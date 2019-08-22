@@ -9,13 +9,389 @@ if (_nodejs) {
 var moment = require('moment');
 var shortid = require('shortid');
 
-var StorageTemplate = require('./mappers/storage/_template.js');
-var ProcessorTemplate = require('./mappers/processors/_template.js');
-var ObserverTemplate = require('./mappers/observers/_template.js');
 
-var DefaultStorageMapper = require('./mappers/storage/inMemory.js');
-var DefaultProcessorMapper = require('./mappers/processors/eval.js');
-var DefaultObserverMapper = require('./mappers/observers/intervalMapper.js');
+StorageMapperTemplate = function(SPOO, options) {
+    this.CONSTANTS = {
+        MULTITENANCY: {
+            ISOLATED: "isolated",
+            SHARED: "shared"
+        },
+        TYPES: {
+            SCHEDULED: 'scheduled',
+            QUERIED: 'queried'
+        }
+    };
+    this.objectFamily = null;
+    this.multitenancy = (options || {}).multitenancy || this.CONSTANTS.MULTITENANCY.ISOLATED;
+
+    this.connect = function(connectionString, success, error) {
+
+    }
+
+    this.closeConnection = function(success, error) {
+
+    }
+
+    this.setObjectFamily = function(value) {
+        this.objectFamily = value;
+    };
+
+    this.setMultiTenancy = function(value) {
+        this.multitenancy = value;
+    };
+
+    this.createClient = function(client, success, error) {
+
+    };
+
+    this.getDBByMultitenancy = function(client) {
+
+    };
+
+    this.listClients = function(success, error) {
+
+    };
+
+    this.getById = function(id, success, error, app, client) {
+
+    }
+
+    this.getByCriteria = function(criteria, success, error, app, client, flags) {
+
+    }
+
+    this.count = function(criteria, success, error, app, client, flags) {
+
+    }
+
+    this.update = function(spooElement, success, error, app, client) {
+
+    };
+
+    this.add = function(spooElement, success, error, app, client) {
+
+    };
+
+    this.remove = function(spooElement, success, error, app, client) {
+
+    };
+};
+
+ProcessorMapperTemplate = function(SPOO) {
+    this.CONSTANTS = {
+        MULTITENANCY: {
+            ISOLATED: "isolated",
+            SHARED: "shared"
+        },
+        TYPES: {
+            SCHEDULED: 'scheduled',
+            QUERIED: 'queried'
+        }
+    }
+
+    this.SPOO = SPOO;
+    this.objectFamily = null;
+    this.multitenancy = this.CONSTANTS.MULTITENANCY.ISOLATED;
+
+    this.execute = function(dsl, obj, prop, data, callback, client, app, user, options) {
+
+    };
+
+    this.setMultiTenancy = function(value) {
+        this.multitenancy = value;
+    };
+
+    this.setObjectFamily = function(value) {
+        this.objectFamily = value;
+    };
+
+};
+
+ObserverMapperTemplate = function(SPOO, options, content) {
+    this.CONSTANTS = {
+        MULTITENANCY: {
+            ISOLATED: "isolated",
+            SHARED: "shared"
+        },
+        TYPES: {
+            SCHEDULED: 'scheduled',
+            QUERIED: 'queried'
+        }
+    };
+    this.SPOO = SPOO;
+    this.interval = (options || {}).interval || 60000;
+    this.objectFamily = null;
+    this.type = (options || {}).type || this.CONSTANTS.TYPES.QUERIED;
+    this.multitenancy = (options || {}).multitenancy || this.CONSTANTS.MULTITENANCY.ISOLATED;
+
+    this.initialize = function(millis) {
+
+    }
+
+    this.setObjectFamily = function(value) {
+        this.objectFamily = value;
+    };
+
+    this.run = function(date) {
+
+    }
+
+    if (content) Object.assign(this, content)
+}
+
+
+var StorageTemplate = StorageMapperTemplate;
+var ProcessorTemplate = ProcessorMapperTemplate;
+var ObserverTemplate = ObserverMapperTemplate;
+
+
+var DefaultStorageMapper = function(SPOO, options) {
+
+    return Object.assign(new StorageTemplate(SPOO, options), {
+
+        database: {},
+        index: {},
+
+        createClient: function(client, success, error) {
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
+                if (this.database[client])
+                    error('Client already exists')
+
+                this.database[client] = [];
+                this.index[client] = {};
+                success()
+            }
+        },
+        getDBByMultitenancy: function(client) {
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) {
+                if (!Array.isArray(this.database)) this.database = [];
+
+                return this.database;
+            } else if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
+
+                if (!this.database[client])
+                    throw new Error('no database for client ' + client);
+
+                return this.database[client];
+            }
+        },
+
+        listClients: function(success, error) {
+            if (!this.database)
+                return error('no database');
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED)
+                success(Object.keys(this.database));
+            else success(Object.keys(this.database));
+        },
+
+        getById: function(id, success, error, app, client) {
+
+            var db = this.getDBByMultitenancy(client);
+
+            if (this.index[client][id] === undefined)
+                return error('object not found: ' + id);
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
+                if (this.index[client][id].tenantId != client)
+                    return error('object not found: ' + _id);
+
+            success(db[this.index[client][id]]);
+        },
+
+        getByCriteria: function(criteria, success, error, app, client, flags) {
+
+            var db = this.getDBByMultitenancy(client);
+
+            if (app)
+                Object.assign(criteria, { applications: { $in: [app] } })
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
+                Object.assign(criteria, { tenantId: client })
+
+            success(Query.query(db, criteria, Query.undot));
+        },
+
+        count: function(criteria, success, error, app, client, flags) {
+
+            var db = this.getDBByMultitenancy(client);
+
+            if (app)
+                Object.assign(criteria, { applications: { $in: [app] } })
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
+                Object.assign(criteria, { tenantId: client })
+
+            success(Query.query(db, criteria, Query.undot).length);
+        },
+
+        update: function(spooElement, success, error, app, client) {
+
+            var db = this.getDBByMultitenancy(client);
+
+            if (this.index[client][spooElement._id] === undefined)
+                return error('object not found: ' + spooElement._id);
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
+                if (this.index[client][spooElement._id].tenantId != client)
+                    return error('object not found: ' + _id);
+
+            db[this.index[client][spooElement._id]] = spooElement;
+
+            success(db[this.index[client][spooElement._id]]);
+        },
+
+        add: function(spooElement, success, error, app, client) {
+
+            if (!this.database[client])
+                this.database[client] = [];
+
+            if (!this.index[client]) this.index[client] = {};
+
+            if (this.index[client][spooElement._id] !== undefined)
+                return error('object with taht id already exists: ' + spooElement._id);
+            if (!this.index[client]) this.index[client] = {};
+
+            var db = this.getDBByMultitenancy(client);
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) {
+                spooElement.tenantId = client;
+            }
+
+            this.index[client][spooElement._id] = db.push(spooElement) - 1;
+
+            success(spooElement);
+        },
+        remove: function(spooElement, success, error, app, client) {
+
+            var db = this.getDBByMultitenancy(client);
+
+            if (this.index[client][spooElement._id] === undefined)
+                return error('object not found: ' + spooElement._id);
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
+                if (this.index[client][spooElement._id].tenantId != client)
+                    return error('object not found: ' + spooElement._id);
+
+
+            db.splice(this.index[client][spooElement._id], 1);
+            delete this.index[client][spooElement._id];
+            success(spooElement)
+
+        }
+
+
+    })
+}
+
+
+var DefaultProcessorMapper = function(SPOO) {
+    return Object.assign(new ProcessorTemplate(SPOO), {
+
+        execute: function(dsl, obj, prop, data, callback, client, app, user, options) {
+
+            var SPOO = this.SPOO;
+            console.info("22..", dsl);
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
+                try {
+                    console.info('pre eval')
+
+                    eval(dsl);
+                    console.info('after eval')
+                } catch (e) {
+                    console.info(e);
+                }
+                callback();
+            } else {
+                try {
+                    eval(dsl);
+                } catch (e) {
+                    console.info(e);
+                }
+                callback();
+            }
+        }
+    })
+}
+
+var DefaultObserverMapper = function(SPOO) {
+    return Object.assign(new ObserverTemplate(SPOO), {
+
+        initialize: function(millis) {
+            var self = this;
+
+            // first run
+            //self.run(new Date());
+
+            // interval
+            this.interval = setInterval(function() {
+
+                self.run(moment().utc());
+
+            }, this.interval)
+        },
+
+        run: function(date) {
+
+            var self = this;
+
+            self.SPOO.getPersistence(self.objectFamily).listClients(function(data) {
+
+                //console.log("d", data);
+
+                data.forEach(function(tenant) {
+
+                    console.log("current run: ", date.toISOString(), tenant);
+
+
+                    self.SPOO.getPersistence(self.objectFamily).getByCriteria({
+                        aggregatedEvents: {
+                            $elemMatch: {
+                                'date': { $lte: date.toISOString() }
+                            }
+                        }
+                    }, function(objs) {
+
+                        objs.forEach(function(obj) {
+
+                            obj = SPOO[self.objectFamily](obj);
+
+                            obj.aggregatedEvents.forEach(function(aE) {
+
+                                var prop = obj.getProperty(aE.propName);
+
+                                self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
+
+                                    obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
+                                        console.log("remaining events: ", d.aggregatedEvents);
+                                        console.log(obj.getProperty(aE.propName));
+                                    }, function(err) {
+                                        console.log(err);
+                                    }, tenant)
+
+
+                                }, tenant, {});
+
+                            })
+
+
+                        })
+
+                    }, function(err) {
+
+                    }, /*app*/ undefined, tenant, {})
+                })
+
+            }, function(err) {
+
+            })
+        }
+
+
+    })
+}
 
 var CONSTANTS = {
 
@@ -274,6 +650,10 @@ var OBJY = {
     storage: null,
     processor: null,
     observer: null,
+
+    StorageTemplate: StorageTemplate,
+    ProcessorTemplate: ProcessorTemplate,
+    ObserverTemplate: ObserverTemplate,
 
     tenant: function(tenant) {
         if (!tenant) throw new Error("No tenant specified");

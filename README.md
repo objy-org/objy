@@ -46,9 +46,6 @@ https://objy.io/code/objy.min.js
 // Include OBJY (Node.js)
 const OBJY = require('objy');
 
-// OPTIONAL: Initialize in the context of a client and (optionally) an app
-OBJY.client('myComapny').app('helloWorldApp');
-
 // Create an object
 OBJY.Object({name: "Hello World"}).add( obj => {
 	console.log(data);
