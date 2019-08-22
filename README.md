@@ -1,4 +1,4 @@
-# OBJY - Single Point of Object
+# OBJY
 
 A scalable JavaScript framework that lets you build software by modelling behaviour-driven objects, that do the work for you, not by writing complex code. 
 
@@ -7,6 +7,14 @@ A scalable JavaScript framework that lets you build software by modelling behavi
 - [Main Concepts](#Getting Started)
 - [Installing](dgs)
 
+
+## Objects
+
+In real life, everything is an object. Every object is dynamic, has characteristics, behaviour and can execute actions. In OBJY, we are adopting the way objects work in real life by offering a way to model objects, that can have the same features like in real life. This makes it super easy to turn real use cases into its digital representation
+
+In fact, OBJY stands for Single Point of Object.
+
+Objects can have the following features
 
 
 ## Installing
@@ -58,38 +66,9 @@ OBJY.Object({name: "Hello Word"}).get( objs => {
 
 
 
-## Main Concepts
-
-### Objects
-
-In real life, everything is an object. Every object is dynamic, has characteristics, behaviour and can execute actions. In OBJY, we are adopting the way objects work in real life by offering a way to model objects, that can have the same features like in real life. This makes it super easy to turn real use cases into its digital representation
-
-In fact, OBJY stands for Single Point of Object.
-
-Objects can have the following features
-
-### Pluggable Technologies
+## Pluggable Technologies
 
 Every use case has it's special technical requirements. That's why OBJY has a plaggable and extendable mapper ecosystem to plug in any technology responsible for data persistence, processing and observation. These mappers can be used to define Object Families (Objects that have the same technical requirements and share the same mappers).
-
-### Platform Capabilities
-
-OBJY is perfect for building platforms, because it has everything a platform needs:
-
-- Runs on any infrastructure, at any scale
-
-- Simple, open API
-
-- Don't write much code, just define objects
-
-- Multitenancy
-
-- App Contexts
-
-- User and Permission Handling
-
-- Industry-specific solutions
-
   
 
 ## Data Sources
