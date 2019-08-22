@@ -1,0 +1,38 @@
+{
+  "name": "@spootechnologies/spoo",
+  "version": "0.0.1",
+  "description": "A JavaScript framework to build multi purpose platforms",
+  "main": "spoo.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spoo-technologies/spoo.git"
+  },
+  "keywords": [
+    "platform",
+    "javascript",
+    "objects"
+  ],
+  "author": "Marco Boelling",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/spoo-technologies/spoo/issues"
+  },
+  "homepage": "https://github.com/spoo-technologies/spoo#readme",
+  "dependencies": {
+    "bcrypt": "^3.0.6",
+    "localStorage": "^1.0.4",
+    "lokijs": "^1.5.6",
+    "lowdb": "^1.0.0",
+    "mingo": "^2.3.5",
+    "moment": "^2.24.0",
+    "mongoose": "^5.6.4",
+    "nedb": "^1.8.0",
+    "query": "github:protobi/query",
+    "shortid": "^2.2.14",
+    "vm2": "^3.8.1"
+  },
+  "devDependencies": {}
+}
