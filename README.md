@@ -1,6 +1,6 @@
 # OBJY - Single Point of Object
 
-A framework that uses dynamic, behaviour-driven objects to build apps, backends, platforms.
+A scalable JavaScript framework that lets you build software by modelling behaviour-driven objects, that do the work for you, not by writing complex code. 
 
 ## Table of Contents
 
