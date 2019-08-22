@@ -9,13 +9,13 @@ if (_nodejs) {
 var moment = require('moment');
 var shortid = require('shortid');
 
-var StorageTemplate = require('./catalog/storage/_template.js');
-var ProcessorTemplate = require('./catalog/processors/_template.js');
-var ObserverTemplate = require('./catalog/observers/_template.js');
+var StorageTemplate = require('./mappers/storage/_template.js');
+var ProcessorTemplate = require('./mappers/processors/_template.js');
+var ObserverTemplate = require('./mappers/observers/_template.js');
 
-var DefaultStorageMapper = require('./catalog/storage/inMemory.js');
-var DefaultProcessorMapper = require('./catalog/processors/eval.js');
-var DefaultObserverMapper = require('./catalog/observers/intervalMapper.js');
+var DefaultStorageMapper = require('./mappers/storage/inMemory.js');
+var DefaultProcessorMapper = require('./mappers/processors/eval.js');
+var DefaultObserverMapper = require('./mappers/observers/intervalMapper.js');
 
 var CONSTANTS = {
 
@@ -271,6 +271,10 @@ var OBJY = {
     commandSequence: [],
     eventAlterationSequence: [],
 
+    storage: null,
+    processor: null,
+    observer: null,
+
     tenant: function(tenant) {
         if (!tenant) throw new Error("No tenant specified");
         this.activeTenant = tenant;
@@ -429,16 +433,16 @@ var OBJY = {
         }
 
         if (params.storage) this.plugInPersistenceMapper(params.name, params.storage);
-        else this.plugInPersistenceMapper(params.name, new DefaultStorageMapper(thisRef));
+        else this.plugInPersistenceMapper(params.name, thisRef.storage || new DefaultStorageMapper(thisRef));
 
         if (params.processor) this.plugInProcessor(params.name, params.processor);
-        else this.plugInProcessor(params.name, new DefaultProcessorMapper(thisRef));
+        else this.plugInProcessor(params.name, thisRef.processor || new DefaultProcessorMapper(thisRef));
 
         if (params.observer) {
             this.plugInObserver(params.name, params.observer);
             if (params.observer.initialize) params.observer.initialize();
         } else {
-            this.plugInObserver(params.name, new DefaultObserverMapper(thisRef));
+            this.plugInObserver(params.name, thisRef.observer || new DefaultObserverMapper(thisRef));
             if (this.observers[params.name].initialize) this.observers[params.name].initialize();
         }
 
@@ -1184,18 +1188,22 @@ var OBJY = {
 
     add: function(obj, success, error, app, client) {
 
-        var propKeys = Object.keys(obj.properties);
+        if (obj.properties) {
 
-        propKeys.forEach(function(property) {
+            var propKeys = Object.keys(obj.properties);
 
-            if (property.template) delete property;
+            propKeys.forEach(function(property) {
 
-            if (property.type == CONSTANTS.PROPERTY.TYPE_SHORTID) {
-                if (property.value == '' && !property.value)
-                    property.value = OBJY.RANDOM();
-            }
+                if (property.template) delete property;
 
-        })
+                if (property.type == CONSTANTS.PROPERTY.TYPE_SHORTID) {
+                    if (property.value == '' && !property.value)
+                        property.value = OBJY.RANDOM();
+                }
+
+            })
+
+        }
 
         this.addObject(obj, success, error, app, client);
 
@@ -1310,7 +1318,6 @@ var OBJY = {
             }
 
             success(data);
-
 
 
         }, function(err) {
@@ -3433,6 +3440,7 @@ var OBJY = {
 
         this.role = role || 'object';
 
+
         if (!params.structure) {
 
             this.type = obj.type || null;
@@ -3440,7 +3448,6 @@ var OBJY = {
             this.applications = OBJY.ApplicationsChecker(this, obj.applications) || [];
 
             this.inherits = OBJY.TemplatesChecker(this, obj.inherits) || [];
-
 
             this.name = obj.name || null;
 
@@ -4287,7 +4294,7 @@ var OBJY = {
             var mapper = instance.observers[thisRef.role];
 
 
-            aggregateAllEvents(this.properties);
+            if (this.properties) aggregateAllEvents(this.properties);
 
             if (!this._id) this._id = OBJY.ID();
 
@@ -4487,7 +4494,7 @@ var OBJY = {
 
             var mapper = instance.observers[thisRef.role];
 
-            if (mapper.type != 'scheduled') aggregateAllEvents(this.properties);
+            if (mapper.type != 'scheduled' && this.properties) aggregateAllEvents(this.properties);
 
             function updateFn() {
 

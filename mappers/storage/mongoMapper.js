@@ -24,9 +24,9 @@ var generalObjectModel = {
     lastModified: String,
     aggregatedEvents: [],
     tenantId: String,
-    password:String,
-    username:String,
-    email:String
+    password: String,
+    username: String,
+    email: String
 };
 
 var ObjSchema = new Schema(generalObjectModel);
@@ -67,7 +67,6 @@ Mapper = function(SPOO, options) {
             var db = this.getDBByMultitenancy(client);
 
             var ClientInfo = db.model('clientinfos', ClientSchema);
-
 
             ClientInfo.find({ name: client }).exec(function(err, data) {
                 if (err) {
@@ -162,18 +161,18 @@ Mapper = function(SPOO, options) {
             var Obj = db.model(this.objectFamily, ObjSchema);
 
             if (flags.$page == 1) flags.$page = 0;
-            else flags.$page-=1;
+            else flags.$page -= 1;
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
 
-          
+
             Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(flags.$sort || '_id').exec(function(err, data) {
 
                 if (err) {
                     error(err);
                     return;
                 }
-                
+
                 success(data);
                 return;
             });
@@ -229,9 +228,9 @@ Mapper = function(SPOO, options) {
             if (app) {
                 if (spooElement.applications.indexOf(app) == -1) spooElement.applications.push(app);
             }
-            
+
             console.log(this.objectFamily);
-            
+
             var Obj = db.model(this.objectFamily, ObjSchema);
 
             delete spooElement._id;
@@ -248,7 +247,6 @@ Mapper = function(SPOO, options) {
                 success(data);
                 console.log('SAVED TO DB');
             })
-
 
         },
         remove: function(spooElement, success, error, app, client) {

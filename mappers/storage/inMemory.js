@@ -117,8 +117,6 @@ Mapper = function(SPOO, options) {
                 spooElement.tenantId = client;
             }
 
-
-
             this.index[client][spooElement._id] = db.push(spooElement) - 1;
 
             success(spooElement);

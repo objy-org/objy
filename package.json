@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/spoo-technologies/spoo#readme",
   "dependencies": {
+    "@spootechnologies/objy-catalog": "^1.0.0",
     "bcrypt": "^3.0.6",
     "localStorage": "^1.0.4",
     "lokijs": "^1.5.6",
