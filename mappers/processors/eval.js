@@ -1,4 +1,3 @@
-var Global = require('./_template.js');
 
 Mapper = function(SPOO) {
     return Object.assign(new SPOO.ProcessorTemplate(SPOO), {
