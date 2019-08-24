@@ -9,14 +9,14 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 - [How to Example](#how-to)
 	- [Define Object Families](#object-families)
 	- [Model Objects](#model-objects)
-	- [Mapper ecosystem](#Pluggable-Technologies)
+	- [Adapters ecosystem](#Pluggable-Technologies)
 	- [Inline Mapper](#inline-mappers)
 	- [Third party objects](#Integrate-third-party-systems)
 
 - [Contributing](#Contributing)
 - [License](#license)
 
-## Model Objects
+## Objects
 
 In OBJY, building software is done by modelling dynamic objects, that have a behaviour. Tell your objects what to do and they'll do the rest.
 
@@ -25,6 +25,12 @@ Objects consist of
 - dynamic attributes
 - actions
 - rule-based behaviour
+
+
+## Adapters
+
+Objects can be very different in their nature. Some objects are big, some are small, some are produced very fast, some not so fast.
+This is why you can define how different types of objects are stored, processed or observed, using adapters for third party technologies.
 
 
 ## Installing
@@ -48,73 +54,76 @@ https://objy.io/code/objy.min.js
 
 
 
-## How to
+## Getting started
 
 
 ```javascript
-// Include OBJY (Node.js)
 const OBJY = require('objy');
-
-// Define object families
-
-OBJY.define({
-	name: "Object",
-	pluralName: "Objects",
-
-	// optional: define backends
-	storage: new MongoMapper(),
-	processor: new InMemoryProcessor(),
-	observer: new CronObserver()
-})
-
-
-// Create an object
-OBJY.Object({name: "Hello World"}).add( obj => {
-	console.log(data);
-}, err => {
-	console.error(err);
-})
-
-// Query Objects
-OBJY.Object({name: "Hello Word"}).get( objs => {
-	console.log(objs);
-}, err => {
-	console.error(err);
-})
 ```
 
+### Handling Objects
 
-### Object Families
-
-OBJY lets you define multiple object families. They are used to group objects that have a similar nature.
+The philisophy behind OBJY ist to let you define and model aobjects and tell them what to do. In order to do so, all you need is CRUD:
 
 ```javascript
-// define an in memory object family
-OBJY.define({
-	name : "MyObject",
-	pluralName: "MyObjects"
-});
+// add one
+OBJY.MyObject({}).add(callback);
 
-// define an object family with custom backends
-OBJY.define({
-	name : "MyObject",
-	pluralName: "MyObjects",
-	storage: new MongoMapper(),
-	processor: new InMemoryProcessor(),
-	observer: new CronObserver()
-});
+// add multiple
+OBJY.MyObjects([{}],[{}]).add(callback);
+
+// get one
+OBJY.MyObject(id).get(callback);
+
+// get multiple
+OBJY.MyObjects(query).get(callback);
+
+// update one
+OBJY.MyObject(id).setName('test').save(callback);
+
+// replace one
+OBJY.MyObject(id).replace(newObject).save(callback);
+
+// delete one
+OBJY.MyObject(id).delete();
 ```
 
+### Modelling Objects
 
-### Model Objects
+Now comes the fun part. Build an object and tell it what to do.
 
-OBJY lets you define multiple object families. They are used to group objects that have a similar nature.
+The base structure of an OBJY object is built up on some always-there attributes, like name, type and some others. Next to these features, there is the dynamic properties part. this is where you define what an object should look like and what it should do.
 
 ```javascript
 OBJY.MyObject({
-	name: "test",
-	properties: {}
+	// static part
+	name: 'test',
+	type: 'test',
+	
+	// dynamic part
+	properties: {
+		expired: false,
+		expire: {
+			type: 'event',
+			date: '20.20.2020',
+			action: 'this.expired = false'
+		}
+	}
 });
+```
+
+
+### Updating an Object
+
+Now comes the fun part. Build an object and tell it what to do.
+
+The base structure of an OBJY object is built up on some always-there attributes, like name, type and some others. Next to these features, there is the dynamic properties part. this is where you define what an object should look like and what it should do.
+
+```javascript
+OBJY.MyObject(id)
+	.setPropertyValue('expired', false)
+	.addProperty('open', false).
+	.save(callback)
 ```
 
 
