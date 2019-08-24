@@ -67,22 +67,19 @@ The base structure of an OBJY object is built up on some always-there attributes
 
 ```javascript
 OBJY.MyObject({
-     "_id": "5a818c47d34ee54a747bfa8e", // Unique id, auto generated
-     "role": "object", // Auto generated
-     "applications": ["2134124mkskfd32"], // A list of applications, where this object ist accessible from
-     "inherits": ["214om214"], // A list of templates to inherit from
-     "name": "rrr", // Name of the object
-     "type": 'car', // Type of the object
-     "onCreate": null, // Scripts to be executed on object creation
-     "onDelete": null, // Scripts to be executed on object deletion
-     "properties": { // Dynamic properties
-        "expired": false
-     }, 
-     "permissions": { // Object-wide permittions
-        "admin": {
-          "value": "*"
-        }
-     }
+	// static part
+	name: 'test',
+	type: 'test',
+	
+	// dynamic part
+	properties: {
+		expired: false,
+		expire: {
+			type: 'event',
+			date: '20.20.2020',
+			action: 'this.expired = false'
+		}
+	}
 });
 ```
 
