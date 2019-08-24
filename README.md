@@ -1,6 +1,8 @@
 # OBJY
 
-![OBJY LOGO](icon.png "OBJY")
+<center><img src="icon.png" style="height:200px"></center>
+
+
 
 A cross-platform JavaScript framework that lets you build software by modelling behaviour-driven objects, that do the work for you, not by writing complex code. 
 
