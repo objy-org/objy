@@ -6,11 +6,15 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 
 - [Main Concepts](#Model-Objects)
 - [Installing](#installing)
-- [Example](#quick-example)
-- [Object Families](#object-families)
-	- [Example](#example)
-	- [Contribute](#Contribute-your-own-mapper)
-	- [Integrate](#Integrate-third-party-systems)
+- [Define Object Families](#quick-example)
+- [Model Objects](#quick-example)
+- [Plug in backends](#quick-example)
+	- [Mapper ecosystem](#quick-example)
+	- [Inline Mapper](#quick-example)
+	- [Third party objects](#quick-example)
+
+- [Contribute](#object-families)
+- [License](#license)
 
 ## Model Objects
 
