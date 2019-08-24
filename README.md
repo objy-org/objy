@@ -55,6 +55,19 @@ https://objy.io/code/objy.min.js
 // Include OBJY (Node.js)
 const OBJY = require('objy');
 
+// Define object families
+
+OBJY.define({
+	name: "Object",
+	pluralName: "Objects",
+
+	// optional: define backends
+	storage: new MongoMapper(),
+	processor: new InMemoryProcessor(),
+	observer: new CronObserver()
+})
+
+
 // Create an object
 OBJY.Object({name: "Hello World"}).add( obj => {
 	console.log(data);
