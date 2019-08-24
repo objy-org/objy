@@ -12,6 +12,7 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 	- [Modelling Objects](#Modelling-Objects)
 	- [Handling Objects](#Handling-Objects)
 - [Adapters](#Adapters)
+- [Example](#example)
 - [License](#license)
 
 ## Main Concepts
@@ -190,6 +191,39 @@ With many different adapters for different technologies, OBJY can be used to bui
 
 Adapters can also be used to connect to third party systems and introduce third party data as OBJY objects in your project.
 
+## Example
+
+Time for a simple example. Lets buld a yogurt.
+
+```javascript
+const OBJY = require('objy');
+
+OBJY.define({
+	name : "Object",
+	pluralName: "Objects"
+});
+
+OBJY.Object({
+	name: "Yogurt",
+	type: "yogurt",
+	properties: {
+		expired: false,
+		opened: false,
+		expire: {
+			type: 'event',
+			date: '20.20.2020',
+			action: 'this.expired = false'
+		}
+	},
+	onChange: {
+		checkIfOpened: {
+			actiion: 'if(this.properties.opened == true) this.setEventDate("expire", "17.20.20")'
+		}
+	}
+})
+
+
+```
 
 ## Authors
 
