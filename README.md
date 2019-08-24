@@ -69,28 +69,44 @@ OBJY.Object({name: "Hello Word"}).get( objs => {
 
 ## Object Families
 
-Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast.
-
-This is what object families are for. They group objects that have the same requirements for the underlying technologies used for persistence, processing and observation.
+OBJY lets you define multiple object families. They are used to group objects that have a similar nature.
 
 ### Example
 ```javascript
+// define it
+OBJY.define({
+	name : "MyObject",
+	pluralName: "MyObjects"
+});
+
+// use it
+OBJY.MyObject({name: "test"});
+```
+
+
+## Pluggable Technologies
+
+Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast.
+When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed.
+
+### Example
+```javascript
+// define it
 OBJY.define({
 	name : "InMemObject",
 	pluralName: "InMemObjects",
 	persistence: new InMemoryMapper(),
 	observer: new RealTimeObserver(),
 	processor: new RealTimeProcessor()
-})
+});
+
+// use it
+OBJY.InMemObject({...});
 ```
 
-
-### Pluggable Mappers
-
-OBJY has a mapper ecosystem, that let's you plug in ready-to-use mappers for persistence, processing and observation. 
-  
-
 ### Inline mappers
+
+
 
 
 ```javascript
