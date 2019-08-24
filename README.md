@@ -1,6 +1,6 @@
 # OBJY
 
-A scalable JavaScript framework that lets you build software by modelling behaviour-driven objects, that do the work for you, not by writing complex code. 
+A cross-platform JavaScript framework that lets you build software by modelling behaviour-driven objects, that do the work for you, not by writing complex code. 
 
 ## Table of Contents
 
@@ -8,25 +8,26 @@ A scalable JavaScript framework that lets you build software by modelling behavi
 - [Installing](dgs)
 
 
-## Objects
+## Model Objects
 
-In real life, everything is an object. Every object is dynamic, has characteristics, behaviour and can execute actions. In OBJY, we are adopting the way objects work in real life by offering a way to model objects, that can have the same features like in real life. This makes it super easy to turn real use cases into its digital representation
+In OBJY, building software is done by modelling dynamic objects, that have a behaviour. Tell your objects what to do and they'll do the rest.
 
-In fact, OBJY stands for Single Point of Object.
+Objects consist of
 
-Objects can have the following features
+- dynamic attributes
+- actions
+- rule-based behaviour
 
 
 ## Installing
 
-### NPM
+### For Node
 
 ```shell
 npm install objy
 ```
 
-
-### CDN
+### For the Browser
 
 
 ```shell
@@ -62,15 +63,14 @@ OBJY.Object({name: "Hello Word"}).get( objs => {
 ```
 
 
-
 ## Pluggable Technologies
 
 Every use case has it's special technical requirements. That's why OBJY has a plaggable and extendable mapper ecosystem to plug in any technology responsible for data persistence, processing and observation. These mappers can be used to define Object Families (Objects that have the same technical requirements and share the same mappers).
   
 
-## Data Sources
+## Data Source Ecosystem
 
-In order to build production-grade platforms and solutions, OBJY let's you plug in just the right technologies for specific use cases. This is what object families are for. They represent objects that have the same requirements for the underlying technologies used for persistence, processing and observation.
+In order to build production-grade solutions, OBJY let's you plug in just the right technologies for specific use cases. This is what object families are for. They represent objects that have the same requirements for the underlying technologies used for persistence, processing and observation.
 
 See [Mappers](#mappers) for details.
 

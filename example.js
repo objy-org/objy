@@ -1,4 +1,4 @@
-const OBJY = require('./objy.js');
+const OBJY = require('@spootechnologies/objy');
 
 //const MongoMapper = require('node_modules/@spootechnologies/objy-catalog/storage/mongoMapper.js')
 

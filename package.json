@@ -1,6 +1,6 @@
 {
-  "name": "@spootechnologies/spoo",
-  "version": "0.0.1",
+  "name": "@spootechnologies/objy",
+  "version": "0.0.2",
   "description": "A JavaScript framework to build multi purpose platforms",
   "main": "spoo.js",
   "scripts": {
@@ -20,7 +20,7 @@
   "bugs": {
     "url": "https://github.com/spoo-technologies/spoo/issues"
   },
-  "homepage": "https://github.com/spoo-technologies/spoo#readme",
+  "homepage": "https://github.com/spoo-technologies/objy#readme",
   "dependencies": {
     "@spootechnologies/objy-catalog": "^1.0.0",
     "bcrypt": "^3.0.6",
