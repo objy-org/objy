@@ -9,6 +9,8 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 - [Example](#quick-example)
 - [Object Families](#object-families)
 	- [Example](#example)
+	- [Contribute](#Contribute-your-own-mapper)
+	- [Integrate](#Integrate-third-party-systems)
 
 ## Model Objects
 
@@ -121,7 +123,7 @@ OBJY.define({
 ```
 
 
-## Build your own mapper - extend the ecosystem
+## Contribute your own mapper
 
 If you need a mapper that doesn't exist yet, you can simply build it yourself. Each mapper type must follow a predefined structure, that can be found inside the mapper directories (_template.js). You can use this template as a starting point.
 
@@ -133,7 +135,7 @@ Every use case may have different requirements for the technologies used. By mat
 
 With many different mappers for different technologies, OBJY can be used to build platforms for a varaity of different use cases and domains.
 
-### Integrate third party systems
+## Integrate third party systems
 
 Mappers can also be used to connect to third party systems and introduce third party data as OBJY objects in your platform.
 
