@@ -6,14 +6,14 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 
 - [Main Concepts](#Model-Objects)
 - [Installing](#installing)
-- [Define Object Families](#quick-example)
-- [Model Objects](#quick-example)
-- [Plug in backends](#quick-example)
-	- [Mapper ecosystem](#quick-example)
-	- [Inline Mapper](#quick-example)
-	- [Third party objects](#quick-example)
+- [How to Example](#how-to)
+	- [Define Object Families](#object-families)
+	- [Model Objects](#model-objects)
+	- [Mapper ecosystem](#Pluggable-Technologies)
+	- [Inline Mapper](#inline-mappers)
+	- [Third party objects](#Integrate-third-party-systems)
 
-- [Contribute](#object-families)
+- [Contributing](#Contributing)
 - [License](#license)
 
 ## Model Objects
@@ -48,7 +48,7 @@ https://objy.io/code/objy.min.js
 
 
 
-## Quick Example
+## How to
 
 
 ```javascript
@@ -71,11 +71,10 @@ OBJY.Object({name: "Hello Word"}).get( objs => {
 ```
 
 
-## Object Families
+### Object Families
 
 OBJY lets you define multiple object families. They are used to group objects that have a similar nature.
 
-### Example
 ```javascript
 // define it
 OBJY.define({
@@ -85,6 +84,18 @@ OBJY.define({
 
 // use it
 OBJY.MyObject({name: "test"});
+```
+
+
+### Model Objects
+
+OBJY lets you define multiple object families. They are used to group objects that have a similar nature.
+
+```javascript
+OBJY.MyObject({
+	name: "test",
+	properties: {}
+});
 ```
 
 
@@ -109,8 +120,6 @@ OBJY.InMemObject({...});
 ```
 
 ### Inline mappers
-
-
 
 
 ```javascript
@@ -141,6 +150,11 @@ OBJY.define({
 	}
 })
 ```
+
+### Integrate third party systems
+
+Mappers can also be used to connect to third party systems and introduce third party data as OBJY objects in your platform.
+
 
 
 ## Contribute your own mapper
