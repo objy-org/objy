@@ -89,14 +89,20 @@ OBJY.Object({name: "Hello Word"}).get( objs => {
 OBJY lets you define multiple object families. They are used to group objects that have a similar nature.
 
 ```javascript
-// define it
+// define an in memory object family
 OBJY.define({
 	name : "MyObject",
 	pluralName: "MyObjects"
 });
 
-// use it
-OBJY.MyObject({name: "test"});
+// define an object family with custom backends
+OBJY.define({
+	name : "MyObject",
+	pluralName: "MyObjects",
+	storage: new MongoMapper(),
+	processor: new InMemoryProcessor(),
+	observer: new CronObserver()
+});
 ```
 
 
