@@ -6,7 +6,9 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 
 - [Main Concepts](#Model-Objects)
 - [Installing](#installing)
-
+- [Example](#quick-example)
+- [Object Families](#object-families)
+	- [Example](#example)
 
 ## Model Objects
 
@@ -63,30 +65,32 @@ OBJY.Object({name: "Hello Word"}).get( objs => {
 ```
 
 
-## Pluggable Technologies
+## Object Families
 
-Every use case has it's special technical requirements. That's why OBJY has a plaggable and extendable mapper ecosystem to plug in any technology responsible for data persistence, processing and observation. These mappers can be used to define Object Families (Objects that have the same technical requirements and share the same mappers).
-  
+Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast.
 
-## Data Source Ecosystem
+This is what object families are for. They group objects that have the same requirements for the underlying technologies used for persistence, processing and observation.
 
-In order to build production-grade solutions, OBJY let's you plug in just the right technologies for specific use cases. This is what object families are for. They represent objects that have the same requirements for the underlying technologies used for persistence, processing and observation.
-
-See [Mappers](#mappers) for details.
-
-
-### Example 1: Use Ready to use mappers
+### Example
 ```javascript
 OBJY.define({
-	name : "Item",
-	pluralName: "Items",
+	name : "InMemObject",
+	pluralName: "InMemObjects",
 	persistence: new InMemoryMapper(),
 	observer: new RealTimeObserver(),
 	processor: new RealTimeProcessor()
 })
 ```
 
-### Example 2: Use inline mappers
+
+### Pluggable Mappers
+
+OBJY has a mapper ecosystem, that let's you plug in ready-to-use mappers for persistence, processing and observation. 
+  
+
+### Inline mappers
+
+
 ```javascript
 OBJY.define({
 	name : "Item",
@@ -129,7 +133,7 @@ Every use case may have different requirements for the technologies used. By mat
 
 With many different mappers for different technologies, OBJY can be used to build platforms for a varaity of different use cases and domains.
 
-### Natively integrate third party systems
+### Integrate third party systems
 
 Mappers can also be used to connect to third party systems and introduce third party data as OBJY objects in your platform.
 
