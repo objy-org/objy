@@ -20,11 +20,7 @@ OBJY is meant to be simple by abstracting very much of the hard parts and making
 
 In OBJY, building software is done by modelling dynamic objects, that have a behaviour. Tell your objects what to do and they'll do the rest.
 
-Objects consist of
-
-- dynamic attributes
-- actions
-- rule-based behaviour
+Objects consist of dynamic attributes and rule based-behaviours
 
 
 ### Adapters
@@ -108,7 +104,7 @@ OBJY.MyObject(id).get(callback);
 #### Query
 
 ```javascript
-OBJY.MyObjects(query).get(callback);
+OBJY.MyObjects({type:'example', 'properties.expired' : false}).get(callback);
 ```
 
 #### Update
@@ -128,7 +124,7 @@ OBJY.MyObject(id).replace(newObject).save(callback);
 
 ```javascript
 // delete one
-OBJY.MyObject(id).delete();
+OBJY.MyObject(id).delete(callback);
 ```
 
 
@@ -140,7 +136,7 @@ When you define an object family, you can tell OBJY where objects in this family
 ### Use an adapter
 
 ```javascript
-// define it
+// define a custom object family
 OBJY.define({
 	name : "InMemObject",
 	pluralName: "InMemObjects",
@@ -149,7 +145,7 @@ OBJY.define({
 	processor: new RealTimeProcessor()
 });
 
-// use it
+// use the object familys
 OBJY.InMemObject({...});
 ```
 
@@ -162,26 +158,16 @@ OBJY.define({
 	name : "Item",
 	pluralName: "Items",
 	persistence: {
-		add: function() {
-
-		},
-		get: function() {
-
-		},
+		add: function() { },
+		get: function() { },
 		...
 	},
 	observer: {
-		initialize: function() {
-
-		},
-		run: function(){
-
-		}
+		initialize: function() { },
+		run: function(){ }
 	},
 	processor: {
-		execute: function() {
-
-		}
+		execute: function() { }
 	}
 })
 ```
