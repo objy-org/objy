@@ -4,8 +4,8 @@ A cross-platform JavaScript framework that lets you build software by modelling 
 
 ## Table of Contents
 
-- [Main Concepts](#Getting Started)
-- [Installing](dgs)
+- [Main Concepts](#Model-Objects)
+- [Installing](#installing)
 
 
 ## Model Objects
