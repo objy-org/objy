@@ -152,48 +152,9 @@ OBJY.define({
 OBJY.InMemObject({...});
 ```
 
-### Inline adapter
-
-You can also implement an adapter inline, while you define an object family.
-
-```javascript
-OBJY.define({
-	name : "Item",
-	pluralName: "Items",
-	persistence: {
-		add: function() { },
-		get: function() { },
-		...
-	},
-	observer: {
-		initialize: function() { },
-		run: function(){ }
-	},
-	processor: {
-		execute: function() { }
-	}
-})
-```
-
-### Contribute an adapter
-
-If you need n adapter that doesn't exist yet, you can simply build it yourself. Each adapter type must follow a predefined structure, that can be found inside the adapter directories. 
-
-#### Why build a new adapter?
-
-Building adapters is the best way to participate to the OBJY Ecosystem. 
-
-Every use case may have different requirements for the technologies used. By matching requirements and technical solutions, the best results can be archieved.
-
-With many different adapters for different technologies, OBJY can be used to build cool things  for a varaity of different use cases and domains.
-
-#### Integrate third party systems
-
-Adapters can also be used to connect to third party systems and introduce third party data as OBJY objects in your project.
-
 ## Example
 
-Time for a simple example. Lets buld a yogurt.
+Time for a simple example. Lets build a yogurt.
 
 ```javascript
 const OBJY = require('objy');
@@ -229,8 +190,6 @@ OBJY.Object({
 
 * **Marco Boelling** - *Creator of OBJY* - [Twitter](https://twitter.com/marcoboelling)
 
-See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
@@ -238,6 +197,5 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 ## Connect
 
 * [objy.io](https://objy.io) - OBJY's official website
-* [Twitter](https://www.twitter.com/objyio) - OBJY's Twitter
-* [Medium](https://medium.com/objy-io) - Official OBJY Blog
+* [Twitter](https://www.twitter.com/objy7) - OBJY's Twitter
 
