@@ -473,7 +473,7 @@ var DefaultObserverMapper = function(SPOO) {
 
 
                     self.SPOO.getPersistence(self.objectFamily).getByCriteria({
-                        aggregatedEvents: {
+                        _aggregatedEvents: {
                             $elemMatch: {
                                 'date': { $lte: date.toISOString() }
                             }
@@ -484,25 +484,21 @@ var DefaultObserverMapper = function(SPOO) {
 
                             obj = SPOO[self.objectFamily](obj);
 
-                            obj.aggregatedEvents.forEach(function(aE) {
+                            obj._aggregatedEvents.forEach(function(aE) {
 
                                 var prop = obj.getProperty(aE.propName);
 
                                 self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
-                                        console.log("remaining events: ", d.aggregatedEvents);
+                                        console.log("remaining events: ", d._aggregatedEvents);
                                         console.log(obj.getProperty(aE.propName));
                                     }, function(err) {
                                         console.log(err);
                                     }, tenant)
 
-
                                 }, tenant, {});
-
                             })
-
-
                         })
 
                     }, function(err) {
@@ -514,8 +510,6 @@ var DefaultObserverMapper = function(SPOO) {
 
             })
         }
-
-
     })
 }
 
@@ -4083,7 +4077,7 @@ var OBJY = {
 
             this.permissions = new OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
 
-            this.aggregatedEvents = obj.aggregatedEvents || [];
+            this._aggregatedEvents = obj._aggregatedEvents || [];
 
             if (this.role == 'template') {
                 this.privileges = obj.privileges;
@@ -4852,7 +4846,7 @@ var OBJY = {
 
             var thisRef = this;
 
-            thisRef.aggregatedEvents = [];
+            thisRef._aggregatedEvents = [];
 
             function aggregateAllEvents(props, prePropsString) {
 
@@ -4883,20 +4877,20 @@ var OBJY = {
                             instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: prePropsString + "." + p, property: props[p], date: date })
 
                             var found = false;
-                            thisRef.aggregatedEvents.forEach(function(aE) {
+                            thisRef._aggregatedEvents.forEach(function(aE) {
                                 if (aE.propName == prePropsString + "." + p) found = true;
                             })
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString()) 
-                                thisRef.aggregatedEvents.push({ propName: prePropsString + "." + p, date: date });
+                                thisRef._aggregatedEvents.push({ propName: prePropsString + "." + p, date: date });
 
                         } else {
 
                             instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: p, property: props[p], date: date })
 
                             var found = false;
-                            thisRef.aggregatedEvents.forEach(function(aE) {
+                            thisRef._aggregatedEvents.forEach(function(aE) {
                                 if (aE.propName == p) found = true;
                             })
 
@@ -4904,7 +4898,7 @@ var OBJY = {
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString()) 
-                                thisRef.aggregatedEvents.push({ propName: p, date: date });
+                                thisRef._aggregatedEvents.push({ propName: p, date: date });
 
                         }
                     }
@@ -5054,7 +5048,7 @@ var OBJY = {
 
             var thisRef = this;
 
-            thisRef.aggregatedEvents = [];
+            thisRef._aggregatedEvents = [];
 
             function aggregateAllEvents(props, prePropsString) {
 
@@ -5085,27 +5079,27 @@ var OBJY = {
                             // instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: prePropsString + "." + p, date: date });
 
                             var found = false;
-                            thisRef.aggregatedEvents.forEach(function(aE) {
+                            thisRef._aggregatedEvents.forEach(function(aE) {
                                 if (aE.propName == prePropsString + "." + p) found = true;
                             })
 
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString())
-                                thisRef.aggregatedEvents.push({ propName: prePropsString + "." + p, date: date });
+                                thisRef._aggregatedEvents.push({ propName: prePropsString + "." + p, date: date });
 
                         } else {
 
                             //instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: p, date: date })
 
                             var found = false;
-                            thisRef.aggregatedEvents.forEach(function(aE) {
+                            thisRef._aggregatedEvents.forEach(function(aE) {
                                 if (aE.propName == p) found = true;
                             })
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString())
-                                thisRef.aggregatedEvents.push({ propName: p, date: date });
+                                thisRef._aggregatedEvents.push({ propName: p, date: date });
                         }
                     }
 
@@ -5474,7 +5468,7 @@ var OBJY = {
             return OBJY.deserialize(this);
         }
 
-        
+
     },
 
     hello: function() {

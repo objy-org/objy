@@ -4,7 +4,7 @@ const OBJY = require('./objy.js');
 
 //OBJY.storage = new MongoMapper();
 
-OBJY.metaPropPrefix = '_';
+OBJY.metaPropPrefix = '';
 
 OBJY.define({
     name: "SensorMeasure",

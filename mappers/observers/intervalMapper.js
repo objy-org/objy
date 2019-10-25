@@ -31,7 +31,7 @@ Mapper = function(SPOO) {
 
 
                     self.SPOO.getPersistence(self.objectFamily).getByCriteria({
-                        aggregatedEvents: {
+                        _aggregatedEvents: {
                             $elemMatch: {
                                 'date': { $lte: date.toISOString() }
                             }
@@ -42,14 +42,14 @@ Mapper = function(SPOO) {
 
                             obj = SPOO[self.objectFamily](obj);
 
-                            obj.aggregatedEvents.forEach(function(aE) {
+                            obj._aggregatedEvents.forEach(function(aE) {
 
                                 var prop = obj.getProperty(aE.propName);
 
                                 self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
-                                        console.log("remaining events: ", d.aggregatedEvents);
+                                        console.log("remaining events: ", d._aggregatedEvents);
                                         console.log(obj.getProperty(aE.propName));
                                     }, function(err) {
                                         console.log(err);
