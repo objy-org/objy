@@ -1,8 +1,10 @@
-const OBJY = require('@spootechnologies/objy');
+const OBJY = require('./objy.js');
 
 //const MongoMapper = require('node_modules/@spootechnologies/objy-catalog/storage/mongoMapper.js')
 
 //OBJY.storage = new MongoMapper();
+
+OBJY.metaPropPrefix = '_';
 
 OBJY.define({
     name: "SensorMeasure",
@@ -10,7 +12,8 @@ OBJY.define({
 })
 
 
-OBJY.SensorMeasure({ name: "hallo" }).add(function(data) {
-    console.info(data)
-})
+var t = OBJY.SensorMeasure({ name: "hallo", test: 22 }).add(function(data) {
+    //console.info('ss', data)
+});
 
+console.log('fsgdsd', t)

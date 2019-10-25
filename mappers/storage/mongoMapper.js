@@ -19,6 +19,7 @@ var generalObjectModel = {
     onChange: {},
     permissions: {},
     properties: {},
+    privileges: {},
     created: String,
     lastModified: String,
     aggregatedEvents: [],

@@ -1,6 +1,6 @@
 {
   "name": "@spootechnologies/objy",
-  "version": "0.0.3",
+  "version": "0.0.6",
   "description": "A JavaScript framework to build multi purpose platforms",
   "main": "spoo.js",
   "scripts": {
