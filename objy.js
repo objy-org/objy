@@ -824,72 +824,6 @@ var OBJY = {
         return nObj;
     },
 
-    lang: function(code, cb) {
-
-        var blocks = code.split(' ');
-        var method = blocks[0];
-        var family = blocks[1];
-        var tuple = code.substring(blocks[0].length + 1 + blocks[1].length + 1) //'{name: "test"}';
-
-
-        function tupleToJson(tuple) {
-            //console.log('tuple', eval('(' + tuple + ')'));
-            return eval('(' + tuple + ')');
-        }
-
-        var sequence = this[family](tupleToJson(tuple));
-
-        //console.log(sequence)
-
-        if (["add", "get", "count", "delete", "update"].indexOf(method.toLowerCase()) == -1) {
-            throw new Error('Method ' + method + ' not availabke');
-        }
-
-        sequence[method.toLowerCase()](function(data) {
-            cb(data, false)
-        }, function(err) {
-            cb(data, true)
-        });
-
-        /*switch (method.toUpperCase()) {
-            case 'get':
-                sequence.get(function(data) {
-                    cb(data, false)
-                }, function(err) {
-                    cb(data, true)
-                });
-                break;
-            case 'count':
-                sequence.count(function(data) {
-                    cb(data, false)
-                }, function(err) {
-                    cb(data, true)
-                });
-                break;
-            case 'add':
-                sequence.add(function(data) {
-                    cb(data, false)
-                }, function(err) {
-                    cb(data, true)
-                });
-                break;
-            case 'update':
-                sequence.save(function(data) {
-                    cb(data, false)
-                }, function(err) {
-                    cb(data, true)
-                });
-                break;
-            case 'delete':
-                sequence.delete(function(data) {
-                    cb(data, false)
-                }, function(err) {
-                    cb(data, true)
-                });
-                break;
-        }*/
-
-    },
 
     tenant: function(tenant) {
         if (!tenant) throw new Error("No tenant specified");
@@ -926,25 +860,6 @@ var OBJY = {
         var result = false;
 
         if (!user) return true;
-
-        /*
-            user: {
-                privileges: {
-                    app: [{name: "admin", value: "r"}],
-                    *: [manager]
-                }
-            }
-            
-            obj: {
-                permissions: {
-                    admin : {
-                        value: "*"
-                    },
-                    "*": "*"
-                }
-            }
-            permission : "r"
-        */
 
         var privileges = user.privileges;
         var permissions = obj.permissions;
@@ -1151,7 +1066,6 @@ var OBJY = {
 
     ConditionsChecker: function(property, value) {
 
-
         if (property.hasOwnProperty('conditions')) {
 
             //new ConditionEngine(undefined, property, undefined, value).execute(property.conditions);
@@ -1223,12 +1137,6 @@ var OBJY = {
 
         console.info('n', newObj)
 
-        //console.info('----------------obj', obj, 'tmpl', template)
-
-        // Object handlers
-
-        //console.info('objdetlta1', obj)
-
         var meta = ['name', 'type'];
         meta.forEach(function(p) {
             if (newObj[p] != oldObj[p]) oldObj[p] = newObj[p];
@@ -1258,12 +1166,13 @@ var OBJY = {
 
             console.info('doing the props...', newObj)
 
+
+
             Object.keys(newObj.properties).forEach(function(p) {
 
                 if (newObj.properties[p].type == 'bag') {
                     doTheProps(newObj.properties[p]);
                 }
-
 
                 if (newObj.properties[p]) {
                     if (newObj.properties[p].template && oldObj.properties[p]) {
@@ -1706,7 +1615,6 @@ var OBJY = {
             if (app == application) contains = true;
         });
         if (!contains) {
-
             obj.applications.push(application);
             OBJY.chainPermission(obj, instance, 'a', 'addApplication', application);
 
@@ -1783,13 +1691,9 @@ var OBJY = {
 
         var self = this;
 
-
-
         this.mappers[obj.role].remove(obj, function(data) {
 
             success(data);
-
-
 
         }, function(err) {
             error(err);
@@ -1967,7 +1871,6 @@ var OBJY = {
         var objectsCache = [];
 
 
-
         this.mappers[role].count(criteria, function(data) {
             var counter = 0;
             var num = data.length;
@@ -2000,7 +1903,6 @@ var OBJY = {
 
 
         return OBJY.getObjectByIdSyn(propertyToReturn.value);
-
 
     },
 
@@ -2152,7 +2054,6 @@ var OBJY = {
                 removeOnChange(obj.properties[access.shift()], access);
             } else {
 
-
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
@@ -2233,12 +2134,9 @@ var OBJY = {
 
     },
 
-
     PropertyBagItemPermissionRemover: function(obj, propertyName, permissionKey, instance) {
         var allProperties = obj.properties;
         var thisRef = this;
-
-
 
         var propertyToReturn;
 
@@ -2256,10 +2154,6 @@ var OBJY = {
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyName);
                 }
-                console.log(obj.properties[access[0]]);
-                console.log(obj.properties[access[0]].permissions);
-                console.log(permissionKey);
-                console.log(obj.properties[access[0]].permissions[permissionKey]);
 
                 if (!obj.properties[access[0]].permissions) throw new NoSuchPermissionException(permissionKey);
                 if (!obj.properties[access[0]].permissions[permissionKey]) throw new NoSuchPermissionException(permissionKey);
@@ -2463,12 +2357,6 @@ var OBJY = {
                 OBJY.ValuePropertyMetaSubstituter(obj.properties[propertyKey]);
                 break;
 
-                /*
-            case CONSTANTS.PROPERTY.TYPE_ARRAY:
-                if (!Array.isArray(property[propertyKey].value)) throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ARRAY);
-                obj.properties[propertyKey] = property[propertyKey];
-                break;
-*/
             case CONSTANTS.PROPERTY.TYPE_EVENT:
 
                 var _event = {};
@@ -2577,8 +2465,6 @@ var OBJY = {
                 obj.properties[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
                 obj.properties[propertyKey].properties = {};
 
-
-
                 propertyKeys.forEach(function(property) {
                     tmpProp = {};
                     tmpProp[property] = innerProperties[property];
@@ -2651,97 +2537,6 @@ var OBJY = {
 
     },
 
-
-    EventSetWrapper: function(obj, _event, fieldKey, newValue) {
-        function setValue(obj, access, value) {
-            if (typeof(access) == 'string') {
-                access = access.split('.');
-            }
-            if (access.length > 1) {
-                setValue(obj.events[_event][access.shift()], access, value);
-            } else {
-
-                if (obj.events[_event] === undefined) throw new NoSuchEventException(_event);
-
-                try {
-                    var t = obj.events[_event][access[0]].type;
-                } catch (e) {
-                    throw new NoSuchPropertyException(fieldKey);
-                }
-                obj.events[_event][access[0]] = newValue;
-            }
-        }
-
-        setValue(obj, fieldKey, newValue);
-    },
-
-
-    EventCreateWrapper: function(obj, _event) {
-
-        if (typeof _event !== 'object') throw new InvalidFormatException();
-        var eventKey = Object.keys(_event)[0];
-        try {
-            existing = obj.events[eventKey]
-            console.debug(obj.events);
-            console.debug(_event);
-        } catch (e) {}
-
-        if (existing) throw new DuplicateEventException(eventKey);
-
-        if (!_event[eventKey]._id) _event[eventKey]._id = OBJY.ID();
-
-        switch (_event[eventKey].type) {
-            case CONSTANTS.EVENT.TYPE_RECURRING:
-                if (_event[eventKey].lastOccurence == undefined) _event[eventKey].lastOccurence = null;
-                else if (!moment(_event[eventKey].lastOccurence).isValid()) throw new InvalidDateException(_event[eventKey].lastOccurence);
-                else _event[eventKey].lastOccurence = moment(_event[eventKey].lastOccurence).utc().format();
-
-                if (_event[eventKey].action === undefined) _event[eventKey].action = 'confirm';
-
-                if (_event[eventKey].interval === undefined) throw new MissingAttributeException('interval');
-
-                _event[eventKey].interval = moment.duration(_event[eventKey].interval);
-
-                switch (_event[eventKey].action) {
-                    case CONSTANTS.EVENT.ACTION.TYPE_AUTORENEW:
-
-                        break;
-                    case CONSTANTS.EVENT.ACTION.TYPE_CONFIRM:
-
-                        break;
-                    default:
-                        throw new InvalidActionException(_event[eventKey].action);
-                        break;
-                }
-
-                obj.events[eventKey] = _event[eventKey];
-                break;
-            case CONSTANTS.EVENT.TYPE_TERMINATING:
-                if (_event[eventKey].date === undefined) throw new MissingAttributeException('date');
-                if (!moment(_event[eventKey].date).isValid()) throw new InvalidDateException(_event[eventKey].date);
-                _event[eventKey].date = moment(_event[eventKey].date).utc().format();
-                if (_event[eventKey].action === undefined) _event[eventKey].action = 'deactivate';
-                obj.events[eventKey] = _event[eventKey];
-                break;
-            default:
-                throw new InvalidTypeException(_event.type);
-        }
-
-
-    },
-
-
-    EventLogTemplatesCreateWrapper: function(obj, template) //addTemplateToObject!!!
-    {
-        var existing = false;
-        obj.inherits.forEach(function(_template) {
-            if (_template == template) existing = true;
-        })
-        if (!existing) {
-            obj.inherits.push(template);
-
-        }
-    },
 
     TemplatesCreateWrapper: function(obj, template) //addTemplateToObject!!!
     {
@@ -4162,8 +3957,23 @@ var OBJY = {
 
         this.replace = function(newObj) {
 
-            OBJY.prepareObjectDelta(OBJY.serialize(this), OBJY.serialize(newObj));
+            newObj = OBJY[this.role](newObj);
 
+            var self = this;
+
+            Object.keys(this).forEach(function(k) {
+                if (self[k] instanceof Function || k == '_id') return;
+                console.warn('okey', k, self[k]);
+                delete self[k]
+            })
+
+            console.warn('nokeys', this);
+
+            Object.keys(newObj).forEach(function(k) {
+                self[k] = newObj[k];
+                if (self[k].template) self[k].overwritten = true;
+            })
+            //OBJY.prepareObjectDelta(this, newObj);
         };
 
         this.addProperty = function(name, property) {
@@ -4435,15 +4245,6 @@ var OBJY = {
             perm[name] = permission;
             permission = perm;
 
-            /*var propertyKey = Object.keys(property)[0];
-            if (propertyKey.indexOf('.') != -1) {
-                var lastDot = propertyKey.lastIndexOf(".");
-                var bag = propertyKey.substring(0, lastDot);
-                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
-                var newProp = {};
-                this.setBagPropertyPermission(bag, newProKey, value);
-                return;
-            }*/
             new OBJY.PropertyPermissionSetWrapper(this, property, permission, instance);
             return this;
         };
@@ -4451,7 +4252,7 @@ var OBJY = {
         this.setPropertyOnCreate = function(property, name, onCreateObj) {
 
             if (typeof onCreateObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onCreateObj)[0];
+            var key = name;
 
             new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
             return this;
@@ -4972,9 +4773,7 @@ var OBJY = {
                     }, app, client);
             }
 
-            //addFn(thisRef)
-
-
+           
             if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                 console.info('adding strict')
 
@@ -5307,7 +5106,6 @@ var OBJY = {
 
                                     instance.eventAlterationSequence.push({ operation: 'remove', obj: thisRef, propName: p, date: date })
 
-
                                 }
                             }
 
@@ -5391,16 +5189,11 @@ var OBJY = {
                 }
 
             }
-            // arrayDeserialize(this);
+
 
             function prepareObj(data) {
 
                 OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')
-                //console.log(OBJY[thisRef.role](data));
-                //success(OBJY[thisRef.role](data))
-
-                //success(OBJY[data.role](data));
-                //    return data;
 
                 if (dontInherit) {
                     success(OBJY[data.role](OBJY.deserialize(data)));
