@@ -4,16 +4,50 @@ const OBJY = require('./objy.js');
 
 //OBJY.storage = new MongoMapper();
 
-OBJY.metaPropPrefix = '';
+OBJY.metaPropPrefix = '_';
 
 OBJY.define({
     name: "SensorMeasure",
-    pluralName: "SensorMeasures"
+    pluralName: "SensorMeasures",
+    customProps: {
+        assi: null
+    }
 })
 
+var t = OBJY.SensorMeasure({
+    name: "hallo",
+    test: 22,
+    mybag: {
+        type: 'bag',
+        properties: {
+            test: {
+                type: 'shortText',
+                value: 'asaf',
+                onCreate: {}
+            }
+        }
+    }
+}).add(function(data) {
+    console.info('_', data)
 
-var t = OBJY.SensorMeasure({ name: "hallo", test: 22 }).add(function(data) {
-    //console.info('ss', data)
+    OBJY.SensorMeasures({}).get(function(data) {
+        console.info('ddd', data)
+    })
 });
 
-console.log('fsgdsd', t)
+var t2 = t.replace({
+    name: "hallo",
+    test222: 22,
+    mybag: {
+        type: 'bag',
+        properties: {
+            test2: {
+                type: 'shortText',
+                value: 'asaf',
+                onCreate: {}
+            }
+        }
+    }
+})
+
+console.log('fsgdsd', t2)

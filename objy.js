@@ -9,6 +9,7 @@ if (_nodejs) {
 var moment = require('moment');
 var shortid = require('shortid');
 
+var Query;
 (function() {
     function objectify(a) {
         var rows = [];
@@ -21,7 +22,7 @@ var shortid = require('shortid');
     }
     if (!String.prototype.startsWith) { Object.defineProperty(String.prototype, "startsWith", { enumerable: false, configurable: false, writable: false, value: function(searchString, position) { position = position || 0; return this.lastIndexOf(searchString, position) === position } }) }
     if (!String.prototype.endsWith) { Object.defineProperty(String.prototype, "endsWith", { value: function(searchString, position) { var subjectString = this.toString(); if (position === undefined || position > subjectString.length) { position = subjectString.length } position -= searchString.length; var lastIndex = subjectString.indexOf(searchString, position); return lastIndex !== -1 && lastIndex === position } }) }
-    var Query = {
+    Query = {
         satisfies: function(row, constraints, getter) { return Query.lhs._rowsatisfies(row, constraints, getter) },
         Query: function(constraints, getter) { return function(row) { return Query.lhs._rowsatisfies(row, constraints, getter) } },
         join: function(left_rows, right_rows, left_key, right_key) {
@@ -787,6 +788,8 @@ var OBJY = {
 
         if (this.metaPropPrefix == '') return obj;
 
+        if (obj.properties) return obj;
+
         var self = this;
 
         var nObj = {
@@ -938,10 +941,8 @@ var OBJY = {
                         value: "*"
                     },
                     "*": "*"
-
                 }
             }
-
             permission : "r"
         */
 
@@ -1351,14 +1352,12 @@ var OBJY = {
         // Privileges
         /* if (newObj.privileges) {
              Object.keys(newObj.privileges).forEach(function(a) {
-
                  newObj.privileges[a].forEach(function(tP, i) {
                      
                      oldObj.privileges[a].forEach(function(t_P, i_) {
                          if (JSON.stringify(tP) != JSON.stringify(t_P))
                              
                              oldObj.privileges[a].overwritten = true;
-
                              oldObj.privileges[a].overwritten = true;
                          
                      })                       
@@ -1747,8 +1746,6 @@ var OBJY = {
                 console.log(obj.properties[propKeys[i]] + ' . ' + templateId);
                 if (obj.properties[propKeys[i]].template == templateId) delete obj.properties[propKeys[i]];
             }
-
-
             var permissionKeys = Object.keys(obj.permissions);
             var i;
             for (i = 0; i < permissionKeys.length; i++) {
@@ -1756,7 +1753,6 @@ var OBJY = {
                 console.log(obj.permissions[permissionKeys[i]] + ' . ' + templateId);
                 if (obj.permissions[permissionKeys[i]].template == templateId) delete obj.permissions[permissionKeys[i]];
             }
-
             var i;
             for (i = 0; i < obj.inherits.length; i++) {
                 if (obj.inherits[i] == templateId) obj.inherits.splice(i, 1);
@@ -1875,12 +1871,9 @@ var OBJY = {
 
         /*
                 var propKeys = Object.keys(obj.properties);
-
-
                 propKeys.forEach(function(property) {
                     {
                         if (obj.properties[property].template) {
-
                             if (!obj.properties[property].overwrittenOnCreate) delete obj.properties[property].onCreate;
                             if (!obj.properties[property].overwrittenOnChange) delete obj.properties[property].onChange;
                             if (!obj.properties[property].overwrittenOnDelete) delete obj.properties[property].onDelete;
@@ -1889,20 +1882,15 @@ var OBJY = {
                         }
                     }
                 })
-
                 if (obj.privileges) {
                     var appKeys = Object.keys(obj.privileges);
                     appKeys.forEach(function(app) {
-
                         var k;
                         for (k = 0; k < obj.privileges[app].length; k++) {
-
                         }
-
                         if (obj.privileges[app].length == 0) delete obj.privileges[app];
                     })
                 }
-
                 this.updateObject(obj, success, error, app, client);*/
 
 
@@ -1954,14 +1942,11 @@ var OBJY = {
 
 
             /*data.forEach(function(obj, i) {
-
                 counter++;
                 if (counter == data.length) success(data);
-
                 /*new OBJY.Obj(obj).get(function(ob) {
                         counter++;
                         data[i] = ob
-
                         if (counter == data.length) success(data);
                     },
                     function(err) {
@@ -2413,21 +2398,14 @@ var OBJY = {
         }
 
 
-
-
-
-
         try {
             existing = obj.properties[propertyKey]
 
         } catch (e) {}
 
         /*iif (!property[propertyKey].type) {
-
             obj.properties[propertyKey] = property[propertyKey];
-
            
-
             f (typeof property[propertyKey].value === 'string') {
                 if (property[propertyKey].value.length <= 255) property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
                 else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_LONGTEXT;
@@ -3163,7 +3141,6 @@ var OBJY = {
             case constants.PROPERTY_TYPE_SHORTTEXT:
                 obj.properties[propertyKey].value = newValue;
             break;
-
             default : 
                 throw new InvalidTypeException(existingProperty.type);
         }*/
@@ -3249,7 +3226,6 @@ var OBJY = {
             case constants.PROPERTY_TYPE_SHORTTEXT:
                 obj.properties[propertyKey].value = newValue;
             break;
-
             default : 
                 throw new InvalidTypeException(existingProperty.type);
         }*/
@@ -3305,7 +3281,7 @@ var OBJY = {
                     newValue.template = obj.properties[access[0]].template
                 }
 
-                obj.properties[acdcess[0]] = newValue;
+                obj.properties[access[0]] = newValue;
 
                 if (obj.properties[access[0]].onChange) {
                     if (Object.keys(obj.properties[access[0]].onChange).length > 0) {
@@ -3315,7 +3291,7 @@ var OBJY = {
                     }
                 }
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
+                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setProperty', propertyKey);
                 console.log("-", instance.permissionSequence);
 
             }
@@ -3837,17 +3813,17 @@ var OBJY = {
 
                     // TODO : change!!!
 
-                    data.forEach(function(d) {
-                        d = OBJY[params.name](d)
-                    })
+
 
                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
+
                         success(data);
                         return;
                     }
 
                     if (data.length == 0) {
                         //console.info(data)
+
                         success(data);
                         return;
                     }
@@ -3856,13 +3832,13 @@ var OBJY = {
 
                         d.inherits = d.inherits.filter(function(item, pos) { return d.inherits.indexOf(item) == pos; });
 
-
                         //onsole.info(d)
                         var counter = 0;
 
                         if (d.inherits.length == 0) {
                             allCounter++;
                             if (allCounter == data.length) {
+
                                 success(data);
                                 return d;
                             }
@@ -3884,6 +3860,7 @@ var OBJY = {
                                         // console.info(d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
+
                                             success(data);
                                             return d;
                                         }
@@ -3896,6 +3873,7 @@ var OBJY = {
                                         //console.info(d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
+
                                             success(data);
                                             return d;
                                         }
@@ -3904,6 +3882,7 @@ var OBJY = {
                             } else {
 
                                 if (d.inherits.length == 1) {
+
                                     success(data);
                                     return d;
                                 } else {
@@ -4056,6 +4035,18 @@ var OBJY = {
 
         this.role = role || 'object';
 
+        if (params.customProps) {
+            for (var prop in params.customProps) {
+                this[prop] = params.customProps[prop];
+            }
+        }
+
+        if (params.customFuncs) {
+            for (var func in params.customFuncs) {
+                this[func] = params.customFuncs[func];
+            }
+        }
+
         if (!params.structure) {
 
             this.type = obj.type || null;
@@ -4073,17 +4064,19 @@ var OBJY = {
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
+            console.info('obj', obj);
+
             this.properties = OBJY.PropertiesChecker(this, obj.properties, instance) || {};
 
             this.permissions = new OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
 
             this._aggregatedEvents = obj._aggregatedEvents || [];
 
-            if (this.role == 'template') {
+            /*if (this.role == 'template') {
                 this.privileges = obj.privileges;
                 this.addPrivilege = obj.addPrivilege;
                 this.removePrivilege = obj.removePrivilege;
-            }
+            }*/
 
             if (params.authable) {
                 console.log("authable!!!");
@@ -4092,6 +4085,21 @@ var OBJY = {
                 this.password = obj.password || null;
                 this.privileges = OBJY.PrivilegesChecker(obj) || {};
                 this.spooAdmin = obj.spooAdmin || false;
+                this._clients = obj._clients || [];
+
+                this.addClient = function(client) {
+                    if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
+                    this._clients.push(client);
+                    return this;
+                };
+
+                this.removeClient = function(client) {
+                    if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
+                    this._clients.splice(this._clients.indexOf(client), 1);
+                    return this;
+                };
+
+                delete this.name;
 
                 this.addPrivilege = function(privilege) {
                     new OBJY.PrivilegeChecker(this, privilege);
@@ -4154,7 +4162,7 @@ var OBJY = {
 
         this.replace = function(newObj) {
 
-            OBJY.prepareObjectDelta(this, newObj);
+            OBJY.prepareObjectDelta(OBJY.serialize(this), OBJY.serialize(newObj));
 
         };
 
@@ -4254,7 +4262,6 @@ var OBJY = {
                 this.setBagPropertyValue(bag, newProKey, value,  client);
                 return;
             }
-
             new OBJY.ConditionsChecker(this.getProperty(property), value);*/
 
             new OBJY.PropertySetWrapper(this, property, value, instance, ['addObject']);
@@ -4274,7 +4281,6 @@ var OBJY = {
                 this.setBagPropertyValue(bag, newProKey, value,  client);
                 return;
             }
-
             new OBJY.ConditionsChecker(this.getProperty(property), value);*/
 
             new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject']);
@@ -4828,6 +4834,9 @@ var OBJY = {
 
             var thisRef = this;
 
+            thisRef = this;
+
+            console.info('tr', thisRef);
             console.log(thisRef.onCreate);
 
             Object.keys(thisRef.onCreate).forEach(function(key) {
@@ -5404,7 +5413,6 @@ var OBJY = {
                 }
 
                 if (data.inherits.length == 0) {
-
                     success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }

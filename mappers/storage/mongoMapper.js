@@ -9,10 +9,12 @@ var clientSchema = {
 var ClientSchema = new Schema(clientSchema);
 
 var generalObjectModel = {
-    type: String,
+    type: { type: String, index: true },
+    applications: { type: [String], index: true },
+    created: { type: String, index: true },
+    lastModified: { type: String, index: true },
     role: String,
     inherits: [],
-    applications: [],
     name: String,
     onDelete: {},
     onCreate: {},
@@ -20,17 +22,15 @@ var generalObjectModel = {
     permissions: {},
     properties: {},
     privileges: {},
-    created: String,
-    lastModified: String,
     aggregatedEvents: [],
     tenantId: String,
     password: String,
     username: String,
-    email: String
+    email: String,
+    _clients: []
 };
 
-var ObjSchema = new Schema(generalObjectModel);
-
+var ObjSchema = new Schema(generalObjectModel, { strict: false });
 
 Mapper = function(SPOO, options) {
     return Object.assign(new SPOO.StorageTemplate(SPOO, options), {
@@ -165,9 +165,33 @@ Mapper = function(SPOO, options) {
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
 
+            if (criteria.$query) {
+                criteria = JSON.parse(JSON.stringify(criteria.$query));
+                delete criteria.$query;
+            }
 
-            Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(flags.$sort || '_id').exec(function(err, data) {
+            var arr = [{ $match: criteria }, { $limit: 20 }];
+            if (flags.$page) arr.push({ $skip: this.globalPaging * (flags.$page || 0) })
 
+            if (flags.$sort) {
+                var s = {};
+
+                if (flags.$sort.charAt(0) == '-') {
+                    s[flags.$sort.slice(1)] = -1;
+                } else {
+                    s[flags.$sort] = 1;
+                }
+
+                arr.push({ $sort: s })
+            }
+
+            var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(flags.$sort || '_id');
+
+            if (criteria.$aggregate) {
+                finalQuery = Obj.aggregate(criteria.$aggregate);
+            }
+
+            finalQuery.exec(function(err, data) {
                 if (err) {
                     error(err);
                     return;
@@ -176,7 +200,6 @@ Mapper = function(SPOO, options) {
                 success(data);
                 return;
             });
-
 
         },
 
