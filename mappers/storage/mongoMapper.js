@@ -32,8 +32,8 @@ var generalObjectModel = {
 
 var ObjSchema = new Schema(generalObjectModel, { strict: false });
 
-Mapper = function(SPOO, options) {
-    return Object.assign(new SPOO.StorageTemplate(SPOO, options), {
+Mapper = function(OBJY, options) {
+    return Object.assign(new OBJY.StorageTemplate(OBJY, options), {
 
         database: {},
         index: {},
@@ -41,6 +41,24 @@ Mapper = function(SPOO, options) {
 
         connect: function(connectionString, success, error) {
             this.database = mongoose.createConnection(connectionString);
+
+            this.database.on('error', function(err) {
+                error(err)
+            });
+
+            this.database.once('open', function() {
+                success();
+            });
+
+            return this;
+        },
+
+        getConnection: function() {
+            return this.database;
+        },
+
+        useConnection: function(connection, success, error) {
+            this.database = connection;
 
             this.database.on('error', function(err) {
                 error(err)
@@ -85,7 +103,7 @@ Mapper = function(SPOO, options) {
                         }
 
                         success(data);
-                        console.log('SAVED CLIENT TO DB');
+
                     })
                 }
 
@@ -113,13 +131,11 @@ Mapper = function(SPOO, options) {
                 ClientInfo.find({}).exec(function(err, data) {
 
                     if (err) {
-                        console.log("err");
+
                         error(err);
                         return;
                     }
-                    console.log(data.map(function(item) {
-                        return item.name
-                    }));
+
                     success(data.map(function(item) {
                         return item.name
                     }))
@@ -134,21 +150,20 @@ Mapper = function(SPOO, options) {
             var db = this.getDBByMultitenancy(client);
 
             var constrains = { _id: id };
-            console.log("app", app)
+
             if (app) constrains['applications'] = { $in: [app] }
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) constrains['tenantId'] = client;
 
             Obj = db.model(this.objectFamily, ObjSchema);
 
-            console.log(constrains);
 
             Obj.findOne(constrains, function(err, data) {
                 if (err) {
                     error(err);
                     return;
                 }
-                console.log(data);
+
                 success(data);
                 return;
             });
@@ -216,7 +231,7 @@ Mapper = function(SPOO, options) {
                     error(err);
                     return;
                 }
-                console.log(data);
+
                 success({ 'result': data });
                 return;
             });
@@ -234,13 +249,13 @@ Mapper = function(SPOO, options) {
 
             Obj.findOneAndUpdate(criteria, spooElement, function(err, data) {
                 if (err) {
-                    console.log("update err");
+
                     error(err);
                     return;
                 }
                 if (data.n != 0) success(spooElement);
                 else error("object not found");
-                console.log('UPDATED TO DB');
+
             })
         },
 
@@ -262,13 +277,13 @@ Mapper = function(SPOO, options) {
 
             new Obj(spooElement).save(function(err, data) {
                 if (err) {
-                    console.log("save err", err);
+
                     error(err);
                     return;
                 }
-                console.log(data);
+
                 success(data);
-                console.log('SAVED TO DB');
+
             })
 
         },

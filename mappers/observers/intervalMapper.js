@@ -1,7 +1,7 @@
 var moment = require("moment");
 
-Mapper = function(SPOO) {
-    return Object.assign(new SPOO.ProcessorTemplate(SPOO), {
+Mapper = function(OBJY) {
+    return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
 
         initialize: function(millis) {
             var self = this;
@@ -21,16 +21,15 @@ Mapper = function(SPOO) {
 
             var self = this;
 
-            self.SPOO.getPersistence(self.objectFamily).listClients(function(data) {
+            self.OBJY.getPersistence(self.objectFamily).listClients(function(data) {
 
                 //console.log("d", data);
 
                 data.forEach(function(tenant) {
 
-                    console.log("current run: ", date.toISOString(), tenant);
+                    OBJY.Logger.log("Running...")
 
-
-                    self.SPOO.getPersistence(self.objectFamily).getByCriteria({
+                    self.OBJY.getPersistence(self.objectFamily).getByCriteria({
                         _aggregatedEvents: {
                             $elemMatch: {
                                 'date': { $lte: date.toISOString() }
@@ -40,19 +39,18 @@ Mapper = function(SPOO) {
 
                         objs.forEach(function(obj) {
 
-                            obj = SPOO[self.objectFamily](obj);
+                            obj = OBJY[self.objectFamily](obj);
 
                             obj._aggregatedEvents.forEach(function(aE) {
 
                                 var prop = obj.getProperty(aE.propName);
 
-                                self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
+                                self.OBJY.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
-                                        console.log("remaining events: ", d._aggregatedEvents);
-                                        console.log(obj.getProperty(aE.propName));
+
                                     }, function(err) {
-                                        console.log(err);
+                                        OBJY.Logger.error(err)
                                     }, tenant)
 
 

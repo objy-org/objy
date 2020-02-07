@@ -17,6 +17,11 @@ OBJY.define({
 var t = OBJY.SensorMeasure({
     name: "hallo",
     test: 22,
+    _onCreate: {
+        test: {
+            value: "console.warn(1);"
+        }
+    },
     mybag: {
         type: 'bag',
         properties: {
@@ -30,11 +35,12 @@ var t = OBJY.SensorMeasure({
 }).add(function(data) {
     console.info('_', data)
 
-    OBJY.SensorMeasures({}).get(function(data) {
+    /*OBJY.SensorMeasures({}).get(function(data) {
         console.info('ddd', data)
-    })
+    })*/
 });
 
+/*
 var t2 = t.replace({
     name: "hallo",
     test222: 22,
@@ -50,4 +56,6 @@ var t2 = t.replace({
     }
 })
 
-console.log('fsgdsd', t2)
+console.log('fsgdsd', t2)*/
+
+//OBJY.@Permission({ apps: ['crm'], users: {}, entities: {} })

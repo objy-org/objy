@@ -1,26 +1,22 @@
-
-Mapper = function(SPOO) {
-    return Object.assign(new SPOO.ProcessorTemplate(SPOO), {
+Mapper = function(OBJY) {
+    return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
 
         execute: function(dsl, obj, prop, data, callback, client, app, user, options) {
 
-            var SPOO = this.SPOO;
-            console.info("22..", dsl);
+            var OBJY = this.OBJY;
+            OBJY.Logger.log("Executing dsl in mapper")
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
                 try {
-                    console.info('pre eval')
-
                     eval(dsl);
-                    console.info('after eval')
                 } catch (e) {
-                    console.info(e);
+                    OBJY.Logger.error(e)
                 }
                 callback();
             } else {
                 try {
                     eval(dsl);
                 } catch (e) {
-                    console.info(e);
+                    OBJY.Logger.error(e)
                 }
                 callback();
             }

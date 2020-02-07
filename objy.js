@@ -20,38 +20,116 @@ var Query;
         }
         return rows
     }
-    if (!String.prototype.startsWith) { Object.defineProperty(String.prototype, "startsWith", { enumerable: false, configurable: false, writable: false, value: function(searchString, position) { position = position || 0; return this.lastIndexOf(searchString, position) === position } }) }
-    if (!String.prototype.endsWith) { Object.defineProperty(String.prototype, "endsWith", { value: function(searchString, position) { var subjectString = this.toString(); if (position === undefined || position > subjectString.length) { position = subjectString.length } position -= searchString.length; var lastIndex = subjectString.indexOf(searchString, position); return lastIndex !== -1 && lastIndex === position } }) }
+    if (!String.prototype.startsWith) {
+        Object.defineProperty(String.prototype, "startsWith", {
+            enumerable: false,
+            configurable: false,
+            writable: false,
+            value: function(searchString, position) {
+                position = position || 0;
+                return this.lastIndexOf(searchString, position) === position
+            }
+        })
+    }
+    if (!String.prototype.endsWith) {
+        Object.defineProperty(String.prototype, "endsWith", {
+            value: function(searchString, position) {
+                var subjectString = this.toString();
+                if (position === undefined || position > subjectString.length) {
+                    position = subjectString.length
+                }
+                position -= searchString.length;
+                var lastIndex = subjectString.indexOf(searchString, position);
+                return lastIndex !== -1 && lastIndex === position
+            }
+        })
+    }
     Query = {
-        satisfies: function(row, constraints, getter) { return Query.lhs._rowsatisfies(row, constraints, getter) },
-        Query: function(constraints, getter) { return function(row) { return Query.lhs._rowsatisfies(row, constraints, getter) } },
+        satisfies: function(row, constraints, getter) {
+            return Query.lhs._rowsatisfies(row, constraints, getter)
+        },
+        Query: function(constraints, getter) {
+            return function(row) {
+                return Query.lhs._rowsatisfies(row, constraints, getter)
+            }
+        },
         join: function(left_rows, right_rows, left_key, right_key) {
             var leftKeyFn, rightKeyFn;
-            if (typeof left_key == "string") leftKeyFn = function(row) { return row[left_key] };
+            if (typeof left_key == "string") leftKeyFn = function(row) {
+                return row[left_key]
+            };
             else leftKeyFn = left_key;
             if (!right_key) rightKeyFn = leftKeyFn;
-            if (typeof right_key == "string") rightKeyFn = function(row) { return row[left_key] };
+            if (typeof right_key == "string") rightKeyFn = function(row) {
+                return row[left_key]
+            };
             else rightKeyFn = right_key;
             return left_rows
         },
         query: function(rows, constraints, getter) {
             if (typeof getter == "string") {
                 var method = getter;
-                getter = function(obj, key) { return obj[method](key) }
+                getter = function(obj, key) {
+                    return obj[method](key)
+                }
             }
             var filter = new Query.Query(constraints, getter);
             return rows.filter(filter)
         },
         lhs: {
-            _rowsatisfies: function(row, constraints, getter) { for (var key in constraints) { if (this[key]) { if (!this[key](row, constraints[key], getter)) return false } else { var val = getter ? getter(row, key) : row[key]; var res = this.rhs._satisfies(val, constraints[key], key); if (!res) return false } } return true },
-            $count: function(row, condition, getter) { var res = condition.$constraints.map(function(c) { return Query.satisfies(row, c, getter) }).filter(function(v) { return v }).length; return this.rhs._satisfies(res, condition.$constraint) },
-            $not: function(row, constraint, getter) { return !this._rowsatisfies(row, constraint, getter) },
-            $or: function(row, constraint, getter) { if (!Array.isArray(constraint)) { constraint = objectify(constraint) } for (var i = 0; i < constraint.length; i++) { if (this._rowsatisfies(row, constraint[i], getter)) return true } return false },
-            $and: function(row, constraint, getter) { if (!Array.isArray(constraint)) { constraint = objectify(constraint) } for (var i = 0; i < constraint.length; i++) { if (!this._rowsatisfies(row, constraint[i], getter)) return false } return true },
-            $nor: function(row, constraint, getter) { return !this.$or(row, constraint, getter) },
-            $where: function(values, ref) { var fn = typeof ref == "string" ? new Function(ref) : ref; var res = fn.call(values); return res },
+            _rowsatisfies: function(row, constraints, getter) {
+                for (var key in constraints) {
+                    if (this[key]) {
+                        if (!this[key](row, constraints[key], getter)) return false
+                    } else {
+                        var val = getter ? getter(row, key) : row[key];
+                        var res = this.rhs._satisfies(val, constraints[key], key);
+                        if (!res) return false
+                    }
+                }
+                return true
+            },
+            $count: function(row, condition, getter) {
+                var res = condition.$constraints.map(function(c) {
+                    return Query.satisfies(row, c, getter)
+                }).filter(function(v) {
+                    return v
+                }).length;
+                return this.rhs._satisfies(res, condition.$constraint)
+            },
+            $not: function(row, constraint, getter) {
+                return !this._rowsatisfies(row, constraint, getter)
+            },
+            $or: function(row, constraint, getter) {
+                if (!Array.isArray(constraint)) {
+                    constraint = objectify(constraint)
+                }
+                for (var i = 0; i < constraint.length; i++) {
+                    if (this._rowsatisfies(row, constraint[i], getter)) return true
+                }
+                return false
+            },
+            $and: function(row, constraint, getter) {
+                if (!Array.isArray(constraint)) {
+                    constraint = objectify(constraint)
+                }
+                for (var i = 0; i < constraint.length; i++) {
+                    if (!this._rowsatisfies(row, constraint[i], getter)) return false
+                }
+                return true
+            },
+            $nor: function(row, constraint, getter) {
+                return !this.$or(row, constraint, getter)
+            },
+            $where: function(values, ref) {
+                var fn = typeof ref == "string" ? new Function(ref) : ref;
+                var res = fn.call(values);
+                return res
+            },
             rhs: {
-                $cb: function(value, constraint, parentKey) { return constraint(value) },
+                $cb: function(value, constraint, parentKey) {
+                    return constraint(value)
+                },
                 _satisfies: function(value, constraint, parentKey) {
                     if (constraint === value) return true;
                     else if (constraint instanceof RegExp) return this.$regex(value, constraint);
@@ -79,61 +157,220 @@ var Query;
                         for (var i = 0; i < value.length; i++)
                             if (this.$eq(value[i], constraint)) return true;
                         return false
-                    } else if (constraint === null || constraint === undefined || constraint === "") { return this.$null(value) } else if (value === null || value === "" || value === undefined) return false;
-                    else if (value instanceof Date) { if (constraint instanceof Date) { return value.getTime() == constraint.getTime() } else if (typeof constraint == "number") { return value.getTime() == constraint } else if (typeof constraint == "string") return value.getTime() == new Date(constraint).getTime() } else { return value == constraint }
+                    } else if (constraint === null || constraint === undefined || constraint === "") {
+                        return this.$null(value)
+                    } else if (value === null || value === "" || value === undefined) return false;
+                    else if (value instanceof Date) {
+                        if (constraint instanceof Date) {
+                            return value.getTime() == constraint.getTime()
+                        } else if (typeof constraint == "number") {
+                            return value.getTime() == constraint
+                        } else if (typeof constraint == "string") return value.getTime() == new Date(constraint).getTime()
+                    } else {
+                        return value == constraint
+                    }
                 },
-                $exists: function(value, constraint, parentKey) { return value != undefined == (constraint && true) },
-                $deepEquals: function(value, constraint) { if (typeof _ == "undefined" || typeof _.isEqual == "undefined") { return JSON.stringify(value) == JSON.stringify(constraint) } else { return _.isEqual(value, constraint) } },
-                $not: function(values, constraint) { return !this._satisfies(values, constraint) },
-                $ne: function(values, constraint) { return !this._satisfies(values, constraint) },
-                $nor: function(values, constraint, parentKey) { return !this.$or(values, constraint, parentKey) },
-                $and: function(values, constraint, parentKey) { if (!Array.isArray(constraint)) { throw new Error("Logic $and takes array of constraint objects") } for (var i = 0; i < constraint.length; i++) { var res = this._satisfies(values, constraint[i], parentKey); if (!res) return false } return true },
-                $or: function(values, constraint, parentKey) { if (!Array.isArray(values)) { values = [values] } for (var v = 0; v < values.length; v++) { for (var i = 0; i < constraint.length; i++) { if (this._satisfies(values[v], constraint[i], parentKey)) { return true } } } return false },
-                $null: function(values) { var result; if (values === "" || values === null || values === undefined) { return true } else if (Array.isArray(values)) { for (var v = 0; v < values.length; v++) { if (!this.$null(values[v])) { return false } } return true } else return false },
-                $in: function(values, constraint) { if (!Array.isArray(constraint)) throw new Error("$in requires an array operand"); var result = false; if (!Array.isArray(values)) { values = [values] } for (var v = 0; v < values.length; v++) { var val = values[v]; for (var i = 0; i < constraint.length; i++) { if (this._satisfies(val, constraint[i])) { result = true; break } } result = result || constraint.indexOf(val) >= 0 } return result },
-                $likeI: function(values, constraint) { return values.toLowerCase().indexOf(constraint) >= 0 },
-                $like: function(values, constraint) { return values.indexOf(constraint) >= 0 },
-                $startsWith: function(values, constraint) { if (!values) return false; return values.startsWith(constraint) },
-                $endsWith: function(values, constraint) { if (!values) return false; return values.endsWith(constraint) },
-                $elemMatch: function(values, constraint, parentKey) { for (var i = 0; i < values.length; i++) { if (Query.lhs._rowsatisfies(values[i], constraint)) return true } return false },
-                $contains: function(values, constraint) { return values.indexOf(constraint) >= 0 },
-                $nin: function(values, constraint) { return !this.$in(values, constraint) },
-                $regex: function(values, constraint) { var result = false; if (Array.isArray(values)) { for (var i = 0; i < values.length; i++) { if (constraint.test(values[i])) { return true } } } else return constraint.test(values) },
-                $gte: function(values, ref) { return !this.$null(values) && values >= this.resolve(ref) },
-                $gt: function(values, ref) { return !this.$null(values) && values > this.resolve(ref) },
-                $lt: function(values, ref) { return !this.$null(values) && values < this.resolve(ref) },
-                $lte: function(values, ref) { return !this.$null(values) && values <= this.resolve(ref) },
-                $before: function(values, ref) { if (typeof ref === "string") ref = Date.parse(ref); if (typeof values === "string") values = Date.parse(values); return this.$lte(values, ref) },
-                $after: function(values, ref) { if (typeof ref === "string") ref = Date.parse(ref); if (typeof values === "string") values = Date.parse(values); return this.$gte(values, ref) },
-                $type: function(values, ref) { return typeof values == ref },
-                $all: function(values, ref) { throw new Error("$all not implemented") },
-                $size: function(values, ref) { return typeof values == "object" && (values.length == ref || Object.keys(values).length == ref) },
-                $mod: function(values, ref) { return values % ref[0] == ref[1] },
-                $equal: function() { return this.$eq(arguments) },
-                $between: function(values, ref) { return this._satisfies(values, { $gt: ref[0], $lt: ref[1] }) },
-                resolve: function(ref) { if (typeof ref === "object") { if (ref["$date"]) return Date.parse(ref["$date"]) } return ref }
+                $exists: function(value, constraint, parentKey) {
+                    return value != undefined == (constraint && true)
+                },
+                $deepEquals: function(value, constraint) {
+                    if (typeof _ == "undefined" || typeof _.isEqual == "undefined") {
+                        return JSON.stringify(value) == JSON.stringify(constraint)
+                    } else {
+                        return _.isEqual(value, constraint)
+                    }
+                },
+                $not: function(values, constraint) {
+                    return !this._satisfies(values, constraint)
+                },
+                $ne: function(values, constraint) {
+                    return !this._satisfies(values, constraint)
+                },
+                $nor: function(values, constraint, parentKey) {
+                    return !this.$or(values, constraint, parentKey)
+                },
+                $and: function(values, constraint, parentKey) {
+                    if (!Array.isArray(constraint)) {
+                        throw new Error("Logic $and takes array of constraint objects")
+                    }
+                    for (var i = 0; i < constraint.length; i++) {
+                        var res = this._satisfies(values, constraint[i], parentKey);
+                        if (!res) return false
+                    }
+                    return true
+                },
+                $or: function(values, constraint, parentKey) {
+                    if (!Array.isArray(values)) {
+                        values = [values]
+                    }
+                    for (var v = 0; v < values.length; v++) {
+                        for (var i = 0; i < constraint.length; i++) {
+                            if (this._satisfies(values[v], constraint[i], parentKey)) {
+                                return true
+                            }
+                        }
+                    }
+                    return false
+                },
+                $null: function(values) {
+                    var result;
+                    if (values === "" || values === null || values === undefined) {
+                        return true
+                    } else if (Array.isArray(values)) {
+                        for (var v = 0; v < values.length; v++) {
+                            if (!this.$null(values[v])) {
+                                return false
+                            }
+                        }
+                        return true
+                    } else return false
+                },
+                $in: function(values, constraint) {
+                    if (!Array.isArray(constraint)) throw new Error("$in requires an array operand");
+                    var result = false;
+                    if (!Array.isArray(values)) {
+                        values = [values]
+                    }
+                    for (var v = 0; v < values.length; v++) {
+                        var val = values[v];
+                        for (var i = 0; i < constraint.length; i++) {
+                            if (this._satisfies(val, constraint[i])) {
+                                result = true;
+                                break
+                            }
+                        }
+                        result = result || constraint.indexOf(val) >= 0
+                    }
+                    return result
+                },
+                $likeI: function(values, constraint) {
+                    return values.toLowerCase().indexOf(constraint) >= 0
+                },
+                $like: function(values, constraint) {
+                    return values.indexOf(constraint) >= 0
+                },
+                $startsWith: function(values, constraint) {
+                    if (!values) return false;
+                    return values.startsWith(constraint)
+                },
+                $endsWith: function(values, constraint) {
+                    if (!values) return false;
+                    return values.endsWith(constraint)
+                },
+                $elemMatch: function(values, constraint, parentKey) {
+                    for (var i = 0; i < values.length; i++) {
+                        if (Query.lhs._rowsatisfies(values[i], constraint)) return true
+                    }
+                    return false
+                },
+                $contains: function(values, constraint) {
+                    return values.indexOf(constraint) >= 0
+                },
+                $nin: function(values, constraint) {
+                    return !this.$in(values, constraint)
+                },
+                $regex: function(values, constraint) {
+                    var result = false;
+                    if (Array.isArray(values)) {
+                        for (var i = 0; i < values.length; i++) {
+                            if (constraint.test(values[i])) {
+                                return true
+                            }
+                        }
+                    } else return constraint.test(values)
+                },
+                $gte: function(values, ref) {
+                    return !this.$null(values) && values >= this.resolve(ref)
+                },
+                $gt: function(values, ref) {
+                    return !this.$null(values) && values > this.resolve(ref)
+                },
+                $lt: function(values, ref) {
+                    return !this.$null(values) && values < this.resolve(ref)
+                },
+                $lte: function(values, ref) {
+                    return !this.$null(values) && values <= this.resolve(ref)
+                },
+                $before: function(values, ref) {
+                    if (typeof ref === "string") ref = Date.parse(ref);
+                    if (typeof values === "string") values = Date.parse(values);
+                    return this.$lte(values, ref)
+                },
+                $after: function(values, ref) {
+                    if (typeof ref === "string") ref = Date.parse(ref);
+                    if (typeof values === "string") values = Date.parse(values);
+                    return this.$gte(values, ref)
+                },
+                $type: function(values, ref) {
+                    return typeof values == ref
+                },
+                $all: function(values, ref) {
+                    throw new Error("$all not implemented")
+                },
+                $size: function(values, ref) {
+                    return typeof values == "object" && (values.length == ref || Object.keys(values).length == ref)
+                },
+                $mod: function(values, ref) {
+                    return values % ref[0] == ref[1]
+                },
+                $equal: function() {
+                    return this.$eq(arguments)
+                },
+                $between: function(values, ref) {
+                    return this._satisfies(values, {
+                        $gt: ref[0],
+                        $lt: ref[1]
+                    })
+                },
+                resolve: function(ref) {
+                    if (typeof ref === "object") {
+                        if (ref["$date"]) return Date.parse(ref["$date"])
+                    }
+                    return ref
+                }
             }
         }
     };
     Query.undot = function(obj, key) {
         var keys = key.split("."),
             sub = obj;
-        for (var i = 0; i < keys.length; i++) { sub = sub[keys[i]] }
+        for (var i = 0; i < keys.length; i++) {
+            sub = sub[keys[i]]
+        }
         return sub
     };
     Query.lhs.rhs.$equal = Query.lhs.rhs.$eq;
     Query.lhs.rhs.$any = Query.lhs.rhs.$or;
     Query.lhs.rhs.$all = Query.lhs.rhs.$and;
-    Query.satisfies = function(row, constraints, getter) { return this.lhs._rowsatisfies(row, constraints, getter) };
-    Array.prototype.query = function(q) { return Query.query(this, q) };
+    Query.satisfies = function(row, constraints, getter) {
+        return this.lhs._rowsatisfies(row, constraints, getter)
+    };
+    Array.prototype.query = function(q) {
+        return Query.query(this, q)
+    };
     RegExp.prototype.toJSON = RegExp.prototype.toString;
     if (typeof module != "undefined") module.exports = Query;
-    else if (typeof define != "undefined" && define.amd) define("query", [], function() { return Query });
+    else if (typeof define != "undefined" && define.amd) define("query", [], function() {
+        return Query
+    });
     else if (typeof window != "undefined") window.Query = Query;
     else if (typeof GLOBAL != undefined && GLOBAL.global) GLOBAL.global.Query = Query;
     return Query
 })(this);
 
+
+Logger = {
+    enabled: [],
+    log: function(msg) {
+        if (this.enabled.length == 0 || this.enabled.indexOf('log') != -1) console.log(msg)
+    },
+    warn: function(msg) {
+        if (this.enabled.length == 0 || this.enabled.indexOf('warn') != -1) console.warn(msg)
+    },
+    error: function(msg) {
+        if (this.enabled.length == 0 || this.enabled.indexOf('error') != -1) console.error(msg)
+    }
+}
 
 
 StorageMapperTemplate = function(SPOO, options) {
@@ -333,10 +570,16 @@ var DefaultStorageMapper = function(SPOO, options) {
             var db = this.getDBByMultitenancy(client);
 
             if (app)
-                Object.assign(criteria, { applications: { $in: [app] } })
+                Object.assign(criteria, {
+                    applications: {
+                        $in: [app]
+                    }
+                })
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                Object.assign(criteria, { tenantId: client })
+                Object.assign(criteria, {
+                    tenantId: client
+                })
 
             success(Query.query(db, criteria, Query.undot));
         },
@@ -346,10 +589,16 @@ var DefaultStorageMapper = function(SPOO, options) {
             var db = this.getDBByMultitenancy(client);
 
             if (app)
-                Object.assign(criteria, { applications: { $in: [app] } })
+                Object.assign(criteria, {
+                    applications: {
+                        $in: [app]
+                    }
+                })
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                Object.assign(criteria, { tenantId: client })
+                Object.assign(criteria, {
+                    tenantId: client
+                })
 
             success(Query.query(db, criteria, Query.undot).length);
         },
@@ -420,22 +669,20 @@ var DefaultProcessorMapper = function(SPOO) {
         execute: function(dsl, obj, prop, data, callback, client, app, user, options) {
 
             var SPOO = this.SPOO;
-            console.info("22..", dsl);
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
                 try {
-                    console.info('pre eval')
-
+                    Logger.log('Executing dsl')
                     eval(dsl);
-                    console.info('after eval')
+                    console.info('Executed dsl')
                 } catch (e) {
-                    console.info(e);
+                    Logger.error(e)
                 }
                 callback();
             } else {
                 try {
                     eval(dsl);
                 } catch (e) {
-                    console.info(e);
+                    Logger.error(e)
                 }
                 callback();
             }
@@ -449,10 +696,6 @@ var DefaultObserverMapper = function(SPOO) {
         initialize: function(millis) {
             var self = this;
 
-            // first run
-            //self.run(new Date());
-
-            // interval
             this.interval = setInterval(function() {
 
                 self.run(moment().utc());
@@ -466,17 +709,16 @@ var DefaultObserverMapper = function(SPOO) {
 
             self.SPOO.getPersistence(self.objectFamily).listClients(function(data) {
 
-                //console.log("d", data);
-
                 data.forEach(function(tenant) {
 
-                    console.log("current run: ", date.toISOString(), tenant);
-
+                    Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
 
                     self.SPOO.getPersistence(self.objectFamily).getByCriteria({
                         _aggregatedEvents: {
                             $elemMatch: {
-                                'date': { $lte: date.toISOString() }
+                                'date': {
+                                    $lte: date.toISOString()
+                                }
                             }
                         }
                     }, function(objs) {
@@ -492,8 +734,7 @@ var DefaultObserverMapper = function(SPOO) {
                                 self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
-                                        console.log("remaining events: ", d._aggregatedEvents);
-                                        console.log(obj.getProperty(aE.propName));
+
                                     }, function(err) {
                                         console.log(err);
                                     }, tenant)
@@ -755,6 +996,8 @@ var OBJY = {
 
     self: this,
 
+    Logger: Logger,
+
     metaProperties: ['id', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
     metaPropPrefix: '',
@@ -856,7 +1099,6 @@ var OBJY = {
 
     checkPermissions: function(user, app, obj, permission, soft) {
 
-        console.log(privileges);
         var result = false;
 
         if (!user) return true;
@@ -872,19 +1114,14 @@ var OBJY = {
 
         var allowed = false;
 
-        console.log(privileges, app);
-
         if (app) {
             if (privileges['*']) {
 
-                console.log('***')
-
                 Object.keys(permissions).forEach(function(pKey) {
-
 
                     privileges['*'].forEach(function(item) {
                         if (permissions[item.name]) {
-                            console.log("ll", ((permissions[item.name] || {}).value || ""));
+
                             if (((permissions[item.name] || {}).value || "").indexOf(permission) != -1 || (permissions[item.name] || {}).value == "*") allowed = true;
                         }
 
@@ -901,7 +1138,7 @@ var OBJY = {
 
                 privileges[app].forEach(function(item) {
                     if (permissions[item.name]) {
-                        console.log(((permissions[item.name] || {}).value || ""));
+
                         if (((permissions[item.name] || {}).value || "").indexOf(permission) != -1 || (permissions[item.name] || {}).value == "*") allowed = true;
                     }
 
@@ -910,7 +1147,6 @@ var OBJY = {
                     }
                 })
 
-                console.log("allowed", allowed);
                 if (!allowed) throw new LackOfPermissionsException();
                 else return true
 
@@ -925,16 +1161,20 @@ var OBJY = {
             if (Object.keys(obj.permissions).length > 0) {
                 if (!instance.permissionSequence[obj._id]) instance.permissionSequence[obj._id] = [];
 
-                console.log("#", instance.activeUser, obj, code, OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, code, true));
-
                 if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, code, true))
-                    instance.permissionSequence[obj._id].push({ name: name, key: key });
+                    instance.permissionSequence[obj._id].push({
+                        name: name,
+                        key: key
+                    });
             }
         }
     },
 
     chainCommand: function(obj, instance, key, value) {
-        instance.commandSequence.push({ name: key, value: value });
+        instance.commandSequence.push({
+            name: key,
+            value: value
+        });
     },
 
     objectFamilies: [],
@@ -1073,17 +1313,17 @@ var OBJY = {
     },
 
     execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
+        Logger.log("triggering dsl")
         this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, this.instance.activeUser, options);
     },
 
     getElementPermisson: function(element) {
-
         if (!element) return {};
         else if (!element.permissions) return {};
         else return element.permissions;
     },
 
-    updateInheritedObjs: function(templ, pluralName, success, error, client, params) {
+    updateInheritedObjs: function(templ, pluralName, success, error, client, params) { //@TPDO: Fix this!
         var templateFamily;
 
         if (params.templateFamily) templateFamily = `'${params.templateFamily}'`
@@ -1135,8 +1375,6 @@ var OBJY = {
 
     prepareObjectDelta: function(oldObj, newObj) {
 
-        console.info('n', newObj)
-
         var meta = ['name', 'type'];
         meta.forEach(function(p) {
             if (newObj[p] != oldObj[p]) oldObj[p] = newObj[p];
@@ -1164,10 +1402,6 @@ var OBJY = {
         // Properties
         function doTheProps(newObj) {
 
-            console.info('doing the props...', newObj)
-
-
-
             Object.keys(newObj.properties).forEach(function(p) {
 
                 if (newObj.properties[p].type == 'bag') {
@@ -1176,33 +1410,33 @@ var OBJY = {
 
                 if (newObj.properties[p]) {
                     if (newObj.properties[p].template && oldObj.properties[p]) {
-                        console.info('it has a template', newObj.properties[p], oldObj.properties[p])
+
                         if (newObj.properties[p].value != oldObj.properties[p].value) {
-                            console.info('its a difference !!!!!! ------- ')
+
                             oldObj.properties[p].value = newObj.properties[p].value;
                             oldObj.properties[p].overwritten = true;
                         }
 
                         if (newObj.properties[p].action != oldObj.properties[p].action) {
-                            console.info('its a difference !!!!!! ------- ')
+
                             oldObj.properties[p].action = newObj.properties[p].action;
                             oldObj.properties[p].overwritten = true;
                         }
 
                         if (newObj.properties[p].date != oldObj.properties[p].date) {
-                            console.info('its a difference !!!!!! ------- ')
+
                             oldObj.properties[p].date = newObj.properties[p].date;
                             oldObj.properties[p].overwritten = true;
                         }
 
                         if (newObj.properties[p].interval != oldObj.properties[p].interval) {
-                            console.info('its a difference !!!!!! ------- ')
+
                             oldObj.properties[p].interval = newObj.properties[p].interval;
                             oldObj.properties[p].overwritten = true;
                         }
 
                         if (JSON.stringify(newObj.properties[p].meta) != JSON.stringify(oldObj.properties[p].interval)) {
-                            console.info('its a difference !!!!!! ------- ')
+
                             oldObj.properties[p].meta = newObj.properties[p].meta;
                             oldObj.properties[p].overwritten = true;
                         }
@@ -1226,9 +1460,7 @@ var OBJY = {
                 if (newObj.properties[p]) {
                     handlers.forEach(function(h) {
                         if (newObj.properties[p][h]) {
-
                             Object.keys(newObj.properties[p][h]).forEach(function(oC) {
-
                                 if (newObj.properties[p][h][oC]) {
                                     if (newObj.properties[p][h][oC].value != oldObj.properties[p][h][oC].value)
                                         oldObj.properties[p][h][oC].value = newObj.properties[p][h][oC].value;
@@ -1244,7 +1476,6 @@ var OBJY = {
 
         doTheProps(newObj);
 
-        console.info('objdetlta2')
         // Applications TODO
 
         // Permissions
@@ -1283,8 +1514,6 @@ var OBJY = {
         var self = this;
 
         function run(template) {
-
-            console.info(template.properties)
 
             if (!template) {
 
@@ -1330,7 +1559,7 @@ var OBJY = {
                     if (template.properties[p].type == 'bag') {
 
                         if (!obj.properties[p]) {
-                            console.log('has not prop', p);
+
                             obj.properties[p] = template.properties[p];
                             obj.properties[p].template = templateId;
                         } else {
@@ -1437,7 +1666,10 @@ var OBJY = {
                     })
 
                     if (!contains) {
-                        obj.privileges[a].push({ name: tP.name, template: templateId })
+                        obj.privileges[a].push({
+                            name: tP.name,
+                            template: templateId
+                        })
                     }
 
                 })
@@ -1805,7 +2037,6 @@ var OBJY = {
 
         this.mappers[obj.role].update(obj, function(data) {
             success(data);
-
         }, function(err) {
             error(err);
         }, app, client);
@@ -1866,10 +2097,8 @@ var OBJY = {
 
     countObjects: function(criteria, role, success, error, app, client, flags) {
 
-
         var templatesCache = [];
         var objectsCache = [];
-
 
         this.mappers[role].count(criteria, function(data) {
             var counter = 0;
@@ -1933,7 +2162,6 @@ var OBJY = {
         getValue(obj, eventName);
 
         return eventToReturn;
-
 
     },
 
@@ -2258,9 +2486,6 @@ var OBJY = {
 
 
     ActionCreateWrapper: function(obj, action, client) {
-        console.debug(obj);
-        console.log("pppa");
-        console.debug(action);
 
         action = Object.assign({}, action);
 
@@ -2269,8 +2494,7 @@ var OBJY = {
 
         try {
             existing = obj.actions[actionKey]
-            console.debug(obj.actions);
-            console.debug(action);
+
         } catch (e) {}
 
         if (existing) throw new DuplicateActionException(actionKey);
@@ -2385,7 +2609,13 @@ var OBJY = {
 
                     _event[eventKey].nextOccurence = moment(_event[eventKey].lastOccurence || moment().utc()).utc().add(_event[eventKey].interval).toISOString();
 
-                    instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: property, date: _event[eventKey].nextOccurence })
+                    instance.eventAlterationSequence.push({
+                        operation: 'add',
+                        obj: obj,
+                        propName: propertyKey,
+                        property: property,
+                        date: _event[eventKey].nextOccurence
+                    })
 
 
                 } else if (_event[eventKey].date !== undefined) {
@@ -2400,7 +2630,13 @@ var OBJY = {
 
                     }
 
-                    instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: property, date: _event[eventKey].date })
+                    instance.eventAlterationSequence.push({
+                        operation: 'add',
+                        obj: obj,
+                        propName: propertyKey,
+                        property: property,
+                        date: _event[eventKey].date
+                    })
 
                     if (!_event[eventKey].action) _event[eventKey].action = '';
                 } else {
@@ -2458,7 +2694,7 @@ var OBJY = {
                 var innerProperties = property[propertyKey].properties;
 
                 var propertyKeys = Object.keys(innerProperties);
-                console.debug(propertyKeys);
+
                 parentProp = property;
 
                 obj.properties[propertyKey] = property[propertyKey];
@@ -2481,10 +2717,15 @@ var OBJY = {
                 var innerProperties = property[propertyKey].properties;
 
                 var propertyKeys = Object.keys(innerProperties);
-                console.debug(propertyKeys);
+
                 parentProp = property;
 
-                obj.properties[propertyKey] = { type: CONSTANTS.PROPERTY.TYPE_ARRAY, properties: {}, query: property[propertyKey].query, meta: property[propertyKey].meta };
+                obj.properties[propertyKey] = {
+                    type: CONSTANTS.PROPERTY.TYPE_ARRAY,
+                    properties: {},
+                    query: property[propertyKey].query,
+                    meta: property[propertyKey].meta
+                };
 
 
                 propertyKeys.forEach(function(property) {
@@ -2520,7 +2761,10 @@ var OBJY = {
             if (Object.keys(property[propertyKey].onCreate).length > 0) {
                 if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
                 if (!instance.handlerSequence[obj._id].onCreate) instance.handlerSequence[obj._id].onCreate = [];
-                instance.handlerSequence[obj._id].onCreate.push({ handler: property[propertyKey].onCreate, prop: property[propertyKey] });
+                instance.handlerSequence[obj._id].onCreate.push({
+                    handler: property[propertyKey].onCreate,
+                    prop: property[propertyKey]
+                });
             }
         }
 
@@ -2561,7 +2805,9 @@ var OBJY = {
         permissionKeys.forEach(function(permission) {
             //if (!typeof permissions[permission] == 'string') throw new InvalidPermissionException();
             if (typeof permissions[permission] == 'string') {
-                permissions[permission] = { value: permissions[permission] };
+                permissions[permission] = {
+                    value: permissions[permission]
+                };
             } else {
                 permissions[permission] = permissions[permission];
             }
@@ -2598,8 +2844,8 @@ var OBJY = {
         if (!onCreate) onCreate = {};
 
         Object.keys(onCreate).forEach(function(oC) {
-            if (!oC.trigger) oC.trigger = 'after';
-            if (!oC.trigger) oC.type = 'async';
+            if (!onCreate[oC].trigger) oC.trigger = 'after';
+            if (!onCreate[oC].trigger) oC.type = 'async';
 
         })
 
@@ -2613,8 +2859,8 @@ var OBJY = {
         if (!onChange) onChange = {};
 
         Object.keys(onChange).forEach(function(oC) {
-            if (!oC.trigger) oC.trigger = 'after';
-            if (!oC.trigger) oC.type = 'async';
+            if (!onChange[oC].trigger) oC.trigger = 'after';
+            if (!onChange[oC].trigger) oC.type = 'async';
 
         })
 
@@ -2628,8 +2874,8 @@ var OBJY = {
         if (!onDelete) onDelete = {};
 
         Object.keys(onDelete).forEach(function(oC) {
-            if (!oC.trigger) oC.trigger = 'after';
-            if (!oC.trigger) oC.type = 'async';
+            if (!onDelete[oC].trigger) oC.trigger = 'after';
+            if (!onDelete[oC].trigger) oC.type = 'async';
 
         })
 
@@ -3002,12 +3248,14 @@ var OBJY = {
                     if (Object.keys(obj.properties[access[0]].onChange).length > 0) {
                         if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
                         if (!instance.handlerSequence[obj._id].onChange) instance.handlerSequence[obj._id].onChange = [];
-                        instance.handlerSequence[obj._id].onChange.push({ handler: obj.properties[access[0]].onChange, prop: obj.properties[access[0]] });
+                        instance.handlerSequence[obj._id].onChange.push({
+                            handler: obj.properties[access[0]].onChange,
+                            prop: obj.properties[access[0]]
+                        });
                     }
                 }
 
                 OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
-                console.log("-", instance.permissionSequence);
 
             }
         }
@@ -3082,12 +3330,15 @@ var OBJY = {
                     if (Object.keys(obj.properties[access[0]].onChange).length > 0) {
                         if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
                         if (!instance.handlerSequence[obj._id].onChange) instance.handlerSequence[obj._id].onChange = [];
-                        instance.handlerSequence[obj._id].onChange.push({ handler: obj.properties[access[0]].onChange, prop: obj.properties[access[0]] });
+                        instance.handlerSequence[obj._id].onChange.push({
+                            handler: obj.properties[access[0]].onChange,
+                            prop: obj.properties[access[0]]
+                        });
                     }
                 }
 
                 OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setProperty', propertyKey);
-                console.log("-", instance.permissionSequence);
+
 
             }
         }
@@ -3143,8 +3394,20 @@ var OBJY = {
                 if (obj.properties[access[0]].lastOccurence) {
 
                     var nextOccurence = moment(obj.properties[access[0]].lastOccurence).utc().add(newValue);
-                    instance.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: nextOccurence })
-                    instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: nextOccurence })
+                    instance.eventAlterationSequence.push({
+                        operation: 'remove',
+                        obj: obj,
+                        propName: propertyKey,
+                        property: obj.properties[access[0]],
+                        date: nextOccurence
+                    })
+                    instance.eventAlterationSequence.push({
+                        operation: 'add',
+                        obj: obj,
+                        propName: propertyKey,
+                        property: obj.properties[access[0]],
+                        date: nextOccurence
+                    })
                 }
 
                 OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventInterval', propertyKey);
@@ -3296,7 +3559,9 @@ var OBJY = {
                 if (!obj.properties[access[0]].reminders)
                     obj.properties[access[0]].reminders = {};
 
-                obj.properties[access[0]].reminders[reminder.diff] = { action: reminder.action };
+                obj.properties[access[0]].reminders[reminder.diff] = {
+                    action: reminder.action
+                };
             }
         }
 
@@ -3398,8 +3663,20 @@ var OBJY = {
                 obj.properties[access[0]].date = newValue;
 
 
-                instance.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })
-                instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })
+                instance.eventAlterationSequence.push({
+                    operation: 'remove',
+                    obj: obj,
+                    propName: propertyKey,
+                    property: obj.properties[access[0]],
+                    date: newValue
+                })
+                instance.eventAlterationSequence.push({
+                    operation: 'add',
+                    obj: obj,
+                    propName: propertyKey,
+                    property: obj.properties[access[0]],
+                    date: newValue
+                })
 
                 OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventDate', propertyKey);
 
@@ -3579,8 +3856,6 @@ var OBJY = {
     Objs: function(objs, role, instance, params, flags) {
         var self = this;
 
-        console.log("typeof", typeof objs, objs);
-
         if (typeof objs === "object" && !Array.isArray(objs)) {
 
             var flags = flags || {};
@@ -3625,7 +3900,9 @@ var OBJY = {
 
                     data.forEach(function(d) {
 
-                        d.inherits = d.inherits.filter(function(item, pos) { return d.inherits.indexOf(item) == pos; });
+                        d.inherits = d.inherits.filter(function(item, pos) {
+                            return d.inherits.indexOf(item) == pos;
+                        });
 
                         //onsole.info(d)
                         var counter = 0;
@@ -3690,7 +3967,9 @@ var OBJY = {
 
                     })
 
-                }, function(err) { error(err) }, app, client, flags || {});
+                }, function(err) {
+                    error(err)
+                }, app, client, flags || {});
 
             }
 
@@ -3706,17 +3985,15 @@ var OBJY = {
                 OBJY.countObjects(objs, role, function(data) {
                     success(data);
 
-                }, function(err) { error(err) }, app, client, flags || {});
+                }, function(err) {
+                    error(err)
+                }, app, client, flags || {});
 
                 return;
             }
 
 
         } else if (Array.isArray(objs)) {
-
-            console.log("ARRAY");
-
-            console.log()
 
             this.add = function(success, error) {
 
@@ -3798,15 +4075,14 @@ var OBJY = {
         } else {
             this.auth = function(userObj, callback, error) {
 
-                console.info('auth...', userObj, params.pluralName, instance[params.pluralName])
+                instance[params.pluralName]({
+                    username: userObj.username
+                }).get(function(data) {
 
-                instance[params.pluralName]({ username: userObj.username }).get(function(data) {
-                    console.info('auth... data', data)
                     if (data.length == 0) error("User not found");
                     callback(data[0])
 
                 }, function(err) {
-                    console.info(err);
                     error(err);
                 })
             };
@@ -3815,6 +4091,8 @@ var OBJY = {
     },
 
     Obj: function(obj, role, instance, params) {
+
+        Logger.log("Plain Object: " + obj);
 
         if (instance.metaPropPrefix != '') obj = OBJY.serialize(obj);
 
@@ -3859,8 +4137,6 @@ var OBJY = {
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
-            console.info('obj', obj);
-
             this.properties = OBJY.PropertiesChecker(this, obj.properties, instance) || {};
 
             this.permissions = new OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
@@ -3874,7 +4150,7 @@ var OBJY = {
             }*/
 
             if (params.authable) {
-                console.log("authable!!!");
+
                 this.username = obj.username || null;
                 this.email = obj.email || null;
                 this.password = obj.password || null;
@@ -3963,16 +4239,24 @@ var OBJY = {
 
             Object.keys(this).forEach(function(k) {
                 if (self[k] instanceof Function || k == '_id') return;
-                console.warn('okey', k, self[k]);
+
                 delete self[k]
             })
 
-            console.warn('nokeys', this);
+            function doTheProps(self, o) {
+                Object.keys(o).forEach(function(k) {
 
-            Object.keys(newObj).forEach(function(k) {
-                self[k] = newObj[k];
-                if (self[k].template) self[k].overwritten = true;
-            })
+                    self[k] = o[k];
+                    if (typeof o[k] === 'object') {
+                        doTheProps(self[k], o[k])
+                    }
+
+                    if (self[k].template) self[k].overwritten = true;
+                })
+            }
+
+            doTheProps(self, newObj);
+
             //OBJY.prepareObjectDelta(this, newObj);
         };
 
@@ -4235,7 +4519,7 @@ var OBJY = {
             tmpName = shortid.generate();
 
             tmpProp[tmpName] = value[propKey];
-            console.log(tmpProp);
+
             this.addPropertyToBag(array, tmpProp);
         };
 
@@ -4321,7 +4605,6 @@ var OBJY = {
 
             if (typeof onChangeObj !== 'object') throw new InvalidArgumentException()
             var key = name; //Object.keys(onChangeObj)[0];
-
 
             new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
             return this;
@@ -4573,13 +4856,21 @@ var OBJY = {
                     if (Object.keys(tmpProp.onDelete).length > 0) {
                         if (!instance.handlerSequence[this._id]) instance.handlerSequence[this._id] = {};
                         if (!instance.handlerSequence[this._id].onDelete) instance.handlerSequence[this._id].onDelete = [];
-                        instance.handlerSequence[this._id].onDelete.push({ handler: tmpProp.onDelete, prop: tmpProp });
+                        instance.handlerSequence[this._id].onDelete.push({
+                            handler: tmpProp.onDelete,
+                            prop: tmpProp
+                        });
                     }
                 }
 
                 OBJY.chainPermission(this.properties[propertyName], instance, 'd', 'removeProperty', propertyName);
 
-                if (this.properties[propertyName].type == 'date') instance.eventAlterationSequence.push({ operation: 'remove', obj: this, propName: propertyName, date: date })
+                if (this.properties[propertyName].type == 'date') instance.eventAlterationSequence.push({
+                    operation: 'remove',
+                    obj: this,
+                    propName: propertyName,
+                    date: date
+                })
 
                 delete this.properties[propertyName];
 
@@ -4637,12 +4928,10 @@ var OBJY = {
 
             thisRef = this;
 
-            console.info('tr', thisRef);
-            console.log(thisRef.onCreate);
 
             Object.keys(thisRef.onCreate).forEach(function(key) {
 
-                if (thisRef.onCreate[key].trigger == 'before') {
+                if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
 
                     //dsl, obj, prop, data, callback, client, options
                     instance.execProcessorAction(thisRef.onCreate[key].value, thisRef, null, null, function(data) {
@@ -4684,7 +4973,13 @@ var OBJY = {
 
                         if (prePropsString) {
 
-                            instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: prePropsString + "." + p, property: props[p], date: date })
+                            instance.eventAlterationSequence.push({
+                                operation: 'add',
+                                obj: thisRef,
+                                propName: prePropsString + "." + p,
+                                property: props[p],
+                                date: date
+                            })
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
@@ -4693,22 +4988,32 @@ var OBJY = {
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString()) 
-                                thisRef._aggregatedEvents.push({ propName: prePropsString + "." + p, date: date });
+                                thisRef._aggregatedEvents.push({
+                                    propName: prePropsString + "." + p,
+                                    date: date
+                                });
 
                         } else {
 
-                            instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: p, property: props[p], date: date })
+                            instance.eventAlterationSequence.push({
+                                operation: 'add',
+                                obj: thisRef,
+                                propName: p,
+                                property: props[p],
+                                date: date
+                            })
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
                                 if (aE.propName == p) found = true;
                             })
 
-                            console.log(props[p], moment().utc().toISOString(), date, moment(date).utc().toISOString());
-
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString()) 
-                                thisRef._aggregatedEvents.push({ propName: p, date: date });
+                                thisRef._aggregatedEvents.push({
+                                    propName: p,
+                                    date: date
+                                });
 
                         }
                     }
@@ -4763,6 +5068,8 @@ var OBJY = {
 
                         instance.eventAlterationSequence = [];
 
+                        Logger.log("Added Object: " + JSON.stringify(data, null, 2));
+
                         success(OBJY.deserialize(data));
 
                         delete thisRef.instance;
@@ -4773,9 +5080,8 @@ var OBJY = {
                     }, app, client);
             }
 
-           
+
             if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
-                console.info('adding strict')
 
                 if (this.inherits.length == 0) addFn(thisRef);
 
@@ -4783,8 +5089,6 @@ var OBJY = {
                 this.inherits.forEach(function(template) {
 
                     if (thisRef._id != template) {
-
-                        console.log("client; ", client)
 
                         OBJY.getTemplateFieldsForObject(thisRef, template, function() {
                                 counter++;
@@ -4803,8 +5107,7 @@ var OBJY = {
                 });
 
             } else {
-                console.info('adding unsctrict');
-                console.info(thisRef)
+
                 addFn(thisRef);
             }
             return OBJY.deserialize(this);
@@ -4813,8 +5116,6 @@ var OBJY = {
 
 
         this.update = function(success, error, client) {
-
-            console.info('updatefn')
 
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
@@ -4894,7 +5195,10 @@ var OBJY = {
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString())
-                                thisRef._aggregatedEvents.push({ propName: prePropsString + "." + p, date: date });
+                                thisRef._aggregatedEvents.push({
+                                    propName: prePropsString + "." + p,
+                                    date: date
+                                });
 
                         } else {
 
@@ -4907,7 +5211,10 @@ var OBJY = {
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString())
-                                thisRef._aggregatedEvents.push({ propName: p, date: date });
+                                thisRef._aggregatedEvents.push({
+                                    propName: p,
+                                    date: date
+                                });
                         }
                     }
 
@@ -4973,6 +5280,7 @@ var OBJY = {
                             }, client, params)
                         }
 
+                        Logger.log("Updated Object: " + data);
 
                         if (success) success(OBJY.deserialize(data));
 
@@ -4982,7 +5290,6 @@ var OBJY = {
                     }, app, client);
 
             }
-
 
 
             if (instance.commandSequence.length > 0 && params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
@@ -4996,12 +5303,11 @@ var OBJY = {
                     }
                 })
 
-                console.log("founter", instance.commandSequence);
                 if (foundCounter == 0) updateFn(thisRef);
 
                 var execCounter = 0;
                 instance.commandSequence.forEach(function(i) {
-                    console.log(i);
+
 
                     if (i.name == 'addInherit' && thisRef.inherits.indexOf(i.value) != -1) {
                         execCounter++;
@@ -5019,7 +5325,7 @@ var OBJY = {
                     }
 
                     if (i.name == 'removeInherit' && thisRef.inherits.indexOf(i.value) == -1) {
-                        console.log("ölsfökdsmgsdg");
+
                         execCounter++;
                         OBJY.removeTemplateFieldsForObject(thisRef, i.value, function() {
 
@@ -5060,12 +5366,12 @@ var OBJY = {
             })
 
             OBJY.getObjectById(this.role, this._id, function(data) {
-                console.log('...', data)
+
                 return OBJY.remove(thisRef, function(_data) {
 
                     Object.keys(thisRef.onDelete).forEach(function(key) {
                         if (thisRef.onDelete[key].trigger == 'after') {
-                            //dsl, obj, prop, data, callback, client, options
+
                             instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
 
                             }, client, null);
@@ -5098,17 +5404,26 @@ var OBJY = {
 
                                 if (prePropsString) {
 
-                                    instance.eventAlterationSequence.push({ operation: 'remove', obj: thisRef, propName: prePropsString + "." + p, date: date });
+                                    instance.eventAlterationSequence.push({
+                                        operation: 'remove',
+                                        obj: thisRef,
+                                        propName: prePropsString + "." + p,
+                                        date: date
+                                    });
 
                                     var found = false;
 
                                 } else {
 
-                                    instance.eventAlterationSequence.push({ operation: 'remove', obj: thisRef, propName: p, date: date })
+                                    instance.eventAlterationSequence.push({
+                                        operation: 'remove',
+                                        obj: thisRef,
+                                        propName: p,
+                                        date: date
+                                    })
 
                                 }
                             }
-
                         })
                     }
 
@@ -5149,14 +5464,19 @@ var OBJY = {
 
                     }
 
+                    Logger.log("Removed Object: " + data);
 
                     success(OBJY.deserialize(data));
 
 
-                }, function(err) { error(err) }, app, client);
+                }, function(err) {
+                    error(err)
+                }, app, client);
 
 
-            }, function(err) { error(err) }, app, client);
+            }, function(err) {
+                error(err)
+            }, app, client);
 
             return OBJY.deserialize(this);
         };
@@ -5183,7 +5503,9 @@ var OBJY = {
                             obj.properties[propKey].permissions = permDeserialize(obj.properties[propKey].permissions);
                         }
 
-                        propsArray.push(Object.assign({ name: propKey }, obj.properties[propKey]));
+                        propsArray.push(Object.assign({
+                            name: propKey
+                        }, obj.properties[propKey]));
                     });
                     obj.properties = propsArray;
                 }
@@ -5263,7 +5585,9 @@ var OBJY = {
                         //instance.caches[thisRef.role].add(thisRef._id, data);
                     }
 
-                }, function(err) { error(err) }, app, client);
+                }, function(err) {
+                    error(err)
+                }, app, client);
             }
 
             return OBJY.deserialize(this);
@@ -5273,7 +5597,7 @@ var OBJY = {
     },
 
     hello: function() {
-        console.log("Hello from OBJY");
+        Logger.log("Hello from OBJY!");
     }
 }
 

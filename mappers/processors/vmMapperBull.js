@@ -1,12 +1,11 @@
-
 const { VM, VMScript } = require('vm2');
 var Queue = require('bull');
 
 
-Mapper = function(SPOO) {
-    return Object.assign(new SPOO.ProcessorTemplate(SPOO), {
+Mapper = function(OBJY) {
+    return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
 
-        sandBox: new VM({ sandbox: { SPOO: this.SPOO, dsl: this, this: this } }),
+        sandBox: new VM({ sandbox: { OBJY: this.OBJY, dsl: this, this: this } }),
         jobQueue: null,
 
         init: function(redisCon) {
@@ -14,8 +13,8 @@ Mapper = function(SPOO) {
             this.jobQueue = new Queue('spoo jobs', redisCon);
 
             this.jobQueue.process(function(job, done) {
-                console.info('executing...')
-                new Mapper(SPOO).executeFromJob(job.data.dsl, JSON.parse(job.data.obj), JSON.parse(job.prop || {}), job.data.data, );
+               
+                new Mapper(OBJY).executeFromJob(job.data.dsl, JSON.parse(job.data.obj), JSON.parse(job.prop || {}), job.data.data, );
             });
 
             this.jobQueue.on('completed', function(job, result) {
