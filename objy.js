@@ -2852,6 +2852,13 @@ var OBJY = {
         return onCreate;
     },
 
+    AffectsCreateWrapper: function(obj, affects) {
+        
+        if (!affects) affects = {};
+
+        return affects;
+    },
+
     ObjectOnChangeCreateWrapper: function(obj, onChange, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
@@ -4120,6 +4127,10 @@ var OBJY = {
             }
         }
 
+        if(params.isRule) {
+            this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance) || {};
+        }
+
         if (!params.structure) {
 
             this.type = obj.type || null;
@@ -4127,6 +4138,7 @@ var OBJY = {
             this.applications = OBJY.ApplicationsChecker(this, obj.applications) || [];
 
             this.inherits = OBJY.TemplatesChecker(this, obj.inherits) || [];
+
 
             this.name = obj.name || null;
 
@@ -4926,9 +4938,10 @@ var OBJY = {
 
             var thisRef = this;
 
-            thisRef = this;
-
-
+            checkAffects(obj){
+                this.mappers.
+            }
+            
             Object.keys(thisRef.onCreate).forEach(function(key) {
 
                 if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {

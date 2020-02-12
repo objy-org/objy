@@ -14,6 +14,48 @@ OBJY.define({
     }
 })
 
+
+OBJY.define({name: "Permission", pluralName: "Permissions"})
+
+OBJY.define({
+    name: "Rule",
+    pluralName: "Rules",
+    isRule:true,
+    storage: {}
+})
+
+
+OBJY.Rule({
+    affects: {
+        type: 'mav-user',
+        privileges: {
+            userdirectory: ['mav']
+        }
+    }
+}).add()
+
+
+OBJY.Rule({
+    affects: {
+        type: 'bewerber',
+        permissions: {
+            mav: 'r'
+        }
+    }
+}).add()
+
+OBJY.Rule({
+    affects: {},
+    onCreate: {
+        dsl: {
+            value: "email()"
+        }
+    }
+    
+}).add()
+
+
+
 var t = OBJY.SensorMeasure({
     name: "hallo",
     test: 22,
