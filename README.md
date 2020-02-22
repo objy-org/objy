@@ -22,6 +22,8 @@ npm install objy
 
 ## What to do?
 
+The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD.
+
 ```javascript
 
 //Build an object
@@ -38,10 +40,6 @@ OBJY.Object({
 })
 ```
 
-
-## CRUD Operations
-
-The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD:
 
 #### Add
 
