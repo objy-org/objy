@@ -22,19 +22,19 @@ npm install objy
 
 ## What to do?
 
-***Build an object***
-
 ```javascript
+
+//Build an object
+
 OBJY.Object({
    name: "Passport",
    expires: "2020-10-10",
    number: "123"
 })
-```
 
-***Define a behaviour***
 
-```javascript
+//Define a behaviour
+
 OBJY.Object({
    ...
    warnMe: {
@@ -42,11 +42,10 @@ OBJY.Object({
       action: "email('expiring soon!')"
    }
 })
-```
 
-***React to events***
 
-```javascript
+// React to events
+
 OBJY.Object({
    ...
    onChange: "if(this.number.length == 0) return;"
