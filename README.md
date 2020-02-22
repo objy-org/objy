@@ -36,9 +36,7 @@ OBJY.Object({
 
 ```javascript
 OBJY.Object({
-   name: "Passport",
-   expires: "2020-10-10",
-   number: "123",
+   ...
    warnMe: {
       date: "2020-10-05",
       action: "email('expiring soon!')"
@@ -50,24 +48,10 @@ OBJY.Object({
 
 ```javascript
 OBJY.Object({
-   name: "Passport",
-   expires: "2020-10-10",
-   number: "123",
+   ...
    onChange: "if(this.number.length == 0) return;"
 })
 ```
-
-***Combine***
-
-```javascript
-OBJY.Object({
-   name: "Passport",
-   expires: "2020-10-10",
-   number: "123",
-   onChange: "if(this.number.length == 0) return;"
-})
-```
-
 
 
 ## CRUD Operations
