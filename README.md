@@ -1,8 +1,8 @@
 # OBJY
 
-![OBJY LOGO](objy-icon-full.png "OBJY")
+An object-driven, cross-platform programming framework, written in JavaScript, that uses behaviour-driven objects for modelling use cases.
 
-An object-driven cross-platform programming framework, written in JavaScript.
+![OBJY LOGO](objy-icon-full.png "OBJY")
 
 ## Table of Contents
 
@@ -20,14 +20,9 @@ An object-driven cross-platform programming framework, written in JavaScript.
 npm install objy
 ```
 
-## Concept
+## What to do?
 
-OBJY is a programming framework and runtime that uses behaviour-driven objects for modelling use cases.
-
-* Everything is an object
-* Every object has a behaviour
-* Every object can be handled using CRUD
-
+### Behaviours
 
 ```javascript
 const OBJY = require('objy');
