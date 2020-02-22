@@ -22,7 +22,7 @@ npm install objy
 
 ## What to do?
 
-***Model entities
+***Model entities***
 
 ```javascript
 OBJY.Object({
@@ -31,7 +31,7 @@ OBJY.Object({
 }).add()
 ```
 
-***Define behaviours
+***Define behaviours***
 
 ```javascript
 OBJY.Object({
@@ -45,7 +45,7 @@ OBJY.Object({
 ```
 
 
-## Handling Objects
+## CRUD Operations
 
 The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD:
 
