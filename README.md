@@ -40,7 +40,6 @@ OBJY.Object({
 })
 ```
 
-
 #### Add
 
 ```javascript
