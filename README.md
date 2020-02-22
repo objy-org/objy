@@ -34,12 +34,8 @@ const OBJY = require('objy');
 
 OBJY.Object({
    name: "Hello",
-   _onCreate: {
-      setWorld:"this.name += ' World'"
-   }
-}).add((object, err) = {
-   console.log(object)
-})
+   @create: "this.name += ' World'"
+}).add()
 ```
 
 
@@ -73,9 +69,9 @@ OBJY.Objects({type:'example', 'properties.expired' : false}).get(callback);
 ```javascript
 // update one
 OBJY.Object(id)
-	.setPropertyValue('expired', false)
-	.addProperty('open', false).
-	.save(callback)
+   .setPropertyValue('expired', false)
+   .addProperty('open', false).
+   .save(callback)
 
 // replace one
 OBJY.Object(id).replace(newObject).save(callback);
