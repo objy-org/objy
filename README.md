@@ -22,27 +22,52 @@ npm install objy
 
 ## What to do?
 
-***Model entities***
+***Build an object***
 
 ```javascript
 OBJY.Object({
-   name: "Big Yogurt",
-   type: "yogurt"
-}).add()
+   name: "Passport",
+   expires: "2020-10-10",
+   number: "123"
+})
 ```
 
-***Define behaviours***
+***Define a behaviour***
 
 ```javascript
 OBJY.Object({
-   name: "Big Yogurt",
-   type: "yogurt",
-   expires: {
-      date: '2020-10-10',
-      action: '...'
+   name: "Passport",
+   expires: "2020-10-10",
+   number: "123",
+   warnMe: {
+      date: "2020-10-05",
+      action: "email('expiring soon!')"
    }
-}).add()
+})
 ```
+
+***React to events***
+
+```javascript
+OBJY.Object({
+   name: "Passport",
+   expires: "2020-10-10",
+   number: "123",
+   onChange: "if(this.number.length == 0) return;"
+})
+```
+
+***Combine***
+
+```javascript
+OBJY.Object({
+   name: "Passport",
+   expires: "2020-10-10",
+   number: "123",
+   onChange: "if(this.number.length == 0) return;"
+})
+```
+
 
 
 ## CRUD Operations
