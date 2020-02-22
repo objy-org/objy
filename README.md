@@ -22,14 +22,25 @@ npm install objy
 
 ## What to do?
 
-### Behaviours
+***Model entities
 
 ```javascript
-const OBJY = require('objy');
-
 OBJY.Object({
-   name: "Hello",
-   @create: "this.name += ' World'"
+   name: "Big Yogurt",
+   type: "yogurt"
+}).add()
+```
+
+***Define behaviours
+
+```javascript
+OBJY.Object({
+   name: "Big Yogurt",
+   type: "yogurt",
+   expires: {
+      date: '2020-10-10',
+      action: '...'
+   }
 }).add()
 ```
 
