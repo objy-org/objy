@@ -2,35 +2,15 @@
 
 ![OBJY LOGO](objy-icon-full.png "OBJY")
 
-A cross-platform JavaScript framework that lets you build software by modelling behaviour-driven objects, that do the work for you, not by writing complex code. 
+An object-driven cross-platform programming framework, written in JavaScript.
 
 ## Table of Contents
 
-- [Main Concepts](#Main-concepts)
 - [Installing](#installing)
-- [Getting started](#Getting-started)
-	- [Modelling Objects](#Modelling-Objects)
-	- [Handling Objects](#Handling-Objects)
-- [Adapters](#Adapters)
-- [Example](#example)
+- [Concept](#concept)
+- [Operations](#handling-Objects)
+- [Customize](#Customize)
 - [License](#license)
-
-## Main Concepts
-
-OBJY is meant to be simple by abstracting very much of the hard parts and making them available in an easy way through a simple and understandable interface.
-
-### Objects
-
-In OBJY, building software is done by modelling dynamic objects, that have a behaviour. Tell your objects what to do and they'll do the rest.
-
-Objects consist of dynamic attributes and rule based-behaviours
-
-
-### Adapters
-
-Objects can be very different in their nature. Some objects are big, some are small, some are produced very fast, some not so fast.
-This is why you can define how different types of objects are stored, processed or observed, using adapters for third party technologies.
-
 
 ## Installing
 
@@ -40,150 +20,92 @@ This is why you can define how different types of objects are stored, processed 
 npm install objy
 ```
 
-### For the Browser
+## Concept
 
+OBJY is a programming framework and runtime that uses behaviour-driven objects for modelling use cases.
 
-```shell
-https://objy.io/code/objy.js
-
- - or -
-
-https://objy.io/code/objy.min.js
-```
-
-
-
-## Getting started
+* Everything is an object
+* Every object has a behaviour
+* Every object can be handled using CRUD
 
 
 ```javascript
 const OBJY = require('objy');
-```
 
-### Modelling Objects
-
-Now comes the fun part. Build an object and tell it what to do.
-
-The base structure of an OBJY object is built up on some always-there attributes, like name, type and some others. Next to these features, there is the dynamic properties part. this is where you define what an object should look like and what it should do.
-
-```javascript
-OBJY.MyObject({
-	// static part
-	name: 'test',
-	type: 'test',
-	
-	// dynamic part
-	properties: {
-		expired: false,
-		expire: {
-			type: 'event',
-			date: '20.20.2020',
-			action: 'this.expired = false'
-		}
-	}
-});
+OBJY.Object({
+   name: "Hello",
+   _onCreate: {
+      setWorld:"this.name += ' World'"
+   }
+}).add((object, err) = {
+   console.log(object)
+})
 ```
 
 
-### Handling Objects
+## Handling Objects
 
-The philisophy behind OBJY ist to let you define and model aobjects and tell them what to do. In order to do so, all you need is CRUD:
+The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD:
 
 #### Add
 
 ```javascript
 // add one
-OBJY.MyObject({}).add(callback);
+OBJY.Object({}).add(callback);
 
 // add multiple
-OBJY.MyObjects([{}],[{}]).add(callback);
+OBJY.Objects([{}],[{}]).add(callback);
 ```
 
 #### Get one
 ```javascript
-OBJY.MyObject(id).get(callback);
+OBJY.Object(id).get(callback);
 ```
 
 #### Query
 
 ```javascript
-OBJY.MyObjects({type:'example', 'properties.expired' : false}).get(callback);
+OBJY.Objects({type:'example', 'properties.expired' : false}).get(callback);
 ```
 
 #### Update
 
 ```javascript
 // update one
-OBJY.MyObject(id)
+OBJY.Object(id)
 	.setPropertyValue('expired', false)
 	.addProperty('open', false).
 	.save(callback)
 
 // replace one
-OBJY.MyObject(id).replace(newObject).save(callback);
+OBJY.Object(id).replace(newObject).save(callback);
 ```
 
 #### Delete
 
 ```javascript
 // delete one
-OBJY.MyObject(id).delete(callback);
+OBJY.Object(id).delete(callback);
 ```
 
+## Customize
 
-## Adapters
-
-Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast.
-When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed.
+Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast. When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed.
 
 ### Use an adapter
 
 ```javascript
 // define a custom object family
 OBJY.define({
-	name : "InMemObject",
-	pluralName: "InMemObjects",
-	persistence: new InMemoryMapper(),
-	observer: new RealTimeObserver(),
-	processor: new RealTimeProcessor()
+   name : "InMemObject",
+   pluralName: "InMemObjects",
+   persistence: new InMemoryMapper(),
+   observer: new RealTimeObserver(),
+   processor: new RealTimeProcessor()
 });
 
 // use the object familys
 OBJY.InMemObject({...});
-```
-
-## Example
-
-Time for a simple example. Lets build a yogurt.
-
-```javascript
-const OBJY = require('objy');
-
-OBJY.define({
-	name : "Object",
-	pluralName: "Objects"
-});
-
-OBJY.Object({
-	name: "Yogurt",
-	type: "yogurt",
-	properties: {
-		expired: false,
-		opened: false,
-		expire: {
-			type: 'event',
-			date: '20.20.2020',
-			action: 'this.expired = false'
-		}
-	},
-	onChange: {
-		checkIfOpened: {
-			actiion: 'if(this.properties.opened == true) this.setEventDate("expire", "17.20.20")'
-		}
-	}
-})
-
-
 ```
 
 ## Authors
