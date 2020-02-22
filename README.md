@@ -29,25 +29,11 @@ npm install objy
 OBJY.Object({
    name: "Passport",
    expires: "2020-10-10",
-   number: "123"
-})
-
-
-//Define a behaviour
-
-OBJY.Object({
-   ...
+   number: "123",
    warnMe: {
       date: "2020-10-05",
       action: "email('expiring soon!')"
-   }
-})
-
-
-// React to events
-
-OBJY.Object({
-   ...
+   },
    onChange: "if(this.number.length == 0) return;"
 })
 ```
