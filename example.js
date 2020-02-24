@@ -1,18 +1,56 @@
 const OBJY = require('./objy.js');
-
+const stream = require('stream');
+const fs = require('fs')
 //const MongoMapper = require('node_modules/@spootechnologies/objy-catalog/storage/mongoMapper.js')
 
 //OBJY.storage = new MongoMapper();
 
-OBJY.metaPropPrefix = '_';
+
+OBJY.client('mb');
+
+//OBJY.metaPropPrefix = '_';
 
 OBJY.define({
     name: "SensorMeasure",
     pluralName: "SensorMeasures",
     customProps: {
         assi: null
-    }
+    },
+    observer: null
 })
+
+
+OBJY.define({
+    name: "File",
+    pluralName: "Files",
+    storage: new OBJY.Mapper.Storage.Mongo(OBJY).connect('mongodb://localhost', () => {
+
+        const s = fs.createReadStream('example.js')
+
+        OBJY.File({ properties: { data: s } }).add((d) => {
+
+            OBJY.File(d._id).get((data) => {
+                console.log('got file')
+                console.log(data)
+
+                /*var ws = fs.createWriteStream(data._id, {
+                    flags: 'w'
+                });
+
+                data.properties.data.pipe(ws)*/
+
+            }, (e) => {
+
+            })
+
+        }, () => {})
+    }, () => {
+        console.error('connect error')
+    })
+})
+
+
+return;
 
 var t = OBJY.SensorMeasure({
     name: "hallo",
