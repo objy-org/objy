@@ -44,9 +44,7 @@ OBJY.Object({
 //Build an object
 
 OBJY.Object({
-   name: "Passport",
-   expires: "2020-10-10",
-   number: "123",
+   ...
    warnMe: {
       date: "2020-10-05",
       action: "email('expiring soon!')"
