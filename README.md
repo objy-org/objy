@@ -24,6 +24,21 @@ npm install objy
 
 The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD.
 
+#### Simple object
+
+```javascript
+
+//Build an object
+
+OBJY.Object({
+   name: "Passport",
+   expires: "2020-10-10",
+   number: "123"
+})
+```
+
+#### Object with behaviour
+
 ```javascript
 
 //Build an object
