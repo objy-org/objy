@@ -4,14 +4,6 @@ An object-driven, cross-platform programming framework, written in JavaScript, t
 
 ![OBJY LOGO](objy-icon-full.png "OBJY")
 
-## Table of Contents
-
-- [Installing](#installing)
-- [Concept](#concept)
-- [Operations](#handling-Objects)
-- [Customize](#Customize)
-- [License](#license)
-
 ## Installing
 
 ### For Node
