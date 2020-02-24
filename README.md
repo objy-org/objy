@@ -20,7 +20,7 @@ An object-driven, cross-platform programming framework, written in JavaScript, t
 npm install objy
 ```
 
-## Programming paradigm?
+## Develop with OBJY?
 
 The philisophy behind OBJY ist to define objects and tell them what to do. In order to do so, all you need is CRUD.
 
