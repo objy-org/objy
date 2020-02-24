@@ -20,9 +20,9 @@ An object-driven, cross-platform programming framework, written in JavaScript, t
 npm install objy
 ```
 
-## What to do?
+## Programming paradigm?
 
-The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD.
+The philisophy behind OBJY ist to define objects and tell them what to do. In order to do so, all you need is CRUD.
 
 #### Simple object
 
