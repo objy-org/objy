@@ -1,6 +1,6 @@
 {
   "name": "@spootechnologies/objy",
-  "version": "0.2.0",
+  "version": "0.2.8",
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "spoo.js",
   "scripts": {
@@ -23,17 +23,21 @@
   "homepage": "https://github.com/spoo-technologies/objy#readme",
   "dependencies": {
     "@spootechnologies/objy-catalog": "^1.0.0",
-    "bcrypt": "^3.0.6",
+    "bcrypt": "^3.0.8",
+    "fs": "0.0.1-security",
+    "gridfs-stream": "^1.1.1",
     "localStorage": "^1.0.4",
-    "lokijs": "^1.5.6",
+    "lokijs": "^1.5.8",
     "lowdb": "^1.0.0",
-    "mingo": "^2.3.5",
-    "mocha": "^6.2.0",
+    "mingo": "^2.4.0",
+    "mocha": "^6.2.2",
     "moment": "^2.24.0",
-    "mongoose": "^5.6.4",
+    "mongoose": "^5.8.11",
+    "mongoose-gridfs": "^1.2.26",
+    "multer-gridfs-storage": "^4.0.2",
     "nedb": "^1.8.0",
-    "shortid": "^2.2.14",
-    "vm2": "^3.8.1"
+    "shortid": "^2.2.15",
+    "vm2": "^3.8.4"
   },
   "devDependencies": {}
 }

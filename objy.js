@@ -998,6 +998,13 @@ var OBJY = {
 
     Logger: Logger,
 
+    Mapper: {
+        Storage: {
+            Mongo: require('./mappers/storage/mongoMapper.js'),
+            GridFS: require('./mappers/storage/gridFSMapper.js'),
+        },
+    },
+
     metaProperties: ['id', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
     metaPropPrefix: '',
@@ -1028,45 +1035,12 @@ var OBJY = {
     ObserverTemplate: ObserverTemplate,
 
     serialize: function(obj) {
-
-        if (this.metaPropPrefix == '') return obj;
-
-        if (obj.properties) return obj;
-
-        var self = this;
-
-        var nObj = {
-            properties: {}
-        };
-
-        for (var prop in obj) {
-            if (self.metaProperties.indexOf(prop.substr(1)) == -1) {
-                nObj.properties[prop] = obj[prop];
-            } else nObj[prop.substr(1)] = obj[prop];
-        }
-        return nObj;
+        return obj;
     },
 
     deserialize: function(obj) {
-
-        if (this.metaPropPrefix == '') return obj;
-
-        var self = this;
-
-        var nObj = {};
-
-        for (var prop in obj) {
-            if (self.metaProperties.indexOf(prop) != -1) nObj[self.metaPropPrefix + prop] = obj[prop];
-            else if (prop != 'properties') nObj[prop] = obj[prop];
-        }
-
-        for (var prop in obj.properties) {
-            nObj[prop] = obj.properties[prop]
-        }
-
-        return nObj;
+        return obj;
     },
-
 
     tenant: function(tenant) {
         if (!tenant) throw new Error("No tenant specified");
@@ -1210,6 +1184,8 @@ var OBJY = {
         if (params.observer) {
             this.plugInObserver(params.name, params.observer);
             if (params.observer.initialize) params.observer.initialize();
+        } else if (params.observer == null) {
+            this.observers[params.name] = {}
         } else {
             this.plugInObserver(params.name, thisRef.observer || new DefaultObserverMapper(thisRef));
             if (this.observers[params.name].initialize) this.observers[params.name].initialize();
@@ -2504,6 +2480,7 @@ var OBJY = {
 
     PropertyCreateWrapper: function(obj, property, isBag, instance) {
 
+
         property = Object.assign({}, property);
 
 
@@ -2536,7 +2513,7 @@ var OBJY = {
         if (existing) throw new DuplicatePropertyException(propertyKey);
 
         //console.debug(property);
-        switch (property[propertyKey].type) {
+        switch ((property[propertyKey] || {}).type) {
             case undefined:
                 obj.properties[propertyKey] = property[propertyKey];
                 break;
@@ -2757,7 +2734,7 @@ var OBJY = {
                 throw new InvalidTypeException(property[propertyKey].type);
         }
 
-        if (property[propertyKey].onCreate) {
+        if ((property[propertyKey] || {}).onCreate) {
             if (Object.keys(property[propertyKey].onCreate).length > 0) {
                 if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
                 if (!instance.handlerSequence[obj._id].onCreate) instance.handlerSequence[obj._id].onCreate = [];
@@ -4094,13 +4071,14 @@ var OBJY = {
 
         Logger.log("Plain Object: " + obj);
 
-        if (instance.metaPropPrefix != '') obj = OBJY.serialize(obj);
+        if (instance.metaPropPrefix != '' && typeof obj !== "string") obj = OBJY.serialize(obj);
 
         if (!obj) throw new Error("Invalid param");
 
         if (obj._id) this._id = obj._id;
 
         if (typeof obj === "string") {
+
             this._id = obj;
         }
 
@@ -4244,7 +4222,8 @@ var OBJY = {
             })
 
             function doTheProps(self, o) {
-                Object.keys(o).forEach(function(k) {
+                Object.keys(
+                    o).forEach(function(k) {
 
                     self[k] = o[k];
                     if (typeof o[k] === 'object') {
@@ -4280,7 +4259,6 @@ var OBJY = {
             }
 
             new OBJY.PropertyCreateWrapper(this, property, false, instance);
-
 
             return this;
         };
@@ -5036,7 +5014,7 @@ var OBJY = {
 
                         obj._id = data._id;
 
-                        Object.keys(data.onCreate).forEach(function(key) {
+                        Object.keys(data.onCreate || {}).forEach(function(key) {
                             if (data.onCreate[key].trigger == 'after') {
                                 //dsl, obj, prop, data, callback, client, options
                                 instance.execProcessorAction(data.onCreate[key].value, data, null, null, function(data) {
@@ -5128,7 +5106,7 @@ var OBJY = {
                 throw new LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
             }
 
-            Object.keys(thisRef.onChange).forEach(function(key) {
+            Object.keys(thisRef.onChange || {}).forEach(function(key) {
                 if (thisRef.onChange[key].trigger == 'before') {
                     instance.execProcessorAction(thisRef.onChange[key].action, thisRef, null, null, function(data) {
 
@@ -5229,7 +5207,7 @@ var OBJY = {
 
                 OBJY.updateO(thisRef, function(data) {
 
-                        Object.keys(data.onChange).forEach(function(key) {
+                        Object.keys(data.onChange || {}).forEach(function(key) {
                             if (data.onChange[key].trigger == 'after') {
                                 //dsl, obj, prop, data, callback, client, options
                                 instance.execProcessorAction(data.onChange[key].action, data, null, null, function(data) {
@@ -5356,7 +5334,7 @@ var OBJY = {
 
             OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd');
 
-            Object.keys(thisRef.onDelete).forEach(function(key) {
+            Object.keys(thisRef.onDelete || {}).forEach(function(key) {
                 if (thisRef.onDelete[key].trigger == 'before') {
                     //dsl, obj, prop, data, callback, client, options
                     instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
@@ -5369,7 +5347,7 @@ var OBJY = {
 
                 return OBJY.remove(thisRef, function(_data) {
 
-                    Object.keys(thisRef.onDelete).forEach(function(key) {
+                    Object.keys(thisRef.onDelete || {}).forEach(function(key) {
                         if (thisRef.onDelete[key].trigger == 'after') {
 
                             instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
@@ -5380,13 +5358,13 @@ var OBJY = {
 
                     function aggregateAllEvents(props, prePropsString) {
 
-                        Object.keys(props).forEach(function(p) {
+                        Object.keys(props || {}).forEach(function(p) {
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                                 if (prePropsString) {
                                     aggregateAllEvents(props[p].properties, prePropsString + "." + p)
                                 }
                             else {
-                                aggregateAllEvents(props[p].properties, p)
+                                if (props[p].properties) aggregateAllEvents(props[p].properties, p)
                             }
 
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
@@ -5431,7 +5409,6 @@ var OBJY = {
 
 
                     aggregateAllEvents(data.properties || {});
-
 
 
                     if (mapper.type == 'scheduled') {
@@ -5527,7 +5504,7 @@ var OBJY = {
                     return data;
                 }
 
-                if (data.inherits.length == 0) {
+                if ((data.inherits || []).length == 0) {
                     success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
@@ -5570,12 +5547,12 @@ var OBJY = {
                 });
             }
 
-
             //console.warn('cccache', thisRef._id, instance.caches[thisRef.role].data[thisRef._id])
             if (instance.caches[thisRef.role].data[thisRef._id]) {
                 //console.warn('________________id', thisRef._id)
                 prepareObj(instance.caches[thisRef.role].data[thisRef._id]);
             } else {
+
                 OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
 
                     prepareObj(data);

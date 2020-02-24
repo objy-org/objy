@@ -188,8 +188,9 @@ Mapper = function(OBJY, options) {
             var arr = [{ $match: criteria }, { $limit: 20 }];
             if (flags.$page) arr.push({ $skip: this.globalPaging * (flags.$page || 0) })
 
+            var s = {};
+
             if (flags.$sort) {
-                var s = {};
 
                 if (flags.$sort.charAt(0) == '-') {
                     s[flags.$sort.slice(1)] = -1;
@@ -200,7 +201,9 @@ Mapper = function(OBJY, options) {
                 arr.push({ $sort: s })
             }
 
-            var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(flags.$sort || '_id');
+            console.warn('criteria', criteria, this.globalPaging, flags.$page)
+
+            var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });
 
             if (criteria.$aggregate) {
                 finalQuery = Obj.aggregate(criteria.$aggregate);
