@@ -175,6 +175,8 @@ Mapper = function(OBJY, options) {
 
             var Obj = db.model(this.objectFamily, ObjSchema);
 
+            if (app) criteria.applications = [$in: [app]];
+
             if (flags.$page == 1) flags.$page = 0;
             else flags.$page -= 1;
 
@@ -227,6 +229,8 @@ Mapper = function(OBJY, options) {
 
             var Obj = db.model(this.objectFamily, ObjSchema);
 
+            if (app) criteria.applications = [$in: [app]];
+
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
 
             Obj.count(criteria).exec(function(err, data) {
@@ -245,6 +249,8 @@ Mapper = function(OBJY, options) {
             var db = this.getDBByMultitenancy(client);
 
             var Obj = db.model(this.objectFamily, ObjSchema);
+
+            if (app) criteria.applications = [$in: [app]];
 
             var criteria = { _id: spooElement._id };
 
