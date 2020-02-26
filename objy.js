@@ -1133,9 +1133,8 @@ var OBJY = {
 
         var authorisations;
 
-        if(!app){
-            if(!user.authorisations['*']) throw new Error("Lack of permissions")
-        }
+        if(!app && !user.authorisations['*']) throw new Error("Lack of permissions")
+        else if(user.authorisations['*']) authorisations = user.authorisations['*'];
         else if(app && !user.authorisations[app]) throw new Error("Lack of permissions");
         else authorisations = user.authorisations[app];
 
@@ -1159,12 +1158,20 @@ var OBJY = {
     },
 
 
-    buildAuthroisationQuery: function(obj, user, condition) {
+    buildAuthroisationQuery: function(obj, user, condition, app) {
+        
+         var authorisations;
+
+        if(!app && !user.authorisations['*']) throw new Error("Lack of permissions")
+        else if(user.authorisations['*']) authorisations = user.authorisations['*'];
+        else if(app && !user.authorisations[app]) throw new Error("Lack of permissions");
+        else authorisations = user.authorisations[app];
+
         var permCheck = [obj];
 
         var query = {$or: []}
 
-        user.authorisations.forEach(function(a){
+        authorisations.forEach(function(a){
             if(a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
         })
 
@@ -3899,7 +3906,7 @@ var OBJY = {
                 }
             })
 
-            objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r')
+            objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
 
             this.get = function(success, error) {
 
