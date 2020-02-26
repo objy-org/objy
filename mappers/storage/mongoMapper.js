@@ -28,7 +28,7 @@ var generalObjectModel = {
     username: String,
     email: String,
     _clients: [],
-    authroisations: []
+    authorisations: {}
 };
 
 var ObjSchema = new Schema(generalObjectModel, { strict: false });
@@ -203,7 +203,7 @@ Mapper = function(OBJY, options) {
 
                 arr.push({ $sort: s })
             }
-
+            
             console.warn('criteria', criteria, this.globalPaging, flags.$page)
 
             var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });

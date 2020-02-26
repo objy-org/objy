@@ -1056,10 +1056,8 @@ var OBJY = {
         return this;
     },
 
-    user: function(user) {
-        if (!user) throw new Error("No user specified");
+    useUser: function(user) {
         this.activeUser = user;
-
         return this;
     },
 
@@ -1072,6 +1070,8 @@ var OBJY = {
 
     checkPermissions: function(user, app, obj, permission, soft) {
 
+        return true;
+        
         var result = false;
 
         if (!user) return true;
@@ -1133,20 +1133,22 @@ var OBJY = {
 
         var authorisations;
 
-        if(!app && !user.authorisations['*']) throw new Error("Lack of permissions")
-        else if(user.authorisations['*']) authorisations = user.authorisations['*'];
-        else if(app && !user.authorisations[app]) throw new Error("Lack of permissions");
+        if (!user) return;
+
+        if (!app && !user.authorisations['*']) throw new Error("Lack of permissions")
+        else if (user.authorisations['*']) authorisations = user.authorisations['*'];
+        else if (app && !user.authorisations[app]) throw new Error("Lack of permissions");
         else authorisations = user.authorisations[app];
 
         var permCheck = [obj];
 
-        var query = {$or: []}
+        var query = { $or: [] }
 
-        authorisations.forEach(function(a){
-            if(a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
+        authorisations.forEach(function(a) {
+            if (a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
         })
 
-        if(query.$or.length == 0) throw new Error("Lack of permissions")
+        if (query.$or.length == 0) throw new Error("Lack of permissions")
 
         // CONSOLE LOGGING FOR TESTING PURPOSES!
 
@@ -1154,28 +1156,30 @@ var OBJY = {
 
         console.log('perm result', Query.query(permCheck, query, Query.undot))
 
-        if(Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
+        if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
     },
 
 
     buildAuthroisationQuery: function(obj, user, condition, app) {
-        
-         var authorisations;
 
-        if(!app && !user.authorisations['*']) throw new Error("Lack of permissions")
-        else if(user.authorisations['*']) authorisations = user.authorisations['*'];
-        else if(app && !user.authorisations[app]) throw new Error("Lack of permissions");
+        var authorisations;
+
+        if (!user) return obj;
+
+        if (!app && !user.authorisations['*']) throw new Error("Lack of permissions")
+        else if (user.authorisations['*']) authorisations = user.authorisations['*'];
+        else if (app && !user.authorisations[app]) throw new Error("Lack of permissions");
         else authorisations = user.authorisations[app];
 
         var permCheck = [obj];
 
-        var query = {$or: []}
+        var query = { $or: [] }
 
-        authorisations.forEach(function(a){
-            if(a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
+        authorisations.forEach(function(a) {
+            if (a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
         })
 
-        if(query.$or.length == 0) throw new Error("Lack of permissions")
+        if (query.$or.length == 0) throw new Error("Lack of permissions")
 
         // CONSOLE LOGGING FOR TESTING PURPOSES!
 
@@ -4104,7 +4108,6 @@ var OBJY = {
                             }
                         }
 
-
                     }, function(err) {
                         counter++;
                         if (objs.length == counter) error(err);
@@ -4204,8 +4207,7 @@ var OBJY = {
                 this.privileges = OBJY.PrivilegesChecker(obj) || {};
                 this.spooAdmin = obj.spooAdmin || false;
                 this._clients = obj._clients || [];
-
-                this.authroisations = obj.authroisations || [];
+                this.authorisations = obj.authorisations || [];
 
                 this.addClient = function(client) {
                     if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
