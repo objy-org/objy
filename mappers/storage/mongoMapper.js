@@ -27,7 +27,8 @@ var generalObjectModel = {
     password: String,
     username: String,
     email: String,
-    _clients: []
+    _clients: [],
+    authroisations: []
 };
 
 var ObjSchema = new Schema(generalObjectModel, { strict: false });

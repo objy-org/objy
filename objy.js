@@ -1070,7 +1070,6 @@ var OBJY = {
         return this;
     },
 
-
     checkPermissions: function(user, app, obj, permission, soft) {
 
         var result = false;
@@ -2092,6 +2091,9 @@ var OBJY = {
         this.findObjects(role, criteria, success, error, client, flags, true);
     },
 
+    checkAuthroisations: function() {
+        
+    },
 
     PropertyRefParser: function(obj, propertyName, success, error) {
         var allProperties = obj.getProperties();
@@ -2830,7 +2832,7 @@ var OBJY = {
     },
 
     AffectsCreateWrapper: function(obj, affects) {
-        
+
         if (!affects) affects = {};
 
         return affects;
@@ -4105,7 +4107,7 @@ var OBJY = {
             }
         }
 
-        if(params.isRule) {
+        if (params.isRule) {
             this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance) || {};
         }
 
@@ -4147,6 +4149,8 @@ var OBJY = {
                 this.privileges = OBJY.PrivilegesChecker(obj) || {};
                 this.spooAdmin = obj.spooAdmin || false;
                 this._clients = obj._clients || [];
+
+                this.authroisations = obj.authroisations || [];
 
                 this.addClient = function(client) {
                     if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
@@ -4916,10 +4920,7 @@ var OBJY = {
 
             var thisRef = this;
 
-            checkAffects(obj){
-                this.mappers.
-            }
-            
+
             Object.keys(thisRef.onCreate).forEach(function(key) {
 
                 if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
