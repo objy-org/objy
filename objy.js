@@ -1129,12 +1129,21 @@ var OBJY = {
 
     },
 
-     checkAuthroisations: function(obj, user, condition) {
+    checkAuthroisations: function(obj, user, condition, app) {
+
+        var authorisations;
+
+        if(!app){
+            if(!user.authorisations['*']) throw new Error("Lack of permissions")
+        }
+        else if(app && !user.authorisations[app]) throw new Error("Lack of permissions");
+        else authorisations = user.authorisations[app];
+
         var permCheck = [obj];
 
         var query = {$or: []}
 
-        user.authorisations.forEach(function(a){
+        authorisations.forEach(function(a){
             if(a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
         })
 
@@ -4959,7 +4968,7 @@ var OBJY = {
 
             var thisRef = this;
 
-            OBJY.checkAuthroisations(this, instance.activeUser, "c");
+            OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
 
             Object.keys(thisRef.onCreate).forEach(function(key) {
 
@@ -5152,7 +5161,7 @@ var OBJY = {
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
 
-            OBJY.checkAuthroisations(this, instance.activeUser, "u");
+            OBJY.checkAuthroisations(this, instance.activeUser, "u", instance.activeApp);
 
             var thisRef = this;
 
@@ -5386,7 +5395,7 @@ var OBJY = {
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
 
-            OBJY.checkAuthroisations(this, instance.activeUser, "d");
+            OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp);
 
             var thisRef = JSON.parse(JSON.stringify(this));
 
@@ -5521,7 +5530,7 @@ var OBJY = {
             var client = instance.activeTenant;
             var app = instance.activeApp;
 
-            OBJY.checkAuthroisations(this, instance.activeUser, "r");
+            OBJY.checkAuthroisations(this, instance.activeUser, "r", instance.activeApp);
 
             var thisRef = this;
             var counter = 0;
