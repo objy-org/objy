@@ -1001,7 +1001,7 @@ var OBJY = {
     Mapper: {
         Storage: {
             Mongo: require('./mappers/storage/mongoMapper.js'),
-            GridFS: require('./mappers/storage/gridFSMapper.js'),
+            //GridFS: require('./mappers/storage/gridFSMapper.js'),
         },
     },
 
@@ -1127,6 +1127,47 @@ var OBJY = {
 
         } else throw new LackOfPermissionsException();
 
+    },
+
+     checkAuthroisations: function(obj, user, condition) {
+        var permCheck = [obj];
+
+        var query = {$or: []}
+
+        user.authorisations.forEach(function(a){
+            if(a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
+        })
+
+        if(query.$or.length == 0) throw new Error("Lack of permissions")
+
+        // CONSOLE LOGGING FOR TESTING PURPOSES!
+
+        console.log('query', query)
+
+        console.log('perm result', Query.query(permCheck, query, Query.undot))
+
+        if(Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
+    },
+
+
+    buildAuthroisationQuery: function(obj, user, condition) {
+        var permCheck = [obj];
+
+        var query = {$or: []}
+
+        user.authorisations.forEach(function(a){
+            if(a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
+        })
+
+        if(query.$or.length == 0) throw new Error("Lack of permissions")
+
+        // CONSOLE LOGGING FOR TESTING PURPOSES!
+
+        console.log('build query', query)
+
+        obj.$or = query.$or;
+
+        return obj;
     },
 
     chainPermission: function(obj, instance, code, name, key) {
@@ -2089,10 +2130,6 @@ var OBJY = {
 
     findAllObjects: function(role, criteria, success, error, client, flags) {
         this.findObjects(role, criteria, success, error, client, flags, true);
-    },
-
-    checkAuthroisations: function() {
-        
     },
 
     PropertyRefParser: function(obj, propertyName, success, error) {
@@ -3853,6 +3890,8 @@ var OBJY = {
                 }
             })
 
+            objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r')
+
             this.get = function(success, error) {
 
                 var client = instance.activeTenant;
@@ -4920,6 +4959,7 @@ var OBJY = {
 
             var thisRef = this;
 
+            OBJY.checkAuthroisations(this, instance.activeUser, "c");
 
             Object.keys(thisRef.onCreate).forEach(function(key) {
 
@@ -5111,6 +5151,8 @@ var OBJY = {
 
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
+
+            OBJY.checkAuthroisations(this, instance.activeUser, "u");
 
             var thisRef = this;
 
@@ -5344,6 +5386,8 @@ var OBJY = {
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
 
+            OBJY.checkAuthroisations(this, instance.activeUser, "d");
+
             var thisRef = JSON.parse(JSON.stringify(this));
 
             OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd');
@@ -5476,6 +5520,8 @@ var OBJY = {
 
             var client = instance.activeTenant;
             var app = instance.activeApp;
+
+            OBJY.checkAuthroisations(this, instance.activeUser, "r");
 
             var thisRef = this;
             var counter = 0;
