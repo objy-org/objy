@@ -1071,7 +1071,7 @@ var OBJY = {
     checkPermissions: function(user, app, obj, permission, soft) {
 
         return true;
-        
+
         var result = false;
 
         if (!user) return true;
@@ -1132,23 +1132,35 @@ var OBJY = {
     checkAuthroisations: function(obj, user, condition, app) {
 
         var authorisations;
-
         if (!user) return;
 
-        if (!app && !user.authorisations['*']) throw new Error("Lack of permissions")
-        else if (user.authorisations['*']) authorisations = user.authorisations['*'];
-        else if (app && !user.authorisations[app]) throw new Error("Lack of permissions");
-        else authorisations = user.authorisations[app];
+        function throwError() {
+            throw new Error("Lack of permissions")
+        }
+
+        if (Object.keys(user.authorisations || {}).length == 0) throwError();
+
+        if (!app && !user.authorisations['*']) {
+            console.warn('app, !authorisationsapp');
+            throwError();
+        }
+
+        if (user.authorisations['*']) authorisations = user.authorisations['*'];
+        else if (app && !user.authorisations[app]) {
+            console.warn('app, !authorisationsapp')
+            throwError();
+        } else authorisations = user.authorisations[app];
 
         var permCheck = [obj];
 
         var query = { $or: [] }
 
         authorisations.forEach(function(a) {
-            if (a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
+            console.warn('_a', a, condition)
+            if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
         })
 
-        if (query.$or.length == 0) throw new Error("Lack of permissions")
+        if (query.$or.length == 0) throwError();
 
         // CONSOLE LOGGING FOR TESTING PURPOSES!
 
@@ -1163,31 +1175,54 @@ var OBJY = {
     buildAuthroisationQuery: function(obj, user, condition, app) {
 
         var authorisations;
-
         if (!user) return obj;
 
-        if (!app && !user.authorisations['*']) throw new Error("Lack of permissions")
-        else if (user.authorisations['*']) authorisations = user.authorisations['*'];
-        else if (app && !user.authorisations[app]) throw new Error("Lack of permissions");
-        else authorisations = user.authorisations[app];
+        function throwError() {
+            throw new Error("Lack of permissions")
+        }
+
+        if (Object.keys(user.authorisations || {}).length == 0) throwError();
+
+        if (!app && !user.authorisations['*']) {
+            console.warn('app, !authorisationsapp');
+            throwError();
+        }
+
+        if (user.authorisations['*']) authorisations = user.authorisations['*'];
+        else if (app && !user.authorisations[app]) {
+            console.warn('app, !authorisationsapp')
+            throwError();
+        } else authorisations = user.authorisations[app];
 
         var permCheck = [obj];
 
-        var query = { $or: [] }
+        var query = []
+        var wildcard = false;
 
         authorisations.forEach(function(a) {
-            if (a[1].indexOf(condition) != -1 || a[1].indexOf("*") != -1) query.$or.push(a[0])
+            console.warn('_a', a, condition)
+            if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
+                if (Object.keys(a.query).length == 0) wildcard = true;
+                else {
+                    console.log([a.query, obj])
+                    query.push({ '$and': [a.query, obj] })
+                }
+            }
         })
 
-        if (query.$or.length == 0) throw new Error("Lack of permissions")
+        if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
 
         // CONSOLE LOGGING FOR TESTING PURPOSES!
 
+        query = { $or: query };
+
         console.log('build query', query)
 
-        obj.$or = query.$or;
+        console.log('query', query)
 
-        return obj;
+        console.log('perm result', Query.query(permCheck, query, Query.undot))
+
+        return query;
     },
 
     chainPermission: function(obj, instance, code, name, key) {

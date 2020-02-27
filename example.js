@@ -8,9 +8,9 @@ const fs = require('fs')
 
 OBJY.client('mb');
 OBJY.user({
-    authorisations: [
-        [{},'c']
-    ]
+    authorisations: {
+        "*": [{ query: {}, "*" }]
+    }
 })
 
 //OBJY.metaPropPrefix = '_';
@@ -25,9 +25,9 @@ OBJY.define({
 })
 
 
-OBJY.SensorMeasure({type: "22"}).add(function(data){
+OBJY.SensorMeasure({ type: "22" }).add(function(data) {
 
-    OBJY.SensorMeasures({type: "22"}).get(function(data){
+    OBJY.SensorMeasures({ type: "22" }).get(function(data) {
 
     })
 
