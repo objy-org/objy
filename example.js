@@ -7,10 +7,11 @@ const fs = require('fs')
 
 
 OBJY.client('mb');
-OBJY.user({
-    authorisations: [
-        [{},'c']
-    ]
+OBJY.useUser({
+    authorisations: {
+        '*': [[{},'*']],
+        crm : [[{},'c']]
+    }
 })
 
 //OBJY.metaPropPrefix = '_';
