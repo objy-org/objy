@@ -7,6 +7,7 @@ const fs = require('fs')
 
 
 OBJY.client('mb');
+
 OBJY.useUser({
     authorisations: {
         '*': [[{},'*']],
@@ -26,9 +27,9 @@ OBJY.define({
 })
 
 
-OBJY.SensorMeasure({type: "22"}).add(function(data){
+OBJY.SensorMeasure({ type: "22" }).add(function(data) {
 
-    OBJY.SensorMeasures({type: "22"}).get(function(data){
+    OBJY.SensorMeasures({ type: "22" }).get(function(data) {
 
     })
 
