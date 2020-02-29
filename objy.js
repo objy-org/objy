@@ -1256,6 +1256,11 @@ var OBJY = {
         return this.objectFamilies;
     },
 
+    defineGlobal: function(params)
+    {
+
+    },
+
     define: function(params) {
 
         var thisRef = this;
@@ -2682,14 +2687,13 @@ var OBJY = {
 
                     _event[eventKey].nextOccurence = moment(_event[eventKey].lastOccurence || moment().utc()).utc().add(_event[eventKey].interval).toISOString();
 
-                    instance.eventAlterationSequence.push({
+                   /* instance.eventAlterationSequence.push({
                         operation: 'add',
                         obj: obj,
                         propName: propertyKey,
                         property: property,
                         date: _event[eventKey].nextOccurence
-                    })
-
+                    })*/
 
                 } else if (_event[eventKey].date !== undefined) {
 
@@ -2703,13 +2707,13 @@ var OBJY = {
 
                     }
 
-                    instance.eventAlterationSequence.push({
+                   /* instance.eventAlterationSequence.push({
                         operation: 'add',
                         obj: obj,
                         propName: propertyKey,
                         property: property,
                         date: _event[eventKey].date
-                    })
+                    })*/
 
                     if (!_event[eventKey].action) _event[eventKey].action = '';
                 } else {
@@ -3474,7 +3478,8 @@ var OBJY = {
                 if (obj.properties[access[0]].lastOccurence) {
 
                     var nextOccurence = moment(obj.properties[access[0]].lastOccurence).utc().add(newValue);
-                    instance.eventAlterationSequence.push({
+                    
+                    /*instance.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: obj,
                         propName: propertyKey,
@@ -3487,7 +3492,7 @@ var OBJY = {
                         propName: propertyKey,
                         property: obj.properties[access[0]],
                         date: nextOccurence
-                    })
+                    })*/
                 }
 
                 OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventInterval', propertyKey);
@@ -3743,7 +3748,7 @@ var OBJY = {
                 obj.properties[access[0]].date = newValue;
 
 
-                instance.eventAlterationSequence.push({
+                /*instance.eventAlterationSequence.push({
                     operation: 'remove',
                     obj: obj,
                     propName: propertyKey,
@@ -3756,7 +3761,7 @@ var OBJY = {
                     propName: propertyKey,
                     property: obj.properties[access[0]],
                     date: newValue
-                })
+                })*/
 
                 OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventDate', propertyKey);
 
@@ -5042,12 +5047,14 @@ var OBJY = {
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
-                    if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
+
+                    if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
                         if (prePropsString) {
                             aggregateAllEvents(props[p].properties, prePropsString + "." + p)
                         }
-                    else {
-                        aggregateAllEvents(props[p].properties, p)
+                    }
+                    else if(typeof props[p] == 'object') {
+                        aggregateAllEvents(props[p], p)
                     }
 
                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
@@ -5146,7 +5153,7 @@ var OBJY = {
 
                                     }, instance.activeTenant)
                                 } else if (evt.operation == 'remove') {
-                                    mapper.addEvent(obj._id, evt.propName, function(evtData) {
+                                    mapper.removeEvent(obj._id, evt.propName, function(evtData) {
 
                                     }, function(evtErr) {
 
@@ -5254,14 +5261,16 @@ var OBJY = {
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
-                    if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
+                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
                         if (prePropsString) {
                             aggregateAllEvents(props[p].properties, prePropsString + "." + p)
                         }
-                    else {
-                        aggregateAllEvents(props[p].properties, p)
+                    }
+                    else if(typeof props[p] == 'object') {
+                        aggregateAllEvents(props[p], p)
                     }
 
+                    console.log('88', props[p])
                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
 
                         var date = null;
@@ -5277,13 +5286,12 @@ var OBJY = {
 
                         if (prePropsString) {
 
-                            // instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: prePropsString + "." + p, date: date });
+                            instance.eventAlterationSequence.push({ operation: 'remove', obj: thisRef, propName: prePropsString + "." + p, date: date });
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
                                 if (aE.propName == prePropsString + "." + p) found = true;
                             })
-
 
                             if (!found && props[p].triggered != true)
                                 //if(moment().toISOString() >= moment(date).toISOString())
@@ -5294,7 +5302,7 @@ var OBJY = {
 
                         } else {
 
-                            //instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: p, date: date })
+                        instance.eventAlterationSequence.push({ operation: 'remove', obj: thisRef, propName: p, date: date })
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
@@ -5315,7 +5323,7 @@ var OBJY = {
 
             var mapper = instance.observers[thisRef.role];
 
-            if (mapper.type != 'scheduled' && this.properties) aggregateAllEvents(this.properties);
+            if (this.properties) aggregateAllEvents(this.properties);
 
             function updateFn() {
 
@@ -5351,13 +5359,30 @@ var OBJY = {
 
                         if (mapper.type == 'scheduled') {
                             instance.eventAlterationSequence.forEach(function(evt) {
-                                if (evt.type == 'add') {
+                                
+
+                                /*if (evt.type == 'add') {
                                     mapper.addEvent(this._id, evt.propName, evt.property, function(evtData) {
 
                                     }, function(evtErr) {
 
                                     }, instance.activeTenant)
-                                }
+                                }*/
+
+
+                                if (evt.operation == 'add') {
+                                mapper.addEvent(data._id, evt.propName, evt.property, function(evtData) {
+
+                                }, function(evtErr) {
+
+                                }, instance.activeTenant)
+                            } else if (evt.operation == 'remove') {
+                                mapper.removeEvent(data._id, evt.propName, function(evtData) {
+
+                                }, function(evtErr) {
+                                    console.log(evtErr);
+                                }, instance.activeTenant)
+                            }
 
                             })
                         }
@@ -5475,13 +5500,14 @@ var OBJY = {
                     function aggregateAllEvents(props, prePropsString) {
 
                         Object.keys(props || {}).forEach(function(p) {
-                            if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
-                                if (prePropsString) {
-                                    aggregateAllEvents(props[p].properties, prePropsString + "." + p)
+                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
+                                    if (prePropsString) {
+                                        aggregateAllEvents(props[p].properties, prePropsString + "." + p)
+                                    }
                                 }
-                            else {
-                                if (props[p].properties) aggregateAllEvents(props[p].properties, p)
-                            }
+                                else if(typeof props[p] == 'object') {
+                                    aggregateAllEvents(props[p], p)
+                                }
 
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
 

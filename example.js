@@ -26,7 +26,7 @@ OBJY.define({
 })
 
 
-OBJY.SensorMeasure({name: "sss", properties: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}).add(function(data1) {
+OBJY.SensorMeasure({name: "sss", properties: { test: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}}).add(function(data1) {
 
     /*OBJY.SensorMeasure(data1._id).get(function(data) {
         data.replace({name: "sss", evt: {type: 'event', interval: "5s", action: "console.log('hit hre')" }}).update(function(saved){
@@ -34,6 +34,9 @@ OBJY.SensorMeasure({name: "sss", properties: { evt: {type: 'event', interval: 12
         })
     })*/
 
+    data1.remove(function(d){
+
+    })
     console.info(data1)
 
 })
