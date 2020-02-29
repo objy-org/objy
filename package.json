@@ -23,6 +23,7 @@
   "homepage": "https://github.com/spoo-technologies/objy#readme",
   "dependencies": {
     "bcrypt": "^3.0.8",
+    "bull": "^3.13.0",
     "fs": "0.0.1-security",
     "gridfs-stream": "^1.1.1",
     "localStorage": "^1.0.4",
