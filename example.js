@@ -34,10 +34,14 @@ OBJY.SensorMeasure({name: "sss", properties: { test: { evt: {type: 'event', inte
         })
     })*/
 
-    data1.remove(function(d){
+    setTimeout(function()
+    {
+        data1.remove(function(d){
 
     })
     console.info(data1)
+},15000)
+    
 
 })
 

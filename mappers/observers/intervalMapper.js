@@ -5,11 +5,7 @@ Mapper = function(OBJY) {
 
         initialize: function(millis) {
             var self = this;
-
-            // first run
-            console.warn('init observer')
-            //self.run(new Date());
-
+            
             // interval
             this.interval = setInterval(function() {
 
@@ -23,8 +19,6 @@ Mapper = function(OBJY) {
             var self = this;
 
             self.OBJY.getPersistence(self.objectFamily).listClients(function(data) {
-
-                //console.log("d", data);
 
                 data.forEach(function(tenant) {
 
@@ -41,7 +35,6 @@ Mapper = function(OBJY) {
                         objs.forEach(function(obj) {
 
                             obj = OBJY[self.objectFamily](obj);
-
                             obj._aggregatedEvents.forEach(function(aE) {
 
                                 var prop = obj.getProperty(aE.propName);
@@ -54,12 +47,8 @@ Mapper = function(OBJY) {
                                         OBJY.Logger.error(err)
                                     }, tenant)
 
-
                                 }, tenant, {});
-
                             })
-
-
                         })
 
                     }, function(err) {
@@ -71,10 +60,7 @@ Mapper = function(OBJY) {
 
             })
         }
-
-
     })
 }
-
 
 module.exports = Mapper;
