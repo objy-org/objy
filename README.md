@@ -4,14 +4,6 @@ An object-driven, cross-platform programming framework, written in JavaScript, t
 
 ![OBJY LOGO](objy-icon-full.png "OBJY")
 
-## Table of Contents
-
-- [Installing](#installing)
-- [Concept](#concept)
-- [Operations](#handling-Objects)
-- [Customize](#Customize)
-- [License](#license)
-
 ## Installing
 
 ### For Node
@@ -20,9 +12,11 @@ An object-driven, cross-platform programming framework, written in JavaScript, t
 npm install objy
 ```
 
-## What to do?
+## Programming with OBJY?
 
-The philisophy behind OBJY ist to let you define and model objects and tell them what to do. In order to do so, all you need is CRUD.
+The philisophy behind OBJY ist to define objects and tell them what to do. In order to do so, all you need is CRUD.
+
+#### Simple object
 
 ```javascript
 
@@ -31,7 +25,18 @@ The philisophy behind OBJY ist to let you define and model objects and tell them
 OBJY.Object({
    name: "Passport",
    expires: "2020-10-10",
-   number: "123",
+   number: "123"
+})
+```
+
+#### Object with behaviour
+
+```javascript
+
+//Build an object
+
+OBJY.Object({
+   ...
    warnMe: {
       date: "2020-10-05",
       action: "email('expiring soon!')"

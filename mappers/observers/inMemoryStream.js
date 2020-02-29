@@ -13,11 +13,12 @@ var CONSTANTS = {
     }
 }
 
-Mapper = function(SPOO, options) {
+Mapper = function(OBJY, options) {
     this.type = (options || {}).type || CONSTANTS.TYPES.SCHEDULED;
     this.database = {};
     this.objectFamily = null;
     this.index = {};
+    this.OBJY = OBJY;
     this.multitenancy = (options || {}).multitenancy || CONSTANTS.MULTITENANCY.ISOLATED;
 }
 
@@ -108,6 +109,8 @@ Mapper.prototype.addEvent = function(objId, propName, event, success, error, cli
             // @TODO: link to processor
 
             console.log(event.action);
+
+            self.OBJY.processors[self.objectFamily].execute(event.action, {}, {}, {}, function(){}, client, null, null, {});
 
             //self.processor.execute(dsl, obj, prop, data, callback, client, app, user, options);
 
