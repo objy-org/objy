@@ -254,9 +254,7 @@ Mapper = function(OBJY, options) {
             var db = this.getDBByMultitenancy(client);
 
             var Obj = db.model(this.objectFamily, ObjSchema);
-
-            if (app) criteria.applications = [$in: [app]];
-
+        
             var criteria = { _id: spooElement._id };
 
             if (app) criteria['applications'] = { $in: [app] }
