@@ -1,7 +1,7 @@
 const OBJY = require('./objy.js');
 const stream = require('stream');
 const fs = require('fs')
-//const MongoMapper = require('node_modules/@spootechnologies/objy-catalog/storage/mongoMapper.js')
+const EventMapper = require('./mappers/observers/inMemoryStream.js')
 
 //OBJY.storage = new MongoMapper();
 
@@ -10,8 +10,7 @@ OBJY.client('mb');
 
 OBJY.useUser({
     authorisations: {
-        '*': [[{},'*']],
-        crm : [[{},'c']]
+        '*': [{query: {}, perm:'*'}]
     }
 })
 
@@ -23,15 +22,19 @@ OBJY.define({
     customProps: {
         assi: null
     },
-    observer: null
+    observer : new EventMapper(OBJY)
 })
 
 
-OBJY.SensorMeasure({ type: "22" }).add(function(data) {
+OBJY.SensorMeasure({name: "sss", properties: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}).add(function(data1) {
 
-    OBJY.SensorMeasures({ type: "22" }).get(function(data) {
+    /*OBJY.SensorMeasure(data1._id).get(function(data) {
+        data.replace({name: "sss", evt: {type: 'event', interval: "5s", action: "console.log('hit hre')" }}).update(function(saved){
+            console.log(saved)
+        })
+    })*/
 
-    })
+    console.info(data1)
 
 })
 

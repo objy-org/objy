@@ -1,8 +1,10 @@
-const OBJY = require('../objy.js');
+const OBJY = require('./objy.js');
 
 var assert = require('assert');
+
+var Obj;
+
 describe('Object', function() {
-  describe('#constructor', function() {
     it('should form an object', function(done) {
       
       OBJY.define({
@@ -10,10 +12,9 @@ describe('Object', function() {
       	pluralName: "Objects"
       });
 
-      var o = OBJY.Object({});
+      Obj = OBJY.Object({});
 
       done();
       
     });
-  });
 });

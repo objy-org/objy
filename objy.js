@@ -482,7 +482,7 @@ ObserverMapperTemplate = function(SPOO, options, content) {
         }
     };
     this.SPOO = SPOO;
-    this.interval = (options || {}).interval || 60000;
+    this.interval = (options || {}).interval || 10000;
     this.objectFamily = null;
     this.type = (options || {}).type || this.CONSTANTS.TYPES.QUERIED;
     this.multitenancy = (options || {}).multitenancy || this.CONSTANTS.MULTITENANCY.ISOLATED;
@@ -734,6 +734,10 @@ var DefaultObserverMapper = function(SPOO) {
                                 self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
+
+                                        OBJY.Logger.log('d._aggregatedEvents')
+                                        OBJY.Logger.log(d._aggregatedEvents)
+
 
                                     }, function(err) {
                                         console.log(err);
@@ -1279,8 +1283,6 @@ var OBJY = {
         if (params.observer) {
             this.plugInObserver(params.name, params.observer);
             if (params.observer.initialize) params.observer.initialize();
-        } else if (params.observer == null) {
-            this.observers[params.name] = {}
         } else {
             this.plugInObserver(params.name, thisRef.observer || new DefaultObserverMapper(thisRef));
             if (this.observers[params.name].initialize) this.observers[params.name].initialize();
@@ -2011,7 +2013,7 @@ var OBJY = {
 
             propKeys.forEach(function(property) {
 
-                if (property.template) delete property;
+                if (property.template) property = null;
 
                 if (property.type == CONSTANTS.PROPERTY.TYPE_SHORTID) {
                     if (property.value == '' && !property.value)
@@ -4325,16 +4327,18 @@ var OBJY = {
 
             Object.keys(this).forEach(function(k) {
                 if (self[k] instanceof Function || k == '_id') return;
-
                 delete self[k]
             })
 
             function doTheProps(self, o) {
-                Object.keys(
-                    o).forEach(function(k) {
+                console.log('dtp', o)
+                Object.keys(o).forEach(function(k) {
+
+                    if(o[k] == null || o[k] === undefined) return;
 
                     self[k] = o[k];
                     if (typeof o[k] === 'object') {
+                        console.log('typeof', typeof o[k], o[k])
                         doTheProps(self[k], o[k])
                     }
 
@@ -4342,7 +4346,10 @@ var OBJY = {
                 })
             }
 
+            console.log('bdtp', newObj)
             doTheProps(self, newObj);
+
+            return self;
 
             //OBJY.prepareObjectDelta(this, newObj);
         };
@@ -5114,7 +5121,6 @@ var OBJY = {
 
             if (app)
                 if (this.applications.indexOf(app) == -1) this.applications.push(app);
-
 
             var addFn = function(obj) {
                 OBJY.add(obj, function(data) {

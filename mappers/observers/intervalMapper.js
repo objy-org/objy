@@ -7,6 +7,7 @@ Mapper = function(OBJY) {
             var self = this;
 
             // first run
+            console.warn('init observer')
             //self.run(new Date());
 
             // interval

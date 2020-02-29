@@ -4,7 +4,7 @@
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "spoo.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
   },
   "repository": {
     "type": "git",
@@ -22,7 +22,6 @@
   },
   "homepage": "https://github.com/spoo-technologies/objy#readme",
   "dependencies": {
-    "@spootechnologies/objy-catalog": "^1.0.0",
     "bcrypt": "^3.0.8",
     "fs": "0.0.1-security",
     "gridfs-stream": "^1.1.1",
@@ -39,5 +38,7 @@
     "shortid": "^2.2.15",
     "vm2": "^3.8.4"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "jest": "^25.1.0"
+  }
 }
