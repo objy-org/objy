@@ -71,7 +71,7 @@ Mapper = function(OBJY, options) {
       });
       
     };
- 
+
     this.addEvent = function(objId, propName, event, success, error, client) {
         var self = this;
 
