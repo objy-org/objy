@@ -255,7 +255,7 @@ Mapper = function(OBJY, options) {
 
             var Obj = db.model(this.objectFamily, ObjSchema);
 
-            if (app) criteria.applications = [$in: [app]];
+            if (app) criteria.applications = {$in: [app]};
 
             var criteria = { _id: spooElement._id };
 
