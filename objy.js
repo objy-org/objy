@@ -983,10 +983,8 @@ var OBJY = {
                             })
                         }
                     })
-
                 })
             }
-
 
             doTheProps(template, obj);
 
