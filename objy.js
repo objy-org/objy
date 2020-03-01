@@ -2348,11 +2348,11 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setValue(obj.properties[access.shift()], access, value);
+                setValue(obj[access.shift()], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
@@ -2360,7 +2360,7 @@ var OBJY = {
 
                 if (typeof value !== 'object') throw new InvalidDataTypeException(value, 'object');
 
-                obj.properties[access[0]].query = query;
+                obj[access[0]].query = query;
             }
         }
 
@@ -2375,19 +2375,19 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setOnChange(obj.properties[access.shift()], access, meta);
+                setOnChange(obj[access.shift()], access, meta);
             } else {
 
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
+                //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                if (obj.properties[access[0]].template) obj.properties[access[0]].metaOverwritten = true;
-                obj.properties[access[0]].meta = meta;
+                if (obj[access[0]].template) obj[access[0]].metaOverwritten = true;
+                obj[access[0]].meta = meta;
             }
         }
 
@@ -2401,27 +2401,27 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setOnChange(obj.properties[access.shift()], access, onChange);
+                setOnChange(obj[access.shift()], access, onChange);
             } else {
 
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
+                //if (!obj[access[0]].on) obj.properties[access[0]].on = {};
 
-                if (!obj.properties[access[0]].onChange) obj.properties[access[0]].onChange = {}
+                if (!obj[access[0]].onChange) obj[access[0]].onChange = {}
 
-                if (!obj.properties[access[0]].onChange[name]) obj.properties[access[0]].onChange[name] = {}
+                if (!obj[access[0]].onChange[name]) obj[access[0]].onChange[name] = {}
 
-                if (obj.properties[access[0]].onChange[name].template) obj.properties[access[0]].onChange[name].overwritten = true;
-                obj.properties[access[0]].onChange[name].value = onChange;
-                obj.properties[access[0]].onChange[name].trigger = trigger || 'after';
-                obj.properties[access[0]].onChange[name].type = type || 'async';
+                if (obj[access[0]].onChange[name].template) obj[access[0]].onChange[name].overwritten = true;
+                obj[access[0]].onChange[name].value = onChange;
+                obj[access[0]].onChange[name].trigger = trigger || 'after';
+                obj[access[0]].onChange[name].type = type || 'async';
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'w', 'setPropertyOnChangeHandler', name);
+                OBJY.chainPermission(obj[access[0]], instance, 'w', 'setPropertyOnChangeHandler', name);
             }
         }
 
@@ -2434,28 +2434,28 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setOnCreate(obj.properties[access.shift()], access, onCreate);
+                setOnCreate(obj[access.shift()], access, onCreate);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
+                //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                if (!obj.properties[access[0]].onCreate) obj.properties[access[0]].onCreate = {};
+                if (!obj[access[0]].onCreate) obj[access[0]].onCreate = {};
 
-                if (!obj.properties[access[0]].onCreate[name]) obj.properties[access[0]].onCreate[name] = {};
+                if (!obj[access[0]].onCreate[name]) obj[access[0]].onCreate[name] = {};
 
-                if (obj.properties[access[0]].onCreate[name].templateId) obj.properties[access[0]].onCreate[name].overwritten = true;
+                if (obj[access[0]].onCreate[name].templateId) obj[access[0]].onCreate[name].overwritten = true;
 
-                obj.properties[access[0]].onCreate[name].value = onCreate;
-                obj.properties[access[0]].onCreate[name].trigger = trigger || 'after';
-                obj.properties[access[0]].onCreate[name].type = type || 'async';
+                obj[access[0]].onCreate[name].value = onCreate;
+                obj[access[0]].onCreate[name].trigger = trigger || 'after';
+                obj[access[0]].onCreate[name].type = type || 'async';
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'v', 'setPropertyOnCreateHandler', name);
+                OBJY.chainPermission(obj[access[0]], instance, 'v', 'setPropertyOnCreateHandler', name);
 
             }
         }
@@ -2469,25 +2469,25 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setOnDelete(obj.properties[access.shift()], access, onDelete);
+                setOnDelete(obj[access.shift()], access, onDelete);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                if (!obj.properties[access[0]].onDelete) obj.properties[access[0]].onDelete = {};
-                if (!obj.properties[access[0]].onDelete[name]) obj.properties[access[0]].onDelete[name] = {};
+                if (!obj[access[0]].onDelete) obj[access[0]].onDelete = {};
+                if (!obj[access[0]].onDelete[name]) obj[access[0]].onDelete[name] = {};
 
                 //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
-                if (obj.properties[access[0]].onDelete[name].template) obj.properties[access[0]].onDelete[name].overwritten = true;
-                obj.properties[access[0]].onDelete[name].value = onDelete;
-                obj.properties[access[0]].onDelete[name].trigger = trigger || 'after';
-                obj.properties[access[0]].onDelete[name].type = type || 'async';
+                if (obj[access[0]].onDelete[name].template) obj[access[0]].onDelete[name].overwritten = true;
+                obj[access[0]].onDelete[name].value = onDelete;
+                obj[access[0]].onDelete[name].trigger = trigger || 'after';
+                obj[access[0]].onDelete[name].type = type || 'async';
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'z', 'setPropertyOnDeleteHandler', name);
+                OBJY.chainPermission(obj[access[0]], instance, 'z', 'setPropertyOnDeleteHandler', name);
             }
         }
 
@@ -2501,18 +2501,18 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setConditions(obj.properties[access.shift()], access, conditions);
+                setConditions(obj[access.shift()], access, conditions);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
+                //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                obj.properties[access[0]].conditions = conditions;
+                obj[access[0]].conditions = conditions;
             }
         }
 
@@ -2529,21 +2529,21 @@ var OBJY = {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                setPermission(obj.properties[access.shift()], access, permission);
+                setPermission(obj[access.shift()], access, permission);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
                 var permissionKey = Object.keys(permission)[0];
-                if (!obj.properties[access[0]].permissions) obj.properties[access[0]].permissions = {};
+                if (!obj[access[0]].permissions) obj[access[0]].permissions = {};
 
-                obj.properties[access[0]].permissions[permissionKey] = permission[permissionKey];
+                obj[access[0]].permissions[permissionKey] = permission[permissionKey];
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'x', 'setPropertyPermission', propertyKey);
+                OBJY.chainPermission(obj[access[0]], instance, 'x', 'setPropertyPermission', propertyKey);
             }
         }
 
@@ -2585,51 +2585,51 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                if (obj.properties[access[0]].type == 'boolean') {
-                    if (typeof(newValue) != 'boolean') throw new InvalidValueException(newValue, obj.properties[access[0]].type);
+                if (obj[access[0]].type == 'boolean') {
+                    if (typeof(newValue) != 'boolean') throw new InvalidValueException(newValue, obj[access[0]].type);
                 }
-                if (obj.properties[access[0]].type == 'number') {
-                    if (isNaN(newValue)) throw new InvalidValueException(newValue, obj.properties[access[0]].type);
+                if (obj[access[0]].type == 'number') {
+                    if (isNaN(newValue)) throw new InvalidValueException(newValue, obj[access[0]].type);
                 }
 
 
-                if (obj.properties[access[0]].template) obj.properties[access[0]].overwritten = true;
-                obj.properties[access[0]].value = newValue;
+                if (obj[access[0]].template) obj[access[0]].overwritten = true;
+                obj[access[0]].value = newValue;
 
 
-                if (obj.properties[access[0]].onChange) {
-                    if (Object.keys(obj.properties[access[0]].onChange).length > 0) {
+                if (obj[access[0]].onChange) {
+                    if (Object.keys(obj[access[0]].onChange).length > 0) {
                         if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
                         if (!instance.handlerSequence[obj._id].onChange) instance.handlerSequence[obj._id].onChange = [];
                         instance.handlerSequence[obj._id].onChange.push({
-                            handler: obj.properties[access[0]].onChange,
-                            prop: obj.properties[access[0]]
+                            handler: obj[access[0]].onChange,
+                            prop: obj[access[0]]
                         });
                     }
                 }
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
+                OBJY.chainPermission(obj[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
 
             }
         }
@@ -2672,46 +2672,46 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                if (obj.properties[access[0]].template) {
+                if (obj[access[0]].template) {
                     newValue.overwritten = true;
-                    newValue.template = obj.properties[access[0]].template
+                    newValue.template = obj[access[0]].template
                 }
 
-                obj.properties[access[0]] = newValue;
+                obj[access[0]] = newValue;
 
-                if (obj.properties[access[0]].onChange) {
-                    if (Object.keys(obj.properties[access[0]].onChange).length > 0) {
+                if (obj[access[0]].onChange) {
+                    if (Object.keys(obj[access[0]].onChange).length > 0) {
                         if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
                         if (!instance.handlerSequence[obj._id].onChange) instance.handlerSequence[obj._id].onChange = [];
                         instance.handlerSequence[obj._id].onChange.push({
-                            handler: obj.properties[access[0]].onChange,
-                            prop: obj.properties[access[0]]
+                            handler: obj[access[0]].onChange,
+                            prop: obj[access[0]]
                         });
                     }
                 }
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setProperty', propertyKey);
+                OBJY.chainPermission(obj[access[0]], instance, 'u', 'setProperty', propertyKey);
 
 
             }
@@ -2738,36 +2738,36 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
 
-                if (obj.properties[access[0]].template) obj.properties[access[0]].overwritten = true;
+                if (obj[access[0]].template) obj[access[0]].overwritten = true;
 
-                delete obj.properties[access[0]].date;
-                obj.properties[access[0]].interval = newValue;
+                delete obj[access[0]].date;
+                obj[access[0]].interval = newValue;
 
-                if (obj.properties[access[0]].lastOccurence) {
+                if (obj[access[0]].lastOccurence) {
 
-                    var nextOccurence = moment(obj.properties[access[0]].lastOccurence).utc().add(newValue);
+                    var nextOccurence = moment(obj[access[0]].lastOccurence).utc().add(newValue);
                     
                     /*instance.eventAlterationSequence.push({
                         operation: 'remove',
@@ -2785,7 +2785,7 @@ var OBJY = {
                     })*/
                 }
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventInterval', propertyKey);
+                OBJY.chainPermission(obj[access[0]], instance, 'u', 'setEventInterval', propertyKey);
 
             }
         }
@@ -2814,12 +2814,12 @@ var OBJY = {
                         if (obj[shift].template) obj[shift].overwritten = true;
                         setValue(obj[shift], access, value);
 
-                    } else if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    } else if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                         }
 
-                        setValue(obj.properties[shift], access, value);
+                        setValue(obj[shift], access, value);
                     }
                 } catch (e) {}
 
@@ -2827,29 +2827,20 @@ var OBJY = {
             } else {
                 //obj[access[0]] = value;
                 try {
-                    if(obj[access[0]])
-                    {
-
-                    } else 
-                    {
-                        var t = obj.properties[access[0]].type;
-                    }
+    
+                        var t = obj[access[0]];
+                    
                     
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                if(obj[access[0]])
-                {
+                
                     if (obj[access[0]].interval)
                         obj[access[0]].nextOccurence = moment().utc().add(obj[access[0]].interval).toISOString();
                     else obj[access[0]].triggered = newValue;
-                }
-                else {
-                    if (obj.properties[access[0]].interval)
-                        obj.properties[access[0]].nextOccurence = moment().utc().add(obj.properties[access[0]].interval).toISOString();
-                    else obj.properties[access[0]].triggered = newValue;
-                }
+               
+                
                 
                 //obj.properties[access[0]].overwritten = true;
             }
@@ -2874,33 +2865,33 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
 
-                    var t = obj.properties[access[0]].type;
+                    var t = obj[access[0]];
 
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
 
-                obj.properties[access[0]].lastOccurence = newValue;
+                obj[access[0]].lastOccurence = newValue;
 
-                obj.properties[access[0]].nextOccurence = moment(newValue).utc().add(moment.duration(obj.properties[access[0]].interval)).toISOString();
+                obj[access[0]].nextOccurence = moment(newValue).utc().add(moment.duration(obj[access[0]].interval)).toISOString();
             }
         }
 
@@ -2923,32 +2914,32 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
 
-                if (obj.properties[access[0]].template) obj.properties[access[0]].overwritten = true;
+                if (obj[access[0]].template) obj[access[0]].overwritten = true;
 
-                if (!obj.properties[access[0]].reminders)
-                    obj.properties[access[0]].reminders = {};
+                if (!obj[access[0]].reminders)
+                    obj[access[0]].reminders = {};
 
-                obj.properties[access[0]].reminders[reminder.diff] = {
+                obj[access[0]].reminders[reminder.diff] = {
                     action: reminder.action
                 };
             }
@@ -2974,31 +2965,31 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
 
-                if (obj.properties[access[0]].reminders) {
+                if (obj[access[0]].reminders) {
                     try {
-                        delete obj.properties[access[0]].reminders[reminder];
+                        delete obj[access[0]].reminders[reminder];
                     } catch (e) {
                         throw new NoSuchReminderException(reminder);
                     }
@@ -3023,33 +3014,33 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
 
-                if (obj.properties[access[0]].template) obj.properties[access[0]].overwritten = true;
-                delete obj.properties[access[0]].interval;
-                delete obj.properties[access[0]].lastOccurence;
-                delete obj.properties[access[0]].nextOccurence;
-                obj.properties[access[0]].date = newValue;
+                if (obj[access[0]].template) obj[access[0]].overwritten = true;
+                delete obj[access[0]].interval;
+                delete obj[access[0]].lastOccurence;
+                delete obj[access[0]].nextOccurence;
+                obj[access[0]].date = newValue;
 
 
                 /*instance.eventAlterationSequence.push({
@@ -3067,7 +3058,7 @@ var OBJY = {
                     date: newValue
                 })*/
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventDate', propertyKey);
+                OBJY.chainPermission(obj[access[0]], instance, 'u', 'setEventDate', propertyKey);
 
             }
         }
@@ -3086,37 +3077,37 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                    if (obj[shift].type) {
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
+                        if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                            if (obj[shift].template) obj[shift].overwritten = true;
                             //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                setValue(obj[shift], access, value);
             } else {
 
                 try {
-                    var t = obj.properties[access[0]].value;
+                    var t = obj[access[0]];
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
 
 
-                if (obj.properties[access[0]].template) obj.properties[access[0]].overwritten = true;
+                if (obj[access[0]].template) obj[access[0]].overwritten = true;
 
-                obj.properties[access[0]].action = newValue;
+                obj[access[0]].action = newValue;
 
-                OBJY.chainPermission(obj.properties[access[0]], instance, 'u', 'setEventAction', propertyKey);
+                OBJY.chainPermission(obj[access[0]], instance, 'u', 'setEventAction', propertyKey);
 
-                //instance.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })
-                //instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })
+                //instance.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj[access[0]], date: newValue })
+                //instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj[access[0]], date: newValue })
             }
         }
 
