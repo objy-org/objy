@@ -22,7 +22,7 @@ OBJY.define({
     customProps: {
         assi: null
     },
-    observer : new EventMapper(OBJY)
+    //observer : new EventMapper(OBJY)
 })
 
 

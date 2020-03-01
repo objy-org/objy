@@ -1,12 +1,11 @@
 var moment = require("moment");
 
 Mapper = function(OBJY) {
-    return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
+    return Object.assign(new OBJY.ObserverTemplate(OBJY), {
 
         initialize: function(millis) {
             var self = this;
-            
-            // interval
+
             this.interval = setInterval(function() {
 
                 self.run(moment().utc());
@@ -22,12 +21,14 @@ Mapper = function(OBJY) {
 
                 data.forEach(function(tenant) {
 
-                    OBJY.Logger.log("Running...")
+                    Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
 
                     self.OBJY.getPersistence(self.objectFamily).getByCriteria({
                         _aggregatedEvents: {
                             $elemMatch: {
-                                'date': { $lte: date.toISOString() }
+                                'date': {
+                                    $lte: date.toISOString()
+                                }
                             }
                         }
                     }, function(objs) {
@@ -35,6 +36,7 @@ Mapper = function(OBJY) {
                         objs.forEach(function(obj) {
 
                             obj = OBJY[self.objectFamily](obj);
+
                             obj._aggregatedEvents.forEach(function(aE) {
 
                                 var prop = obj.getProperty(aE.propName);
@@ -43,8 +45,12 @@ Mapper = function(OBJY) {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
 
+                                        OBJY.Logger.log('d._aggregatedEvents')
+                                        OBJY.Logger.log(d._aggregatedEvents)
+
+
                                     }, function(err) {
-                                        OBJY.Logger.error(err)
+                                        console.log(err);
                                     }, tenant)
 
                                 }, tenant, {});
