@@ -42,7 +42,6 @@ OBJY.SensorMeasure({name: "sss", properties: { test: { evt: {type: 'event', inte
     console.info(data1)
 },15000)
     
-
 })
 
 

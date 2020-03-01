@@ -1811,20 +1811,27 @@ var OBJY = {
         var propertyToReturn;
 
         function getValue(obj, access) {
+
+           
             if (typeof(access) == 'string') {
                 access = access.split('.');
             }
             if (access.length > 1) {
-                getValue(obj.properties[access.shift()], access);
+                var k = access.shift();
+                if(obj[k]) getValue(obj[k], access);
+                else if(obj.properties[k]) getValue(obj.properties[k], access);
+            
             } else {
 
-                try {
+               /* try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyName);
-                }
+                }*/
 
-                propertyToReturn = obj.properties[access[0]];
+                if(obj[access[0]]) propertyToReturn = obj[access[0]];
+                else if(obj.properties[access[0]]) propertyToReturn = obj.properties[access[0]];
+               
             }
         }
 
@@ -2803,30 +2810,48 @@ var OBJY = {
 
                 var shift = access.shift();
                 try {
-                    if (obj.properties[shift].type) {
+                    if(obj[shift])
+                    {
+                        if (obj[shift].template) obj[shift].overwritten = true;
+                        setValue(obj[shift], access, value);
+
+                    } else if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
                         }
-                        if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                            if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
-                        }
+
+                        setValue(obj.properties[shift], access, value);
                     }
                 } catch (e) {}
 
-                setValue(obj.properties[shift], access, value);
+                
             } else {
                 //obj[access[0]] = value;
                 try {
-                    var t = obj.properties[access[0]].type;
+                    if(obj[access[0]])
+                    {
+
+                    } else 
+                    {
+                        var t = obj.properties[access[0]].type;
+                    }
+                    
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
 
-                if (obj.properties[access[0]].interval)
-                    obj.properties[access[0]].nextOccurence = moment().utc().add(obj.properties[access[0]].interval).toISOString();
-                else obj.properties[access[0]].triggered = newValue;
+                if(obj[access[0]])
+                {
+                    if (obj[access[0]].interval)
+                        obj[access[0]].nextOccurence = moment().utc().add(obj[access[0]].interval).toISOString();
+                    else obj[access[0]].triggered = newValue;
+                }
+                else {
+                    if (obj.properties[access[0]].interval)
+                        obj.properties[access[0]].nextOccurence = moment().utc().add(obj.properties[access[0]].interval).toISOString();
+                    else obj.properties[access[0]].triggered = newValue;
+                }
+                
                 //obj.properties[access[0]].overwritten = true;
             }
         }

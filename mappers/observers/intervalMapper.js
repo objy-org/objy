@@ -48,7 +48,6 @@ Mapper = function(OBJY) {
                                         OBJY.Logger.log('d._aggregatedEvents')
                                         OBJY.Logger.log(d._aggregatedEvents)
 
-
                                     }, function(err) {
                                         console.log(err);
                                     }, tenant)
