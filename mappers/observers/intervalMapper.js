@@ -17,13 +17,13 @@ Mapper = function(OBJY) {
 
             var self = this;
 
-            self.OBJY.getPersistence(self.objectFamily).listClients(function(data) {
+            OBJY.getPersistence(self.objectFamily).listClients(function(data) {
 
                 data.forEach(function(tenant) {
 
-                    Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
+                    OBJY.Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
 
-                    self.OBJY.getPersistence(self.objectFamily).getByCriteria({
+                    OBJY.getPersistence(self.objectFamily).getByCriteria({
                         _aggregatedEvents: {
                             $elemMatch: {
                                 'date': {
@@ -41,7 +41,7 @@ Mapper = function(OBJY) {
 
                                 var prop = obj.getProperty(aE.propName);
 
-                                self.OBJY.execProcessorAction(prop.action, obj, prop, null, function() {
+                                OBJY.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
 

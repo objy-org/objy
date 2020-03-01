@@ -4974,7 +4974,6 @@ var OBJY = {
 
             //console.warn('cccache', thisRef._id, instance.caches[thisRef.role].data[thisRef._id])
             if (instance.caches[thisRef.role].data[thisRef._id]) {
-                //console.warn('________________id', thisRef._id)
                 prepareObj(instance.caches[thisRef.role].data[thisRef._id]);
             } else {
 
@@ -4994,15 +4993,12 @@ var OBJY = {
 
             return OBJY.deserialize(this);
         }
-
-
     },
 
     hello: function() {
         Logger.log("Hello from OBJY!");
     }
 }
-
 
 if (_nodejs) module.exports = OBJY;
 else if (window) window.OBJY = OBJY;

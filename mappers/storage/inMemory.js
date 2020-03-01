@@ -1,3 +1,4 @@
+var Query = require('./../../dependencies/query.js')
 var Mapper = function(OBJY, options) {
 
     return Object.assign(new OBJY.StorageTemplate(OBJY, options), {
