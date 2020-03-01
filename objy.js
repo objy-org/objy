@@ -2800,7 +2800,6 @@ var OBJY = {
 
         if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new NotAnEventException(propertyKey);
 
-
         function setValue(obj, access, value) {
             if (typeof(access) == 'string') {
                 access = access.split('.');
@@ -2859,7 +2858,6 @@ var OBJY = {
         setValue(obj, propertyKey, newValue);
 
     },
-
 
     EventLastOccurenceSetWrapper: function(obj, propertyKey, newValue, client, notPermitted) {
 
