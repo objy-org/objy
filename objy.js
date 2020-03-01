@@ -938,7 +938,7 @@ var OBJY = {
 
                         doTheProps(template.properties[p], obj.properties[p]);
                     }
-
+                  
 
                     if (!obj.properties[p]) {
                         obj.properties[p] = template.properties[p];
@@ -4341,12 +4341,7 @@ var OBJY = {
 
                 Object.keys(props).forEach(function(p) {
 
-                    if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                        if (prePropsString) {
-                            aggregateAllEvents(props[p].properties, prePropsString + "." + p)
-                        }
-                    }
-                    else if(typeof props[p] == 'object') {
+                    if(typeof props[p] == 'object') {
                         aggregateAllEvents(props[p], p)
                     }
 
@@ -4554,12 +4549,7 @@ var OBJY = {
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
-                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                        if (prePropsString) {
-                            aggregateAllEvents(props[p].properties, prePropsString + "." + p)
-                        }
-                    }
-                    else if(typeof props[p] == 'object') {
+                     if(typeof props[p] == 'object') {
                         aggregateAllEvents(props[p], p)
                     }
 
@@ -4793,12 +4783,7 @@ var OBJY = {
                     function aggregateAllEvents(props, prePropsString) {
 
                         Object.keys(props || {}).forEach(function(p) {
-                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                    if (prePropsString) {
-                                        aggregateAllEvents(props[p].properties, prePropsString + "." + p)
-                                    }
-                                }
-                                else if(typeof props[p] == 'object') {
+                              if(typeof props[p] == 'object') {
                                     aggregateAllEvents(props[p], p)
                                 }
 
