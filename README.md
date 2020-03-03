@@ -22,7 +22,7 @@ The philisophy behind OBJY ist to define objects and tell them what to do. In or
 
 //Build an object
 
-OBJY.Object({ name: "Passport", number: "123" })
+OBJY.Object({ name: "Passport", expires: { date: "2020-10-05", action: "delete this;" }})
 ```
 
 #### Object with behaviour
