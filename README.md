@@ -56,6 +56,10 @@ OBJY.Objects([{}],[{}]).add(callback);
 OBJY.Object(id).get(callback);
 ```
 
+```shell
+get object id;
+```
+
 #### Query
 
 ```javascript
