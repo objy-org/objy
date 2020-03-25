@@ -1,11 +1,38 @@
 var mongoose = require('mongoose');
 var Grid = require('gridfs-stream');
+var Schema = mongoose.Schema;
 var GridFsStorage = require('multer-gridfs-storage');
 var shortid = require('shortid');
 
 const { createModel } = require('mongoose-gridfs');
 
 var Attachment;
+
+var generalObjectModel = {
+    type: { type: String, index: true },
+    applications: { type: [String], index: true },
+    created: { type: String, index: true },
+    lastModified: { type: String, index: true },
+    role: String,
+    inherits: [],
+    name: String,
+    mimetype: String,
+    onDelete: {},
+    onCreate: {},
+    onChange: {},
+    permissions: {},
+    properties: {},
+    privileges: {},
+    aggregatedEvents: [],
+    tenantId: String,
+    password: String,
+    username: String,
+    email: String,
+    _clients: [],
+    authorisations: {}
+};
+
+var ObjSchema = new Schema(generalObjectModel, { strict: false });
 
 const mongo = mongoose.mongo;
 
@@ -128,10 +155,32 @@ Mapper = function(OBJY, options) {
                 connection: db
             });
 
-            try {
-                var data = Attachment.read({ _id: id })
+            var constrains = { _id: id };
 
-                success({ _id: id, name: id, role: this.objectFamily, properties: { data: data } });
+            if (app) constrains['applications'] = { $in: [app] }
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) constrains['tenantId'] = client;
+
+            Obj = db.model(this.objectFamily, ObjSchema);
+
+            try {
+                var _data = Attachment.read({ _id: mongoose.Types.ObjectId(id) })
+
+                Obj.findOne(constrains, function(err, data) {
+                    if (err) {
+                        error(err);
+                        return;
+                    }
+
+                    if (!data.properties) data.properties = {};
+
+                    data.properties.data = _data;
+
+                    success(data);
+                    return;
+                });
+
+                //success({ _id: id, name: id, role: this.objectFamily, properties: { data: data } });
             } catch (e) {
                 OBJY.Logger.error(e);
                 error('Error getting file')
@@ -163,19 +212,38 @@ Mapper = function(OBJY, options) {
                 connection: db
             });
 
-            spooElement = spooElement.properties.data;
+            //spooElement = spooElement.properties.data;
+
+            var Obj = db.model(this.objectFamily, ObjSchema);
 
             try {
 
                 var fileId = shortid.generate();
 
-                Attachment.write({ filename: fileId, name: fileId }, spooElement, (err, file) => {
+                Attachment.write({ filename: fileId, name: fileId, mimetype: spooElement.properties.mimetype }, spooElement.properties.data, (err, file) => {
                     if (err) {
                         OBJY.Logger.error(err);
                         error('Error adding file');
                         return;
                     }
-                    success({ _id: file._id, name: fileId })
+
+                    spooElement._id = file._id;
+                    spooElement.name = fileId;
+
+                    if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) spooElement.tenantId = client;
+
+                    delete spooElement.properties.data;
+                    spooElement.mimetype = spooElement.properties.mimetype + '';
+                    delete spooElement.properties.mimetype;
+                    new Obj(spooElement).save(function(err, data) {
+                        if (err) {
+                            error(err);
+                            return;
+                        }
+                        success(data);
+                    })
+
+                    //success({ _id: file._id, name: fileId })
                 });
 
             } catch (e) {
@@ -192,6 +260,18 @@ Mapper = function(OBJY, options) {
                 connection: db
             });
 
+
+            var Obj = db.model(this.objectFamily, ObjSchema);
+
+            var criteria = { _id: spooElement._id };
+
+            if (app) criteria['applications'] = { $in: [app] }
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
+
+
+
+
             Attachment.unlink({ _id: spooElement._id }, (err, file) => {
                 if (err) {
                     OBJY.Logger.error(err);
@@ -199,7 +279,20 @@ Mapper = function(OBJY, options) {
                     return
                 }
 
-                success({ _id: spooElement._id })
+                Obj.deleteOne(criteria, function(err, data) {
+                    if (err) {
+                        error(err);
+                        return;
+                    }
+                    if (data.n == 0) error("object not found");
+                    else {
+                        console.log("remove success");
+                        success({ _id: spooElement._id });
+                    }
+
+                })
+
+                //success({ _id: spooElement._id })
             });
         }
     })

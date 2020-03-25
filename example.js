@@ -10,10 +10,11 @@ OBJY.client('mb');
 
 OBJY.useUser({
     authorisations: {
-        '*': [{query: {}, perm:'*'}]
+        '*': [{ query: {}, perm: '*' }]
     }
 })
 
+OBJY.Logger.enabled = ['error'];
 //OBJY.metaPropPrefix = '_';
 
 OBJY.define({
@@ -22,11 +23,11 @@ OBJY.define({
     customProps: {
         assi: null
     },
-    observer : new EventMapper(OBJY)
+    observer: new EventMapper(OBJY)
 })
 
 
-OBJY.SensorMeasure({name: "sss", properties: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}).add(function(data1) {
+OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 } } } }).add(function(data1) {
 
     /*OBJY.SensorMeasure(data1._id).get(function(data) {
         data.replace({name: "sss", evt: {type: 'event', interval: "5s", action: "console.log('hit hre')" }}).update(function(saved){
@@ -34,7 +35,36 @@ OBJY.SensorMeasure({name: "sss", properties: { evt: {type: 'event', interval: 12
         })
     })*/
 
-    console.info(data1)
+    OBJY.SensorMeasure({ inherits: [data1._id], name: 'underobject' }).add(function(data2) {
+
+        OBJY.SensorMeasure(data2._id).get(function(data3) {
+            //console.log('d3', data3)
+
+            //data3 = OBJY.SensorMeasure(data3);
+
+            //data3.addProperty('groups.three', { type: 'shortText', value: 'fff' });
+
+            //console.log('zwische', data3)
+
+            data3.properties.groups.three = { t: 3 }
+            //data3.addProperty('three', { t: 3 })
+
+            data3.replace(data3).update(function(d4) {
+                data1.replace({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 }, four: {f:4} } } }).update(function(data5)
+                    {
+                        console.warn('REPLACED THAT SHIT', data5);
+                         OBJY.SensorMeasure(d4._id).get(function(d6){
+                            console.warn('d6', d6)
+                         })
+
+                    });
+
+               
+            })
+
+        })
+
+    })
 
 })
 

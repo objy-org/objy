@@ -1005,7 +1005,7 @@ var OBJY = {
     Mapper: {
         Storage: {
             Mongo: require('./mappers/storage/mongoMapper.js'),
-            //GridFS: require('./mappers/storage/gridFSMapper.js'),
+            GridFS: require('./mappers/storage/gridFSMapper.js'),
         },
     },
 
@@ -1613,55 +1613,97 @@ var OBJY = {
                 }
             })
 
+            var isObject = function(a) {
+    return (!!a) && (a.constructor === Object);
+};
 
             // Properties
             function doTheProps(template, obj) {
 
                 if (!obj) obj = {}
 
-                if (!obj.properties) {
+               /* if (!obj.properties) {
                     obj.properties = {};
-                }
+                }*/
 
                 //console.info('compare', template, 'obj:', obj)
 
-                if (!template.properties) template.properties = {};
+                //if (!template.properties) template.properties = {};
 
-                Object.keys(template.properties).forEach(function(p) {
+                console.log('ok,', template, Object.keys(template || {}));
 
-                    if (template.properties[p].type == 'bag') {
+                Object.keys(template || {}).forEach(function(p) {
 
-                        if (!obj.properties[p]) {
+                    if (template[p].type == 'bag') {
 
-                            obj.properties[p] = template.properties[p];
-                            obj.properties[p].template = templateId;
+                        if (!obj[p]) {
+
+                            obj[p] = template[p];
+                            obj[p].template = templateId;
                         } else {
-                            if (!obj.properties[p].overwritten && Object.keys(obj.properties[p]).length == 0) {
-                                obj.properties[p] = template.properties[p];
+                            if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                obj[p] = template[p];
                             }
 
-                            obj.properties[p].template = templateId;
+                            obj[p].template = templateId;
                             //obj.properties[p].overwritten = true;
                         }
 
-                        doTheProps(template.properties[p], obj.properties[p]);
-                    }
+                        doTheProps(template[p], obj[p]);
+
+                    } else if (isObject(template[p])) {
+
+                        if (!obj[p]) {
+
+                            obj[p] = template[p];
+                            obj[p].template = templateId;
+                        } else {
+
+                            console.log('TTT', p, obj[p]);
+                            if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                obj[p] = template[p];
+                            }
+
+                            obj[p].template = templateId;
+                            //obj.properties[p].overwritten = true;
+                        }
+
+                        doTheProps(template[p], obj[p]);
+
+                    } 
+                    /*else if (Object.keys(template[p] || {}).length > 0) {
+
+                                           if (!obj[p]) {
+
+                                               obj[p] = template[p];
+                                               obj[p].template = templateId;
+                                           } else {
+                                               if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                                   obj[p] = template[p];
+                                               }
+
+                                               obj[p].template = templateId;
+                                               //obj.properties[p].overwritten = true;
+                                           }
+
+                                           doTheProps(template[p], obj[p]);
+                                       }*/
 
 
-                    if (!obj.properties[p]) {
-                        obj.properties[p] = template.properties[p];
-                        obj.properties[p].template = templateId;
-                        delete obj.properties[p].overwritten;
+                    if (!obj[p]) {
+                        obj[p] = template[p];
+                        obj[p].template = templateId;
+                        delete obj[p].overwritten;
                     } else {
 
-                        if (!obj.properties[p].overwritten) {
-                            obj.properties[p].template = templateId;
-                            if (obj.properties[p].value == null) obj.properties[p].value = template.properties[p].value;
+                        if (!obj[p].overwritten) {
+                            obj[p].template = templateId;
+                            if (obj[p].value == null) obj[p].value = template[p].value;
                             //obj.properties[p].overwritten = true;
                         }
 
-                        if (!obj.properties[p].metaOverwritten) {
-                            obj.properties[p].meta = template.properties[p].meta;
+                        if (!obj[p].metaOverwritten) {
+                            obj[p].meta = template[p].meta;
                         }
                     }
 
@@ -1679,25 +1721,25 @@ var OBJY = {
                     }
 
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                        if (template.properties[p][h]) {
-                            if (!obj.properties[p][h]) obj.properties[p][h] = {};
+                        if (template[p][h]) {
+                            if (!obj[p][h]) obj[p][h] = {};
 
-                            Object.keys(template.properties[p][h]).forEach(function(oC) {
+                            Object.keys(template[p][h]).forEach(function(oC) {
 
-                                if (!obj.properties[p][h][oC]) {
-                                    obj.properties[p][h][oC] = template.properties[p][h][oC];
-                                    obj.properties[p][h][oC].template = templateId;
+                                if (!obj[p][h][oC]) {
+                                    obj[p][h][oC] = template[p][h][oC];
+                                    obj[p][h][oC].template = templateId;
                                 }
                             })
                         }
                     })
 
                 })
+
+
             }
 
-
-            doTheProps(template, obj);
-
+            doTheProps(template.properties, obj.properties);
 
             // Applications
 
@@ -2604,7 +2646,6 @@ var OBJY = {
                 property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_BOOLEAN;
             else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
         }*/
-
 
         if (existing) throw new DuplicatePropertyException(propertyKey);
 
@@ -4333,16 +4374,14 @@ var OBJY = {
             function doTheProps(self, o) {
                 console.log('dtp', o)
                 Object.keys(o).forEach(function(k) {
-
-                    if(o[k] == null || o[k] === undefined) return;
+                    if (o[k] == null || o[k] === undefined) return;
 
                     self[k] = o[k];
                     if (typeof o[k] === 'object') {
                         console.log('typeof', typeof o[k], o[k])
                         doTheProps(self[k], o[k])
                     }
-
-                    if (self[k].template) self[k].overwritten = true;
+                    self[k].overwritten = true;
                 })
             }
 
@@ -4913,7 +4952,7 @@ var OBJY = {
 
 
             var tmpBag = this.getProperty(bag);
-            if (tmpBag.template) tmpBag.overwritten = true;
+            //if (tmpBag.template) tmpBag.overwritten = true;
 
             new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance);
 
