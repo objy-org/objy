@@ -19,6 +19,7 @@ OBJY.Logger.enabled = ['error'];
 
 OBJY.define({
     name: "SensorMeasure",
+    dirty: true,
     pluralName: "SensorMeasures",
     customProps: {
         assi: null
@@ -26,6 +27,19 @@ OBJY.define({
     observer: new EventMapper(OBJY)
 })
 
+
+OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 } } } }).add(function(data1) {
+
+    console.log('added', data1);
+
+    OBJY.SensorMeasure(data1._id).get(function(f) {
+        console.log('f', f)
+    })
+
+
+});
+
+return;
 
 OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 } } } }).add(function(data1) {
 
@@ -50,16 +64,15 @@ OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { 
             //data3.addProperty('three', { t: 3 })
 
             data3.replace(data3).update(function(d4) {
-                data1.replace({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 }, four: {f:4} } } }).update(function(data5)
-                    {
-                        console.warn('REPLACED THAT SHIT', data5);
-                         OBJY.SensorMeasure(d4._id).get(function(d6){
-                            console.warn('d6', d6)
-                         })
+                data1.replace({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 }, four: { f: 4 } } } }).update(function(data5) {
+                    console.warn('REPLACED THAT SHIT', data5);
+                    OBJY.SensorMeasure(d4._id).get(function(d6) {
+                        console.warn('d6', d6)
+                    })
 
-                    });
+                });
 
-               
+
             })
 
         })

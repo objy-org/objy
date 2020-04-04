@@ -40,8 +40,8 @@ Mapper = function(OBJY, options) {
         index: {},
         globalPaging: 20,
 
-        connect: function(connectionString, success, error) {
-            this.database = mongoose.createConnection(connectionString);
+        connect: function(connectionString, success, error, options) {
+            this.database = mongoose.createConnection(connectionString, options);
 
             this.database.on('error', function(err) {
                 error(err)
@@ -177,8 +177,6 @@ Mapper = function(OBJY, options) {
             var Obj = db.model(this.objectFamily, ObjSchema);
 
 
-            if (app) criteria['applications'] = { $in: [app] }
-
 
             if (flags.$page == 1) flags.$page = 0;
             else flags.$page -= 1;
@@ -205,7 +203,11 @@ Mapper = function(OBJY, options) {
 
                 arr.push({ $sort: s })
             }
-            
+
+            if (app) criteria['applications'] = { $in: [app] }
+
+            console.warn('__APP__', app, criteria['applications']);
+        
             console.warn('criteria', criteria, this.globalPaging, flags.$page)
 
             var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });
@@ -254,7 +256,7 @@ Mapper = function(OBJY, options) {
             var db = this.getDBByMultitenancy(client);
 
             var Obj = db.model(this.objectFamily, ObjSchema);
-        
+
             var criteria = { _id: spooElement._id };
 
             if (app) criteria['applications'] = { $in: [app] }

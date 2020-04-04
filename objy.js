@@ -6,6 +6,10 @@ if (_nodejs) {
     };
 }
 
+var isObject = function(a) {
+    return (!!a) && (a.constructor === Object);
+};
+
 var moment = require('moment');
 var shortid = require('shortid');
 
@@ -1614,27 +1618,29 @@ var OBJY = {
             })
 
             var isObject = function(a) {
-    return (!!a) && (a.constructor === Object);
-};
+                return (!!a) && (a.constructor === Object);
+            };
 
             // Properties
             function doTheProps(template, obj) {
 
                 if (!obj) obj = {}
 
-               /* if (!obj.properties) {
-                    obj.properties = {};
-                }*/
+                /* if (!obj.properties) {
+                     obj.properties = {};
+                 }*/
 
                 //console.info('compare', template, 'obj:', obj)
 
                 //if (!template.properties) template.properties = {};
 
-                console.log('ok,', template, Object.keys(template || {}));
+                console.log('ok,', obj, template, Object.keys(template || {}));
 
                 Object.keys(template || {}).forEach(function(p) {
 
-                    if (template[p].type == 'bag') {
+                    if (!isObject(template[p])) return;
+
+                    if ((template[p] || {}).type == 'bag') {
 
                         if (!obj[p]) {
 
@@ -1670,24 +1676,8 @@ var OBJY = {
 
                         doTheProps(template[p], obj[p]);
 
-                    } 
-                    /*else if (Object.keys(template[p] || {}).length > 0) {
+                    }
 
-                                           if (!obj[p]) {
-
-                                               obj[p] = template[p];
-                                               obj[p].template = templateId;
-                                           } else {
-                                               if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
-                                                   obj[p] = template[p];
-                                               }
-
-                                               obj[p].template = templateId;
-                                               //obj.properties[p].overwritten = true;
-                                           }
-
-                                           doTheProps(template[p], obj[p]);
-                                       }*/
 
 
                     if (!obj[p]) {
@@ -1736,10 +1726,9 @@ var OBJY = {
 
                 })
 
-
             }
 
-            doTheProps(template.properties, obj.properties);
+            doTheProps(template.properties || {}, obj.properties || {});
 
             // Applications
 
@@ -4381,7 +4370,8 @@ var OBJY = {
                         console.log('typeof', typeof o[k], o[k])
                         doTheProps(self[k], o[k])
                     }
-                    self[k].overwritten = true;
+
+                    if (Object.keys(self[k] || {}).length > 0) self[k].overwritten = true;
                 })
             }
 
@@ -5060,6 +5050,27 @@ var OBJY = {
 
             OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
 
+            if (!this._id) this._id = OBJY.ID();
+
+            if (params.dirty) {
+
+                OBJY.add(thisRef, function(data) {
+
+                        thisRef._id = data._id;
+
+                        success(OBJY.deserialize(data));
+
+                        delete thisRef.instance;
+
+                    },
+                    function(err) {
+                        console.warn('err', err, error)
+                        error(err);
+                    }, app, client);
+
+                return OBJY.deserialize(this);
+            }
+
             Object.keys(thisRef.onCreate).forEach(function(key) {
 
                 if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
@@ -5074,13 +5085,14 @@ var OBJY = {
             this.created = moment().utc().toDate().toISOString();
             this.lastModified = moment().utc().toDate().toISOString();
 
-            var thisRef = this;
-
             thisRef._aggregatedEvents = [];
 
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
+
+                    if (!isObject(props[p])) return;
+
                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                         if (prePropsString) {
                             aggregateAllEvents(props[p].properties, prePropsString + "." + p)
@@ -5155,7 +5167,7 @@ var OBJY = {
 
             if (this.properties) aggregateAllEvents(this.properties);
 
-            if (!this._id) this._id = OBJY.ID();
+
 
             if (app)
                 if (this.applications.indexOf(app) == -1) this.applications.push(app);
@@ -5253,6 +5265,25 @@ var OBJY = {
 
             var thisRef = this;
 
+
+            if (params.dirty) {
+
+                OBJY.updateO(thisRef, function(data) {
+
+                        delete instance.handlerSequence[this._id];
+
+                        instance.eventAlterationSequence = [];
+
+                        if (success) success(OBJY.deserialize(data));
+
+                    },
+                    function(err) {
+                        if (error) error(err);
+                    }, app, client);
+
+                return OBJY.deserialize(this);
+            }
+
             OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')
 
             if ((instance.permissionSequence[thisRef._id] || []).length > 0) {
@@ -5293,6 +5324,9 @@ var OBJY = {
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
+
+                    if (!isObject(props[p])) return;
+
                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                         if (prePropsString) {
                             aggregateAllEvents(props[p].properties, prePropsString + "." + p)
@@ -5483,9 +5517,31 @@ var OBJY = {
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
 
+            var thisRef = JSON.parse(JSON.stringify(this));
+
             OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp);
 
-            var thisRef = JSON.parse(JSON.stringify(this));
+            if (params.dirty) {
+
+                OBJY.getObjectById(this.role, this._id, function(data) {
+
+                    return OBJY.remove(thisRef, function(_data) {
+
+                        success(OBJY.deserialize(data));
+
+                    }, function(err) {
+                        error(err)
+                    }, app, client);
+
+
+                }, function(err) {
+                    error(err)
+                }, app, client);
+
+                return OBJY.deserialize(this);
+
+            }
+
 
             OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd');
 
@@ -5514,6 +5570,9 @@ var OBJY = {
                     function aggregateAllEvents(props, prePropsString) {
 
                         Object.keys(props || {}).forEach(function(p) {
+
+                            if (!isObject(props[p])) return;
+
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                                 if (prePropsString) {
                                     aggregateAllEvents(props[p].properties, prePropsString + "." + p)
@@ -5618,9 +5677,24 @@ var OBJY = {
             var client = instance.activeTenant;
             var app = instance.activeApp;
 
+            var thisRef = this;
+
             OBJY.checkAuthroisations(this, instance.activeUser, "r", instance.activeApp);
 
-            var thisRef = this;
+            if (params.dirty) {
+
+                OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
+
+                    success(OBJY[data.role](OBJY.deserialize(data)));
+
+                }, function(err) {
+                    error(err)
+                }, app, client);
+
+                return OBJY.deserialize(this);
+            }
+
+
             var counter = 0;
 
             function arrayDeserialize(obj, parentArray) {
