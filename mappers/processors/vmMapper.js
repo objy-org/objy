@@ -1,6 +1,4 @@
-
 const { VM, VMScript } = require('vm2');
-
 
 Mapper = function(OBJY) {
     return Object.assign(new OBJY.ProcessorTemplate(OBJY), {

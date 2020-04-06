@@ -1,16 +1,11 @@
 var moment = require("moment");
 
 Mapper = function(OBJY) {
-    return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
+    return Object.assign(new OBJY.ObserverTemplate(OBJY), {
 
         initialize: function(millis) {
             var self = this;
 
-            // first run
-            console.warn('init observer')
-            //self.run(new Date());
-
-            // interval
             this.interval = setInterval(function() {
 
                 self.run(moment().utc());
@@ -22,18 +17,18 @@ Mapper = function(OBJY) {
 
             var self = this;
 
-            self.OBJY.getPersistence(self.objectFamily).listClients(function(data) {
-
-                //console.log("d", data);
+            OBJY.getPersistence(self.objectFamily).listClients(function(data) {
 
                 data.forEach(function(tenant) {
 
-                    OBJY.Logger.log("Running...")
+                    OBJY.Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
 
-                    self.OBJY.getPersistence(self.objectFamily).getByCriteria({
+                    OBJY.getPersistence(self.objectFamily).getByCriteria({
                         _aggregatedEvents: {
                             $elemMatch: {
-                                'date': { $lte: date.toISOString() }
+                                'date': {
+                                    $lte: date.toISOString()
+                                }
                             }
                         }
                     }, function(objs) {
@@ -46,20 +41,19 @@ Mapper = function(OBJY) {
 
                                 var prop = obj.getProperty(aE.propName);
 
-                                self.OBJY.execProcessorAction(prop.action, obj, prop, null, function() {
+                                OBJY.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
 
+                                        OBJY.Logger.log('d._aggregatedEvents')
+                                        OBJY.Logger.log(d._aggregatedEvents)
+
                                     }, function(err) {
-                                        OBJY.Logger.error(err)
+                                        console.log(err);
                                     }, tenant)
 
-
                                 }, tenant, {});
-
                             })
-
-
                         })
 
                     }, function(err) {
@@ -71,10 +65,7 @@ Mapper = function(OBJY) {
 
             })
         }
-
-
     })
 }
-
 
 module.exports = Mapper;
