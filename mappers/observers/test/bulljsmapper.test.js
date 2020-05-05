@@ -8,31 +8,28 @@ var propName = "prop123";
 //var evtProp = {date: new Date().getTime(), action: 'console.log(1)'};
 var evtProp = {interval: 1000, action: 'console.log(1)'};
 
-describe('Object', function() {
-    it('create Mapper', function(done) {
+describe('Bull Mapper', function() {
+
+    test('create Mapper', function(done) {
       mapper = new M(OBJY);
+      expect(mapper).toBeTruthy();
       done();
     });
-});
 
-describe('Object', function() {
-    it('add event to schedule', async function(done) {
+    test('add event to schedule', async function(done) {
       
       mapper.addEvent(objectId, propName, evtProp, function(evt){
-
+        expect(evt).toBeTruthy();
         done();
 
       }, function(err){}, 'test');
   
     });
-});
 
-describe('Object', function() {
-    it('remove event from schedule', function(done) {
+    test('remove event from schedule', function(done) {
       
   		mapper.removeEvent(objectId, propName, evtProp, function(evt){
 
-  			console.log(evt);
   			done();
 
   		}, function(err){

@@ -5,7 +5,7 @@ var assert = require('assert');
 var Obj;
 
 describe('Object', function() {
-    it('should form an object', function(done) {
+    test('should form an object', function(done) {
       
       OBJY.define({
       	name: "Object",
@@ -13,7 +13,7 @@ describe('Object', function() {
       });
 
       Obj = OBJY.Object({});
-
+      expect(Obj).toBeTruthy();
       done();
       
     });

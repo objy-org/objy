@@ -93,11 +93,11 @@ return;
 
 OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 } } } }).add(function(data1) {
 
-    /*OBJY.SensorMeasure(data1._id).get(function(data) {
-        data.replace({name: "sss", evt: {type: 'event', interval: "5s", action: "console.log('hit hre')" }}).update(function(saved){
-            console.log(saved)
-        })
-    })*/
+    //observer : new EventMapper(OBJY)
+})
+
+
+OBJY.SensorMeasure({name: "sss", properties: { test: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}}).add(function(data1) {
 
     OBJY.SensorMeasure({ inherits: [data1._id], name: 'underobject' }).add(function(data2) {
 
@@ -129,6 +129,15 @@ OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { 
 
     })
 
+    setTimeout(function()
+    {
+        data1.remove(function(d){
+
+
+    })
+    console.info(data1)
+},15000)
+    
 })
 
 

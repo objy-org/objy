@@ -66,7 +66,6 @@ Mapper = function(OBJY, options) {
       
       // CURRENTLY ONLY POSSIBLE FOR DELAYED JOBS 
       this.scheduledQueue.getJob(objId + ':' + propName).then(function(job){
-            console.log('jjjoib__', job)
             success(job)
       });
       
@@ -112,14 +111,9 @@ Mapper = function(OBJY, options) {
 
         function remRepeatable()
         {
-
             var interval = Infinity;
 
             interval = moment.duration(event.interval).asMilliseconds()
-
-            console.log({ repeat: {
-              every: interval
-            }, jobId: objId + ':' + propName})
 
             self.scheduledQueue.removeRepeatable(objId + ':' + propName, { repeat: {
               every: interval
