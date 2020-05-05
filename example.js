@@ -5,6 +5,11 @@ const EventMapper = require('./mappers/observers/inMemoryStream.js')
 
 //OBJY.storage = new MongoMapper();
 
+OBJY.affectables = [{
+    affects: { role: 'object' },
+    apply: { properties: { firstName: 'asfadfsdfsdgsg' } }
+}];
+
 OBJY.useUser({
     authorisations: {
         '*': [{ query: {}, perm: 'cr' }]
@@ -15,6 +20,26 @@ OBJY.define({
     name: "object",
     pluralName: "objects",
     authable: true
+})
+
+OBJY.define({
+    name: "affect",
+    pluralName: "affects",
+    isRule: true
+})
+
+
+OBJY.affect({
+    name: "Users",
+    affects: {
+        role: 'user'
+    },
+    apply: {
+        firstName: null,
+        lastName: null
+    }
+}).add((d, e) => {
+    console.log('d', d)
 })
 
 
@@ -97,7 +122,7 @@ OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { 
 })
 
 
-OBJY.SensorMeasure({name: "sss", properties: { test: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}}).add(function(data1) {
+OBJY.SensorMeasure({ name: "sss", properties: { test: { evt: { type: 'event', interval: 12000, action: "console.log('hit hre')" } } } }).add(function(data1) {
 
     OBJY.SensorMeasure({ inherits: [data1._id], name: 'underobject' }).add(function(data2) {
 
@@ -129,15 +154,14 @@ OBJY.SensorMeasure({name: "sss", properties: { test: { evt: {type: 'event', inte
 
     })
 
-    setTimeout(function()
-    {
-        data1.remove(function(d){
+    setTimeout(function() {
+        data1.remove(function(d) {
 
 
-    })
-    console.info(data1)
-},15000)
-    
+        })
+        console.info(data1)
+    }, 15000)
+
 })
 
 

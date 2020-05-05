@@ -1029,6 +1029,11 @@ var OBJY = {
 
     },
 
+    affectables: [{
+        affects: { role: 'user' },
+        apply: { firstName: null, lastName: null }
+    }],
+
     handlerSequence: [],
     permissionSequence: [],
     commandSequence: [],
@@ -1074,6 +1079,15 @@ var OBJY = {
         this.activeApp = app;
 
         return this;
+    },
+
+    applyAffects: function(obj) {
+        var self = this;
+        self.affectables.forEach(function(a) {
+            if (Query.query([obj], a.affects, Query.undot).length != 0) {
+                Object.assign(obj, a.apply)
+            }
+        })
     },
 
     checkPermissions: function(user, app, obj, permission, soft) {
@@ -1930,12 +1944,10 @@ var OBJY = {
                         }
                     })
                 }
-
             })
         }
 
         doTheProps(obj.properties || {});
-
 
         // Applications TODO
 
@@ -1952,7 +1964,7 @@ var OBJY = {
         // Privileges
         if (obj.privileges) {
             Object.keys(obj.privileges).forEach(function(a) {
-
+                if (!Array.isArray(obj.privileges[a])) return;
                 obj.privileges[a].forEach(function(tP, i) {
                     if (tP.template == templateId && !tP.overwritten)
                         obj.privileges[a].splice(i, 1);
@@ -3026,6 +3038,13 @@ var OBJY = {
         return affects;
     },
 
+    ApplyCreateWrapper: function(obj, apply) {
+
+        if (!apply) apply = {};
+
+        return apply;
+    },
+
     ObjectOnChangeCreateWrapper: function(obj, onChange, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
@@ -4074,6 +4093,8 @@ var OBJY = {
 
                     data.forEach(function(d) {
 
+                        OBJY.applyAffects(d)
+
                         d.inherits = d.inherits.filter(function(item, pos) {
                             return d.inherits.indexOf(item) == pos;
                         });
@@ -4132,7 +4153,7 @@ var OBJY = {
                                     counter++;
                                     return;
                                 }
-                                
+
                             }
                         });
 
@@ -4177,6 +4198,8 @@ var OBJY = {
                 for (i = 0; i < objs.length; i++) {
                     objs[i] = OBJY[role](objs[i]).add(function(data) {
 
+                        OBJY.applyAffects(data)
+
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
                             var counter = 0;
@@ -4189,6 +4212,8 @@ var OBJY = {
                                     return data;
                                 }
                             }
+
+
 
                             data.inherits.forEach(function(template) {
 
@@ -4293,6 +4318,7 @@ var OBJY = {
 
         if (params.isRule) {
             this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance) || {};
+            this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance) || {};
         }
 
         if (!params.structure) {
@@ -5226,7 +5252,6 @@ var OBJY = {
             if (this.properties) aggregateAllEvents(this.properties);
 
 
-
             if (app)
                 if (this.applications.indexOf(app) == -1) this.applications.push(app);
 
@@ -5234,6 +5259,8 @@ var OBJY = {
                 OBJY.add(obj, function(data) {
 
                         obj._id = data._id;
+
+                        OBJY.applyAffects(data)
 
                         Object.keys(data.onCreate || {}).forEach(function(key) {
                             if (data.onCreate[key].trigger == 'after') {
@@ -5451,6 +5478,8 @@ var OBJY = {
             function updateFn() {
 
                 OBJY.updateO(thisRef, function(data) {
+
+                        OBJY.applyAffects(data)
 
                         Object.keys(data.onChange || {}).forEach(function(key) {
                             if (data.onChange[key].trigger == 'after') {
@@ -5780,6 +5809,8 @@ var OBJY = {
 
 
             function prepareObj(data) {
+
+                OBJY.applyAffects(data)
 
                 OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')
 
