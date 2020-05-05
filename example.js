@@ -5,6 +5,56 @@ const EventMapper = require('./mappers/observers/inMemoryStream.js')
 
 //OBJY.storage = new MongoMapper();
 
+OBJY.useUser({
+    authorisations: {
+        '*': [{ query: {}, perm: 'cr' }]
+    }
+})
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects",
+    authable: true
+})
+
+
+OBJY.object({
+    "authorisations": {
+        '*': [{ query: { type: "test", perm: "crud" } }]
+    },
+    "properties": {
+        "timeGroups": {
+            "type": "bag",
+        }
+    }
+}).add(function(data) {
+
+    console.log('added', data);
+
+
+    OBJY.object({
+        "authorisations": {
+            '*': [{ query: { type: "test111", perm: "*" } }]
+        },
+    }).add(function(data5) {
+
+        OBJY.object({
+            name: "inherited",
+            inherits: [data._id, data5._id]
+        }).add(function(d2) {
+
+            OBJY.object(d2).get(function(d3) {
+                console.log('Asfafs', JSON.stringify(d3, null, 4));
+            })
+
+        })
+
+    })
+
+})
+
+
+return;
 
 OBJY.client('mb');
 

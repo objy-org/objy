@@ -1626,9 +1626,11 @@ var OBJY = {
 
                 if (!obj) obj = {}
 
-                /* if (!obj.properties) {
-                     obj.properties = {};
-                 }*/
+                if (obj.type == 'bag') {
+                    if (!obj.properties) {
+                        obj.properties = {};
+                    }
+                }
 
                 //console.info('compare', template, 'obj:', obj)
 
@@ -1655,6 +1657,8 @@ var OBJY = {
                             //obj.properties[p].overwritten = true;
                         }
 
+                        if (!obj[p].properties) obj[p].properties = {};
+
                         doTheProps(template[p], obj[p]);
 
                     } else if (isObject(template[p])) {
@@ -1662,7 +1666,10 @@ var OBJY = {
                         if (!obj[p]) {
 
                             obj[p] = template[p];
-                            obj[p].template = templateId;
+
+                            if (p != 'properties') obj[p].template = templateId;
+
+
                         } else {
 
                             console.log('TTT', p, obj[p]);
@@ -1670,24 +1677,22 @@ var OBJY = {
                                 obj[p] = template[p];
                             }
 
-                            obj[p].template = templateId;
+                            if (p != 'properties') obj[p].template = templateId;
                             //obj.properties[p].overwritten = true;
                         }
 
                         doTheProps(template[p], obj[p]);
-
                     }
-
 
 
                     if (!obj[p]) {
                         obj[p] = template[p];
-                        obj[p].template = templateId;
+                        if (p != 'properties') obj[p].template = templateId;
                         delete obj[p].overwritten;
                     } else {
 
                         if (!obj[p].overwritten) {
-                            obj[p].template = templateId;
+                            if (p != 'properties') obj[p].template = templateId;
                             if (obj[p].value == null) obj[p].value = template[p].value;
                             //obj.properties[p].overwritten = true;
                         }
@@ -1695,7 +1700,14 @@ var OBJY = {
                         if (!obj[p].metaOverwritten) {
                             obj[p].meta = template[p].meta;
                         }
+
+                        if (obj[p].type == 'bag') {
+                            if (!obj[p].properties) {
+                                obj[p].properties = {};
+                            }
+                        }
                     }
+
 
                     if (template.permissions) {
                         if (!obj.permissions) obj.permissions = {};
@@ -1723,9 +1735,7 @@ var OBJY = {
                             })
                         }
                     })
-
                 })
-
             }
 
             doTheProps(template.properties || {}, obj.properties || {});
@@ -1738,6 +1748,44 @@ var OBJY = {
                 })
             }
 
+            if (template.authorisations) {
+                var keys = Object.keys(template.authorisations);
+
+                if (keys.length > 0) {
+                    if (!obj.authorisations) obj.authorisations = {};
+                }
+
+                keys.forEach(function(k) {
+
+                    console.log('auths', obj.authorisations[k], template.authorisations[k]);
+
+                    if (!obj.authorisations[k]) {
+                        obj.authorisations[k] = template.authorisations[k]
+
+                        obj.authorisations[k].forEach(function(a) {
+                            a.template = template._id;
+                            a.test = 'has not'
+                        })
+
+                    } else {
+                        template.authorisations[k].forEach(function(a) {
+
+                            var f = false;
+                            obj.authorisations[k].forEach(function(objA) {
+                                if (JSON.stringify(objA.query) == JSON.stringify(a.query)) f = true;
+                            })
+
+                            if (f) {
+                                a.overwritten = true;
+                            } else {
+                                a.template = template._id;
+                                a.test = 'has'
+                                obj.authorisations[k].push(a)
+                            }
+                        })
+                    }
+                })
+            }
 
             // Permissions
 
@@ -1826,20 +1874,36 @@ var OBJY = {
             }
         })
 
+        var isObject = function(a) {
+            return (!!a) && (a.constructor === Object);
+        };
+
         // Properties
         function doTheProps(obj) {
 
-            Object.keys(obj.properties).forEach(function(p) {
+            if (!obj) obj = {}
 
-                if (obj.properties[p].type == 'bag') {
-                    doTheProps(obj.properties[p]);
+            if (obj.type == 'bag') {
+                if (!obj.properties) {
+                    obj.properties = {};
+                }
+            }
+
+            Object.keys(obj).forEach(function(p) {
+
+                if (!isObject(obj[p])) return;
+
+                if ((obj[p] || {}).type == 'bag') {
+                    doTheProps(obj[p].properties);
+                } else if (isObject(obj[p])) {
+                    doTheProps(obj[p]);
                 }
 
-                if (obj.properties[p]) {
-                    if (obj.properties[p].value != null) obj.properties[p].overwritten = true;
-                    if (obj.properties[p].template == templateId && !obj.properties[p].overwritten) {
-                        //console.info('deleting obj', p, obj.properties[p])
-                        delete obj.properties[p];
+                if (obj[p]) {
+                    if (obj[p].value != null) obj[p].overwritten = true;
+                    if (obj[p].template == templateId && !obj[p].overwritten) {
+                        //console.info('deleting obj', p, obj[p])
+                        delete obj[p];
                     }
                 }
 
@@ -1852,15 +1916,15 @@ var OBJY = {
                     })
                 }
 
-                if (obj.properties[p]) {
+                if (obj[p]) {
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                        if (obj.properties[p][h]) {
+                        if (obj[p][h]) {
 
-                            Object.keys(obj.properties[p][h]).forEach(function(oC) {
+                            Object.keys(obj[p][h]).forEach(function(oC) {
 
-                                if (obj.properties[p][h][oC]) {
-                                    if (obj.properties[p][h][oC].template == templateId && !obj.properties[p][h][oC].overwritten)
-                                        delete obj.properties[p][h][oC];
+                                if (obj[p][h][oC]) {
+                                    if (obj[p][h][oC].template == templateId && !obj[p][h][oC].overwritten)
+                                        delete obj[p][h][oC];
                                 }
                             })
                         }
@@ -1870,7 +1934,7 @@ var OBJY = {
             })
         }
 
-        doTheProps(obj);
+        doTheProps(obj.properties || {});
 
 
         // Applications TODO
@@ -3995,8 +4059,6 @@ var OBJY = {
 
                     // TODO : change!!!
 
-
-
                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
                         success(data);
@@ -4028,9 +4090,7 @@ var OBJY = {
                             }
                         }
 
-
                         d.inherits.forEach(function(template) {
-
 
                             if (d._id != template) {
 
@@ -4039,7 +4099,6 @@ var OBJY = {
                                         counter++;
 
                                         if (counter == d.inherits.length) allCounter++;
-
 
                                         // console.info(d.inherits.length, counter, data.length, allCounter)
 
@@ -4073,7 +4132,7 @@ var OBJY = {
                                     counter++;
                                     return;
                                 }
-
+                                
                             }
                         });
 
@@ -4274,7 +4333,7 @@ var OBJY = {
                 this.privileges = OBJY.PrivilegesChecker(obj) || {};
                 this.spooAdmin = obj.spooAdmin || false;
                 this._clients = obj._clients || [];
-                this.authorisations = obj.authorisations || [];
+                this.authorisations = obj.authorisations || {};
 
                 this.addClient = function(client) {
                     if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
@@ -4939,7 +4998,6 @@ var OBJY = {
         };
 
         this.addPropertyToBag = function(bag, property) {
-
 
             var tmpBag = this.getProperty(bag);
             //if (tmpBag.template) tmpBag.overwritten = true;

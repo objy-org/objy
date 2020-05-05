@@ -1,6 +1,6 @@
 {
   "name": "@spootechnologies/objy",
-  "version": "0.4.7",
+  "version": "0.5.13",
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "spoo.js",
   "scripts": {
@@ -37,7 +37,8 @@
     "multer-gridfs-storage": "^4.0.2",
     "nedb": "^1.8.0",
     "shortid": "^2.2.15",
-    "vm2": "^3.8.4"
+    "vm2": "^3.8.4",
+    "multer": "*"
   },
   "devDependencies": {
     "jest": "^25.1.0"

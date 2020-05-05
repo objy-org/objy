@@ -31,7 +31,7 @@ var generalObjectModel = {
     authorisations: {}
 };
 
-var ObjSchema = new Schema(generalObjectModel, { strict: false });
+var ObjSchema = new Schema(generalObjectModel, { strict: false, minimize: false });
 
 Mapper = function(OBJY, options) {
     return Object.assign(new OBJY.StorageTemplate(OBJY, options), {
@@ -207,7 +207,7 @@ Mapper = function(OBJY, options) {
             if (app) criteria['applications'] = { $in: [app] }
 
             console.warn('__APP__', app, criteria['applications']);
-        
+
             console.warn('criteria', criteria, this.globalPaging, flags.$page)
 
             var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });
@@ -234,6 +234,10 @@ Mapper = function(OBJY, options) {
 
             var Obj = db.model(this.objectFamily, ObjSchema);
 
+            if (criteria.$query) {
+                criteria = JSON.parse(JSON.stringify(criteria.$query));
+                delete criteria.$query;
+            }
 
             if (app) criteria['applications'] = { $in: [app] }
 
