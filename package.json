@@ -1,6 +1,6 @@
 {
   "name": "@spootechnologies/objy",
-  "version": "0.5.13",
+  "version": "0.5.24",
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "spoo.js",
   "scripts": {
@@ -41,6 +41,7 @@
     "multer": "*"
   },
   "devDependencies": {
-    "jest": "^25.1.0"
+    "jest": "^25.1.0",
+    "jsdoc-to-markdown": "^5.0.3"
   }
 }

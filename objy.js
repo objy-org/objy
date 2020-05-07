@@ -999,7 +999,11 @@ function LackOfPermissionsException(message) {
 }
 
 
-
+/**
+ * Main OBJY Instance
+ * @param {object} - Privacy gown
+ * @param {object} - Security
+ */
 var OBJY = {
 
     self: this,
@@ -1029,10 +1033,7 @@ var OBJY = {
 
     },
 
-    affectables: [{
-        affects: { role: 'user' },
-        apply: { firstName: null, lastName: null }
-    }],
+    affectables: [],
 
     handlerSequence: [],
     permissionSequence: [],
@@ -1085,7 +1086,246 @@ var OBJY = {
         var self = this;
         self.affectables.forEach(function(a) {
             if (Query.query([obj], a.affects, Query.undot).length != 0) {
-                Object.assign(obj, a.apply)
+
+                var template = a.apply;
+                var templateId = a._id;
+
+                if (template.name) {
+                    if (!obj.name) obj.name = template.name;
+                }
+
+                if (template.type) {
+                    if (!obj.type) obj.type = template.type;
+                }
+
+                // Object handlers
+
+                ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                    if (template[h]) {
+                        Object.keys(template[h]).forEach(function(oC) {
+                            if (!obj[h][oC]) {
+                                obj[h][oC] = template[h][oC];
+                                obj[h][oC].template = templateId;
+                            }
+                        })
+                    }
+                })
+
+                var isObject = function(a) {
+                    return (!!a) && (a.constructor === Object);
+                };
+
+                // Properties
+                function doTheProps(template, obj) {
+
+                    if (!obj) obj = {}
+
+                    if (obj.type == 'bag') {
+                        if (!obj.properties) {
+                            obj.properties = {};
+                        }
+                    }
+
+                    //console.info('compare', template, 'obj:', obj)
+
+                    //if (!template.properties) template.properties = {};
+
+                    console.log('ok aff,', obj, 'temp:', template, Object.keys(template || {}));
+
+                    Object.keys(template || {}).forEach(function(p) {
+
+                        //if (!isObject(template[p])) return;
+
+                        var isO = isObject(template[p]);
+
+                        if ((template[p] || {}).type == 'bag') {
+
+                            if (!obj[p]) {
+
+                                obj[p] = template[p];
+                                if(isO) obj[p].template = templateId;
+                            } else {
+                                if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                    obj[p] = template[p];
+                                }
+
+                                if(isO) obj[p].template = templateId;
+                                //obj.properties[p].overwritten = true;
+                            }
+
+                            if (!obj[p].properties) obj[p].properties = {};
+
+                            doTheProps(template[p], obj[p]);
+
+                        } else if (isObject(template[p])) {
+
+                            if (!obj[p]) {
+
+                                obj[p] = template[p];
+
+                                if (p != 'properties' && isO) obj[p].template = templateId;
+
+
+                            } else {
+
+                                console.log('TTT', p, obj[p]);
+                                if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                    obj[p] = template[p];
+                                }
+
+                                if (p != 'properties' && isO) obj[p].template = templateId;
+                                //obj.properties[p].overwritten = true;
+                            }
+
+                            doTheProps(template[p], obj[p]);
+                        }
+
+
+                        if (!obj[p]) {
+                            obj[p] = template[p];
+                            if (p != 'properties' && isO) obj[p].template = templateId;
+                            if(isO) delete obj[p].overwritten;
+                        } else {
+
+                            if (!obj[p].overwritten) {
+                                if (p != 'properties' && isO) obj[p].template = templateId;
+                                if (obj[p].value == null && isO)  obj[p].value = template[p].value;
+                                //obj.properties[p].overwritten = true;
+                            }
+
+                            if (!obj[p].metaOverwritten) {
+                                obj[p].meta = template[p].meta;
+                            }
+
+                            if (obj[p].type == 'bag') {
+                                if (!obj[p].properties) {
+                                    obj[p].properties = {};
+                                }
+                            }
+                        }
+
+
+                        if (template.permissions) {
+                            if (!obj.permissions) obj.permissions = {};
+                            Object.keys(template.permissions).forEach(function(p) {
+                                if (!obj.permissions[p]) {
+                                    obj.permissions[p] = template.permissions[p];
+                                    if(isO) obj.permissions[p].template = templateId;
+                                } else {
+                                    if(isO) obj.permissions[p].template = templateId;
+                                    if(isO) obj.permissions[p].overwritten = true;
+                                }
+                            })
+                        }
+
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if(!isObject(template[p])) return;
+                            if (template[p][h]) {
+                                if (!obj[p][h]) obj[p][h] = {};
+
+                                Object.keys(template[p][h]).forEach(function(oC) {
+
+                                    if (!obj[p][h][oC]) {
+                                        obj[p][h][oC] = template[p][h][oC];
+                                        obj[p][h][oC].template = templateId;
+                                    }
+                                })
+                            }
+                        })
+                    })
+                }
+
+                console.log('tt', template, obj);
+                doTheProps(template.properties || {}, obj.properties || {});
+
+                // Applications
+
+                if (template.applications) {
+                    template.applications.forEach(function(a) {
+                        if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
+                    })
+                }
+
+                if (template.authorisations) {
+                    var keys = Object.keys(template.authorisations);
+
+                    if (keys.length > 0) {
+                        if (!obj.authorisations) obj.authorisations = {};
+                    }
+
+                    keys.forEach(function(k) {
+
+                        console.log('auths', obj.authorisations[k], template.authorisations[k]);
+
+                        if (!obj.authorisations[k]) {
+                            obj.authorisations[k] = template.authorisations[k]
+
+                            obj.authorisations[k].forEach(function(a) {
+                                a.template = template._id;
+                                a.test = 'has not'
+                            })
+
+                        } else {
+                            template.authorisations[k].forEach(function(a) {
+
+                                var f = false;
+                                obj.authorisations[k].forEach(function(objA) {
+                                    if (JSON.stringify(objA.query) == JSON.stringify(a.query)) f = true;
+                                })
+
+                                if (f) {
+                                    a.overwritten = true;
+                                } else {
+                                    a.template = template._id;
+                                    a.test = 'has'
+                                    obj.authorisations[k].push(a)
+                                }
+                            })
+                        }
+                    })
+                }
+
+                // Permissions
+
+                if (template.permissions) {
+                    if (!obj.permissions) obj.permissions = {};
+                    Object.keys(template.permissions).forEach(function(p) {
+                        if (!obj.permissions[p]) {
+                            obj.permissions[p] = template.permissions[p];
+                            obj.permissions[p].template = templateId;
+                        } else {
+                            obj.permissions[p].template = templateId;
+                            obj.permissions[p].overwritten = true;
+                        }
+                    })
+                }
+
+                // Privileges
+
+                if (template.privileges) {
+                    if (!obj.privileges) obj.privileges = {};
+                    Object.keys(template.privileges).forEach(function(a) {
+                        if (!obj.privileges[a]) obj.privileges[a] = [];
+
+                        template.privileges[a].forEach(function(tP) {
+                            var contains = false;
+
+                            obj.privileges[a].forEach(function(oP) {
+                                if (oP.name == tP.name) contains = true;
+                            })
+                        })
+
+                        if (!contains) {
+                            obj.privileges[a].push({
+                                name: tP.name,
+                                template: templateId
+                            })
+                        }
+
+                    })
+                }
+
+
             }
         })
     },
@@ -1871,6 +2111,8 @@ var OBJY = {
 
     removeTemplateFieldsForObject: function(obj, templateId, success, error, client) {
 
+
+
         if (!templateId) {
             error('template not found');
             return;
@@ -1893,7 +2135,7 @@ var OBJY = {
         };
 
         // Properties
-        function doTheProps(obj) {
+        /*function doTheProps(obj) {
 
             if (!obj) obj = {}
 
@@ -1945,9 +2187,119 @@ var OBJY = {
                     })
                 }
             })
+        }*/
+
+        // doTheProps(obj.properties || {});
+
+
+
+        function doTheProps(obj) {
+
+            if (obj.properties) {
+
+                Object.keys(obj.properties).forEach(function(p) {
+
+                    if (!isObject(obj.properties[p])) return;
+
+
+                    if (obj.permissions) {
+                        Object.keys(obj.permissions).forEach(function(p) {
+                            if (obj.permissions[p]) {
+                                if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
+                                    delete obj.permissions[p]
+                            }
+                        })
+                    }
+
+                    if (obj.properties[p]) {
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if (obj.properties[p][h]) {
+
+                                Object.keys(obj.properties[p][h]).forEach(function(oC) {
+
+                                    if (obj.properties[p][h][oC]) {
+                                        if (obj.properties[p][h][oC].template == templateId && !obj.properties[p][h][oC].overwritten)
+                                            delete obj.properties[p][h][oC];
+                                    }
+                                })
+                            }
+                        })
+                    }
+
+
+                    if (obj.properties[p].type == 'bag') {
+                        return doTheProps(obj.properties[p]);
+                    }
+
+                    if (obj.properties[p]) {
+                        if (obj.properties[p].value != null) obj.properties[p].overwritten = true;
+                        if (obj.properties[p].template == templateId && !obj.properties[p].overwritten) {
+                            console.info('deleting obj', p, obj.properties[p])
+                            delete obj.properties[p];
+                        }
+                    }
+
+
+
+                })
+
+            } else {
+
+
+                Object.keys(obj).forEach(function(p) {
+
+
+
+                    if (!isObject(obj[p])) return;
+
+
+
+                    if (obj.permissions) {
+                        Object.keys(obj.permissions).forEach(function(p) {
+                            if (obj.permissions[p]) {
+                                if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
+                                    delete obj.permissions[p]
+                            }
+                        })
+                    }
+
+                    if (obj[p]) {
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if (obj[p][h]) {
+
+                                Object.keys(obj[p][h]).forEach(function(oC) {
+
+                                    if (obj[p][h][oC]) {
+                                        if (obj[p][h][oC].template == templateId && !obj[p][h][oC].overwritten)
+                                            delete obj[p][h][oC];
+                                    }
+                                })
+                            }
+                        })
+                    }
+
+
+                    if (obj[p].type == 'bag') {
+                        return doTheProps(obj[p]);
+                    }
+
+                    if (obj[p]) {
+                        if (obj[p].value != null) obj[p].overwritten = true;
+                        if (obj[p].template == templateId && !obj[p].overwritten) {
+                            //console.info('deleting obj', p, obj[p])
+                            delete obj[p];
+                        }
+                    }
+
+
+                })
+
+            }
+
         }
 
-        doTheProps(obj.properties || {});
+        doTheProps(obj);
+
 
         // Applications TODO
 
@@ -5350,7 +5702,6 @@ var OBJY = {
 
             var thisRef = this;
 
-
             if (params.dirty) {
 
                 OBJY.updateO(thisRef, function(data) {
@@ -5476,6 +5827,8 @@ var OBJY = {
             if (mapper.type != 'scheduled' && this.properties) aggregateAllEvents(this.properties);
 
             function updateFn() {
+
+                Logger.log('updating obj ' + JSON.stringify(thisRef, null, 4))
 
                 OBJY.updateO(thisRef, function(data) {
 

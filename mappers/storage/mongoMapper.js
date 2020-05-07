@@ -210,7 +210,10 @@ Mapper = function(OBJY, options) {
 
             console.warn('criteria', criteria, this.globalPaging, flags.$page)
 
-            var finalQuery = Obj.find(criteria).limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });
+            var finalQuery = Obj.find(criteria)
+
+            if (flags.$limit) finalQuery.limit(flags.$limit).sort(s || { '_id': 1 });
+            else finalQuery.limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });
 
             if (criteria.$aggregate) {
                 finalQuery = Obj.aggregate(criteria.$aggregate);
@@ -260,13 +263,15 @@ Mapper = function(OBJY, options) {
 
             var Obj = db.model(this.objectFamily, ObjSchema);
 
-            if (app) criteria.applications = {$in: [app]};
-
             var criteria = { _id: spooElement._id };
+
+             if (app) criteria.applications = { $in: [app] };
 
             if (app) criteria['applications'] = { $in: [app] }
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
+
+        console.warn('update mapper', spooElement)
 
             Obj.findOneAndUpdate(criteria, spooElement, function(err, data) {
                 if (err) {
@@ -332,10 +337,7 @@ Mapper = function(OBJY, options) {
                 }
 
             })
-
         }
-
-
     })
 }
 

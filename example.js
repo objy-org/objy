@@ -6,13 +6,14 @@ const EventMapper = require('./mappers/observers/inMemoryStream.js')
 //OBJY.storage = new MongoMapper();
 
 OBJY.affectables = [{
+    _id: "general",
     affects: { role: 'object' },
-    apply: { properties: { firstName: 'asfadfsdfsdgsg' } }
+    apply: { applications: ['ssg'], properties: { firstName: 23 } }
 }];
 
 OBJY.useUser({
     authorisations: {
-        '*': [{ query: {}, perm: 'cr' }]
+        '*': [{ query: {}, perm: 'cru' }]
     }
 })
 
@@ -27,7 +28,6 @@ OBJY.define({
     pluralName: "affects",
     isRule: true
 })
-
 
 OBJY.affect({
     name: "Users",
@@ -50,12 +50,57 @@ OBJY.object({
     "properties": {
         "timeGroups": {
             "type": "bag",
+            "template": "123",
+            "properties": {
+                test: 124
+            }
+        },
+        stops: {
+            type: "bag",
+            template: "22424",
+            properties: {
+                "1131414": {
+                    type: "bag",
+                    "proeprties": {}
+                }
+            }
         }
     }
 }).add(function(data) {
 
     console.log('added', data);
 
+
+    OBJY.object({
+        "inherits": [data._id],
+        "properties": {
+            "timeGroups": {
+                "type": "bag",
+                "template": "123",
+                "properties": {
+                    test: 124
+                }
+            },
+            stops: {
+                type: "bag",
+                template: data._id,
+                properties: {
+                    "1131414": {
+                        type: "bag",
+                        "proeprties": {}
+                    }
+                }
+            }
+        }
+    }).add(function(data) {
+        data.addProperty('ttt', 222).update(function(data) {
+            console.log('up', JSON.stringify(data, null, 4));
+        })
+    })
+
+
+
+    return;
 
     OBJY.object({
         "authorisations": {
