@@ -2,6 +2,64 @@ const OBJY = require('./objy.js');
 const stream = require('stream');
 const fs = require('fs')
 const EventMapper = require('./mappers/observers/inMemoryStream.js')
+var Processor = require('./mappers/processors/eval.js');
+
+
+
+
+
+var DefaultProcessor = new Processor(OBJY, {});
+
+
+
+DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
+    var ws = OBJY.activeTenant;
+
+    console.log('aaaaaaaaaaööööllll--', obj);
+
+    OBJY[obj.role](obj._id).get(function(data) {
+        console.log('data:::', data);
+        if (data.length == 0) {
+            // ADD
+            OBJY.client(targetWorkspace);
+
+            OBJY[obj.role](obj).add(function(data) {
+                console.log('added', data);
+                OBJY.client(ws);
+            }, function(e) {
+                console.log('e', e);
+                OBJY.client(ws);
+            })
+        } else if (data.length > 0) {
+            // UPDATE
+            OBJY.client(targetWorkspace);
+
+            OBJY[obj.role](data[0]).replace(obj).update(function(data) {
+                console.log('updated', data);
+                OBJY.client(ws);
+            }, function(e) {
+                console.log('e', e);
+                OBJY.client(ws);
+            })
+
+        }
+    }, function(err) {
+        console.log('err', targetWorkspace, err);
+        OBJY.client(targetWorkspace);
+        console.log(OBJY.activeTenant);
+        OBJY[obj.role](obj).add(function(data) {
+            console.log('added', data);
+            console.log(OBJY.mappers);
+            OBJY.client(ws);
+        }, function(e) {
+            console.log('e', e);
+            OBJY.client(ws);
+        })
+
+    })
+};
+
+
 
 //OBJY.storage = new MongoMapper();
 
@@ -9,6 +67,10 @@ OBJY.affectables = [{
     _id: "general",
     affects: { role: 'object' },
     apply: { applications: ['ssg'], properties: { firstName: 23 } }
+}, {
+    _id: "general2",
+    affects: {},
+    apply: { _clients: ["ssg"], onCreate: { replicate: { value: "console.log('sfsfsf');this.pushToWorkspace({_id:'222', role:'object'}, 'aaa')", trigger: "after" } } }
 }];
 
 OBJY.useUser({
@@ -20,16 +82,21 @@ OBJY.useUser({
 OBJY.define({
     name: "object",
     pluralName: "objects",
+    templateSource: 'aaa',
+    templateFamily: 'object',
+    processor: DefaultProcessor,
     authable: true
 })
 
 OBJY.define({
+    processor: DefaultProcessor,
     name: "affect",
     pluralName: "affects",
     isRule: true
 })
 
 OBJY.affect({
+    processor: DefaultProcessor,
     name: "Users",
     affects: {
         role: 'user'
