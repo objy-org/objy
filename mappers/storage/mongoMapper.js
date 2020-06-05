@@ -174,7 +174,7 @@ Mapper = function(OBJY, options) {
 
             var db = this.getDBByMultitenancy(client);
 
-            var Obj = db.model(this.objectFamily, ObjSchema);
+            var Obj = db.model(this.objectFamily, ObjSchema, this.objectFamily);
 
 
 

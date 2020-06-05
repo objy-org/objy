@@ -6,10 +6,7 @@ var Processor = require('./mappers/processors/eval.js');
 
 
 
-
-
 var DefaultProcessor = new Processor(OBJY, {});
-
 
 
 DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
@@ -29,7 +26,7 @@ DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
             }, function(e) {
                 console.log('e', e);
                 OBJY.client(ws);
-            })
+            }) 
         } else if (data.length > 0) {
             // UPDATE
             OBJY.client(targetWorkspace);
@@ -87,6 +84,7 @@ OBJY.define({
     processor: DefaultProcessor,
     authable: true
 })
+
 
 OBJY.define({
     processor: DefaultProcessor,
