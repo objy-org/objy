@@ -8,30 +8,10 @@ var clientSchema = {
 };
 var ClientSchema = new Schema(clientSchema);
 
-var generalObjectModel = {
-    type: { type: String, index: true },
-    applications: { type: [String], index: true },
-    created: { type: String, index: true },
-    lastModified: { type: String, index: true },
-    role: String,
-    inherits: [],
-    name: String,
-    onDelete: {},
-    onCreate: {},
-    onChange: {},
-    permissions: {},
-    properties: {},
-    privileges: {},
-    aggregatedEvents: [],
-    tenantId: String,
-    password: String,
-    username: String,
-    email: String,
-    _clients: [],
-    authorisations: {}
+function parseError(err) {
+    console.log('err', err);
+    return err;
 };
-
-var ObjSchema = new Schema(generalObjectModel, { strict: false, minimize: false });
 
 Mapper = function(OBJY, options) {
     return Object.assign(new OBJY.StorageTemplate(OBJY, options), {
@@ -40,7 +20,42 @@ Mapper = function(OBJY, options) {
         index: {},
         globalPaging: 20,
 
+        generalObjectModel: {
+            type: { type: String, index: true },
+            applications: { type: [String], index: true },
+            created: { type: String, index: true },
+            lastModified: { type: String, index: true },
+            role: String,
+            inherits: [],
+            name: String,
+            onDelete: {},
+            onCreate: {},
+            onChange: {},
+            permissions: {},
+            properties: {},
+            privileges: {},
+            aggregatedEvents: [],
+            tenantId: String,
+            password: String,
+            username: String,
+            email: String,
+            _clients: [],
+            authorisations: {}
+        },
+
+        ObjSchema: new Schema(this.generalObjectModel, { minimize: false}),
+
+        NestedSchema: new Schema({}, { minimize: false }),
+
+        structure: function(structure) {
+            this.generalObjectModel = Object.assign(this.generalObjectModel, structure);
+            this.generalObjectModel.properties = Object.assign(this.generalObjectModel.properties, structure.structure);
+            this.ObjSchema = new Schema(this.generalObjectModel, { minimize: false });
+            return this;
+        },
+
         connect: function(connectionString, success, error, options) {
+
             this.database = mongoose.createConnection(connectionString, options);
 
             this.database.on('error', function(err) {
@@ -156,10 +171,10 @@ Mapper = function(OBJY, options) {
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) constrains['tenantId'] = client;
 
-            Obj = db.model(this.objectFamily, ObjSchema);
+            Obj = db.model(this.objectFamily, this.ObjSchema);
 
 
-            Obj.findOne(constrains, function(err, data) {
+            Obj.findOne(constrains).lean().exec(function(err, data) {
                 if (err) {
                     error(err);
                     return;
@@ -174,7 +189,7 @@ Mapper = function(OBJY, options) {
 
             var db = this.getDBByMultitenancy(client);
 
-            var Obj = db.model(this.objectFamily, ObjSchema, this.objectFamily);
+            var Obj = db.model(this.objectFamily, this.ObjSchema);
 
 
 
@@ -219,7 +234,7 @@ Mapper = function(OBJY, options) {
                 finalQuery = Obj.aggregate(criteria.$aggregate);
             }
 
-            finalQuery.exec(function(err, data) {
+            finalQuery.lean().exec(function(err, data) {
                 if (err) {
                     error(err);
                     return;
@@ -235,7 +250,7 @@ Mapper = function(OBJY, options) {
 
             var db = this.getDBByMultitenancy(client);
 
-            var Obj = db.model(this.objectFamily, ObjSchema);
+            var Obj = db.model(this.objectFamily, this.ObjSchema);
 
             if (criteria.$query) {
                 criteria = JSON.parse(JSON.stringify(criteria.$query));
@@ -261,17 +276,17 @@ Mapper = function(OBJY, options) {
 
             var db = this.getDBByMultitenancy(client);
 
-            var Obj = db.model(this.objectFamily, ObjSchema);
+            var Obj = db.model(this.objectFamily, this.ObjSchema);
 
             var criteria = { _id: spooElement._id };
 
-             if (app) criteria.applications = { $in: [app] };
+            if (app) criteria.applications = { $in: [app] };
 
             if (app) criteria['applications'] = { $in: [app] }
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
 
-        console.warn('update mapper', spooElement)
+            console.warn('update mapper', spooElement)
 
             Obj.findOneAndUpdate(criteria, spooElement, function(err, data) {
                 if (err) {
@@ -287,6 +302,7 @@ Mapper = function(OBJY, options) {
 
         add: function(spooElement, success, error, app, client) {
 
+console.log('add:', spooElement);
             var db = this.getDBByMultitenancy(client);
 
             if (app) {
@@ -295,16 +311,17 @@ Mapper = function(OBJY, options) {
 
             console.log(this.objectFamily);
 
-            var Obj = db.model(this.objectFamily, ObjSchema);
+            var Obj = db.model(this.objectFamily, this.ObjSchema);
 
             delete spooElement._id;
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) spooElement.tenantId = client;
 
             new Obj(spooElement).save(function(err, data) {
-                if (err) {
 
-                    error(err);
+                console.log('added', err, data);
+                if (err) {
+                    error(parseError(err));
                     return;
                 }
 
@@ -317,7 +334,7 @@ Mapper = function(OBJY, options) {
 
             var db = this.getDBByMultitenancy(client);
 
-            var Obj = db.model(this.objectFamily, ObjSchema);
+            var Obj = db.model(this.objectFamily, this.ObjSchema);
 
             var criteria = { _id: spooElement._id };
 

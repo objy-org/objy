@@ -3032,6 +3032,7 @@ var OBJY = {
 
         if (propertyToReturn.type == "action") {
             propertyToReturn.call = function(callback, client) {
+                OBJY.checkAuthroisations(obj, instance.activeUser, "x", instance.activeApp);
                 thisRef.execProcessorAction(propertyToReturn.value, obj, propertyToReturn, {}, callback, client, {});
             }
         }
@@ -4478,11 +4479,11 @@ var OBJY = {
 
                         OBJY.applyAffects(d)
 
-                        d.inherits = d.inherits.filter(function(item, pos) {
+                        /*d.inherits = d.inherits.filter(function(item, pos) {
                             return d.inherits.indexOf(item) == pos;
-                        });
+                        });*/
 
-                        //onsole.info(d)
+                        //console.info(d)
                         var counter = 0;
 
                         if (d.inherits.length == 0) {
@@ -5726,8 +5727,6 @@ var OBJY = {
             return OBJY.deserialize(this);
         };
 
-
-
         this.update = function(success, error, client) {
 
             var client = client || instance.activeTenant;
@@ -6213,7 +6212,7 @@ var OBJY = {
                 }
 
                 if ((data.inherits || []).length == 0) {
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    success(OBJY.deserialize(data));
                     return data;
                 }
 

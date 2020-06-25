@@ -61,6 +61,10 @@ DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
 //OBJY.storage = new MongoMapper();
 
 OBJY.affectables = [{
+    _id: "user readonly",
+    affects: { role: 'user' },
+    apply: { permissions: {admin: "*"} }
+},{
     _id: "general",
     affects: { role: 'object' },
     apply: { applications: ['ssg'], properties: { firstName: 23 } }
