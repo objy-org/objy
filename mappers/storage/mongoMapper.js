@@ -43,7 +43,7 @@ Mapper = function(OBJY, options) {
             authorisations: {}
         },
 
-        ObjSchema: new Schema(this.generalObjectModel, { minimize: false}),
+        ObjSchema: new Schema(this.generalObjectModel, { minimize: false, strict: false}),
 
         NestedSchema: new Schema({}, { minimize: false }),
 
@@ -282,13 +282,10 @@ Mapper = function(OBJY, options) {
 
             if (app) criteria.applications = { $in: [app] };
 
-            if (app) criteria['applications'] = { $in: [app] }
-
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
 
-            console.warn('update mapper', spooElement)
-
-            Obj.findOneAndUpdate(criteria, spooElement, function(err, data) {
+            Obj.findOneAndUpdate(criteria, JSON.parse(JSON.stringify(spooElement)), function(err, data) {
+                
                 if (err) {
 
                     error(err);
@@ -302,7 +299,7 @@ Mapper = function(OBJY, options) {
 
         add: function(spooElement, success, error, app, client) {
 
-console.log('add:', spooElement);
+            console.log('add:', spooElement);
             var db = this.getDBByMultitenancy(client);
 
             if (app) {

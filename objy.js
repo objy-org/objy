@@ -1144,7 +1144,6 @@ var OBJY = {
 
                     //if (!template.properties) template.properties = {};
 
-                    console.log('ok aff,', obj, 'temp:', template, Object.keys(template || {}));
 
                     Object.keys(template || {}).forEach(function(p) {
 
@@ -1182,7 +1181,7 @@ var OBJY = {
 
                             } else {
 
-                                console.log('TTT', p, obj[p]);
+
                                 if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
                                     obj[p] = template[p];
                                 }
@@ -1249,7 +1248,6 @@ var OBJY = {
                     })
                 }
 
-                console.log('tt', template, obj);
                 doTheProps(template.properties || {}, obj.properties || {});
 
                 // Applications
@@ -1276,7 +1274,7 @@ var OBJY = {
 
                     keys.forEach(function(k) {
 
-                        console.log('auths', obj.authorisations[k], template.authorisations[k]);
+
 
                         if (!obj.authorisations[k]) {
                             obj.authorisations[k] = template.authorisations[k]
@@ -1445,9 +1443,7 @@ var OBJY = {
 
         // CONSOLE LOGGING FOR TESTING PURPOSES!
 
-        console.log('query', query)
 
-        console.log('perm result', Query.query(permCheck, query, Query.undot))
 
         if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
     },
@@ -1485,7 +1481,7 @@ var OBJY = {
             if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                 if (Object.keys(a.query).length == 0) wildcard = true;
                 else {
-                    console.log([a.query, obj])
+
                     query.push({ '$and': [a.query, obj] })
                 }
             }
@@ -1497,11 +1493,7 @@ var OBJY = {
 
         query = { $or: query };
 
-        console.log('build query', query)
 
-        console.log('query', query)
-
-        console.log('perm result', Query.query(permCheck, query, Query.undot))
 
         return query;
     },
@@ -1909,7 +1901,7 @@ var OBJY = {
 
                 //if (!template.properties) template.properties = {};
 
-                console.log('ok,', obj, template, Object.keys(template || {}));
+
 
                 Object.keys(template || {}).forEach(function(p) {
 
@@ -1945,7 +1937,6 @@ var OBJY = {
 
                         } else {
 
-                            console.log('TTT', p, obj[p]);
                             if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
                                 obj[p] = template[p];
                             }
@@ -2030,7 +2021,7 @@ var OBJY = {
 
                 keys.forEach(function(k) {
 
-                    console.log('auths', obj.authorisations[k], template.authorisations[k]);
+
 
                     if (!obj.authorisations[k]) {
                         obj.authorisations[k] = template.authorisations[k]
@@ -2082,20 +2073,24 @@ var OBJY = {
                 Object.keys(template.privileges).forEach(function(a) {
                     if (!obj.privileges[a]) obj.privileges[a] = [];
 
+
                     template.privileges[a].forEach(function(tP) {
+
                         var contains = false;
 
                         obj.privileges[a].forEach(function(oP) {
                             if (oP.name == tP.name) contains = true;
                         })
+
+                        if (!contains) {
+                            obj.privileges[a].push({
+                                name: tP.name,
+                                template: templateId
+                            })
+                        }
+
                     })
 
-                    if (!contains) {
-                        obj.privileges[a].push({
-                            name: tP.name,
-                            template: templateId
-                        })
-                    }
 
                 })
             }
@@ -2105,7 +2100,7 @@ var OBJY = {
         }
 
         if (self.caches[templateRole || obj.role].get(templateId)) {
-            //run(self.caches[templateRole || obj.role].get(templateId))
+            run(self.caches[templateRole || obj.role].get(templateId))
 
         } else {
 
@@ -2121,7 +2116,7 @@ var OBJY = {
 
             OBJY.getObjectById(templateRole || obj.role, templateId, function(template) {
 
-                //if(!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId,  template);
+                if (!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId, template);
 
                 run(template)
 
@@ -2143,7 +2138,6 @@ var OBJY = {
     },
 
     removeTemplateFieldsForObject: function(obj, templateId, success, error, client) {
-
 
 
         if (!templateId) {
@@ -2223,7 +2217,6 @@ var OBJY = {
         }*/
 
         // doTheProps(obj.properties || {});
-
 
 
         function doTheProps(obj) {
@@ -4831,14 +4824,14 @@ var OBJY = {
             })
 
             function doTheProps(self, o) {
-                console.log('dtp', o)
+
                 Object.keys(o).forEach(function(k) {
 
                     if (o[k] == null || o[k] === undefined) return;
 
                     self[k] = o[k];
                     if (typeof o[k] === 'object') {
-                        console.log('typeof', typeof o[k], o[k])
+
                         doTheProps(self[k], o[k])
                     }
 
@@ -4846,7 +4839,7 @@ var OBJY = {
                 })
             }
 
-            console.log('bdtp', newObj)
+
             doTheProps(self, newObj);
 
             return self;
@@ -5648,7 +5641,7 @@ var OBJY = {
 
                         OBJY.applyAffects(data)
 
-                        console.log('AFTER ADDFN', data);
+
 
                         Object.keys(data.onCreate || {}).forEach(function(key) {
                             if (data.onCreate[key].trigger == 'after') {
