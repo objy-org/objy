@@ -1975,7 +1975,11 @@ var OBJY = {
 
                     if (template.permissions) {
                         if (!obj.permissions) obj.permissions = {};
+
                         Object.keys(template.permissions).forEach(function(p) {
+
+                            if(!template.permissions[p]) return;
+
                             if (!obj.permissions[p]) {
                                 obj.permissions[p] = template.permissions[p];
                                 obj.permissions[p].template = templateId;
@@ -2100,7 +2104,7 @@ var OBJY = {
         }
 
         if (self.caches[templateRole || obj.role].get(templateId)) {
-            run(self.caches[templateRole || obj.role].get(templateId))
+            //run(self.caches[templateRole || obj.role].get(templateId))
 
         } else {
 
@@ -2116,7 +2120,7 @@ var OBJY = {
 
             OBJY.getObjectById(templateRole || obj.role, templateId, function(template) {
 
-                if (!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId, template);
+                //if (!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId, template);
 
                 run(template)
 
@@ -2600,13 +2604,12 @@ var OBJY = {
 
     getObjectById: function(role, id, success, error, app, client) {
 
-
         this.mappers[role].getById(id, function(data) {
 
-            //console.log("---" + data)
+            console.log("---" + data)
 
             if (data == null) {
-                error('Error - object not found');
+                error('Error - object not found: ' + id);
                 return;
             }
 

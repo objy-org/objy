@@ -1,6 +1,6 @@
 {
   "name": "@spootechnologies/objy",
-  "version": "0.5.36",
+  "version": "0.5.40",
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "spoo.js",
   "scripts": {
