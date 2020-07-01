@@ -1,4 +1,4 @@
-var ProcessorMapperTemplate = function(SPOO) {
+ProcessorMapperTemplate = function(OBJY) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
@@ -10,7 +10,7 @@ var ProcessorMapperTemplate = function(SPOO) {
         }
     }
 
-    this.SPOO = SPOO;
+    this.OBJY = OBJY;
     this.objectFamily = null;
     this.multitenancy = this.CONSTANTS.MULTITENANCY.ISOLATED;
 

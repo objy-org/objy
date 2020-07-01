@@ -1,4 +1,4 @@
-var ObserverMapperTemplate = function(SPOO, options, content) {
+ObserverMapperTemplate = function(OBJY, options, content) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
@@ -9,7 +9,7 @@ var ObserverMapperTemplate = function(SPOO, options, content) {
             QUERIED: 'queried'
         }
     };
-    this.SPOO = SPOO;
+    this.OBJY = OBJY;
     this.interval = (options || {}).interval || 10000;
     this.objectFamily = null;
     this.type = (options || {}).type || this.CONSTANTS.TYPES.QUERIED;

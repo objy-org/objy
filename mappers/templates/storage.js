@@ -1,4 +1,4 @@
-var StorageMapperTemplate = function(SPOO, options) {
+StorageMapperTemplate = function(OBJY, options) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
