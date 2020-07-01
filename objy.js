@@ -1855,6 +1855,11 @@ var OBJY = {
 
         var self = this;
 
+
+            var isObject = function(a) {
+                return (!!a) && (a.constructor === Object);
+            };
+
         function run(template) {
 
             if (!template) {
@@ -1874,17 +1879,21 @@ var OBJY = {
             ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                 if (template[h]) {
                     Object.keys(template[h]).forEach(function(oC) {
+
+                      
+                        if(!template[h][oC] || !isObject(template[h][oC])) return;
+
                         if (!obj[h][oC]) {
                             obj[h][oC] = template[h][oC];
+
+                           // console.log('o', obj[h][oC]);
+
                             obj[h][oC].template = templateId;
                         }
                     })
                 }
             })
 
-            var isObject = function(a) {
-                return (!!a) && (a.constructor === Object);
-            };
 
             // Properties
             function doTheProps(template, obj) {
@@ -1926,7 +1935,7 @@ var OBJY = {
 
                         doTheProps(template[p], obj[p]);
 
-                    } else if (isObject(template[p])) {
+                    } /*else if (isObject(template[p])) {
 
                         if (!obj[p]) {
 
@@ -1946,7 +1955,7 @@ var OBJY = {
                         }
 
                         doTheProps(template[p], obj[p]);
-                    }
+                    }*/
 
 
                     if (!obj[p]) {
@@ -1995,6 +2004,8 @@ var OBJY = {
                             if (!obj[p][h]) obj[p][h] = {};
 
                             Object.keys(template[p][h]).forEach(function(oC) {
+
+                                if(!template[p][h][oC] || !isObject(template[p][h][oC])) return;
 
                                 if (!obj[p][h][oC]) {
                                     obj[p][h][oC] = template[p][h][oC];
@@ -2606,7 +2617,7 @@ var OBJY = {
 
         this.mappers[role].getById(id, function(data) {
 
-            console.log("---" + data)
+           // console.log("---", data)
 
             if (data == null) {
                 error('Error - object not found: ' + id);
@@ -4484,6 +4495,9 @@ var OBJY = {
 
                         if (d.inherits.length == 0) {
                             allCounter++;
+
+                          //  console.info('1', d.inherits.length, counter, data.length, allCounter)
+
                             if (allCounter == data.length) {
 
                                 success(data);
@@ -4501,7 +4515,7 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-                                        // console.info(d.inherits.length, counter, data.length, allCounter)
+                                        // console.info('2', d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -4514,7 +4528,7 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-                                        //console.info(d.inherits.length, counter, data.length, allCounter)
+                                       // console.info('3', d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -4540,6 +4554,7 @@ var OBJY = {
                     })
 
                 }, function(err) {
+                    console.log('err', err);
                     error(err)
                 }, app, client, flags || {});
 
