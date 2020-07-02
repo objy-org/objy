@@ -24,8 +24,10 @@ The philisophy behind OBJY ist to define objects and tell them what to do. In or
 
 OBJY.Object({
    name: "Passport",
-   expires: "2020-10-10",
-   number: "123"
+   properties: {
+      expires: "2020-10-10",
+      number: "123"
+   }
 })
 ```
 
@@ -86,11 +88,30 @@ OBJY.Object(id).replace(newObject).save(callback);
 OBJY.Object(id).delete(callback);
 ```
 
+
+## Object Families
+
+Objects can be grouped into Object Families using the define method. Each Family will have it's own constructor. The default Object Family is "Object" and is already built in.
+
+### Use a mapper
+
+```javascript
+// define a custom object family
+OBJY.define({
+   name : "User",
+   pluralName: "Users"
+});
+
+// use the object familys
+OBJY.User({...});
+```
+
+
 ## Customize
 
 Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast. When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed.
 
-### Use an adapter
+### Use a mapper
 
 ```javascript
 // define a custom object family
@@ -108,7 +129,7 @@ OBJY.InMemObject({...});
 
 ## Authors
 
-* **Marco Boelling** - *Creator of OBJY* - [Twitter](https://twitter.com/marcoboelling)
+* **Marco Boelling** - *Initial author* - [Twitter](https://twitter.com/marcoboelling)
 
 ## License
 
