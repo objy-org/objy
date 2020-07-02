@@ -2,7 +2,7 @@
   "name": "@spootechnologies/objy",
   "version": "0.5.53",
   "description": "A JavaScript framework for building object-driven use cases",
-  "main": "spoo.js",
+  "main": "objy.js",
   "scripts": {
     "test": "jest"
   },

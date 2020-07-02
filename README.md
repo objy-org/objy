@@ -93,8 +93,6 @@ OBJY.Object(id).delete(callback);
 
 Objects can be grouped into Object Families using the define method. Each Family will have it's own constructor. The default Object Family is "Object" and is already built in.
 
-### Use a mapper
-
 ```javascript
 // define a custom object family
 OBJY.define({

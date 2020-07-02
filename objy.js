@@ -15,6 +15,7 @@ var shortid = require('shortid');
 
 var Query = require('./dependencies/query.js');
 var Logger = require('./dependencies/logger.js')
+var CONSTANTS = require('./dependencies/constants.js')
 
 var StorageMapperTemplate = require('./mappers/templates/storage.js');
 var ProcessorMapperTemplate = require('./mappers/templates/processor.js')
@@ -27,8 +28,6 @@ var ObserverTemplate = ObserverMapperTemplate;
 var DefaultStorageMapper = require('./mappers/storage.inmemory.js')
 var DefaultProcessorMapper = require('./mappers/processor.eval.js')
 var DefaultObserverMapper = require('./mappers/observer.interval.js')
-
-var CONSTANTS = require('./constants.js')
 
 
 function NoOnChangeException(message) {
