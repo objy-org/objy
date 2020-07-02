@@ -24,9 +24,9 @@ var StorageTemplate = StorageMapperTemplate;
 var ProcessorTemplate = ProcessorMapperTemplate;
 var ObserverTemplate = ObserverMapperTemplate;
 
-var DefaultStorageMapper = require('./mappers/storage/inMemory.js')
-var DefaultProcessorMapper = require('./mappers/processors/eval.js')
-var DefaultObserverMapper = require('./mappers/observers/intervalMapper.js')
+var DefaultStorageMapper = require('./mappers/storage.inmemory.js')
+var DefaultProcessorMapper = require('./mappers/processor.eval.js')
+var DefaultObserverMapper = require('./mappers/observer.interval.js')
 
 var CONSTANTS = require('./constants.js')
 
@@ -234,13 +234,6 @@ var OBJY = {
     self: this,
 
     Logger: Logger,
-
-    Mapper: {
-        Storage: {
-            Mongo: require('./mappers/storage/mongoMapper.js'),
-            GridFS: require('./mappers/storage/gridFSMapper.js'),
-        },
-    },
 
     metaProperties: ['id', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
