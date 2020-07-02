@@ -28,7 +28,7 @@ var DefaultStorageMapper = require('./mappers/storage/inMemory.js')
 var DefaultProcessorMapper = require('./mappers/processors/eval.js')
 var DefaultObserverMapper = require('./mappers/observers/intervalMapper.js')
 
-var CONSTANTS = require('constants.js')
+var CONSTANTS = require('./constants.js')
 
 
 function NoOnChangeException(message) {

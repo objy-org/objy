@@ -43,8 +43,8 @@ Mapper = function(OBJY, options) {
         index: {},
         globalPaging: 20,
 
-        connect: function(connectionString, success, error) {
-            this.database = mongoose.createConnection(connectionString);
+        connect: function(connectionString, success, error, options) {
+            this.database = mongoose.createConnection(connectionString, options);
 
             this.database.on('error', function(err) {
                 error(err)
@@ -151,7 +151,7 @@ Mapper = function(OBJY, options) {
             var db = this.getDBByMultitenancy(client);
 
             var Attachment = createModel({
-                modelName: 'Attachment',
+                modelName: 'File',
                 connection: db
             });
 
@@ -189,13 +189,90 @@ Mapper = function(OBJY, options) {
 
         getByCriteria: function(criteria, success, error, app, client, flags) {
 
-            error('Querying not possible')
+            var db = this.getDBByMultitenancy(client);
+
+            var Obj = db.model(this.objectFamily, ObjSchema);
+
+
+            if (flags.$page == 1) flags.$page = 0;
+            else flags.$page -= 1;
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
+
+            if (criteria.$query) {
+                criteria = JSON.parse(JSON.stringify(criteria.$query));
+                delete criteria.$query;
+            }
+
+            var arr = [{ $match: criteria }, { $limit: 20 }];
+            if (flags.$page) arr.push({ $skip: this.globalPaging * (flags.$page || 0) })
+
+            var s = {};
+
+            if (flags.$sort) {
+
+                if (flags.$sort.charAt(0) == '-') {
+                    s[flags.$sort.slice(1)] = -1;
+                } else {
+                    s[flags.$sort] = 1;
+                }
+
+                arr.push({ $sort: s })
+            }
+
+            if (app) criteria['applications'] = { $in: [app] }
+
+            console.warn('__APP__', app, criteria['applications']);
+
+            console.warn('criteria', criteria, this.globalPaging, flags.$page)
+
+            var finalQuery = Obj.find(criteria)
+
+            if (flags.$limit) finalQuery.limit(flags.$limit).sort(s || { '_id': 1 });
+            else finalQuery.limit(this.globalPaging).skip(this.globalPaging * (flags.$page || 0)).sort(s || { '_id': 1 });
+
+            if (criteria.$aggregate) {
+                finalQuery = Obj.aggregate(criteria.$aggregate);
+            }
+
+            finalQuery.lean().exec(function(err, data) {
+                if (err) {
+                    error(err);
+                    return;
+                }
+
+                success(data);
+                return;
+            });
+
+
 
         },
 
         count: function(criteria, success, error, app, client, flags) {
 
-            error('Count not possible')
+             var db = this.getDBByMultitenancy(client);
+
+            var Obj = db.model(this.objectFamily, ObjSchema);
+
+            if (criteria.$query) {
+                criteria = JSON.parse(JSON.stringify(criteria.$query));
+                delete criteria.$query;
+            }
+
+            if (app) criteria['applications'] = { $in: [app] }
+
+            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED && client) criteria['tenantId'] = client;
+
+            Obj.count(criteria).exec(function(err, data) {
+                if (err) {
+                    error(err);
+                    return;
+                }
+
+                success({ 'result': data });
+                return;
+            });
         },
 
         update: function(spooElement, success, error, app, client) {
@@ -208,7 +285,7 @@ Mapper = function(OBJY, options) {
             var db = this.getDBByMultitenancy(client);
 
             var Attachment = createModel({
-                modelName: 'Attachment',
+                modelName: 'File',
                 connection: db
             });
 
@@ -256,7 +333,7 @@ Mapper = function(OBJY, options) {
             var db = this.getDBByMultitenancy(client);
 
             var Attachment = createModel({
-                modelName: 'Attachment',
+                modelName: 'File',
                 connection: db
             });
 
