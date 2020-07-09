@@ -6,14 +6,23 @@ Mapper = function(OBJY) {
             OBJY.Logger.log("Executing dsl in mapper")
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
                 try {
-                    eval(dsl);
+                    if (!OBJY.dslType || OBJY.dslType == 'js')
+                        eval(dsl);
+                    else if (OBJY.dslType == 'custom') {
+                        OBJY.lang.parse(dsl);
+                    }
+
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }
                 callback();
             } else {
                 try {
-                    eval(dsl);
+                    if (!OBJY.dslType || OBJY.dslType == 'js')
+                        eval(dsl);
+                    else if (OBJY.dslType == 'custom') {
+                        OBJY.lang.parse(dsl);
+                    }
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }

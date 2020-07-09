@@ -1,8 +1,60 @@
 const OBJY = require('./objy.js');
 const stream = require('stream');
 const fs = require('fs')
-const EventMapper = require('./mappers/observers/inMemoryStream.js')
-var Processor = require('./mappers/processors/eval.js');
+//const EventMapper = require('./mappers/observers/inMemoryStream.js')
+//var Processor = require('./mappers/processors/eval.js');
+
+
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects"
+})
+
+
+console.log(OBJY.object({name:"asfaf"}).add())
+
+
+var OBJY = {
+
+    Obj: function(instance){
+        
+        this.instance = instance;
+
+        add: function()
+        {
+            
+        }
+    }
+}
+
+OBJY.Obj.prototype.add = function()
+{
+    instance
+}
+
+
+
+
+return;
+
+
+var Object = OBJY.Object;
+
+Object({
+    properties: {
+        warnMe: {
+            on: "2020",
+            do: ""
+        },
+        onChange: {
+
+        }
+    }
+})
+
+Object({name: "test", type: "car"}, {age: 2});
+
 
 
 
@@ -26,7 +78,7 @@ DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
             }, function(e) {
                 console.log('e', e);
                 OBJY.client(ws);
-            }) 
+            })
         } else if (data.length > 0) {
             // UPDATE
             OBJY.client(targetWorkspace);
@@ -63,8 +115,8 @@ DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
 OBJY.affectables = [{
     _id: "user readonly",
     affects: { role: 'user' },
-    apply: { permissions: {admin: "*"} }
-},{
+    apply: { permissions: { admin: "*" } }
+}, {
     _id: "general",
     affects: { role: 'object' },
     apply: { applications: ['ssg'], properties: { firstName: 23 } }

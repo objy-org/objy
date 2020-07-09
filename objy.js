@@ -15,6 +15,7 @@ var shortid = require('shortid');
 
 var Query = require('./dependencies/query.js');
 var Logger = require('./dependencies/logger.js')
+var fluent_dsl = require('./dependencies/fluent-dsl.js')
 var CONSTANTS = require('./dependencies/constants.js')
 
 var StorageMapperTemplate = require('./mappers/templates/storage.js');
@@ -238,6 +239,14 @@ var OBJY = {
 
     metaPropPrefix: '',
 
+    dslType: 'js',
+
+    dsl: fluent_dsl,
+
+    lang: function(code) {
+        this.dsl.parse(code);
+    },
+
     instance: this,
 
     activeTenant: null,
@@ -265,6 +274,9 @@ var OBJY = {
     ProcessorTemplate: ProcessorTemplate,
     ObserverTemplate: ObserverTemplate,
 
+    run: function(code) {
+
+    },
 
     serialize: function(obj) {
         return obj;
@@ -1074,10 +1086,179 @@ var OBJY = {
 
         var self = this;
 
+        /*console.log("CHECKING FOR TEMPLATE_: " + templateId);
+        console.log(arguments);
+        this.getObjectById(templateRole || obj.role, templateId, function(template) {
+                console.log("CHECKING FOR TEMPLATE: " + templateId);
+                if (!template) {
+                    error('no such template');
+                    return;
+                }
+                if (template.type) {
+                    if (!obj.type) obj.type = template.type;
+                }
+                if (template.onCreate) {
+                    if (!obj.onCreate) obj.onCreate = template.onCreate;
+                    if (!obj.onCreateOverwritten) {
+                        if (!obj.onCreate) obj.onCreate = template.onCreate;
+                    }
+                }
+                if (template.onDelete) {
+                    if (!obj.onDelete) obj.onDelete = template.onDelete;
+                    if (!obj.onDeleteOverwritten) {
+                        if (!obj.onDelete) obj.onDelete = template.onDelete;
+                    }
+                }
+                var propertyKeys = Object.keys(template.properties);
+                console.log("PORPKEYS");
+                console.log(propertyKeys);
+                var derievedProps = {};
+                propertyKeys.forEach(function(property) {
+                    if (!obj.properties.hasOwnProperty(property)) {
+                        template.properties[property].template = templateId;
+                        if (template.properties[property].overwritten) delete template.properties[property].overwritten;
+                        var cloned = JSON.parse(JSON.stringify(template.properties[property]));
+                        obj.properties[property] = cloned;
+                        console.log("ggg-");
+                        console.log(property);
+                        console.log(obj.properties[property]);
+                    } else {
+                        obj.properties[property].template = templateId;
+                        obj.properties[property].overwritten = true;
+                        if (!obj.properties[property].overwrittenOnCreate) {
+                            if (!obj.properties[property].onCreate) obj.properties[property].onCreate = template.properties[property].onCreate;
+                        }
+                        if (!obj.properties[property].overwrittenOnChange) {
+                            if (!obj.properties[property].onChange) obj.properties[property].onChange = template.properties[property].onChange;
+                        }
+                        if (!obj.properties[property].overwrittenOnDelete) {
+                            if (!obj.properties[property].onDelete) obj.properties[property].onDelete = template.properties[property].onDelete;
+                        }
+                        if (!obj.properties[property].overwrittenMeta) {
+                            if (!obj.properties[property].meta) obj.properties[property].meta = template.properties[property].meta;
+                        }
+                        function getBagProperties(objBag, tmplBag) {
+                            console.log("tmplBag");
+                            console.log(tmplBag);
+                            console.log(objBag);
+                            if (!objBag) {
+                                objBag = {};
+                                objBag[Object.keys(tmplBag)[0]] = tmplBag;
+                                console.log("new objBag");
+                                console.log(objBag);
+                            } else {
+                                if (!objBag.overwritten) {
+                                    if (objBag.permissions) objBag.permissions = Object.assign(objBag.permissions, tmplBag.permissions);
+                                    else objBag.permissions = tmplBag.permissions;
+                                }
+                            }
+                            objBag.template = template._id;
+                            if (!objBag.overwrittenOnCreate) objBag.onCreate = tmplBag.onCreate;
+                            if (!objBag.overwrittenOnChange) objBag.onChange = tmplBag.onChange;
+                            if (!objBag.overwrittenOnDelete) objBag.onDelete = tmplBag.onDelete;
+                            if (!objBag.overwrittenMeta) objBag.meta = tmplBag.meta;
+                            if (objBag.type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG && tmplBag.type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                var templateInnerKeys = Object.keys(tmplBag.properties);
+                                templateInnerKeys.forEach(function(templKey) {
 
-            var isObject = function(a) {
-                return (!!a) && (a.constructor === Object);
-            };
+                                    var hasProp = false;
+                                    var innerPropKeys = Object.keys(objBag.properties);
+                                    innerPropKeys.forEach(function(objKey) {
+                                        if (templKey == objKey) hasProp = true;
+                                    })
+                                    if (!hasProp) {
+                                        console.log("NOT HAS PROP: " + templKey);
+                                        objBag.properties[templKey] = tmplBag.properties[templKey];
+                                        objBag.properties[templKey].template = template._id;
+                                    } else {
+                                        if (objBag.properties[templKey].value === undefined && tmplBag.properties[templKey].hasOwnProperty('value')) {
+                                            if (objBag.properties[templKey].triggered) tmplBag.properties[templKey].triggered = objBag.properties[templKey].triggered;
+                                            objBag.properties[templKey] = tmplBag.properties[templKey];
+                                            objBag.properties[templKey].template = template._id;
+                                        }
+                                        console.log("tmpl prop");
+                                        console.log(tmplBag.properties[templKey]);
+                                        console.log("obj prop");
+                                        console.log(objBag.properties[templKey]);
+                                    }
+                                    console.log("istypebag");
+                                    console.log(tmplBag.properties[templKey].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG);
+                                    if (tmplBag.properties[templKey].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
+                                        getBagProperties(objBag.properties[templKey], tmplBag.properties[templKey])
+                                    else objBag.properties[templKey].template = template._id;
+                                })
+                            } else {
+                                objBag.template = template._id;
+                            }
+                        }
+                        getBagProperties(obj.properties[property], template.properties[property]);
+
+                        console.log("ggg-");
+                        console.log(property);
+                        console.log(obj.properties[property]);
+                    }
+                });
+                if (template.applications)
+                    if (Array.isArray(template.applications)) {
+                        console.log("APPPPPPPPP");
+                        console.log(template.applications);
+                        if (!obj.applications) obj.applications = [];
+                        template.applications.forEach(function(app) {
+                            console.log(app);
+                            console.log(obj.applications);
+                            if (obj.applications.indexOf(app) == -1) obj.applications.push(app);
+                        })
+                    }
+                var permissionKeys = Object.keys(template.permissions);
+                var derievedPermissions = {};
+                permissionKeys.forEach(function(permission) {
+                    if (!obj.permissions.hasOwnProperty(permission)) {
+                        template.permissions[permission].template = templateId;
+                        var cloned = JSON.parse(JSON.stringify(template.permissions[permission]));
+                        obj.permissions[permission] = cloned;
+                    }
+                });
+
+                var privilegeAppKeys = Object.keys(template.privileges);
+                var derievedPrivileges = {};
+                if (!obj.privileges) obj.privileges = {};
+
+                privilegeAppKeys.forEach(function(tApp) {
+                    console.log("tApp: " + tApp);
+                    if (!obj.privileges[tApp]) obj.privileges[tApp] = [];
+                    var j;
+                    for (j = 0; j < template.privileges[tApp].length; j++) {
+                        var contains = false;
+                        var i;
+                        for (i = 0; i < obj.privileges[tApp].length; i++) {
+                            if (obj.privileges[tApp][i].name == template.privileges[tApp][j].name) contains = true;
+                        }
+                        if (!contains) {
+                            obj.privileges[tApp].push(Object.assign({ template: templateId }, template.privileges[tApp][j]));
+                        }
+                    }
+                })
+            
+                success();
+            },
+            function(err) {
+                error(err);
+            }, OBJY.activeApp, templateSource || OBJY.activeTenant)
+
+
+*/
+
+
+
+
+
+
+
+
+
+        var isObject = function(a) {
+            return (!!a) && (a.constructor === Object);
+        };
 
         function run(template) {
 
@@ -1099,13 +1280,13 @@ var OBJY = {
                 if (template[h]) {
                     Object.keys(template[h]).forEach(function(oC) {
 
-                      
-                        if(!template[h][oC] || !isObject(template[h][oC])) return;
+
+                        if (!template[h][oC] || !isObject(template[h][oC])) return;
 
                         if (!obj[h][oC]) {
                             obj[h][oC] = template[h][oC];
 
-                           // console.log('o', obj[h][oC]);
+                            // console.log('o', obj[h][oC]);
 
                             obj[h][oC].template = templateId;
                         }
@@ -1119,95 +1300,62 @@ var OBJY = {
 
                 if (!obj) obj = {}
 
-                if (obj.type == 'bag') {
-                    if (!obj.properties) {
-                        obj.properties = {};
-                    }
+                if (!obj.properties) {
+                    obj.properties = {};
                 }
 
                 //console.info('compare', template, 'obj:', obj)
 
-                //if (!template.properties) template.properties = {};
+                if (!template.properties) template.properties = {};
+
+                Object.keys(template.properties).forEach(function(p) {
+
+                    var cloned = JSON.parse(JSON.stringify(template.properties[p]));
 
 
+                  //  console.log('--', p, obj.properties[p], cloned);
 
-                Object.keys(template || {}).forEach(function(p) {
-
-                    if (!isObject(template[p])) return;
-
-                    if ((template[p] || {}).type == 'bag') {
-
-                        if (!obj[p]) {
-
-                            obj[p] = template[p];
-                            obj[p].template = templateId;
-                        } else {
-                            if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
-                                obj[p] = template[p];
-                            }
-
-                            obj[p].template = templateId;
-                            //obj.properties[p].overwritten = true;
-                        }
-
-                        if (!obj[p].properties) obj[p].properties = {};
-
-                        doTheProps(template[p], obj[p]);
-
-                    } /*else if (isObject(template[p])) {
-
-                        if (!obj[p]) {
-
-                            obj[p] = template[p];
-
-                            if (p != 'properties') obj[p].template = templateId;
-
-
-                        } else {
-
-                            if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
-                                obj[p] = template[p];
-                            }
-
-                            if (p != 'properties') obj[p].template = templateId;
-                            //obj.properties[p].overwritten = true;
-                        }
-
-                        doTheProps(template[p], obj[p]);
-                    }*/
-
-
-                    if (!obj[p]) {
-                        obj[p] = template[p];
-                        if (p != 'properties') obj[p].template = templateId;
-                        delete obj[p].overwritten;
+                    if (!obj.properties[p]) {
+                        obj.properties[p] = cloned;
+                        obj.properties[p].template = templateId;
+                        delete obj.properties[p].overwritten;
                     } else {
 
-                        if (!obj[p].overwritten) {
-                            if (p != 'properties') obj[p].template = templateId;
-                            if (obj[p].value == null) obj[p].value = template[p].value;
+                        //if (!obj.properties[p].onCreateOverwritten && !obj.properties[p].onCreate) obj.properties[p].onCreate = cloned.onCreate;
+                        //if (!obj.properties[p].onChangeOverwritten && !obj.properties[p].onChange) obj.properties[p].onChange = cloned.onChange;
+                        //if (!obj.properties[p].onDeleteOverwritten && !obj.properties[p].onDelete) obj.properties[p].onDelete = cloned.onDelete;
+                        // if (!obj.properties[p].metaOverwritten && !obj.properties[p].meta) obj.properties[p].meta = cloned.meta;
+
+                        if (cloned.meta) {
+                            if (!obj.properties[p].meta) {
+                                obj.properties[p].meta = cloned.meta;
+                                obj.properties[p].meta.overwritten = true;
+                            } else {
+                                if (!obj.properties[p].meta.overwritten) {
+                                    obj.properties[p].meta = cloned.meta;
+                                    obj.properties[p].meta.overwritten = true;
+                                }
+                            }
+                        }
+
+                        obj.properties[p].template = templateId;
+                        obj.properties[p].overwritten = true;
+
+
+                        /*if (!obj.properties[p].overwritten) {
+                            obj.properties[p].template = templateId;
+                            if (obj.properties[p].value == null) obj.properties[p].value = cloned.value;
                             //obj.properties[p].overwritten = true;
                         }
 
-                        if (!obj[p].metaOverwritten) {
-                            obj[p].meta = template[p].meta;
-                        }
-
-                        if (obj[p].type == 'bag') {
-                            if (!obj[p].properties) {
-                                obj[p].properties = {};
-                            }
-                        }
+                        if (!obj.properties[p].metaOverwritten) {
+                            obj.properties[p].meta = cloned.meta;
+                        }*/
                     }
-
 
                     if (template.permissions) {
                         if (!obj.permissions) obj.permissions = {};
-
                         Object.keys(template.permissions).forEach(function(p) {
-
-                            if(!template.permissions[p]) return;
-
                             if (!obj.permissions[p]) {
                                 obj.permissions[p] = template.permissions[p];
                                 obj.permissions[p].template = templateId;
@@ -1219,24 +1367,42 @@ var OBJY = {
                     }
 
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                        if (template[p][h]) {
-                            if (!obj[p][h]) obj[p][h] = {};
+                        if (template.properties[p][h]) {
+                            if (!obj.properties[p][h]) obj.properties[p][h] = {};
 
-                            Object.keys(template[p][h]).forEach(function(oC) {
+                            Object.keys(template.properties[p][h]).forEach(function(oC) {
 
-                                if(!template[p][h][oC] || !isObject(template[p][h][oC])) return;
-
-                                if (!obj[p][h][oC]) {
-                                    obj[p][h][oC] = template[p][h][oC];
-                                    obj[p][h][oC].template = templateId;
+                                if (!obj.properties[p][h][oC]) {
+                                    obj.properties[p][h][oC] = template.properties[p][h][oC];
+                                    obj.properties[p][h][oC].template = templateId;
                                 }
                             })
                         }
                     })
+
+                    if (template.properties[p].type == 'bag') {
+
+                        /*if (!obj.properties[p]) {
+
+                            obj.properties[p] = cloned;
+                            obj.properties[p].template = templateId;
+                        } else {
+                            if (!obj.properties[p].overwritten && Object.keys(obj.properties[p]).length == 0) {
+                                obj.properties[p] = cloned;
+                            }
+
+                            obj.properties[p].template = templateId;
+                            //obj.properties[p].overwritten = true;
+                        }*/
+
+                        doTheProps(cloned, obj.properties[p]);
+                    }
+
                 })
             }
 
-            doTheProps(template.properties || {}, obj.properties || {});
+
+            doTheProps(template, obj);
 
             // Applications
 
@@ -1256,13 +1422,11 @@ var OBJY = {
                 keys.forEach(function(k) {
 
 
-
                     if (!obj.authorisations[k]) {
                         obj.authorisations[k] = template.authorisations[k]
 
                         obj.authorisations[k].forEach(function(a) {
                             a.template = template._id;
-                            a.test = 'has not'
                         })
 
                     } else {
@@ -1346,13 +1510,51 @@ var OBJY = {
             }, undefined, client)*/
 
 
-            console.log('looking in templateSource', templateSource);
+            //console.log('looking in templateSource', templateSource);
 
             OBJY.getObjectById(templateRole || obj.role, templateId, function(template) {
 
                 //if (!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId, template);
 
-                run(template)
+                var counter = 0;
+
+                //console.log('init gtfo', templateId, counter);
+
+
+                if ((template.inherits || []).length == 0) run(template)
+                else {
+
+
+                    template.inherits.forEach(function(i) {
+
+
+
+                        OBJY.getTemplateFieldsForObject(template, i, function() {
+
+                                counter++;
+
+                               // console.log('counter', counter, template, i);
+
+                                if (counter == template.inherits.length) run(template);;
+
+                            },
+                            function(err) {
+                                counter++;
+
+                                if (counter == template.inherits.length) run(template);
+
+                               
+                            }, client, templateRole || obj.role, templateSource || OBJY.activeTenant)
+
+
+                    })
+
+
+                }
+
+
+
+                //run(template)
 
             }, function(err) {
                 error(err);
@@ -1369,6 +1571,8 @@ var OBJY = {
                 error(err);
             }, templateSource)*/
         }
+
+
     },
 
     removeTemplateFieldsForObject: function(obj, templateId, success, error, client) {
@@ -1836,7 +2040,7 @@ var OBJY = {
 
         this.mappers[role].getById(id, function(data) {
 
-           // console.log("---", data)
+            // console.log("---", data)
 
             if (data == null) {
                 error('Error - object not found: ' + id);
@@ -1844,6 +2048,12 @@ var OBJY = {
             }
 
             success(data);
+
+            /*OBJY[data.role](data).get(function(ob){
+                success(ob);
+            }, function(err){
+
+            },client)*/
 
 
         }, function(err) {
@@ -1865,18 +2075,18 @@ var OBJY = {
             success(data);
 
 
-            /*data.forEach(function(obj, i) {
-                counter++;
-                if (counter == data.length) success(data);
-                /*new OBJY.Obj(obj).get(function(ob) {
-                        counter++;
-                        data[i] = ob
-                        if (counter == data.length) success(data);
-                    },
-                    function(err) {
-                        error(err);
-                    }, client);*
-            })*/
+            /* data.forEach(function(obj, i) {
+                 counter++;
+                 if (counter == data.length) success(data);
+                 OBJY[obj.role](obj).get(function(ob) {
+                         counter++;
+                         data[i] = ob
+                         if (counter == data.length) success(data);
+                     },
+                     function(err) {
+                         error(err);
+                     }, client);
+             })*/
 
 
         }, function(err) {
@@ -2588,7 +2798,7 @@ var OBJY = {
     {
         if (!typeof permissions == 'object') throw new InvalidPermissionException();
 
-        if (!permissions) return {};
+        if (!permissions) return;
 
         var permissionKeys = Object.keys(permissions);
         permissionKeys.forEach(function(permission) {
@@ -2630,7 +2840,7 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
 
-        if (!onCreate) onCreate = {};
+        if (!onCreate) return;
 
         Object.keys(onCreate).forEach(function(oC) {
             if (!onCreate[oC].trigger) oC.trigger = 'after';
@@ -2659,7 +2869,7 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
 
-        if (!onChange) onChange = {};
+        if (!onChange) return;
 
         Object.keys(onChange).forEach(function(oC) {
             if (!onChange[oC].trigger) oC.trigger = 'after';
@@ -2674,7 +2884,7 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
 
-        if (!onDelete) onDelete = {};
+        if (!onDelete) return;
 
         Object.keys(onDelete).forEach(function(oC) {
             if (!onDelete[oC].trigger) oC.trigger = 'after';
@@ -3563,7 +3773,7 @@ var OBJY = {
     },
 
     PropertiesChecker: function(obj, properties, instance) {
-        if (properties === undefined) return {};
+        if (properties === undefined) return;
 
         obj.properties = {};
         var propertyKeys = Object.keys(properties);
@@ -3577,17 +3787,18 @@ var OBJY = {
     },
 
     ApplicationsChecker: function(obj, applications) {
-        if (applications === undefined) return [];
+        if (applications === undefined) return;
 
         obj.applications = [];
         applications.forEach(function(application) {
             obj.applications.push(application);
         })
+
         return obj.applications;
     },
 
     ActionsChecker: function(obj, actions) {
-        if (actions === undefined) return {};
+        if (actions === undefined) return;
 
         obj.actions = {};
         var actionKeys = Object.keys(actions);
@@ -3600,9 +3811,9 @@ var OBJY = {
         return obj.actions;
     },
 
-    TemplatesChecker: function(obj, templates) {
-        if (templates === undefined) return [];
-        if (typeof templates !== 'object') return [];
+    InheritsChecker: function(obj, templates) {
+        if (templates === undefined) return;
+        if (typeof templates !== 'object') return;
         obj.inherits = [];
 
         templates.forEach(function(template) {
@@ -3715,7 +3926,7 @@ var OBJY = {
                         if (d.inherits.length == 0) {
                             allCounter++;
 
-                          //  console.info('1', d.inherits.length, counter, data.length, allCounter)
+                            //  console.info('1', d.inherits.length, counter, data.length, allCounter)
 
                             if (allCounter == data.length) {
 
@@ -3747,7 +3958,7 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-                                       // console.info('3', d.inherits.length, counter, data.length, allCounter)
+                                        // console.info('3', d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -3931,33 +4142,32 @@ var OBJY = {
         }
 
         if (params.isRule) {
-            this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance) || {};
-            this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance) || {};
+            this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance);
+            this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
         }
 
         if (!params.structure) {
 
-            this.type = obj.type || null;
+            this.type = obj.type;
 
-            this.applications = OBJY.ApplicationsChecker(this, obj.applications) || [];
+            this.applications = OBJY.ApplicationsChecker(this, obj.applications);
 
-            this.inherits = OBJY.TemplatesChecker(this, obj.inherits) || [];
+            this.inherits = OBJY.InheritsChecker(this, obj.inherits);
 
+            this.name = obj.name;
 
-            this.name = obj.name || null;
-
-            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance) || {};
-            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance) || {};
-            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance) || {};
+            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
+            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
+            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance);
 
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
-            this.properties = OBJY.PropertiesChecker(this, obj.properties, instance) || {};
+            this.properties = OBJY.PropertiesChecker(this, obj.properties, instance);
 
-            this.permissions = new OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
+            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions);
 
-            this._aggregatedEvents = obj._aggregatedEvents || [];
+            this._aggregatedEvents = obj._aggregatedEvents;
 
             /*if (this.role == 'template') {
                 this.privileges = obj.privileges;
@@ -3972,9 +4182,9 @@ var OBJY = {
                 this.username = obj.username || null;
                 this.email = obj.email || null;
                 this.password = obj.password || null;
-                this.privileges = OBJY.PrivilegesChecker(obj) || {};
-                this.spooAdmin = obj.spooAdmin || false;
-                this._clients = obj._clients || [];
+                this.privileges = OBJY.PrivilegesChecker(obj);
+                this.spooAdmin = obj.spooAdmin;
+                this._clients = obj._clients;
 
                 this.addClient = function(client) {
                     if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
@@ -4054,6 +4264,8 @@ var OBJY = {
             newObj = OBJY[this.role](newObj);
 
             var self = this;
+
+            if (self.role != newObj.role) throw new Error("cannot alter role")
 
             Object.keys(this).forEach(function(k) {
                 if (self[k] instanceof Function || k == '_id') return;
@@ -4758,29 +4970,33 @@ var OBJY = {
 
                         thisRef._id = data._id;
 
-                        success(OBJY.deserialize(data));
+                        if (success) success(OBJY.deserialize(data));
 
                         delete thisRef.instance;
 
                     },
                     function(err) {
                         console.warn('err', err, error)
-                        error(err);
+                        if (error) error(err);
                     }, app, client);
 
                 return OBJY.deserialize(this);
             }
 
-            Object.keys(thisRef.onCreate).forEach(function(key) {
 
-                if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
+            if (thisRef.onCreate) {
+                Object.keys(thisRef.onCreate).forEach(function(key) {
 
-                    //dsl, obj, prop, data, callback, client, options
-                    instance.execProcessorAction(thisRef.onCreate[key].value, thisRef, null, null, function(data) {
+                    if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
 
-                    }, client, null);
-                }
-            })
+                        //dsl, obj, prop, data, callback, client, options
+                        instance.execProcessorAction(thisRef.onCreate[key].value, thisRef, null, null, function(data) {
+
+                        }, client, null);
+                    }
+                })
+            }
+
 
             this.created = moment().utc().toDate().toISOString();
             this.lastModified = moment().utc().toDate().toISOString();
@@ -4879,15 +5095,16 @@ var OBJY = {
                         OBJY.applyAffects(data)
 
 
+                        if (data.onCreate) {
+                            Object.keys(data.onCreate).forEach(function(key) {
+                                if (data.onCreate[key].trigger == 'after') {
+                                    //dsl, obj, prop, data, callback, client, options
+                                    instance.execProcessorAction(data.onCreate[key].value, data, null, null, function(data) {
 
-                        Object.keys(data.onCreate || {}).forEach(function(key) {
-                            if (data.onCreate[key].trigger == 'after') {
-                                //dsl, obj, prop, data, callback, client, options
-                                instance.execProcessorAction(data.onCreate[key].value, data, null, null, function(data) {
-
-                                }, client, null);
-                            }
-                        })
+                                    }, client, null);
+                                }
+                            })
+                        }
 
                         if (mapper.type == 'scheduled') {
 
@@ -4914,13 +5131,13 @@ var OBJY = {
 
                         Logger.log("Added Object: " + JSON.stringify(data, null, 2));
 
-                        success(OBJY.deserialize(data));
+                        if (success) success(OBJY.deserialize(data));
 
                         delete thisRef.instance;
 
                     },
                     function(err) {
-                        error(err);
+                        if (error) error(err);
                     }, app, client);
             }
 
@@ -4944,7 +5161,7 @@ var OBJY = {
                             },
                             function(err) {
 
-                                error(thisRef);
+                                if (error) error(thisRef);
                                 return this;
                             }, client, params.templateFamily, params.templateSource)
                     }
@@ -4990,13 +5207,15 @@ var OBJY = {
                 throw new LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
             }
 
-            Object.keys(thisRef.onChange || {}).forEach(function(key) {
-                if (thisRef.onChange[key].trigger == 'before') {
-                    instance.execProcessorAction(thisRef.onChange[key].action, thisRef, null, null, function(data) {
+            if (thisRef.onChange) {
+                Object.keys(thisRef.onChange).forEach(function(key) {
+                    if (thisRef.onChange[key].trigger == 'before') {
+                        instance.execProcessorAction(thisRef.onChange[key].action, thisRef, null, null, function(data) {
 
-                    }, client, null);
-                }
-            })
+                        }, client, null);
+                    }
+                })
+            }
 
             if (instance.handlerSequence[this._id]) {
                 for (var type in instance.handlerSequence[this._id]) {
@@ -5098,14 +5317,16 @@ var OBJY = {
 
                         OBJY.applyAffects(data)
 
-                        Object.keys(data.onChange || {}).forEach(function(key) {
-                            if (data.onChange[key].trigger == 'after') {
-                                //dsl, obj, prop, data, callback, client, options
-                                instance.execProcessorAction(data.onChange[key].action, data, null, null, function(data) {
+                        if (data.onChange) {
+                            Object.keys(data.onChange).forEach(function(key) {
+                                if (data.onChange[key].trigger == 'after') {
+                                    //dsl, obj, prop, data, callback, client, options
+                                    instance.execProcessorAction(data.onChange[key].action, data, null, null, function(data) {
 
-                                }, client, null);
-                            }
-                        })
+                                    }, client, null);
+                                }
+                            })
+                        }
 
                         if (instance.handlerSequence[this._id]) {
                             for (var type in instance.handlerSequence[this._id]) {
@@ -5188,7 +5409,7 @@ var OBJY = {
                                 }
                             },
                             function(err) {
-                                error(thisRef);
+                                if (error) error(thisRef);
                                 return thisRef;
                             }, client, params.templateFamily, params.templateSource)
                     }
@@ -5203,7 +5424,7 @@ var OBJY = {
                                 }
                             },
                             function(err) {
-                                error(thisRef);
+                                if (error) error(thisRef);
                                 return thisRef;
                             }, client)
                     }
@@ -5234,12 +5455,12 @@ var OBJY = {
                         success(OBJY.deserialize(data));
 
                     }, function(err) {
-                        error(err)
+                        if (error) error(err)
                     }, app, client);
 
 
                 }, function(err) {
-                    error(err)
+                    if (error) error(err)
                 }, app, client);
 
                 return OBJY.deserialize(this);
@@ -5249,27 +5470,31 @@ var OBJY = {
 
             OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd');
 
-            Object.keys(thisRef.onDelete || {}).forEach(function(key) {
-                if (thisRef.onDelete[key].trigger == 'before') {
-                    //dsl, obj, prop, data, callback, client, options
-                    instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
+            if (thisRef.onDelete) {
+                Object.keys(thisRef.onDelete).forEach(function(key) {
+                    if (thisRef.onDelete[key].trigger == 'before') {
+                        //dsl, obj, prop, data, callback, client, options
+                        instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
 
-                    }, client, null);
-                }
-            })
+                        }, client, null);
+                    }
+                })
+            }
 
             OBJY.getObjectById(this.role, this._id, function(data) {
 
                 return OBJY.remove(thisRef, function(_data) {
 
-                    Object.keys(thisRef.onDelete || {}).forEach(function(key) {
-                        if (thisRef.onDelete[key].trigger == 'after') {
+                    if (thisRef.onDelete) {
+                        Object.keys(thisRef.onDelete).forEach(function(key) {
+                            if (thisRef.onDelete[key].trigger == 'after') {
 
-                            instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
+                                instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
 
-                            }, client, null);
-                        }
-                    })
+                                }, client, null);
+                            }
+                        })
+                    }
 
                     function aggregateAllEvents(props, prePropsString) {
 
@@ -5361,16 +5586,16 @@ var OBJY = {
 
                     Logger.log("Removed Object: " + data);
 
-                    success(OBJY.deserialize(data));
+                    if (success) success(OBJY.deserialize(data));
 
 
                 }, function(err) {
-                    error(err)
+                    if (error) error(err)
                 }, app, client);
 
 
             }, function(err) {
-                error(err)
+                if (error) error(err)
             }, app, client);
 
             return OBJY.deserialize(this);
@@ -5389,10 +5614,10 @@ var OBJY = {
 
                 OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
 
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
 
                 }, function(err) {
-                    error(err)
+                    if (error) error(err)
                 }, app, client);
 
                 return OBJY.deserialize(this);
@@ -5432,17 +5657,17 @@ var OBJY = {
                 OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')
 
                 if (dontInherit) {
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
 
                 if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
 
                 if ((data.inherits || []).length == 0) {
-                    success(OBJY.deserialize(data));
+                    if (success) success(OBJY.deserialize(data));
                     return data;
                 }
 
@@ -5457,7 +5682,7 @@ var OBJY = {
 
                                 if (counter == data.inherits.length) {
 
-                                    success(OBJY[data.role](OBJY.deserialize(data)));
+                                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                                     return data;
                                 }
                             },
@@ -5467,14 +5692,14 @@ var OBJY = {
 
 
                                 if (counter == data.inherits.length) {
-                                    success(OBJY[data.role](OBJY.deserialize(data)));
+                                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                                     return data;
                                 }
                             }, client, params.templateFamily, params.templateSource)
                     } else {
 
                         if (thisRef.inherits.length == 1) {
-                            success(OBJY[data.role](OBJY.deserialize(data)));
+                            if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                             return data;
                         } else {
                             counter++;
@@ -5500,7 +5725,7 @@ var OBJY = {
                     }
 
                 }, function(err) {
-                    error(err)
+                    if (error) error(err)
                 }, app, client);
             }
 
