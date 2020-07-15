@@ -322,10 +322,14 @@ var Query;
         }
     };
     Query.undot = function(obj, key) {
+      
         var keys = key.split("."),
             sub = obj;
+
         for (var i = 0; i < keys.length; i++) {
-            sub = sub[keys[i]]
+          
+            if(sub)
+                sub = sub[keys[i]]
         }
         return sub
     };

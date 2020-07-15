@@ -580,7 +580,7 @@ var OBJY = {
 
     checkPermissions: function(user, app, obj, permission, soft) {
 
-        return true;
+        //  return true;
 
         var result = false;
 
@@ -588,6 +588,8 @@ var OBJY = {
 
         var privileges = user.privileges;
         var permissions = obj.permissions;
+
+        if (!permissions) return true;
 
         // if permissions present and user has no privileges
         if (!privileges && permissions) {
@@ -648,7 +650,7 @@ var OBJY = {
             throw new Error("Lack of permissions")
         }
 
-        if (Object.keys(user.authorisations || {}).length == 0) throwError();
+        if (Object.keys(user.authorisations || {}).length == 0) return; //throwError();
 
         if (!app && !user.authorisations['*']) {
             console.warn('app, !authorisationsapp');
@@ -675,10 +677,59 @@ var OBJY = {
         // CONSOLE LOGGING FOR TESTING PURPOSES!
 
 
-
         if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
     },
 
+    buildPermissionQuery: function(query, user, app) {
+
+        if (!user.spooAdmin) {
+
+            if (!user.privileges) return query;
+
+            if (app && user.privileges[app]) {
+                var privArr = [];
+                user.privileges[app].forEach(function(p) {
+
+                    var inn = {};
+
+                    inn["permissions." + p.name + ".value"] = { $regex: "r" }
+                    privArr.push(inn);
+                    //inn = {};
+                    //inn["permissions." + p.name] = { $regex: "r" }
+                    //privArr.push(inn);
+                    inn = {};
+                    inn["permissions." + p.name + ".value"] = "*";
+                    privArr.push(inn);
+                    //inn = {};
+                    //inn["permissions." + p.name] = "*";
+                    //privArr.push(inn);
+                })
+                /*var inn = {};
+                inn["permissions.*" + ".value"] = { $regex: "r" }
+                privArr.push(inn);*/
+                //var inn = {};
+                //inn["permissions.*"] = { $regex: "r"}
+                //privArr.push(inn);
+                var inn = {};
+                inn["permissions.*" + ".value"] = "*"
+                privArr.push(inn);
+                //var inn = {};
+                //inn["permissions.*"] = "*"
+                //privArr.push(inn);
+
+                if (Object.keys(query).length > 0) {
+
+                    return { $and: [query, { $or: privArr }] }
+                } else {
+                    return { $or: privArr }
+                }
+            } else if (!app) {
+                return query;
+            }
+        } else {
+            return query
+        }
+    },
 
     buildAuthroisationQuery: function(obj, user, condition, app) {
 
@@ -689,7 +740,7 @@ var OBJY = {
             throw new Error("Lack of permissions")
         }
 
-        if (Object.keys(user.authorisations || {}).length == 0) throwError();
+        if (Object.keys(user.authorisations || {}).length == 0) return obj; //throwError();
 
         if (!app && !user.authorisations['*']) {
             console.warn('app, !authorisationsapp');
@@ -1313,7 +1364,7 @@ var OBJY = {
                     var cloned = JSON.parse(JSON.stringify(template.properties[p]));
 
 
-                  //  console.log('--', p, obj.properties[p], cloned);
+                    //  console.log('--', p, obj.properties[p], cloned);
 
                     if (!obj.properties[p]) {
                         obj.properties[p] = cloned;
@@ -1533,7 +1584,7 @@ var OBJY = {
 
                                 counter++;
 
-                               // console.log('counter', counter, template, i);
+                                // console.log('counter', counter, template, i);
 
                                 if (counter == template.inherits.length) run(template);;
 
@@ -1543,7 +1594,7 @@ var OBJY = {
 
                                 if (counter == template.inherits.length) run(template);
 
-                               
+
                             }, client, templateRole || obj.role, templateSource || OBJY.activeTenant)
 
 
@@ -3883,6 +3934,10 @@ var OBJY = {
 
             objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
 
+            objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
+
+            console.log('perm query', JSON.stringify(objs, null, 4));
+
             this.get = function(success, error) {
 
                 var client = instance.activeTenant;
@@ -3916,12 +3971,16 @@ var OBJY = {
 
                         OBJY.applyAffects(d)
 
+                        if (!d.inherits) d.inherits = [];
+
                         /*d.inherits = d.inherits.filter(function(item, pos) {
                             return d.inherits.indexOf(item) == pos;
                         });*/
 
                         //console.info(d)
                         var counter = 0;
+
+
 
                         if (d.inherits.length == 0) {
                             allCounter++;
@@ -5084,10 +5143,16 @@ var OBJY = {
             if (this.properties) aggregateAllEvents(this.properties);
 
 
-            if (app)
+            if (app) {
+                if (!this.applications) this.applications = [];
                 if (this.applications.indexOf(app) == -1) this.applications.push(app);
+            }
 
             var addFn = function(obj) {
+
+
+                OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c')
+
                 OBJY.add(obj, function(data) {
 
                         obj._id = data._id;
