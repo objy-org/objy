@@ -4,7 +4,8 @@
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "objy.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "build": "ncc build objy.js -m -o dist && browserify -p tinyify objy.js -o dist/browser.js"
   },
   "repository": {
     "type": "git",
