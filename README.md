@@ -17,7 +17,7 @@ npm install @spootechnologies/objy
 ### Deno
 
 ```javascript
-import { OBJY } from https://raw.githubusercontent.com/spoo-technologies/objy/dev/dist/browser.js;
+import { OBJY } from "https://raw.githubusercontent.com/spoo-technologies/objy/dev/dist/browser.js";
 ```
 
 ### Browser
