@@ -704,6 +704,7 @@ var OBJY = {
                     //inn["permissions." + p.name] = "*";
                     //privArr.push(inn);
                 })
+
                 /*var inn = {};
                 inn["permissions.*" + ".value"] = { $regex: "r" }
                 privArr.push(inn);*/
@@ -1888,6 +1889,9 @@ var OBJY = {
 
     addApplicationToObject: function(obj, application, instance) {
         var contains = false;
+
+        if (!obj.applications) obj.applications = [];
+
         obj.applications.forEach(function(app) {
             if (app == application) contains = true;
         });
@@ -3892,7 +3896,14 @@ var OBJY = {
             obj.privileges[privilegeKey] = [];
         }
 
-        if (obj.privileges[privilegeKey].indexOf(privilege[privilegeKey]) == -1) obj.privileges[privilegeKey].push(privilege[privilegeKey]);
+        var contains = false;
+
+        obj.privileges[privilegeKey].forEach(function(oP) {
+            if (oP.name == privilege[privilegeKey].name) contains = true;
+        })
+
+        if (!contains) obj.privileges[privilegeKey].push({ name: privilege[privilegeKey].name });
+        else throw new Error('Privilege already exists')
 
         return privilege;
     },
@@ -3934,7 +3945,9 @@ var OBJY = {
 
             objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
 
-            objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
+            console.log('instance.activeUser', instance.activeUser);
+
+            if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
 
             console.log('perm query', JSON.stringify(objs, null, 4));
 
@@ -3949,6 +3962,9 @@ var OBJY = {
 
                 OBJY.findObjects(objs, role, function(data) {
 
+                    /*data.forEach(function(d) {
+                        d = OBJY[d.role](OBJY.deserialize(d));
+                    })*/
                     // success(data);
                     //    return;
 
@@ -4209,11 +4225,11 @@ var OBJY = {
 
             this.type = obj.type;
 
-            this.applications = OBJY.ApplicationsChecker(this, obj.applications);
+            this.applications = OBJY.ApplicationsChecker(this, obj.applications) || [];
 
-            this.inherits = OBJY.InheritsChecker(this, obj.inherits);
+            this.inherits = OBJY.InheritsChecker(this, obj.inherits) || [];
 
-            this.name = obj.name;
+            this.name = obj.name || null;
 
             this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
             this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
@@ -4222,9 +4238,9 @@ var OBJY = {
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
-            this.properties = OBJY.PropertiesChecker(this, obj.properties, instance);
+            this.properties = OBJY.PropertiesChecker(this, obj.properties, instance) || {};
 
-            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions);
+            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
 
             this._aggregatedEvents = obj._aggregatedEvents;
 
@@ -4241,7 +4257,7 @@ var OBJY = {
                 this.username = obj.username || null;
                 this.email = obj.email || null;
                 this.password = obj.password || null;
-                this.privileges = OBJY.PrivilegesChecker(obj);
+                this.privileges = OBJY.PrivilegesChecker(obj) || {};
                 this.spooAdmin = obj.spooAdmin;
                 this._clients = obj._clients;
 
@@ -4260,7 +4276,14 @@ var OBJY = {
                 delete this.name;
 
                 this.addPrivilege = function(privilege) {
-                    new OBJY.PrivilegeChecker(this, privilege);
+
+                    if (instance.activeApp) {
+                        var tmpPriv = {};
+                        tmpPriv[instance.activeApp] = { name: privilege }
+                        new OBJY.PrivilegeChecker(this, tmpPriv);
+                        return this;
+                    } else throw new Error('Invalid app id');
+
                     return this;
                 };
 
