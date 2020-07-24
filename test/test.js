@@ -1,4 +1,4 @@
-const OBJY = require('./objy.js');
+const OBJY = require('../objy.js');
 
 var assert = require('assert');
 

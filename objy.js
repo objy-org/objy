@@ -243,9 +243,6 @@ var OBJY = {
 
     dsl: fluent_dsl,
 
-    lang: function(code) {
-        this.dsl.parse(code);
-    },
 
     instance: this,
 
@@ -274,18 +271,40 @@ var OBJY = {
     ProcessorTemplate: ProcessorTemplate,
     ObserverTemplate: ObserverTemplate,
 
-    run: function(code) {
-
+    /**
+     * Runs luke code (comming soon)
+     * @param {code} - luke code
+     * @returns {this}
+     */
+    lang: function(code) {
+        this.dsl.parse(code);
+        return this;
     },
 
+
+    /**
+     * Serialises an object into the objy structure (comming soon)
+     * @param {obj} - object
+     * @returns {this}
+     */
     serialize: function(obj) {
         return obj;
     },
 
+    /**
+     * Deserialises an object from the objy structure (comming soon)
+     * @param {obj} - object
+     * @returns {this}
+     */
     deserialize: function(obj) {
         return obj;
     },
 
+    /**
+     * Sets client (workspace) context (deprecated)
+     * @param {tenant} - the tenant identifier
+     * @returns {this}
+     */
     tenant: function(client) {
         return this.client(client);
     },
@@ -371,14 +390,8 @@ var OBJY = {
                         }
                     }
 
-                    //console.info('compare', template, 'obj:', obj)
-
-                    //if (!template.properties) template.properties = {};
-
 
                     Object.keys(template || {}).forEach(function(p) {
-
-                        //if (!isObject(template[p])) return;
 
                         var isO = isObject(template[p]);
 
@@ -578,9 +591,16 @@ var OBJY = {
         })
     },
 
+    /**
+     * Check the permissions for an object or object part
+     * @param {user} - the user object
+     * @param {app} - the current application
+     * @param {obj} - the object (or property) in question
+     * @param {permission} - the permission code to check for
+     * @param {soft} - ...
+     * @returns true or false
+     */
     checkPermissions: function(user, app, obj, permission, soft) {
-
-        //  return true;
 
         var result = false;
 
@@ -641,6 +661,14 @@ var OBJY = {
 
     },
 
+    /**
+     * Check the authorisations for an object
+     * @param {obj} - the object in question
+     * @param {user} - the user object
+     * @param {condition} - the condition to check for
+     * @param {app} - the current application
+     * @returns true or false
+     */
     checkAuthroisations: function(obj, user, condition, app) {
 
         var authorisations;
@@ -674,12 +702,17 @@ var OBJY = {
 
         if (query.$or.length == 0) throwError();
 
-        // CONSOLE LOGGING FOR TESTING PURPOSES!
-
 
         if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
     },
 
+    /**
+     * Add permissions to a query
+     * @param {query} - the initial query
+     * @param {user} - the user object
+     * @param {app} - the current application
+     * @returns {query} - the final query with permissions
+     */
     buildPermissionQuery: function(query, user, app) {
 
         if (!user.spooAdmin) {
@@ -732,6 +765,14 @@ var OBJY = {
         }
     },
 
+    /**
+     * Add authorisations to a query
+     * @param {obj} - the object
+     * @param {user} - the user object
+     * @param {condition} - the condition
+     * @param {app} - the current application
+     * @returns {query} - the final query with permissions
+     */
     buildAuthroisationQuery: function(obj, user, condition, app) {
 
         var authorisations;
@@ -772,15 +813,19 @@ var OBJY = {
 
         if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
 
-        // CONSOLE LOGGING FOR TESTING PURPOSES!
-
         query = { $or: query };
-
-
 
         return query;
     },
 
+    /**
+     * Chains permission information, when performing multiple operations
+     * @param {obj} - the object
+     * @param {instance} - the OBJY instance
+     * @param {code} - the permission code
+     * @param {name} - the permission name
+     * @param {key} - the permission key
+     */
     chainPermission: function(obj, instance, code, name, key) {
         if (obj.permissions) {
             if (Object.keys(obj.permissions).length > 0) {
@@ -795,6 +840,13 @@ var OBJY = {
         }
     },
 
+    /**
+     * Chains command information, when performing multiple operations
+     * @param {obj} - the object
+     * @param {instance} - the OBJY instance
+     * @param {key} - the command name
+     * @param {value} - the command value (parameter)
+     */
     chainCommand: function(obj, instance, key, value) {
         instance.commandSequence.push({
             name: key,
@@ -804,10 +856,19 @@ var OBJY = {
 
     objectFamilies: [],
 
+    /**
+     * Returns all defined Object Families from the current instance
+     * @returns {objectfamilies} an array of all object families
+     */
     getObjectFamilies: function() {
         return this.objectFamilies;
     },
 
+    /**
+     * Defines an Object Family. Creates a constructor with the single name and one with the plural name
+     * @param {params} an object containing the information.
+     * @returns {this} an array of all object families
+     */
     define: function(params) {
 
         var thisRef = this;
@@ -849,6 +910,9 @@ var OBJY = {
         return this[params.name];
     },
 
+    /**
+     * A wrapper for define
+     */
     ObjectFamily: function(params) {
         return this.define(params);
     },
@@ -857,22 +921,38 @@ var OBJY = {
 
     caches: {},
 
+    /**
+     * Returns the constructor for a specified object family name (singular or plural)
+     * @param {role} to object family
+     * @returns {constructor} the constructor
+     */
     getConstructor: function(role) {
         if (this.mappers[role]) return OBJY[role];
         throw new Error("No constructor");
     },
 
+    /**
+     * Returns the persistence mapper attached to the specified object family
+     * @returns {mapper} the mapper instance
+     */
     getPersistenceMapper: function(family) {
 
         if (!this.mappers[family]) throw new Error("No such Object Family");
         return this.mappers[family];
     },
 
+    /**
+     * Returns the persistence mapper attached to the specified object family
+     * @returns {mapper} the mapper instance
+     */
     getPersistence: function(family) {
         if (!this.mappers[family]) throw new Error("No such Object Family: " + family);
         return this.mappers[family];
     },
 
+    /**
+     * Attaches a persistence mapper to an object family
+     */
     plugInPersistenceMapper: function(name, mapper) {
         if (!name) throw new Error("No mapper name provided");
         this.mappers[name] = mapper;
@@ -893,11 +973,19 @@ var OBJY = {
 
     processors: {},
 
+    /**
+     * Returns the processor mapper attached to the specified object family
+     * @returns {mapper} the mapper instance
+     */
     getProcessor: function(family) {
         if (!this.processors[family]) throw new Error("No such Object Family");
         return this.processors[family];
     },
 
+
+    /**
+     * Attaches a processor mapper to an object family
+     */
     plugInProcessor: function(name, processor) {
         if (!name) throw new Error("No mapper name provided");
         this.processors[name] = processor;
