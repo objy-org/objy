@@ -1514,7 +1514,7 @@ var OBJY = {
 
                                 if (!obj.properties[p][h][oC]) {
                                     obj.properties[p][h][oC] = template.properties[p][h][oC];
-                                    obj.properties[p][h][oC].template = templateId;
+                                    if (obj.properties[p][h][oC]) obj.properties[p][h][oC].template = templateId;
                                 }
                             })
                         }
@@ -1621,6 +1621,7 @@ var OBJY = {
                         })
 
                         if (!contains) {
+                            23
                             obj.privileges[a].push({
                                 name: tP.name,
                                 template: templateId
@@ -3443,7 +3444,7 @@ var OBJY = {
     },
 
 
-    PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, notPermitted) {
+    PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, notPermitted, force) {
 
 
         function setValue(obj, access, value) {
@@ -3469,10 +3470,13 @@ var OBJY = {
                 setValue(obj.properties[shift], access, value);
             } else {
                 //obj[access[0]] = value;
-                try {
-                    var t = obj.properties[access[0]].value;
-                } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+
+                if (!force) {
+                    try {
+                        var t = obj.properties[access[0]].value;
+                    } catch (e) {
+                        throw new NoSuchPropertyException(propertyKey);
+                    }
                 }
 
                 if (obj.properties[access[0]].template) {
@@ -4050,9 +4054,17 @@ var OBJY = {
 
                 OBJY.findObjects(objs, role, function(data) {
 
+                    var i;
+                    for (i = 0; i < data.length; i++) {
+                        console.log('d.role', data[i].role);
+                        if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](OBJY.deserialize(data[i]))
+                    }
+
                     /*data.forEach(function(d) {
+                        console.log('d.role', d.role);
                         d = OBJY[d.role](OBJY.deserialize(d));
                     })*/
+
                     // success(data);
                     //    return;
 
@@ -4583,6 +4595,25 @@ var OBJY = {
             new OBJY.ConditionsChecker(this.getProperty(property), value);*/
 
             new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject']);
+
+
+            return this;
+        };
+
+        this.makeProperty = function(property, value, client) {
+
+            /*var propertyKey = Object.keys(property)[0];
+            if (propertyKey.indexOf('.') != -1) {
+                var lastDot = propertyKey.lastIndexOf(".");
+                var bag = propertyKey.substring(0, lastDot);
+                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
+                var newProp = {};
+                this.setBagPropertyValue(bag, newProKey, value,  client);
+                return;
+            }
+            new OBJY.ConditionsChecker(this.getProperty(property), value);*/
+
+            new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject'], true);
 
 
             return this;
@@ -5843,7 +5874,7 @@ var OBJY = {
                 }
 
                 if ((data.inherits || []).length == 0) {
-                    if (success) success(OBJY.deserialize(data));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
 
