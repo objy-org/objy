@@ -6,11 +6,27 @@ An object-driven, cross-platform programming framework, written in JavaScript, t
 
 ## Installing
 
-### For Node
+OBJY can be used in any JavaScript Environment.
+
+### Node
 
 ```shell
-npm install objy
+npm install @spootechnologies/objy
 ```
+
+### Deno
+
+```javascript
+import { OBJY } from "https://raw.githubusercontent.com/spoo-technologies/objy/dev/dist/browser.js";
+```
+
+### Browser
+
+```html
+<script src="https://raw.githubusercontent.com/spoo-technologies/objy/dev/dist/browser.js">
+```
+
+
 
 ## Programming with OBJY?
 
