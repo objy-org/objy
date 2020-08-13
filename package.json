@@ -1,10 +1,11 @@
 {
-  "name": "@spootechnologies/objy",
-  "version": "0.3.3",
+  "name": "objy",
+  "version": "0.5.102",
   "description": "A JavaScript framework for building object-driven use cases",
-  "main": "spoo.js",
+  "main": "objy.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "build": "ncc build objy.js -m -o dist && browserify -p tinyify objy.js -o dist/browser.js"
   },
   "repository": {
     "type": "git",
@@ -23,22 +24,22 @@
   "homepage": "https://github.com/spoo-technologies/objy#readme",
   "dependencies": {
     "bcrypt": "^3.0.8",
+    "bull": "^3.13.0",
     "fs": "0.0.1-security",
     "gridfs-stream": "^1.1.1",
-    "localStorage": "^1.0.4",
-    "lokijs": "^1.5.8",
-    "lowdb": "^1.0.0",
     "mingo": "^2.4.0",
     "mocha": "^6.2.2",
     "moment": "^2.24.0",
     "mongoose": "^5.8.11",
     "mongoose-gridfs": "^1.2.26",
+    "multer": "*",
     "multer-gridfs-storage": "^4.0.2",
-    "nedb": "^1.8.0",
     "shortid": "^2.2.15",
     "vm2": "^3.8.4"
   },
   "devDependencies": {
-    "jest": "^25.1.0"
+    "jest": "^25.1.0",
+    "jsdoc-to-markdown": "^5.0.3",
+    "tinyify": "^2.5.2"
   }
 }

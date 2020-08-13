@@ -1,12 +1,6 @@
 const OBJY = require('./objy.js');
 const stream = require('stream');
 const fs = require('fs')
-<<<<<<< Updated upstream
-const EventMapper = require('./mappers/observers/inMemoryStream.js')
-
-//OBJY.storage = new MongoMapper();
-
-=======
 //const EventMapper = require('./mappers/observers/inMemoryStream.js')
 //var Processor = require('./mappers/processors/eval.js');
 
@@ -14,49 +8,30 @@ const EventMapper = require('./mappers/observers/inMemoryStream.js')
 
 OBJY.define({
     name: "object",
-    pluralName: "objects",
-    authable:true
-})
-
-/*
-OBJY.useUser({
-    privileges: {
-        testapp: [{
-            name: "admin",
-            value: "r"
-        }]
-    }
-})*/
-
-OBJY.app('testapp');
-
-
-OBJY.object({
-    privileges: {
-        testapp: [{
-            name: "admin"
-        }]
-    }
-}).add(function(data) {
-    console.log('added', data);
-
-
-    OBJY.objects({}).get(function(data2) {
-        console.log('data2', data2);
-
-        data2 = data2[0]
-
-        data2.addPrivilege('admin2').update()
-    })
+    pluralName: "objects"
 })
 
 
+console.log(OBJY.object({name:"asfaf"}).add())
 
 
-return;
+var OBJY = {
 
+    Obj: function(instance){
+        
+        this.instance = instance;
 
-console.log(OBJY.object({ name: "asfaf" }).add())
+        add: function()
+        {
+            
+        }
+    }
+}
+
+OBJY.Obj.prototype.add = function()
+{
+    instance
+}
 
 
 
@@ -78,7 +53,7 @@ Object({
     }
 })
 
-Object({ name: "test", type: "car" }, { age: 2 });
+Object({name: "test", type: "car"}, {age: 2});
 
 
 
@@ -137,28 +112,19 @@ DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
 
 //OBJY.storage = new MongoMapper();
 
-OBJY.affectables = [
-
-    {
-        _id: "user readonly",
-        affects: { role: 'user' },
-        apply: { permissions: { admin: "*" } }
-    },
-
-
-    {
-        _id: "general",
-        affects: { role: 'object' },
-        apply: { applications: ['ssg'], properties: { firstName: 23 } }
-    }, {
-        _id: "general2",
-        affects: {},
-        apply: { _clients: ["ssg"], onCreate: { replicate: { value: "console.log('sfsfsf');this.pushToWorkspace({_id:'222', role:'object'}, 'aaa')", trigger: "after" } } }
-    }
-];
-
-
-
+OBJY.affectables = [{
+    _id: "user readonly",
+    affects: { role: 'user' },
+    apply: { permissions: { admin: "*" } }
+}, {
+    _id: "general",
+    affects: { role: 'object' },
+    apply: { applications: ['ssg'], properties: { firstName: 23 } }
+}, {
+    _id: "general2",
+    affects: {},
+    apply: { _clients: ["ssg"], onCreate: { replicate: { value: "console.log('sfsfsf');this.pushToWorkspace({_id:'222', role:'object'}, 'aaa')", trigger: "after" } } }
+}];
 
 OBJY.useUser({
     authorisations: {
@@ -280,37 +246,87 @@ OBJY.object({
 
 
 return;
->>>>>>> Stashed changes
 
 OBJY.client('mb');
 
 OBJY.useUser({
     authorisations: {
-        '*': [{query: {}, perm:'*'}]
+        '*': [{ query: {}, perm: '*' }]
     }
 })
 
+OBJY.Logger.enabled = ['error'];
 //OBJY.metaPropPrefix = '_';
 
 OBJY.define({
     name: "SensorMeasure",
+    dirty: true,
     pluralName: "SensorMeasures",
     customProps: {
         assi: null
     },
-    observer : new EventMapper(OBJY)
+    observer: new EventMapper(OBJY)
 })
 
 
-OBJY.SensorMeasure({name: "sss", properties: { evt: {type: 'event', interval: 12000, action: "console.log('hit hre')" }}}).add(function(data1) {
+OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 } } } }).add(function(data1) {
 
-    /*OBJY.SensorMeasure(data1._id).get(function(data) {
-        data.replace({name: "sss", evt: {type: 'event', interval: "5s", action: "console.log('hit hre')" }}).update(function(saved){
-            console.log(saved)
+    console.log('added', data1);
+
+    OBJY.SensorMeasure(data1._id).get(function(f) {
+        console.log('f', f)
+    })
+
+
+});
+
+return;
+
+OBJY.SensorMeasure({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 } } } }).add(function(data1) {
+
+    //observer : new EventMapper(OBJY)
+})
+
+
+OBJY.SensorMeasure({ name: "sss", properties: { test: { evt: { type: 'event', interval: 12000, action: "console.log('hit hre')" } } } }).add(function(data1) {
+
+    OBJY.SensorMeasure({ inherits: [data1._id], name: 'underobject' }).add(function(data2) {
+
+        OBJY.SensorMeasure(data2._id).get(function(data3) {
+            //console.log('d3', data3)
+
+            //data3 = OBJY.SensorMeasure(data3);
+
+            //data3.addProperty('groups.three', { type: 'shortText', value: 'fff' });
+
+            //console.log('zwische', data3)
+
+            data3.properties.groups.three = { t: 3 }
+            //data3.addProperty('three', { t: 3 })
+
+            data3.replace(data3).update(function(d4) {
+                data1.replace({ name: "sss", properties: { groups: { one: { o: 1 }, two: { t: 2 }, four: { f: 4 } } } }).update(function(data5) {
+                    console.warn('REPLACED THAT SHIT', data5);
+                    OBJY.SensorMeasure(d4._id).get(function(d6) {
+                        console.warn('d6', d6)
+                    })
+
+                });
+
+
+            })
+
         })
-    })*/
 
-    console.info(data1)
+    })
+
+    setTimeout(function() {
+        data1.remove(function(d) {
+
+
+        })
+        console.info(data1)
+    }, 15000)
 
 })
 

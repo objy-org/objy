@@ -6,799 +6,30 @@ if (_nodejs) {
     };
 }
 
+var isObject = function(a) {
+    return (!!a) && (a.constructor === Object);
+};
+
 var moment = require('moment');
 var shortid = require('shortid');
 
-var Query;
-(function() {
-    function objectify(a) {
-        var rows = [];
-        for (var key in a) {
-            var o = {};
-            o[key] = a[key];
-            rows.push(o)
-        }
-        return rows
-    }
-    if (!String.prototype.startsWith) {
-        Object.defineProperty(String.prototype, "startsWith", {
-            enumerable: false,
-            configurable: false,
-            writable: false,
-            value: function(searchString, position) {
-                position = position || 0;
-                return this.lastIndexOf(searchString, position) === position
-            }
-        })
-    }
-    if (!String.prototype.endsWith) {
-        Object.defineProperty(String.prototype, "endsWith", {
-            value: function(searchString, position) {
-                var subjectString = this.toString();
-                if (position === undefined || position > subjectString.length) {
-                    position = subjectString.length
-                }
-                position -= searchString.length;
-                var lastIndex = subjectString.indexOf(searchString, position);
-                return lastIndex !== -1 && lastIndex === position
-            }
-        })
-    }
-    Query = {
-        satisfies: function(row, constraints, getter) {
-            return Query.lhs._rowsatisfies(row, constraints, getter)
-        },
-        Query: function(constraints, getter) {
-            return function(row) {
-                return Query.lhs._rowsatisfies(row, constraints, getter)
-            }
-        },
-        join: function(left_rows, right_rows, left_key, right_key) {
-            var leftKeyFn, rightKeyFn;
-            if (typeof left_key == "string") leftKeyFn = function(row) {
-                return row[left_key]
-            };
-            else leftKeyFn = left_key;
-            if (!right_key) rightKeyFn = leftKeyFn;
-            if (typeof right_key == "string") rightKeyFn = function(row) {
-                return row[left_key]
-            };
-            else rightKeyFn = right_key;
-            return left_rows
-        },
-        query: function(rows, constraints, getter) {
-            if (typeof getter == "string") {
-                var method = getter;
-                getter = function(obj, key) {
-                    return obj[method](key)
-                }
-            }
-            var filter = new Query.Query(constraints, getter);
-            return rows.filter(filter)
-        },
-        lhs: {
-            _rowsatisfies: function(row, constraints, getter) {
-                for (var key in constraints) {
-                    if (this[key]) {
-                        if (!this[key](row, constraints[key], getter)) return false
-                    } else {
-                        var val = getter ? getter(row, key) : row[key];
-                        var res = this.rhs._satisfies(val, constraints[key], key);
-                        if (!res) return false
-                    }
-                }
-                return true
-            },
-            $count: function(row, condition, getter) {
-                var res = condition.$constraints.map(function(c) {
-                    return Query.satisfies(row, c, getter)
-                }).filter(function(v) {
-                    return v
-                }).length;
-                return this.rhs._satisfies(res, condition.$constraint)
-            },
-            $not: function(row, constraint, getter) {
-                return !this._rowsatisfies(row, constraint, getter)
-            },
-            $or: function(row, constraint, getter) {
-                if (!Array.isArray(constraint)) {
-                    constraint = objectify(constraint)
-                }
-                for (var i = 0; i < constraint.length; i++) {
-                    if (this._rowsatisfies(row, constraint[i], getter)) return true
-                }
-                return false
-            },
-            $and: function(row, constraint, getter) {
-                if (!Array.isArray(constraint)) {
-                    constraint = objectify(constraint)
-                }
-                for (var i = 0; i < constraint.length; i++) {
-                    if (!this._rowsatisfies(row, constraint[i], getter)) return false
-                }
-                return true
-            },
-            $nor: function(row, constraint, getter) {
-                return !this.$or(row, constraint, getter)
-            },
-            $where: function(values, ref) {
-                var fn = typeof ref == "string" ? new Function(ref) : ref;
-                var res = fn.call(values);
-                return res
-            },
-            rhs: {
-                $cb: function(value, constraint, parentKey) {
-                    return constraint(value)
-                },
-                _satisfies: function(value, constraint, parentKey) {
-                    if (constraint === value) return true;
-                    else if (constraint instanceof RegExp) return this.$regex(value, constraint);
-                    else if (Array.isArray(constraint)) return this.$in(value, constraint);
-                    else if (constraint && typeof constraint === "object") {
-                        if (constraint instanceof Date) return this.$eq(value, constraint.getTime());
-                        else {
-                            if (constraint.$regex) return this.$regex(value, new RegExp(constraint.$regex, constraint.$options));
-                            for (var key in constraint) {
-                                if (!this[key]) return this.$eq(value, constraint, parentKey);
-                                else if (!this[key](value, constraint[key], parentKey)) return false
-                            }
-                            return true
-                        }
-                    } else if (Array.isArray(value)) {
-                        for (var i = 0; i < value.length; i++)
-                            if (this.$eq(value[i], constraint)) return true;
-                        return false
-                    } else if (constraint === "" || constraint === null || constraint === undefined) return this.$null(value);
-                    else return this.$eq(value, constraint)
-                },
-                $eq: function(value, constraint) {
-                    if (value === constraint) return true;
-                    else if (Array.isArray(value)) {
-                        for (var i = 0; i < value.length; i++)
-                            if (this.$eq(value[i], constraint)) return true;
-                        return false
-                    } else if (constraint === null || constraint === undefined || constraint === "") {
-                        return this.$null(value)
-                    } else if (value === null || value === "" || value === undefined) return false;
-                    else if (value instanceof Date) {
-                        if (constraint instanceof Date) {
-                            return value.getTime() == constraint.getTime()
-                        } else if (typeof constraint == "number") {
-                            return value.getTime() == constraint
-                        } else if (typeof constraint == "string") return value.getTime() == new Date(constraint).getTime()
-                    } else {
-                        return value == constraint
-                    }
-                },
-                $exists: function(value, constraint, parentKey) {
-                    return value != undefined == (constraint && true)
-                },
-                $deepEquals: function(value, constraint) {
-                    if (typeof _ == "undefined" || typeof _.isEqual == "undefined") {
-                        return JSON.stringify(value) == JSON.stringify(constraint)
-                    } else {
-                        return _.isEqual(value, constraint)
-                    }
-                },
-                $not: function(values, constraint) {
-                    return !this._satisfies(values, constraint)
-                },
-                $ne: function(values, constraint) {
-                    return !this._satisfies(values, constraint)
-                },
-                $nor: function(values, constraint, parentKey) {
-                    return !this.$or(values, constraint, parentKey)
-                },
-                $and: function(values, constraint, parentKey) {
-                    if (!Array.isArray(constraint)) {
-                        throw new Error("Logic $and takes array of constraint objects")
-                    }
-                    for (var i = 0; i < constraint.length; i++) {
-                        var res = this._satisfies(values, constraint[i], parentKey);
-                        if (!res) return false
-                    }
-                    return true
-                },
-                $or: function(values, constraint, parentKey) {
-                    if (!Array.isArray(values)) {
-                        values = [values]
-                    }
-                    for (var v = 0; v < values.length; v++) {
-                        for (var i = 0; i < constraint.length; i++) {
-                            if (this._satisfies(values[v], constraint[i], parentKey)) {
-                                return true
-                            }
-                        }
-                    }
-                    return false
-                },
-                $null: function(values) {
-                    var result;
-                    if (values === "" || values === null || values === undefined) {
-                        return true
-                    } else if (Array.isArray(values)) {
-                        for (var v = 0; v < values.length; v++) {
-                            if (!this.$null(values[v])) {
-                                return false
-                            }
-                        }
-                        return true
-                    } else return false
-                },
-                $in: function(values, constraint) {
-                    if (!Array.isArray(constraint)) throw new Error("$in requires an array operand");
-                    var result = false;
-                    if (!Array.isArray(values)) {
-                        values = [values]
-                    }
-                    for (var v = 0; v < values.length; v++) {
-                        var val = values[v];
-                        for (var i = 0; i < constraint.length; i++) {
-                            if (this._satisfies(val, constraint[i])) {
-                                result = true;
-                                break
-                            }
-                        }
-                        result = result || constraint.indexOf(val) >= 0
-                    }
-                    return result
-                },
-                $likeI: function(values, constraint) {
-                    return values.toLowerCase().indexOf(constraint) >= 0
-                },
-                $like: function(values, constraint) {
-                    return values.indexOf(constraint) >= 0
-                },
-                $startsWith: function(values, constraint) {
-                    if (!values) return false;
-                    return values.startsWith(constraint)
-                },
-                $endsWith: function(values, constraint) {
-                    if (!values) return false;
-                    return values.endsWith(constraint)
-                },
-                $elemMatch: function(values, constraint, parentKey) {
-                    for (var i = 0; i < values.length; i++) {
-                        if (Query.lhs._rowsatisfies(values[i], constraint)) return true
-                    }
-                    return false
-                },
-                $contains: function(values, constraint) {
-                    return values.indexOf(constraint) >= 0
-                },
-                $nin: function(values, constraint) {
-                    return !this.$in(values, constraint)
-                },
-                $regex: function(values, constraint) {
-                    var result = false;
-                    if (Array.isArray(values)) {
-                        for (var i = 0; i < values.length; i++) {
-                            if (constraint.test(values[i])) {
-                                return true
-                            }
-                        }
-                    } else return constraint.test(values)
-                },
-                $gte: function(values, ref) {
-                    return !this.$null(values) && values >= this.resolve(ref)
-                },
-                $gt: function(values, ref) {
-                    return !this.$null(values) && values > this.resolve(ref)
-                },
-                $lt: function(values, ref) {
-                    return !this.$null(values) && values < this.resolve(ref)
-                },
-                $lte: function(values, ref) {
-                    return !this.$null(values) && values <= this.resolve(ref)
-                },
-                $before: function(values, ref) {
-                    if (typeof ref === "string") ref = Date.parse(ref);
-                    if (typeof values === "string") values = Date.parse(values);
-                    return this.$lte(values, ref)
-                },
-                $after: function(values, ref) {
-                    if (typeof ref === "string") ref = Date.parse(ref);
-                    if (typeof values === "string") values = Date.parse(values);
-                    return this.$gte(values, ref)
-                },
-                $type: function(values, ref) {
-                    return typeof values == ref
-                },
-                $all: function(values, ref) {
-                    throw new Error("$all not implemented")
-                },
-                $size: function(values, ref) {
-                    return typeof values == "object" && (values.length == ref || Object.keys(values).length == ref)
-                },
-                $mod: function(values, ref) {
-                    return values % ref[0] == ref[1]
-                },
-                $equal: function() {
-                    return this.$eq(arguments)
-                },
-                $between: function(values, ref) {
-                    return this._satisfies(values, {
-                        $gt: ref[0],
-                        $lt: ref[1]
-                    })
-                },
-                resolve: function(ref) {
-                    if (typeof ref === "object") {
-                        if (ref["$date"]) return Date.parse(ref["$date"])
-                    }
-                    return ref
-                }
-            }
-        }
-    };
-    Query.undot = function(obj, key) {
-        var keys = key.split("."),
-            sub = obj;
-        for (var i = 0; i < keys.length; i++) {
-            sub = sub[keys[i]]
-        }
-        return sub
-    };
-    Query.lhs.rhs.$equal = Query.lhs.rhs.$eq;
-    Query.lhs.rhs.$any = Query.lhs.rhs.$or;
-    Query.lhs.rhs.$all = Query.lhs.rhs.$and;
-    Query.satisfies = function(row, constraints, getter) {
-        return this.lhs._rowsatisfies(row, constraints, getter)
-    };
-    Array.prototype.query = function(q) {
-        return Query.query(this, q)
-    };
-    RegExp.prototype.toJSON = RegExp.prototype.toString;
-    if (typeof module != "undefined") module.exports = Query;
-    else if (typeof define != "undefined" && define.amd) define("query", [], function() {
-        return Query
-    });
-    else if (typeof window != "undefined") window.Query = Query;
-    else if (typeof GLOBAL != undefined && GLOBAL.global) GLOBAL.global.Query = Query;
-    return Query
-})(this);
+var Query = require('./dependencies/query.js');
+var Logger = require('./dependencies/logger.js')
+var fluent_dsl = require('./dependencies/fluent-dsl.js')
+var CONSTANTS = require('./dependencies/constants.js')
 
-
-Logger = {
-    enabled: [],
-    log: function(msg) {
-        if (this.enabled.length == 0 || this.enabled.indexOf('log') != -1) console.log(msg)
-    },
-    warn: function(msg) {
-        if (this.enabled.length == 0 || this.enabled.indexOf('warn') != -1) console.warn(msg)
-    },
-    error: function(msg) {
-        if (this.enabled.length == 0 || this.enabled.indexOf('error') != -1) console.error(msg)
-    }
-}
-
-
-StorageMapperTemplate = function(SPOO, options) {
-    this.CONSTANTS = {
-        MULTITENANCY: {
-            ISOLATED: "isolated",
-            SHARED: "shared"
-        },
-        TYPES: {
-            SCHEDULED: 'scheduled',
-            QUERIED: 'queried'
-        }
-    };
-    this.objectFamily = null;
-    this.multitenancy = (options || {}).multitenancy || this.CONSTANTS.MULTITENANCY.ISOLATED;
-
-    this.connect = function(connectionString, success, error) {
-
-    }
-
-    this.closeConnection = function(success, error) {
-
-    }
-
-    this.setObjectFamily = function(value) {
-        this.objectFamily = value;
-    };
-
-    this.setMultiTenancy = function(value) {
-        this.multitenancy = value;
-    };
-
-    this.createClient = function(client, success, error) {
-
-    };
-
-    this.getDBByMultitenancy = function(client) {
-
-    };
-
-    this.listClients = function(success, error) {
-
-    };
-
-    this.getById = function(id, success, error, app, client) {
-
-    }
-
-    this.getByCriteria = function(criteria, success, error, app, client, flags) {
-
-    }
-
-    this.count = function(criteria, success, error, app, client, flags) {
-
-    }
-
-    this.update = function(spooElement, success, error, app, client) {
-
-    };
-
-    this.add = function(spooElement, success, error, app, client) {
-
-    };
-
-    this.remove = function(spooElement, success, error, app, client) {
-
-    };
-};
-
-ProcessorMapperTemplate = function(SPOO) {
-    this.CONSTANTS = {
-        MULTITENANCY: {
-            ISOLATED: "isolated",
-            SHARED: "shared"
-        },
-        TYPES: {
-            SCHEDULED: 'scheduled',
-            QUERIED: 'queried'
-        }
-    }
-
-    this.SPOO = SPOO;
-    this.objectFamily = null;
-    this.multitenancy = this.CONSTANTS.MULTITENANCY.ISOLATED;
-
-    this.execute = function(dsl, obj, prop, data, callback, client, app, user, options) {
-
-    };
-
-    this.setMultiTenancy = function(value) {
-        this.multitenancy = value;
-    };
-
-    this.setObjectFamily = function(value) {
-        this.objectFamily = value;
-    };
-
-};
-
-ObserverMapperTemplate = function(SPOO, options, content) {
-    this.CONSTANTS = {
-        MULTITENANCY: {
-            ISOLATED: "isolated",
-            SHARED: "shared"
-        },
-        TYPES: {
-            SCHEDULED: 'scheduled',
-            QUERIED: 'queried'
-        }
-    };
-    this.SPOO = SPOO;
-    this.interval = (options || {}).interval || 10000;
-    this.objectFamily = null;
-    this.type = (options || {}).type || this.CONSTANTS.TYPES.QUERIED;
-    this.multitenancy = (options || {}).multitenancy || this.CONSTANTS.MULTITENANCY.ISOLATED;
-
-    this.initialize = function(millis) {
-
-    }
-
-    this.setObjectFamily = function(value) {
-        this.objectFamily = value;
-    };
-
-    this.run = function(date) {
-
-    }
-
-    if (content) Object.assign(this, content)
-}
-
+var StorageMapperTemplate = require('./mappers/templates/storage.js');
+var ProcessorMapperTemplate = require('./mappers/templates/processor.js')
+var ObserverMapperTemplate = require('./mappers/templates/observer.js')
 
 var StorageTemplate = StorageMapperTemplate;
 var ProcessorTemplate = ProcessorMapperTemplate;
 var ObserverTemplate = ObserverMapperTemplate;
 
+var DefaultStorageMapper = require('./mappers/storage.inmemory.js')
+var DefaultProcessorMapper = require('./mappers/processor.eval.js')
+var DefaultObserverMapper = require('./mappers/observer.interval.js')
 
-var DefaultStorageMapper = function(SPOO, options) {
-
-    return Object.assign(new StorageTemplate(SPOO, options), {
-
-        database: {},
-        index: {},
-
-        createClient: function(client, success, error) {
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
-                if (this.database[client])
-                    error('Client already exists')
-
-                this.database[client] = [];
-                this.index[client] = {};
-                success()
-            }
-        },
-
-        getDBByMultitenancy: function(client) {
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) {
-                if (!Array.isArray(this.database)) this.database = [];
-
-                return this.database;
-            } else if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
-
-                if (!this.database[client])
-                    throw new Error('no database for client ' + client);
-
-                return this.database[client];
-            }
-        },
-
-        listClients: function(success, error) {
-            if (!this.database)
-                return error('no database');
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED)
-                success(Object.keys(this.database));
-            else success(Object.keys(this.database));
-        },
-
-        getById: function(id, success, error, app, client) {
-
-            var db = this.getDBByMultitenancy(client);
-
-            if (this.index[client][id] === undefined)
-                return error('object not found: ' + id);
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                if (this.index[client][id].tenantId != client)
-                    return error('object not found: ' + _id);
-
-            success(db[this.index[client][id]]);
-        },
-
-        getByCriteria: function(criteria, success, error, app, client, flags) {
-
-            var db = this.getDBByMultitenancy(client);
-
-            if (app)
-                Object.assign(criteria, {
-                    applications: {
-                        $in: [app]
-                    }
-                })
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                Object.assign(criteria, {
-                    tenantId: client
-                })
-
-            success(Query.query(db, criteria, Query.undot));
-        },
-
-        count: function(criteria, success, error, app, client, flags) {
-
-            var db = this.getDBByMultitenancy(client);
-
-            if (app)
-                Object.assign(criteria, {
-                    applications: {
-                        $in: [app]
-                    }
-                })
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                Object.assign(criteria, {
-                    tenantId: client
-                })
-
-            success(Query.query(db, criteria, Query.undot).length);
-        },
-
-        update: function(spooElement, success, error, app, client) {
-
-            var db = this.getDBByMultitenancy(client);
-
-            if (this.index[client][spooElement._id] === undefined)
-                return error('object not found: ' + spooElement._id);
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                if (this.index[client][spooElement._id].tenantId != client)
-                    return error('object not found: ' + _id);
-
-            db[this.index[client][spooElement._id]] = spooElement;
-
-            success(db[this.index[client][spooElement._id]]);
-        },
-
-        add: function(spooElement, success, error, app, client) {
-
-            if (!this.database[client])
-                this.database[client] = [];
-
-            if (!this.index[client]) this.index[client] = {};
-
-            if (this.index[client][spooElement._id] !== undefined)
-                return error('object with taht id already exists: ' + spooElement._id);
-            if (!this.index[client]) this.index[client] = {};
-
-            var db = this.getDBByMultitenancy(client);
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) {
-                spooElement.tenantId = client;
-            }
-
-            this.index[client][spooElement._id] = db.push(spooElement) - 1;
-
-            success(spooElement);
-        },
-        remove: function(spooElement, success, error, app, client) {
-
-            var db = this.getDBByMultitenancy(client);
-
-            if (this.index[client][spooElement._id] === undefined)
-                return error('object not found: ' + spooElement._id);
-
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED)
-                if (this.index[client][spooElement._id].tenantId != client)
-                    return error('object not found: ' + spooElement._id);
-
-
-            db.splice(this.index[client][spooElement._id], 1);
-            delete this.index[client][spooElement._id];
-            success(spooElement)
-
-        }
-
-
-    })
-}
-
-
-var DefaultProcessorMapper = function(SPOO) {
-    return Object.assign(new ProcessorTemplate(SPOO), {
-
-        execute: function(dsl, obj, prop, data, callback, client, app, user, options) {
-
-            var SPOO = this.SPOO;
-            if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
-                try {
-                    Logger.log('Executing dsl')
-                    eval(dsl);
-                    console.info('Executed dsl')
-                } catch (e) {
-                    Logger.error(e)
-                }
-                callback();
-            } else {
-                try {
-                    eval(dsl);
-                } catch (e) {
-                    Logger.error(e)
-                }
-                callback();
-            }
-        }
-    })
-}
-
-var DefaultObserverMapper = function(SPOO) {
-    return Object.assign(new ObserverTemplate(SPOO), {
-
-        initialize: function(millis) {
-            var self = this;
-
-            this.interval = setInterval(function() {
-
-                self.run(moment().utc());
-
-            }, this.interval)
-        },
-
-        run: function(date) {
-
-            var self = this;
-
-            self.SPOO.getPersistence(self.objectFamily).listClients(function(data) {
-
-                data.forEach(function(tenant) {
-
-                    Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
-
-                    self.SPOO.getPersistence(self.objectFamily).getByCriteria({
-                        _aggregatedEvents: {
-                            $elemMatch: {
-                                'date': {
-                                    $lte: date.toISOString()
-                                }
-                            }
-                        }
-                    }, function(objs) {
-
-                        objs.forEach(function(obj) {
-
-                            obj = SPOO[self.objectFamily](obj);
-
-                            obj._aggregatedEvents.forEach(function(aE) {
-
-                                var prop = obj.getProperty(aE.propName);
-
-                                self.SPOO.execProcessorAction(prop.action, obj, prop, null, function() {
-
-                                    obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
-
-                                        OBJY.Logger.log('d._aggregatedEvents')
-                                        OBJY.Logger.log(d._aggregatedEvents)
-
-
-                                    }, function(err) {
-                                        console.log(err);
-                                    }, tenant)
-
-                                }, tenant, {});
-                            })
-                        })
-
-                    }, function(err) {
-
-                    }, /*app*/ undefined, tenant, {})
-                })
-
-            }, function(err) {
-
-            })
-        }
-    })
-}
-
-var CONSTANTS = {
-
-    EVENT: {
-        TYPE_RECURRING: 'recurring',
-        TYPE_TERMINATING: 'terminating',
-        ACTION: {
-            TYPE_AUTORENEW: 'autorenew',
-            TYPE_CONFIRM: 'confirm',
-            TYPE_PROTOCOL: 'protocol'
-        }
-    },
-    PROPERTY: {
-        TYPE_SHORTTEXT: 'shortText',
-        TYPE_LONGTEXT: 'longText',
-        TYPE_INDEXEDTEXT: 'indexedText',
-        TYPE_NUMBER: 'number',
-        TYPE_DATE: 'date',
-        TYPE_SHORTID: 'shortId',
-        TYPE_REF_OBJ: 'objectRef',
-        TYPE_REF_USR: 'userRef',
-        TYPE_REF_FILE: 'fileRef',
-        TYPE_PROPERTY_BAG: 'bag',
-        TYPE_BOOLEAN: 'boolean',
-        TYPE_ARRAY: 'array',
-        TYPE_EVENT: 'event',
-        TYPE_ACTION: 'action',
-        TYPE_JSON: 'json'
-    },
-    MULTITENANCY: {
-        ISOLATED: "isolated",
-        SHARED: "shared"
-    },
-    TYPES: {
-        SCHEDULED: 'scheduled',
-        QUERIED: 'queried'
-    },
-    TEMPLATEMODES: {
-        STRICT: 'strict'
-    }
-}
 
 function NoOnChangeException(message) {
     this.message = "onChange not found";
@@ -995,23 +226,23 @@ function LackOfPermissionsException(message) {
 }
 
 
-
+/**
+ * Main OBJY Instance
+ */
 var OBJY = {
 
     self: this,
 
     Logger: Logger,
 
-    Mapper: {
-        Storage: {
-            Mongo: require('./mappers/storage/mongoMapper.js'),
-            //GridFS: require('./mappers/storage/gridFSMapper.js'),
-        },
-    },
-
     metaProperties: ['id', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
     metaPropPrefix: '',
+
+    dslType: 'js',
+
+    dsl: fluent_dsl,
+
 
     instance: this,
 
@@ -1024,6 +255,8 @@ var OBJY = {
     schema: {
 
     },
+
+    affectables: [],
 
     handlerSequence: [],
     permissionSequence: [],
@@ -1038,33 +271,70 @@ var OBJY = {
     ProcessorTemplate: ProcessorTemplate,
     ObserverTemplate: ObserverTemplate,
 
+    /**
+     * Runs luke code (comming soon)
+     * @param {code} - luke code
+     * @returns {this}
+     */
+    lang: function(code) {
+        this.dsl.parse(code);
+        return this;
+    },
+
+
+    /**
+     * Serialises an object into the objy structure (comming soon)
+     * @param {obj} - object
+     * @returns {this}
+     */
     serialize: function(obj) {
         return obj;
     },
 
+    /**
+     * Deserialises an object from the objy structure (comming soon)
+     * @param {obj} - object
+     * @returns {this}
+     */
     deserialize: function(obj) {
         return obj;
     },
 
-    tenant: function(tenant) {
-        if (!tenant) throw new Error("No tenant specified");
-        this.activeTenant = tenant;
+    /**
+     * Sets client (workspace) context (deprecated)
+     * @param {tenant} - the tenant identifier
+     * @returns {this}
+     */
+    tenant: function(client) {
+        return this.client(client);
+    },
 
+    /**
+     * Sets client (workspace) context
+     * @param {client} - the tenant identifier
+     * @returns {this}
+     */
+    client: function(client) {
+        if (!client) throw new Error("No client specified");
+        this.activeTenant = client;
         return this;
     },
 
-    client: function(tenant) {
-        if (!tenant) throw new Error("No tenant specified");
-        this.activeTenant = tenant;
-
-        return this;
-    },
-
+    /**
+     * Sets user context
+     * @param {user} - the user object
+     * @returns {this}
+     */
     useUser: function(user) {
         this.activeUser = user;
         return this;
     },
 
+    /**
+     * Sets app context
+     * @param {app} - the app identifier
+     * @returns {this}
+     */
     app: function(app) {
         //if (!app) throw new Error("No app specified");
         this.activeApp = app;
@@ -1072,24 +342,296 @@ var OBJY = {
         return this;
     },
 
-    checkPermissions: function(user, app, obj, permission, soft) {
+    /**
+     * Applies affect rules
+     * @param {obj} - the object
+     */
+    applyAffects: function(obj) {
+        var self = this;
+        self.affectables.forEach(function(a) {
+            if (Query.query([obj], a.affects, Query.undot).length != 0) {
 
-        return true;
+                var template = a.apply;
+                var templateId = a._id;
+
+                if (template.name) {
+                    if (!obj.name) obj.name = template.name;
+                }
+
+                if (template.type) {
+                    if (!obj.type) obj.type = template.type;
+                }
+
+                // Object handlers
+
+                ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                    if (template[h]) {
+                        Object.keys(template[h]).forEach(function(oC) {
+                            if (!obj[h][oC]) {
+                                obj[h][oC] = template[h][oC];
+                                obj[h][oC].template = templateId;
+                            }
+                        })
+                    }
+                })
+
+                var isObject = function(a) {
+                    return (!!a) && (a.constructor === Object);
+                };
+
+                // Properties
+                function doTheProps(template, obj) {
+
+                    if (!obj) obj = {}
+
+                    if (obj.type == 'bag') {
+                        if (!obj.properties) {
+                            obj.properties = {};
+                        }
+                    }
+
+
+                    Object.keys(template || {}).forEach(function(p) {
+
+                        var isO = isObject(template[p]);
+
+                        if ((template[p] || {}).type == 'bag') {
+
+                            if (!obj[p]) {
+
+                                obj[p] = template[p];
+                                if (isO) obj[p].template = templateId;
+                            } else {
+                                if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                    obj[p] = template[p];
+                                }
+
+                                if (isO) obj[p].template = templateId;
+                                //obj.properties[p].overwritten = true;
+                            }
+
+                            if (!obj[p].properties) obj[p].properties = {};
+
+                            doTheProps(template[p], obj[p]);
+
+                        } else if (isObject(template[p])) {
+
+                            if (!obj[p]) {
+
+                                obj[p] = template[p];
+
+                                if (p != 'properties' && isO) obj[p].template = templateId;
+
+
+                            } else {
+
+
+                                if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
+                                    obj[p] = template[p];
+                                }
+
+                                if (p != 'properties' && isO) obj[p].template = templateId;
+                                //obj.properties[p].overwritten = true;
+                            }
+
+                            doTheProps(template[p], obj[p]);
+                        }
+
+
+                        if (!obj[p]) {
+                            obj[p] = template[p];
+                            if (p != 'properties' && isO) obj[p].template = templateId;
+                            if (isO) delete obj[p].overwritten;
+                        } else {
+
+                            if (!obj[p].overwritten) {
+                                if (p != 'properties' && isO) obj[p].template = templateId;
+                                if (obj[p].value == null && isO) obj[p].value = template[p].value;
+                                //obj.properties[p].overwritten = true;
+                            }
+
+                            if (!obj[p].metaOverwritten) {
+                                obj[p].meta = template[p].meta;
+                            }
+
+                            if (obj[p].type == 'bag') {
+                                if (!obj[p].properties) {
+                                    obj[p].properties = {};
+                                }
+                            }
+                        }
+
+
+                        if (template.permissions) {
+                            if (!obj.permissions) obj.permissions = {};
+                            Object.keys(template.permissions).forEach(function(p) {
+                                if (!obj.permissions[p]) {
+                                    obj.permissions[p] = template.permissions[p];
+                                    if (isO) obj.permissions[p].template = templateId;
+                                } else {
+                                    if (isO) obj.permissions[p].template = templateId;
+                                    if (isO) obj.permissions[p].overwritten = true;
+                                }
+                            })
+                        }
+
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if (!isObject(template[p])) return;
+                            if (template[p][h]) {
+                                if (!obj[p][h]) obj[p][h] = {};
+
+                                Object.keys(template[p][h]).forEach(function(oC) {
+
+                                    if (!obj[p][h][oC]) {
+                                        obj[p][h][oC] = template[p][h][oC];
+                                        obj[p][h][oC].template = templateId;
+                                    }
+                                })
+                            }
+                        })
+                    })
+                }
+
+                doTheProps(template.properties || {}, obj.properties || {});
+
+                // Applications
+
+                if (template.applications) {
+                    template.applications.forEach(function(a) {
+                        if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
+                    })
+                }
+
+
+                if (template._clients) {
+                    template._clients.forEach(function(a) {
+                        if ((obj._clients || []).indexOf(a) == -1)(obj._clients || []).push(a);
+                    })
+                }
+
+                if (template.authorisations) {
+                    var keys = Object.keys(template.authorisations);
+
+                    if (keys.length > 0) {
+                        if (!obj.authorisations) obj.authorisations = {};
+                    }
+
+                    keys.forEach(function(k) {
+
+
+
+                        if (!obj.authorisations[k]) {
+                            obj.authorisations[k] = template.authorisations[k]
+
+                            obj.authorisations[k].forEach(function(a) {
+                                a.template = template._id;
+                            })
+
+                        } else {
+                            template.authorisations[k].forEach(function(a) {
+
+                                var f = false;
+                                obj.authorisations[k].forEach(function(objA) {
+                                    if (JSON.stringify(objA.query) == JSON.stringify(a.query)) f = true;
+                                })
+
+                                if (f) {
+                                    a.overwritten = true;
+                                } else {
+                                    a.template = template._id;
+                                    obj.authorisations[k].push(a)
+                                }
+                            })
+                        }
+                    })
+                }
+
+                // Permissions
+
+                if (template.permissions) {
+                    if (!obj.permissions) obj.permissions = {};
+                    Object.keys(template.permissions).forEach(function(p) {
+                        if (!obj.permissions[p]) {
+                            obj.permissions[p] = template.permissions[p];
+                            obj.permissions[p].template = templateId;
+                        } else {
+                            obj.permissions[p].template = templateId;
+                            obj.permissions[p].overwritten = true;
+                        }
+                    })
+                }
+
+                // Privileges
+
+                if (template.privileges) {
+                    if (!obj.privileges) obj.privileges = {};
+                    Object.keys(template.privileges).forEach(function(a) {
+                        if (!obj.privileges[a]) obj.privileges[a] = [];
+
+                        template.privileges[a].forEach(function(tP) {
+                            var contains = false;
+
+                            obj.privileges[a].forEach(function(oP) {
+                                if (oP.name == tP.name) contains = true;
+                            })
+                        })
+
+                        if (!contains) {
+                            obj.privileges[a].push({
+                                name: tP.name,
+                                template: templateId
+                            })
+                        }
+
+                    })
+                }
+
+
+            }
+        })
+    },
+
+    /**
+     * Check the permissions for an object or object part
+     * @param {user} - the user object
+     * @param {app} - the current application
+     * @param {obj} - the object (or property) in question
+     * @param {permission} - the permission code to check for
+     * @param {soft} - ...
+     * @returns true or false
+     */
+    checkPermissions: function(user, app, obj, permission, soft) {
 
         var result = false;
 
         if (!user) return true;
 
+        if (user.spooAdmin) return true;
+
         var privileges = user.privileges;
         var permissions = obj.permissions;
 
+        if (!permissions) return true;
+
+        if (Object.keys(permissions || {}).length == 0) return true;
+
         // if permissions present and user has no privileges
         if (!privileges && permissions) {
-            if (!soft) throw new LackOfPermissionsException();
+            if (!soft) return false;
             else return false;
         }
 
         var allowed = false;
+
+        if (Array.isArray(permissions)) {
+            var perms = {};
+
+            permissions.forEach(function(p) {
+                perms[p.name] = { value: p.value };
+            })
+
+            permissions = perms;
+        }
 
         if (app) {
             if (privileges['*']) {
@@ -1124,15 +666,23 @@ var OBJY = {
                     }
                 })
 
-                if (!allowed) throw new LackOfPermissionsException();
+                if (!allowed) return false;
                 else return true
 
-            } else throw new LackOfPermissionsException();
+            } else return false;
 
-        } else throw new LackOfPermissionsException();
+        } else return false;
 
     },
 
+    /**
+     * Check the authorisations for an object
+     * @param {obj} - the object in question
+     * @param {user} - the user object
+     * @param {condition} - the condition to check for
+     * @param {app} - the current application
+     * @returns true or false
+     */
     checkAuthroisations: function(obj, user, condition, app) {
 
         var authorisations;
@@ -1142,7 +692,7 @@ var OBJY = {
             throw new Error("Lack of permissions")
         }
 
-        if (Object.keys(user.authorisations || {}).length == 0) throwError();
+        if (Object.keys(user.authorisations || {}).length == 0) return; //throwError();
 
         if (!app && !user.authorisations['*']) {
             console.warn('app, !authorisationsapp');
@@ -1166,16 +716,86 @@ var OBJY = {
 
         if (query.$or.length == 0) throwError();
 
-        // CONSOLE LOGGING FOR TESTING PURPOSES!
-
-        console.log('query', query)
-
-        console.log('perm result', Query.query(permCheck, query, Query.undot))
 
         if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
     },
 
+    /**
+     * Add permissions to a query
+     * @param {query} - the initial query
+     * @param {user} - the user object
+     * @param {app} - the current application
+     * @returns {query} - the final query with permissions
+     */
+    buildPermissionQuery: function(query, user, app) {
 
+        if (query.$query) {
+            query = JSON.parse(JSON.stringify(query.$query));
+            delete query.$query;
+        }
+
+        if (!user.spooAdmin) {
+
+            if (!user.privileges) return query;
+
+            if (app && user.privileges[app]) {
+                var privArr = [];
+                user.privileges[app].forEach(function(p) {
+
+                    var inn = {};
+
+                    inn["permissions." + p.name + ".value"] = { $regex: "r" }
+                    privArr.push(inn);
+                    //inn = {};
+                    //inn["permissions." + p.name] = { $regex: "r" }
+                    //privArr.push(inn);
+                    inn = {};
+                    inn["permissions." + p.name + ".value"] = "*";
+                    privArr.push(inn);
+
+                    inn = {};
+                    inn["permissions.name"] = p.name;
+                    privArr.push(inn);
+                    //inn = {};
+                    //inn["permissions." + p.name] = "*";
+                    //privArr.push(inn);
+                })
+
+                var inn = {};
+                inn["permissions.*" + ".value"] = { $regex: "r" }
+                privArr.push(inn);
+                inn = {};
+                inn["permissions.*"] = { $regex: "r" }
+                privArr.push(inn);
+                inn = {};
+                inn["permissions.*" + ".value"] = "*"
+                privArr.push(inn);
+                //var inn = {};
+                //inn["permissions.*"] = "*"
+                //privArr.push(inn);
+
+                if (Object.keys(query).length > 0) {
+
+                    return { $and: [query, { $or: privArr }] }
+                } else {
+                    return { $or: privArr }
+                }
+            } else if (!app) {
+                return query;
+            }
+        } else {
+            return query
+        }
+    },
+
+    /**
+     * Add authorisations to a query
+     * @param {obj} - the object
+     * @param {user} - the user object
+     * @param {condition} - the condition
+     * @param {app} - the current application
+     * @returns {query} - the final query with permissions
+     */
     buildAuthroisationQuery: function(obj, user, condition, app) {
 
         var authorisations;
@@ -1185,7 +805,7 @@ var OBJY = {
             throw new Error("Lack of permissions")
         }
 
-        if (Object.keys(user.authorisations || {}).length == 0) throwError();
+        if (Object.keys(user.authorisations || {}).length == 0) return obj; //throwError();
 
         if (!app && !user.authorisations['*']) {
             console.warn('app, !authorisationsapp');
@@ -1208,7 +828,7 @@ var OBJY = {
             if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                 if (Object.keys(a.query).length == 0) wildcard = true;
                 else {
-                    console.log([a.query, obj])
+
                     query.push({ '$and': [a.query, obj] })
                 }
             }
@@ -1216,19 +836,19 @@ var OBJY = {
 
         if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
 
-        // CONSOLE LOGGING FOR TESTING PURPOSES!
-
         query = { $or: query };
-
-        console.log('build query', query)
-
-        console.log('query', query)
-
-        console.log('perm result', Query.query(permCheck, query, Query.undot))
 
         return query;
     },
 
+    /**
+     * Chains permission information, when performing multiple operations
+     * @param {obj} - the object
+     * @param {instance} - the OBJY instance
+     * @param {code} - the permission code
+     * @param {name} - the permission name
+     * @param {key} - the permission key
+     */
     chainPermission: function(obj, instance, code, name, key) {
         if (obj.permissions) {
             if (Object.keys(obj.permissions).length > 0) {
@@ -1243,6 +863,13 @@ var OBJY = {
         }
     },
 
+    /**
+     * Chains command information, when performing multiple operations
+     * @param {obj} - the object
+     * @param {instance} - the OBJY instance
+     * @param {key} - the command name
+     * @param {value} - the command value (parameter)
+     */
     chainCommand: function(obj, instance, key, value) {
         instance.commandSequence.push({
             name: key,
@@ -1252,10 +879,19 @@ var OBJY = {
 
     objectFamilies: [],
 
+    /**
+     * Returns all defined Object Families from the current instance
+     * @returns {objectfamilies} an array of all object families
+     */
     getObjectFamilies: function() {
         return this.objectFamilies;
     },
 
+    /**
+     * Defines an Object Family. Creates a constructor with the single name and one with the plural name
+     * @param {params} an object containing the information.
+     * @returns {this} an array of all object families
+     */
     define: function(params) {
 
         var thisRef = this;
@@ -1297,6 +933,9 @@ var OBJY = {
         return this[params.name];
     },
 
+    /**
+     * A wrapper for define
+     */
     ObjectFamily: function(params) {
         return this.define(params);
     },
@@ -1305,22 +944,38 @@ var OBJY = {
 
     caches: {},
 
+    /**
+     * Returns the constructor for a specified object family name (singular or plural)
+     * @param {role} to object family
+     * @returns {constructor} the constructor
+     */
     getConstructor: function(role) {
         if (this.mappers[role]) return OBJY[role];
         throw new Error("No constructor");
     },
 
+    /**
+     * Returns the persistence mapper attached to the specified object family
+     * @returns {mapper} the mapper instance
+     */
     getPersistenceMapper: function(family) {
 
         if (!this.mappers[family]) throw new Error("No such Object Family");
         return this.mappers[family];
     },
 
+    /**
+     * Returns the persistence mapper attached to the specified object family
+     * @returns {mapper} the mapper instance
+     */
     getPersistence: function(family) {
         if (!this.mappers[family]) throw new Error("No such Object Family: " + family);
         return this.mappers[family];
     },
 
+    /**
+     * Attaches a persistence mapper to an object family
+     */
     plugInPersistenceMapper: function(name, mapper) {
         if (!name) throw new Error("No mapper name provided");
         this.mappers[name] = mapper;
@@ -1341,11 +996,19 @@ var OBJY = {
 
     processors: {},
 
+    /**
+     * Returns the processor mapper attached to the specified object family
+     * @returns {mapper} the mapper instance
+     */
     getProcessor: function(family) {
         if (!this.processors[family]) throw new Error("No such Object Family");
         return this.processors[family];
     },
 
+
+    /**
+     * Attaches a processor mapper to an object family
+     */
     plugInProcessor: function(name, processor) {
         if (!name) throw new Error("No mapper name provided");
         this.processors[name] = processor;
@@ -1381,7 +1044,7 @@ var OBJY = {
 
         if (property.hasOwnProperty('conditions')) {
 
-            //new ConditionEngine(undefined, property, undefined, value).execute(property.conditions);
+            // TODO
         }
     },
 
@@ -1396,8 +1059,10 @@ var OBJY = {
         else return element.permissions;
     },
 
-    updateInheritedObjs: function(templ, pluralName, success, error, client, params) { //@TPDO: Fix this!
-        var templateFamily;
+    updateInheritedObjs: function(templ, pluralName, success, error, client, params) {
+        // TODO
+
+        /*var templateFamily;
 
         if (params.templateFamily) templateFamily = `'${params.templateFamily}'`
 
@@ -1428,7 +1093,7 @@ var OBJY = {
 
         this.execProcessorAction(code, templ, null, null, function(data) {
 
-        }, client, {})
+        }, client, {})*/
     },
 
     removeInheritedObjs: function(templ, pluralName, success, error, client) {
@@ -1453,11 +1118,6 @@ var OBJY = {
             if (newObj[p] != oldObj[p]) oldObj[p] = newObj[p];
         })
 
-        /*Object.keys(newObj).forEach(function(p)
-        {
-            if(typeof newObj[p] !== "object")
-                if(newObj[p] != oldObj[p]) oldObj[p] = newObj[p];
-        })*/
 
         var handlers = ['onCreate', 'onChange', 'onDelete'];
         handlers.forEach(function(h) {
@@ -1549,7 +1209,7 @@ var OBJY = {
 
         doTheProps(newObj);
 
-        // Applications TODO
+        // Applications: TODO!!!
 
         // Permissions
         if (newObj.permissions) {
@@ -1582,9 +1242,14 @@ var OBJY = {
 
     },
 
-    getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole) {
+    getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource) {
 
         var self = this;
+
+
+        var isObject = function(a) {
+            return (!!a) && (a.constructor === Object);
+        };
 
         function run(template) {
 
@@ -1605,8 +1270,13 @@ var OBJY = {
             ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                 if (template[h]) {
                     Object.keys(template[h]).forEach(function(oC) {
+
+
+                        if (!template[h][oC] || !isObject(template[h][oC])) return;
+
                         if (!obj[h][oC]) {
                             obj[h][oC] = template[h][oC];
+
                             obj[h][oC].template = templateId;
                         }
                     })
@@ -1623,46 +1293,37 @@ var OBJY = {
                     obj.properties = {};
                 }
 
-                //console.info('compare', template, 'obj:', obj)
 
                 if (!template.properties) template.properties = {};
 
                 Object.keys(template.properties).forEach(function(p) {
 
-                    if (template.properties[p].type == 'bag') {
-
-                        if (!obj.properties[p]) {
-
-                            obj.properties[p] = template.properties[p];
-                            obj.properties[p].template = templateId;
-                        } else {
-                            if (!obj.properties[p].overwritten && Object.keys(obj.properties[p]).length == 0) {
-                                obj.properties[p] = template.properties[p];
-                            }
-
-                            obj.properties[p].template = templateId;
-                            //obj.properties[p].overwritten = true;
-                        }
-
-                        doTheProps(template.properties[p], obj.properties[p]);
-                    }
+                    var cloned = JSON.parse(JSON.stringify(template.properties[p]));
 
 
                     if (!obj.properties[p]) {
-                        obj.properties[p] = template.properties[p];
+                        obj.properties[p] = cloned;
                         obj.properties[p].template = templateId;
                         delete obj.properties[p].overwritten;
                     } else {
 
-                        if (!obj.properties[p].overwritten) {
-                            obj.properties[p].template = templateId;
-                            if (obj.properties[p].value == null) obj.properties[p].value = template.properties[p].value;
-                            //obj.properties[p].overwritten = true;
+
+                        if (cloned.meta) {
+                            if (!obj.properties[p].meta) {
+                                obj.properties[p].meta = cloned.meta;
+                                obj.properties[p].meta.overwritten = true;
+                            } else {
+                                if (!obj.properties[p].meta.overwritten) {
+                                    obj.properties[p].meta = cloned.meta;
+                                    obj.properties[p].meta.overwritten = true;
+                                }
+                            }
                         }
 
-                        if (!obj.properties[p].metaOverwritten) {
-                            obj.properties[p].meta = template.properties[p].meta;
-                        }
+                        obj.properties[p].template = templateId;
+                        obj.properties[p].overwritten = true;
+
+
                     }
 
                     if (template.permissions) {
@@ -1686,18 +1347,23 @@ var OBJY = {
 
                                 if (!obj.properties[p][h][oC]) {
                                     obj.properties[p][h][oC] = template.properties[p][h][oC];
-                                    obj.properties[p][h][oC].template = templateId;
+                                    if (obj.properties[p][h][oC]) obj.properties[p][h][oC].template = templateId;
                                 }
                             })
                         }
                     })
+
+                    if (template.properties[p].type == 'bag') {
+
+
+                        doTheProps(cloned, obj.properties[p]);
+                    }
 
                 })
             }
 
 
             doTheProps(template, obj);
-
 
             // Applications
 
@@ -1707,6 +1373,42 @@ var OBJY = {
                 })
             }
 
+            if (template.authorisations) {
+                var keys = Object.keys(template.authorisations);
+
+                if (keys.length > 0) {
+                    if (!obj.authorisations) obj.authorisations = {};
+                }
+
+                keys.forEach(function(k) {
+
+
+                    if (!obj.authorisations[k]) {
+                        obj.authorisations[k] = template.authorisations[k]
+
+                        obj.authorisations[k].forEach(function(a) {
+                            a.template = template._id;
+                        })
+
+                    } else {
+                        template.authorisations[k].forEach(function(a) {
+
+                            var f = false;
+                            obj.authorisations[k].forEach(function(objA) {
+                                if (JSON.stringify(objA.query) == JSON.stringify(a.query)) f = true;
+                            })
+
+                            if (f) {
+                                a.overwritten = true;
+                            } else {
+                                a.template = template._id;
+                                a.test = 'has'
+                                obj.authorisations[k].push(a)
+                            }
+                        })
+                    }
+                })
+            }
 
             // Permissions
 
@@ -1730,20 +1432,25 @@ var OBJY = {
                 Object.keys(template.privileges).forEach(function(a) {
                     if (!obj.privileges[a]) obj.privileges[a] = [];
 
+
                     template.privileges[a].forEach(function(tP) {
+
                         var contains = false;
 
                         obj.privileges[a].forEach(function(oP) {
                             if (oP.name == tP.name) contains = true;
                         })
+
+                        if (!contains) {
+                            23
+                            obj.privileges[a].push({
+                                name: tP.name,
+                                template: templateId
+                            })
+                        }
+
                     })
 
-                    if (!contains) {
-                        obj.privileges[a].push({
-                            name: tP.name,
-                            template: templateId
-                        })
-                    }
 
                 })
             }
@@ -1757,14 +1464,56 @@ var OBJY = {
 
         } else {
 
-            /*self.getObjectById(templateRole || obj.role, templateId, function(template) {
-                run(template);
-                //if(!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId,  template);
+
+
+            OBJY.getObjectById(templateRole || obj.role, templateId, function(template) {
+
+                //if (!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId, template);
+
+                var counter = 0;
+
+
+                if ((template.inherits || []).length == 0) run(template)
+                else {
+
+
+                    template.inherits.forEach(function(i) {
+
+
+
+                        OBJY.getTemplateFieldsForObject(template, i, function() {
+
+                                counter++;
+
+                                // console.log('counter', counter, template, i);
+
+                                if (counter == template.inherits.length) run(template);;
+
+                            },
+                            function(err) {
+                                counter++;
+
+                                if (counter == template.inherits.length) run(template);
+
+
+                            }, client, templateRole || obj.role, templateSource || OBJY.activeTenant)
+
+
+                    })
+
+
+                }
+
+
+
+                //run(template)
+
             }, function(err) {
                 error(err);
-            }, undefined, client)*/
+            }, OBJY.activeApp, templateSource || OBJY.activeTenant)
 
-            OBJY[templateRole || obj.role](templateId).get(function(template) {
+
+            /*OBJY[templateRole || obj.role](templateId).get(function(template) {
 
                 //if(!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId,  template);
 
@@ -1772,11 +1521,14 @@ var OBJY = {
 
             }, function(err) {
                 error(err);
-            })
+            }, templateSource)*/
         }
+
+
     },
 
     removeTemplateFieldsForObject: function(obj, templateId, success, error, client) {
+
 
         if (!templateId) {
             error('template not found');
@@ -1795,54 +1547,68 @@ var OBJY = {
             }
         })
 
-        // Properties
+        var isObject = function(a) {
+            return (!!a) && (a.constructor === Object);
+        };
+
+
+
         function doTheProps(obj) {
 
-            Object.keys(obj.properties).forEach(function(p) {
+            if (obj.properties) {
 
-                if (obj.properties[p].type == 'bag') {
-                    doTheProps(obj.properties[p]);
-                }
+                Object.keys(obj.properties).forEach(function(p) {
 
-                if (obj.properties[p]) {
-                    if (obj.properties[p].value != null) obj.properties[p].overwritten = true;
-                    if (obj.properties[p].template == templateId && !obj.properties[p].overwritten) {
-                        //console.info('deleting obj', p, obj.properties[p])
-                        delete obj.properties[p];
+                    if (!isObject(obj.properties[p])) return;
+
+
+                    if (obj.permissions) {
+                        Object.keys(obj.permissions).forEach(function(p) {
+                            if (obj.permissions[p]) {
+                                if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
+                                    delete obj.permissions[p]
+                            }
+                        })
                     }
-                }
 
-                if (obj.permissions) {
-                    Object.keys(obj.permissions).forEach(function(p) {
-                        if (obj.permissions[p]) {
-                            if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
-                                delete obj.permissions[p]
+                    if (obj.properties[p]) {
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if (obj.properties[p][h]) {
+
+                                Object.keys(obj.properties[p][h]).forEach(function(oC) {
+
+                                    if (obj.properties[p][h][oC]) {
+                                        if (obj.properties[p][h][oC].template == templateId && !obj.properties[p][h][oC].overwritten)
+                                            delete obj.properties[p][h][oC];
+                                    }
+                                })
+                            }
+                        })
+                    }
+
+                    if (obj.properties[p].type == 'bag') {
+                        return doTheProps(obj.properties[p]);
+                    }
+
+                    if (obj.properties[p]) {
+                        if (obj.properties[p].value != null) obj.properties[p].overwritten = true;
+                        if (obj.properties[p].template == templateId && !obj.properties[p].overwritten) {
+                            console.info('deleting obj', p, obj.properties[p])
+                            delete obj.properties[p];
                         }
-                    })
-                }
+                    }
 
-                if (obj.properties[p]) {
-                    ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                        if (obj.properties[p][h]) {
+                })
 
-                            Object.keys(obj.properties[p][h]).forEach(function(oC) {
+            }
 
-                                if (obj.properties[p][h][oC]) {
-                                    if (obj.properties[p][h][oC].template == templateId && !obj.properties[p][h][oC].overwritten)
-                                        delete obj.properties[p][h][oC];
-                                }
-                            })
-                        }
-                    })
-                }
 
-            })
         }
 
         doTheProps(obj);
 
 
-        // Applications TODO
+        // Applications: TODO!!!
 
         // Permissions
         if (obj.permissions) {
@@ -1857,7 +1623,7 @@ var OBJY = {
         // Privileges
         if (obj.privileges) {
             Object.keys(obj.privileges).forEach(function(a) {
-
+                if (!Array.isArray(obj.privileges[a])) return;
                 obj.privileges[a].forEach(function(tP, i) {
                     if (tP.template == templateId && !tP.overwritten)
                         obj.privileges[a].splice(i, 1);
@@ -1916,6 +1682,9 @@ var OBJY = {
 
     addApplicationToObject: function(obj, application, instance) {
         var contains = false;
+
+        if (!obj.applications) obj.applications = [];
+
         obj.applications.forEach(function(app) {
             if (app == application) contains = true;
         });
@@ -1952,25 +1721,6 @@ var OBJY = {
         });
 
         if (obj.inherits.indexOf(templateId) != -1) {
-            /*var propKeys = Object.keys(obj.properties);
-            var i;
-            for (i = 0; i < propKeys.length; i++) {
-                console.log("properties inherit");
-                console.log(obj.properties[propKeys[i]] + ' . ' + templateId);
-                if (obj.properties[propKeys[i]].template == templateId) delete obj.properties[propKeys[i]];
-            }
-            var permissionKeys = Object.keys(obj.permissions);
-            var i;
-            for (i = 0; i < permissionKeys.length; i++) {
-                console.log("permissions inherit");
-                console.log(obj.permissions[permissionKeys[i]] + ' . ' + templateId);
-                if (obj.permissions[permissionKeys[i]].template == templateId) delete obj.permissions[permissionKeys[i]];
-            }
-            var i;
-            for (i = 0; i < obj.inherits.length; i++) {
-                if (obj.inherits[i] == templateId) obj.inherits.splice(i, 1);
-            }*/
-
 
             obj.inherits.splice(obj.inherits.indexOf(templateId), 1);
 
@@ -2078,31 +1828,6 @@ var OBJY = {
 
         return;
 
-        /*
-                var propKeys = Object.keys(obj.properties);
-                propKeys.forEach(function(property) {
-                    {
-                        if (obj.properties[property].template) {
-                            if (!obj.properties[property].overwrittenOnCreate) delete obj.properties[property].onCreate;
-                            if (!obj.properties[property].overwrittenOnChange) delete obj.properties[property].onChange;
-                            if (!obj.properties[property].overwrittenOnDelete) delete obj.properties[property].onDelete;
-                            if (!obj.properties[property].meta) delete obj.properties[property].meta;
-                            if (!obj.properties[property].overwritten) delete obj.properties[property];
-                        }
-                    }
-                })
-                if (obj.privileges) {
-                    var appKeys = Object.keys(obj.privileges);
-                    appKeys.forEach(function(app) {
-                        var k;
-                        for (k = 0; k < obj.privileges[app].length; k++) {
-                        }
-                        if (obj.privileges[app].length == 0) delete obj.privileges[app];
-                    })
-                }
-                this.updateObject(obj, success, error, app, client);*/
-
-
         // ADD TENANT AND APPLICATION!!!
     },
 
@@ -2117,17 +1842,21 @@ var OBJY = {
 
     getObjectById: function(role, id, success, error, app, client) {
 
-
         this.mappers[role].getById(id, function(data) {
 
-            //console.log("---" + data)
 
             if (data == null) {
-                error('Error - object not found');
+                error('Error - object not found: ' + id);
                 return;
             }
 
             success(data);
+
+            /*OBJY[data.role](data).get(function(ob){
+                success(ob);
+            }, function(err){
+
+            },client)*/
 
 
         }, function(err) {
@@ -2149,18 +1878,18 @@ var OBJY = {
             success(data);
 
 
-            /*data.forEach(function(obj, i) {
-                counter++;
-                if (counter == data.length) success(data);
-                /*new OBJY.Obj(obj).get(function(ob) {
-                        counter++;
-                        data[i] = ob
-                        if (counter == data.length) success(data);
-                    },
-                    function(err) {
-                        error(err);
-                    }, client);*
-            })*/
+            /* data.forEach(function(obj, i) {
+                 counter++;
+                 if (counter == data.length) success(data);
+                 OBJY[obj.role](obj).get(function(ob) {
+                         counter++;
+                         data[i] = ob
+                         if (counter == data.length) success(data);
+                     },
+                     function(err) {
+                         error(err);
+                     }, client);
+             })*/
 
 
         }, function(err) {
@@ -2470,7 +2199,7 @@ var OBJY = {
     },
 
     PropertyBagItemRemover: function(obj, propertyName, instance) {
-        var allProperties = obj.properties; //obj.getProperties();
+        var allProperties = obj.properties;
         var thisRef = this;
 
 
@@ -2542,6 +2271,7 @@ var OBJY = {
 
         if (propertyToReturn.type == "action") {
             propertyToReturn.call = function(callback, client) {
+                OBJY.checkAuthroisations(obj, instance.activeUser, "x", instance.activeApp);
                 thisRef.execProcessorAction(propertyToReturn.value, obj, propertyToReturn, {}, callback, client, {});
             }
         }
@@ -2584,8 +2314,6 @@ var OBJY = {
 
         if (typeof property !== 'object') {
             throw new InvalidFormatException();
-            //obj.properties[propertyKey] = property[propertyKey];
-            //return;
         }
 
 
@@ -2594,7 +2322,7 @@ var OBJY = {
 
         } catch (e) {}
 
-        /*iif (!property[propertyKey].type) {
+        /*if (!property[propertyKey].type) {
             obj.properties[propertyKey] = property[propertyKey];
            
             f (typeof property[propertyKey].value === 'string') {
@@ -2605,10 +2333,9 @@ var OBJY = {
             else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
         }*/
 
-
         if (existing) throw new DuplicatePropertyException(propertyKey);
 
-        //console.debug(property);
+
         switch ((property[propertyKey] || {}).type) {
             case undefined:
                 obj.properties[propertyKey] = property[propertyKey];
@@ -2872,7 +2599,7 @@ var OBJY = {
     {
         if (!typeof permissions == 'object') throw new InvalidPermissionException();
 
-        if (!permissions) return {};
+        if (!permissions) return;
 
         var permissionKeys = Object.keys(permissions);
         permissionKeys.forEach(function(permission) {
@@ -2914,7 +2641,7 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
 
-        if (!onCreate) onCreate = {};
+        if (!onCreate) return;
 
         Object.keys(onCreate).forEach(function(oC) {
             if (!onCreate[oC].trigger) oC.trigger = 'after';
@@ -2932,11 +2659,18 @@ var OBJY = {
         return affects;
     },
 
+    ApplyCreateWrapper: function(obj, apply) {
+
+        if (!apply) apply = {};
+
+        return apply;
+    },
+
     ObjectOnChangeCreateWrapper: function(obj, onChange, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
 
-        if (!onChange) onChange = {};
+        if (!onChange) return;
 
         Object.keys(onChange).forEach(function(oC) {
             if (!onChange[oC].trigger) oC.trigger = 'after';
@@ -2951,7 +2685,7 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
 
-        if (!onDelete) onDelete = {};
+        if (!onDelete) return;
 
         Object.keys(onDelete).forEach(function(oC) {
             if (!onDelete[oC].trigger) oC.trigger = 'after';
@@ -3177,7 +2911,7 @@ var OBJY = {
             if (access.length > 1) {
                 setOnDelete(obj.properties[access.shift()], access, onDelete);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3187,7 +2921,7 @@ var OBJY = {
                 if (!obj.properties[access[0]].onDelete) obj.properties[access[0]].onDelete = {};
                 if (!obj.properties[access[0]].onDelete[name]) obj.properties[access[0]].onDelete[name] = {};
 
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
+
                 if (obj.properties[access[0]].onDelete[name].template) obj.properties[access[0]].onDelete[name].overwritten = true;
                 obj.properties[access[0]].onDelete[name].value = onDelete;
                 obj.properties[access[0]].onDelete[name].trigger = trigger || 'after';
@@ -3209,14 +2943,12 @@ var OBJY = {
             if (access.length > 1) {
                 setConditions(obj.properties[access.shift()], access, conditions);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
-
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
 
                 obj.properties[access[0]].conditions = conditions;
             }
@@ -3237,7 +2969,7 @@ var OBJY = {
             if (access.length > 1) {
                 setPermission(obj.properties[access.shift()], access, permission);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3255,28 +2987,6 @@ var OBJY = {
 
         setPermission(obj, propertyKey, permission);
 
-
-
-        /*switch(existingProperty.type)
-        {
-            case constants.PROPERTY_TYPE_SHORTTEXT:
-                obj.properties[propertyKey].value = newValue;
-            break;
-            default : 
-                throw new InvalidTypeException(existingProperty.type);
-        }*/
-
-        /*if(obj.role == 'template') 
-        {
-            OBJY.addTemplateFieldToObjects(obj, propertyKey, function(data)
-                {
-                    console.log("template added!");
-                },
-                function(error)
-                {
-                    throw new NoSuchTemplateException(error);
-                });
-        }*/
     },
 
 
@@ -3294,18 +3004,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3343,31 +3053,10 @@ var OBJY = {
         setValue(obj, propertyKey, newValue);
 
 
-
-        /*switch(existingProperty.type)
-        {
-            case constants.PROPERTY_TYPE_SHORTTEXT:
-                obj.properties[propertyKey].value = newValue;
-            break;
-            default : 
-                throw new InvalidTypeException(existingProperty.type);
-        }*/
-
-        /*if(obj.role == 'template') 
-        {
-            OBJY.addTemplateFieldToObjects(obj, propertyKey, function(data)
-                {
-                    console.log("template added!");
-                },
-                function(error)
-                {
-                    throw new NoSuchTemplateException(error);
-                });
-        }*/
     },
 
 
-    PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, notPermitted) {
+    PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, notPermitted, force) {
 
 
         function setValue(obj, access, value) {
@@ -3381,22 +3070,23 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
-                try {
-                    var t = obj.properties[access[0]].value;
-                } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+
+                if (!force) {
+                    try {
+                        var t = obj.properties[access[0]].value;
+                    } catch (e) {
+                        throw new NoSuchPropertyException(propertyKey);
+                    }
                 }
 
                 if (obj.properties[access[0]].template) {
@@ -3447,18 +3137,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3518,18 +3208,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
@@ -3566,18 +3256,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
 
                     var t = obj.properties[access[0]].type;
@@ -3615,18 +3305,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3668,18 +3358,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3717,18 +3407,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3780,11 +3470,11 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
@@ -3840,7 +3530,7 @@ var OBJY = {
     },
 
     PropertiesChecker: function(obj, properties, instance) {
-        if (properties === undefined) return {};
+        if (properties === undefined) return;
 
         obj.properties = {};
         var propertyKeys = Object.keys(properties);
@@ -3854,17 +3544,18 @@ var OBJY = {
     },
 
     ApplicationsChecker: function(obj, applications) {
-        if (applications === undefined) return [];
+        if (applications === undefined) return;
 
         obj.applications = [];
         applications.forEach(function(application) {
             obj.applications.push(application);
         })
+
         return obj.applications;
     },
 
     ActionsChecker: function(obj, actions) {
-        if (actions === undefined) return {};
+        if (actions === undefined) return;
 
         obj.actions = {};
         var actionKeys = Object.keys(actions);
@@ -3877,9 +3568,9 @@ var OBJY = {
         return obj.actions;
     },
 
-    TemplatesChecker: function(obj, templates) {
-        if (templates === undefined) return [];
-        if (typeof templates !== 'object') return [];
+    InheritsChecker: function(obj, templates) {
+        if (templates === undefined) return;
+        if (typeof templates !== 'object') return;
         obj.inherits = [];
 
         templates.forEach(function(template) {
@@ -3891,9 +3582,6 @@ var OBJY = {
 
 
     PrivilegesChecker: function(obj) {
-
-        //obj = JSON.stringify(obj);
-        //var nObj = JSON.parse(obj);
 
         return obj.privileges;
     },
@@ -3907,7 +3595,14 @@ var OBJY = {
             obj.privileges[privilegeKey] = [];
         }
 
-        if (obj.privileges[privilegeKey].indexOf(privilege[privilegeKey]) == -1) obj.privileges[privilegeKey].push(privilege[privilegeKey]);
+        var contains = false;
+
+        obj.privileges[privilegeKey].forEach(function(oP) {
+            if (oP.name == privilege[privilegeKey].name) contains = true;
+        })
+
+        if (!contains) obj.privileges[privilegeKey].push({ name: privilege[privilegeKey].name });
+        else throw new Error('Privilege already exists')
 
         return privilege;
     },
@@ -3949,6 +3644,9 @@ var OBJY = {
 
             objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
 
+            if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
+
+
             this.get = function(success, error) {
 
                 var client = instance.activeTenant;
@@ -3960,12 +3658,14 @@ var OBJY = {
 
                 OBJY.findObjects(objs, role, function(data) {
 
-                    // success(data);
-                    //    return;
+                    var i;
+                    for (i = 0; i < data.length; i++) {
+
+                        if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](OBJY.deserialize(data[i]))
+                    }
+
 
                     // TODO : change!!!
-
-
 
                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
@@ -3982,15 +3682,22 @@ var OBJY = {
 
                     data.forEach(function(d) {
 
-                        d.inherits = d.inherits.filter(function(item, pos) {
-                            return d.inherits.indexOf(item) == pos;
-                        });
+                        OBJY.applyAffects(d)
 
-                        //onsole.info(d)
+                        if (!d.inherits) d.inherits = [];
+
+                        /*d.inherits = d.inherits.filter(function(item, pos) {
+                            return d.inherits.indexOf(item) == pos;
+                        });*/
+
+
                         var counter = 0;
+
+
 
                         if (d.inherits.length == 0) {
                             allCounter++;
+
                             if (allCounter == data.length) {
 
                                 success(data);
@@ -3998,9 +3705,7 @@ var OBJY = {
                             }
                         }
 
-
                         d.inherits.forEach(function(template) {
-
 
                             if (d._id != template) {
 
@@ -4010,8 +3715,6 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-
-                                        // console.info(d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -4024,7 +3727,6 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-                                        //console.info(d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -4032,7 +3734,7 @@ var OBJY = {
                                             return d;
                                         }
 
-                                    }, client, params.templateFamily)
+                                    }, client, params.templateFamily, params.templateSource)
                             } else {
 
                                 if (d.inherits.length == 1) {
@@ -4050,6 +3752,7 @@ var OBJY = {
                     })
 
                 }, function(err) {
+                    console.log('err', err);
                     error(err)
                 }, app, client, flags || {});
 
@@ -4088,6 +3791,8 @@ var OBJY = {
                 for (i = 0; i < objs.length; i++) {
                     objs[i] = OBJY[role](objs[i]).add(function(data) {
 
+                        OBJY.applyAffects(data)
+
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
                             var counter = 0;
@@ -4101,6 +3806,8 @@ var OBJY = {
                                 }
                             }
 
+
+
                             data.inherits.forEach(function(template) {
 
                                 if (data._id != template) {
@@ -4111,7 +3818,6 @@ var OBJY = {
 
                                             if (counter == data.inherits.length) allCounter++;
 
-                                            //console.info(data.inherits.length, counter, objs.length, allCounter)
 
                                             if (allCounter == objs.length) {
                                                 success(objs);
@@ -4121,7 +3827,7 @@ var OBJY = {
                                         function(err) {
                                             error(err);
                                             return data;
-                                        }, client, params.templateFamily)
+                                        }, client, params.templateFamily, params.templateSource)
                                 } else {
 
                                     if (data.inherits.length == 1) {
@@ -4190,51 +3896,48 @@ var OBJY = {
 
         this.role = role || 'object';
 
-        if (params.customProps) {
-            for (var prop in params.customProps) {
-                this[prop] = params.customProps[prop];
+        if (params.staticProps) {
+            for (var prop in params.staticProps) {
+                this[prop] = params.staticProps[prop];
             }
         }
 
-        if (params.customFuncs) {
-            for (var func in params.customFuncs) {
-                this[func] = params.customFuncs[func];
+        if (params.staticFuncs) {
+            for (var func in params.staticFuncs) {
+                this[func] = params.staticFuncs[func];
             }
         }
 
-        if (params.isRule) {
-            this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance) || {};
+        if (params.hasAffects) {
+            this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance);
+            this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
         }
 
         if (!params.structure) {
 
-            this.type = obj.type || null;
+            this.type = obj.type;
 
             this.applications = OBJY.ApplicationsChecker(this, obj.applications) || [];
 
-            this.inherits = OBJY.TemplatesChecker(this, obj.inherits) || [];
-
+            this.inherits = OBJY.InheritsChecker(this, obj.inherits) || [];
 
             this.name = obj.name || null;
 
-            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance) || {};
-            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance) || {};
-            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance) || {};
+            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
+            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
+            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance);
 
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
             this.properties = OBJY.PropertiesChecker(this, obj.properties, instance) || {};
 
-            this.permissions = new OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
+            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
 
-            this._aggregatedEvents = obj._aggregatedEvents || [];
+            this._aggregatedEvents = obj._aggregatedEvents;
 
-            /*if (this.role == 'template') {
-                this.privileges = obj.privileges;
-                this.addPrivilege = obj.addPrivilege;
-                this.removePrivilege = obj.removePrivilege;
-            }*/
+
+            this.authorisations = obj.authorisations || undefined;
 
             if (params.authable) {
 
@@ -4242,9 +3945,8 @@ var OBJY = {
                 this.email = obj.email || null;
                 this.password = obj.password || null;
                 this.privileges = OBJY.PrivilegesChecker(obj) || {};
-                this.spooAdmin = obj.spooAdmin || false;
-                this._clients = obj._clients || [];
-                this.authorisations = obj.authorisations || [];
+                this.spooAdmin = obj.spooAdmin;
+                this._clients = obj._clients;
 
                 this.addClient = function(client) {
                     if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
@@ -4261,7 +3963,14 @@ var OBJY = {
                 delete this.name;
 
                 this.addPrivilege = function(privilege) {
-                    new OBJY.PrivilegeChecker(this, privilege);
+
+                    if (instance.activeApp) {
+                        var tmpPriv = {};
+                        tmpPriv[instance.activeApp] = { name: privilege }
+                        new OBJY.PrivilegeChecker(this, tmpPriv);
+                        return this;
+                    } else throw new Error('Invalid app id');
+
                     return this;
                 };
 
@@ -4325,28 +4034,30 @@ var OBJY = {
 
             var self = this;
 
+            if (self.role != newObj.role) throw new Error("cannot alter role")
+
             Object.keys(this).forEach(function(k) {
                 if (self[k] instanceof Function || k == '_id') return;
                 delete self[k]
             })
 
             function doTheProps(self, o) {
-                console.log('dtp', o)
+
                 Object.keys(o).forEach(function(k) {
 
-                    if(o[k] == null || o[k] === undefined) return;
+                    if (o[k] == null || o[k] === undefined) return;
 
                     self[k] = o[k];
                     if (typeof o[k] === 'object') {
-                        console.log('typeof', typeof o[k], o[k])
+
                         doTheProps(self[k], o[k])
                     }
 
-                    if (self[k].template) self[k].overwritten = true;
+
                 })
             }
 
-            console.log('bdtp', newObj)
+
             doTheProps(self, newObj);
 
             return self;
@@ -4381,7 +4092,7 @@ var OBJY = {
         this.setOnChange = function(name, onChangeObj) {
 
             if (typeof onChangeObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onChangeObj)[0];
+            var key = name;
 
             new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
             return this;
@@ -4390,7 +4101,7 @@ var OBJY = {
         this.setOnDelete = function(name, onDeleteObj) {
 
             if (typeof onDeleteObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onDeleteObj)[0];
+            var key = name;
 
             new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
             return this;
@@ -4399,7 +4110,7 @@ var OBJY = {
         this.setOnCreate = function(name, onCreateObj) {
 
             if (typeof onCreateObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onCreateObj)[0];
+            var key = name;
 
             new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
             return this;
@@ -4440,17 +4151,6 @@ var OBJY = {
 
         this.setPropertyValue = function(property, value, client) {
 
-            /*var propertyKey = Object.keys(property)[0];
-            if (propertyKey.indexOf('.') != -1) {
-                var lastDot = propertyKey.lastIndexOf(".");
-                var bag = propertyKey.substring(0, lastDot);
-                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
-                var newProp = {};
-                this.setBagPropertyValue(bag, newProKey, value,  client);
-                return;
-            }
-            new OBJY.ConditionsChecker(this.getProperty(property), value);*/
-
             new OBJY.PropertySetWrapper(this, property, value, instance, ['addObject']);
 
 
@@ -4459,18 +4159,19 @@ var OBJY = {
 
         this.setProperty = function(property, value, client) {
 
-            /*var propertyKey = Object.keys(property)[0];
-            if (propertyKey.indexOf('.') != -1) {
-                var lastDot = propertyKey.lastIndexOf(".");
-                var bag = propertyKey.substring(0, lastDot);
-                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
-                var newProp = {};
-                this.setBagPropertyValue(bag, newProKey, value,  client);
-                return;
-            }
-            new OBJY.ConditionsChecker(this.getProperty(property), value);*/
+
 
             new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject']);
+
+
+            return this;
+        };
+
+        this.makeProperty = function(property, value, client) {
+
+
+
+            new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject'], true);
 
 
             return this;
@@ -4505,7 +4206,7 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
+
 
             new OBJY.EventActionSetWrapper(this, property, value, client, instance);
             return this;
@@ -4523,7 +4224,6 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
 
             new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance);
             return this;
@@ -4540,8 +4240,6 @@ var OBJY = {
                 this.setBagEventLastOccurence(bag, newProKey, value, client);
                 return;
             }
-
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
 
 
             new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, ['addObject']);
@@ -4560,8 +4258,6 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
-
             new OBJY.EventIntervalSetWrapper(this, property, value, client, instance);
             return this;
         };
@@ -4578,7 +4274,6 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
 
             new OBJY.EventReminderSetWrapper(this, property, reminder, client, ['addObject']);
             return this;
@@ -4727,7 +4422,7 @@ var OBJY = {
         this.setPropertyOnDelete = function(property, name, onDeleteObj) {
 
             if (typeof onDeleteObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onDeleteObj)[0];
+            var key = name;
 
             new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
             return this;
@@ -4861,7 +4556,7 @@ var OBJY = {
                 this.removePropertyPermissionFromBag(propertyName, permissionKey);
                 return;
             } else {
-                console.log(permissionKey);
+
                 if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
                 if (!this.properties[propertyName].permissions[permissionKey]) throw new NoSuchPermissionException(permissionKey);
 
@@ -4911,9 +4606,7 @@ var OBJY = {
 
         this.addPropertyToBag = function(bag, property) {
 
-
             var tmpBag = this.getProperty(bag);
-            if (tmpBag.template) tmpBag.overwritten = true;
 
             new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance);
 
@@ -5004,7 +4697,7 @@ var OBJY = {
         };
 
         this.getProperty = function(propertyName) {
-            //return this.properties[propertyName];
+
             return OBJY.PropertyParser(this, propertyName);
         };
 
@@ -5021,27 +4714,52 @@ var OBJY = {
 
             OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
 
-            Object.keys(thisRef.onCreate).forEach(function(key) {
+            if (!this._id) this._id = OBJY.ID();
 
-                if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
+            if (params.dirty) {
 
-                    //dsl, obj, prop, data, callback, client, options
-                    instance.execProcessorAction(thisRef.onCreate[key].value, thisRef, null, null, function(data) {
+                OBJY.add(thisRef, function(data) {
 
-                    }, client, null);
-                }
-            })
+                        thisRef._id = data._id;
+
+                        if (success) success(OBJY.deserialize(data));
+
+                        delete thisRef.instance;
+
+                    },
+                    function(err) {
+                        console.warn('err', err, error)
+                        if (error) error(err);
+                    }, app, client);
+
+                return OBJY.deserialize(this);
+            }
+
+
+            if (thisRef.onCreate) {
+                Object.keys(thisRef.onCreate).forEach(function(key) {
+
+                    if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
+
+                        instance.execProcessorAction(thisRef.onCreate[key].value, thisRef, null, null, function(data) {
+
+                        }, client, null);
+                    }
+                })
+            }
+
 
             this.created = moment().utc().toDate().toISOString();
             this.lastModified = moment().utc().toDate().toISOString();
-
-            var thisRef = this;
 
             thisRef._aggregatedEvents = [];
 
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
+
+                    if (!isObject(props[p])) return;
+
                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                         if (prePropsString) {
                             aggregateAllEvents(props[p].properties, prePropsString + "." + p)
@@ -5079,7 +4797,7 @@ var OBJY = {
                             })
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString()) 
+
                                 thisRef._aggregatedEvents.push({
                                     propName: prePropsString + "." + p,
                                     date: date
@@ -5101,12 +4819,12 @@ var OBJY = {
                             })
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString()) 
+
+
                                 thisRef._aggregatedEvents.push({
                                     propName: p,
                                     date: date
                                 });
-
                         }
                     }
 
@@ -5117,24 +4835,34 @@ var OBJY = {
 
             if (this.properties) aggregateAllEvents(this.properties);
 
-            if (!this._id) this._id = OBJY.ID();
 
-            if (app)
+            if (app) {
+                if (!this.applications) this.applications = [];
                 if (this.applications.indexOf(app) == -1) this.applications.push(app);
+            }
 
             var addFn = function(obj) {
+
+
+                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c')) return error({ error: "Lack of Permissions" });
+
                 OBJY.add(obj, function(data) {
 
                         obj._id = data._id;
 
-                        Object.keys(data.onCreate || {}).forEach(function(key) {
-                            if (data.onCreate[key].trigger == 'after') {
-                                //dsl, obj, prop, data, callback, client, options
-                                instance.execProcessorAction(data.onCreate[key].value, data, null, null, function(data) {
+                        OBJY.applyAffects(data)
 
-                                }, client, null);
-                            }
-                        })
+
+                        if (data.onCreate) {
+                            Object.keys(data.onCreate).forEach(function(key) {
+                                if (data.onCreate[key].trigger == 'after') {
+
+                                    instance.execProcessorAction(data.onCreate[key].value, data, null, null, function(data) {
+
+                                    }, client, null);
+                                }
+                            })
+                        }
 
                         if (mapper.type == 'scheduled') {
 
@@ -5161,13 +4889,13 @@ var OBJY = {
 
                         Logger.log("Added Object: " + JSON.stringify(data, null, 2));
 
-                        success(OBJY.deserialize(data));
+                        if (success) success(OBJY.deserialize(data));
 
                         delete thisRef.instance;
 
                     },
                     function(err) {
-                        error(err);
+                        if (error) error(err);
                     }, app, client);
             }
 
@@ -5191,9 +4919,9 @@ var OBJY = {
                             },
                             function(err) {
 
-                                error(thisRef);
+                                if (error) error(thisRef);
                                 return this;
-                            }, client, params.templateFamily)
+                            }, client, params.templateFamily, params.templateSource)
                     }
                 });
 
@@ -5204,8 +4932,6 @@ var OBJY = {
             return OBJY.deserialize(this);
         };
 
-
-
         this.update = function(success, error, client) {
 
             var client = client || instance.activeTenant;
@@ -5215,19 +4941,39 @@ var OBJY = {
 
             var thisRef = this;
 
-            OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')
+            if (params.dirty) {
+
+                OBJY.updateO(thisRef, function(data) {
+
+                        delete instance.handlerSequence[this._id];
+
+                        instance.eventAlterationSequence = [];
+
+                        if (success) success(OBJY.deserialize(data));
+
+                    },
+                    function(err) {
+                        if (error) error(err);
+                    }, app, client);
+
+                return OBJY.deserialize(this);
+            }
+
+            if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')) return error({ error: 'Lack of Permissions' })
 
             if ((instance.permissionSequence[thisRef._id] || []).length > 0) {
                 throw new LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
             }
 
-            Object.keys(thisRef.onChange || {}).forEach(function(key) {
-                if (thisRef.onChange[key].trigger == 'before') {
-                    instance.execProcessorAction(thisRef.onChange[key].action, thisRef, null, null, function(data) {
+            if (thisRef.onChange) {
+                Object.keys(thisRef.onChange).forEach(function(key) {
+                    if (thisRef.onChange[key].trigger == 'before') {
+                        instance.execProcessorAction(thisRef.onChange[key].action, thisRef, null, null, function(data) {
 
-                    }, client, null);
-                }
-            })
+                        }, client, null);
+                    }
+                })
+            }
 
             if (instance.handlerSequence[this._id]) {
                 for (var type in instance.handlerSequence[this._id]) {
@@ -5255,6 +5001,9 @@ var OBJY = {
             function aggregateAllEvents(props, prePropsString) {
 
                 Object.keys(props).forEach(function(p) {
+
+                    if (!isObject(props[p])) return;
+
                     if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                         if (prePropsString) {
                             aggregateAllEvents(props[p].properties, prePropsString + "." + p)
@@ -5278,7 +5027,6 @@ var OBJY = {
 
                         if (prePropsString) {
 
-                            // instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: prePropsString + "." + p, date: date });
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
@@ -5287,7 +5035,7 @@ var OBJY = {
 
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString())
+
                                 thisRef._aggregatedEvents.push({
                                     propName: prePropsString + "." + p,
                                     date: date
@@ -5295,7 +5043,6 @@ var OBJY = {
 
                         } else {
 
-                            //instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: p, date: date })
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
@@ -5303,7 +5050,7 @@ var OBJY = {
                             })
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString())
+
                                 thisRef._aggregatedEvents.push({
                                     propName: p,
                                     date: date
@@ -5320,16 +5067,22 @@ var OBJY = {
 
             function updateFn() {
 
+                Logger.log('updating obj ' + JSON.stringify(thisRef, null, 4))
+
                 OBJY.updateO(thisRef, function(data) {
 
-                        Object.keys(data.onChange || {}).forEach(function(key) {
-                            if (data.onChange[key].trigger == 'after') {
-                                //dsl, obj, prop, data, callback, client, options
-                                instance.execProcessorAction(data.onChange[key].action, data, null, null, function(data) {
+                        OBJY.applyAffects(data)
 
-                                }, client, null);
-                            }
-                        })
+                        if (data.onChange) {
+                            Object.keys(data.onChange).forEach(function(key) {
+                                if (data.onChange[key].trigger == 'after') {
+
+                                    instance.execProcessorAction(data.onChange[key].action, data, null, null, function(data) {
+
+                                    }, client, null);
+                                }
+                            })
+                        }
 
                         if (instance.handlerSequence[this._id]) {
                             for (var type in instance.handlerSequence[this._id]) {
@@ -5412,9 +5165,9 @@ var OBJY = {
                                 }
                             },
                             function(err) {
-                                error(thisRef);
+                                if (error) error(thisRef);
                                 return thisRef;
-                            }, client, params.templateFamily)
+                            }, client, params.templateFamily, params.templateSource)
                     }
 
                     if (i.name == 'removeInherit' && thisRef.inherits.indexOf(i.value) == -1) {
@@ -5427,7 +5180,7 @@ var OBJY = {
                                 }
                             },
                             function(err) {
-                                error(thisRef);
+                                if (error) error(thisRef);
                                 return thisRef;
                             }, client)
                     }
@@ -5445,37 +5198,66 @@ var OBJY = {
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
 
-            OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp);
-
             var thisRef = JSON.parse(JSON.stringify(this));
 
-            OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd');
+            OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp);
 
-            Object.keys(thisRef.onDelete || {}).forEach(function(key) {
-                if (thisRef.onDelete[key].trigger == 'before') {
-                    //dsl, obj, prop, data, callback, client, options
-                    instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
+            if (params.dirty) {
 
-                    }, client, null);
-                }
-            })
+                OBJY.getObjectById(this.role, this._id, function(data) {
+
+                    return OBJY.remove(thisRef, function(_data) {
+
+                        success(OBJY.deserialize(data));
+
+                    }, function(err) {
+                        if (error) error(err)
+                    }, app, client);
+
+
+                }, function(err) {
+                    if (error) error(err)
+                }, app, client);
+
+                return OBJY.deserialize(this);
+
+            }
+
+
+            if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd')) return error({ error: 'Lack of Permissions' })
+
+            if (thisRef.onDelete) {
+                Object.keys(thisRef.onDelete).forEach(function(key) {
+                    if (thisRef.onDelete[key].trigger == 'before') {
+
+                        instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
+
+                        }, client, null);
+                    }
+                })
+            }
 
             OBJY.getObjectById(this.role, this._id, function(data) {
 
                 return OBJY.remove(thisRef, function(_data) {
 
-                    Object.keys(thisRef.onDelete || {}).forEach(function(key) {
-                        if (thisRef.onDelete[key].trigger == 'after') {
+                    if (thisRef.onDelete) {
+                        Object.keys(thisRef.onDelete).forEach(function(key) {
+                            if (thisRef.onDelete[key].trigger == 'after') {
 
-                            instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
+                                instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
 
-                            }, client, null);
-                        }
-                    })
+                                }, client, null);
+                            }
+                        })
+                    }
 
                     function aggregateAllEvents(props, prePropsString) {
 
                         Object.keys(props || {}).forEach(function(p) {
+
+                            if (!isObject(props[p])) return;
+
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
                                 if (prePropsString) {
                                     aggregateAllEvents(props[p].properties, prePropsString + "." + p)
@@ -5560,16 +5342,16 @@ var OBJY = {
 
                     Logger.log("Removed Object: " + data);
 
-                    success(OBJY.deserialize(data));
+                    if (success) success(OBJY.deserialize(data));
 
 
                 }, function(err) {
-                    error(err)
+                    if (error) error(err)
                 }, app, client);
 
 
             }, function(err) {
-                error(err)
+                if (error) error(err)
             }, app, client);
 
             return OBJY.deserialize(this);
@@ -5580,9 +5362,24 @@ var OBJY = {
             var client = instance.activeTenant;
             var app = instance.activeApp;
 
+            var thisRef = this;
+
             OBJY.checkAuthroisations(this, instance.activeUser, "r", instance.activeApp);
 
-            var thisRef = this;
+            if (params.dirty) {
+
+                OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
+
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+
+                }, function(err) {
+                    if (error) error(err)
+                }, app, client);
+
+                return OBJY.deserialize(this);
+            }
+
+
             var counter = 0;
 
             function arrayDeserialize(obj, parentArray) {
@@ -5611,20 +5408,22 @@ var OBJY = {
 
             function prepareObj(data) {
 
-                OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')
+                OBJY.applyAffects(data)
+
+                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
                 if (dontInherit) {
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
 
                 if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
 
                 if ((data.inherits || []).length == 0) {
-                    success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                     return data;
                 }
 
@@ -5639,7 +5438,7 @@ var OBJY = {
 
                                 if (counter == data.inherits.length) {
 
-                                    success(OBJY[data.role](OBJY.deserialize(data)));
+                                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                                     return data;
                                 }
                             },
@@ -5649,14 +5448,14 @@ var OBJY = {
 
 
                                 if (counter == data.inherits.length) {
-                                    success(OBJY[data.role](OBJY.deserialize(data)));
+                                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                                     return data;
                                 }
-                            }, client, params.templateFamily)
+                            }, client, params.templateFamily, params.templateSource)
                     } else {
 
                         if (thisRef.inherits.length == 1) {
-                            success(OBJY[data.role](OBJY.deserialize(data)));
+                            if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                             return data;
                         } else {
                             counter++;
@@ -5666,9 +5465,8 @@ var OBJY = {
                 });
             }
 
-            //console.warn('cccache', thisRef._id, instance.caches[thisRef.role].data[thisRef._id])
             if (instance.caches[thisRef.role].data[thisRef._id]) {
-                //console.warn('________________id', thisRef._id)
+
                 prepareObj(instance.caches[thisRef.role].data[thisRef._id]);
             } else {
 
@@ -5677,12 +5475,11 @@ var OBJY = {
                     prepareObj(data);
 
                     if (!instance.caches[thisRef.role].data[thisRef._id]) {
-                        //console.warn('writing to cache', thisRef._id, data)
                         //instance.caches[thisRef.role].add(thisRef._id, data);
                     }
 
                 }, function(err) {
-                    error(err)
+                    if (error) error(err)
                 }, app, client);
             }
 

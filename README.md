@@ -2,38 +2,75 @@
 
 An object-driven, cross-platform programming framework, written in JavaScript, that uses behaviour-driven objects for modelling use cases.
 
-![OBJY LOGO](objy-icon-full.png "OBJY")
+![OBJY LOGO](assets/objy-icon-full.png "OBJY")
 
 ## Installing
 
-### For Node
+OBJY can be used in Node and the Browser.
+
+### Node
 
 ```shell
 npm install objy
 ```
 
-## Programming with OBJY?
+### Browser
 
-The philisophy behind OBJY ist to define objects and tell them what to do. In order to do so, all you need is CRUD.
-
-#### Simple object
-
-```javascript
-
-//Build an object
-
-OBJY.Object({ name: "Passport", expires: { date: "2020-10-05", action: "delete this;" }})
+```html
+<script src="https://raw.githubusercontent.com/objy-org/objy/dev/dist/browser.js">
 ```
 
-#### Object with behaviour
+
+
+## Programming with OBJY
+
+Programming on OBJY is done in two simple steps:
+
+1. Define an Object Family (a bucket of objects) an choose how objects in this family are stored, processed and observed.
+2. Build and handle objects and tell them what to do.
+
+
+### Object Family
+
+```javascript
+
+//Define Object Family
+
+OBJY.define({
+	name: "object", // singular constructor name
+	pluralName: "objects" // plural constructor name
+})
+
+// OBJY now has the contructors:
+
+OBJY.object() // as a wrapper for single objects
+OBJY.objects() // as wrapper for multiple objects
+```
+
+### Simple object
 
 ```javascript
 
 //Build an object
 
-OBJY.Object({
+OBJY.object({
+   name: "Passport",
+   properties: {
+      expires: "2020-10-10",
+      number: "123"
+   }
+})
+```
+
+### Object with behaviour
+
+```javascript
+
+//Build an object
+
+OBJY.object({
    ...
-   expires: {
+   warnMe: {
       date: "2020-10-05",
       action: "email('expiring soon!')"
    },
@@ -41,36 +78,32 @@ OBJY.Object({
 })
 ```
 
-#### Add
+### Add
 
 ```javascript
 // add one
-OBJY.Object({}).add(callback);
+OBJY.object({}).add(callback);
 
 // add multiple
-OBJY.Objects([{}],[{}]).add(callback);
+OBJY.objects([{}],[{}]).add(callback);
 ```
 
-#### Get one
+### Get one
 ```javascript
-OBJY.Object(id).get(callback);
+OBJY.object(id).get(callback);
 ```
 
-```shell
-get object id;
-```
-
-#### Query
+### Query
 
 ```javascript
-OBJY.Objects({type:'example', 'properties.expired' : false}).get(callback);
+OBJY.objects({type:'example', 'properties.expired' : false}).get(callback);
 ```
 
-#### Update
+### Update
 
 ```javascript
 // update one
-OBJY.Object(id)
+OBJY.object(id)
    .setPropertyValue('expired', false)
    .addProperty('open', false).
    .save(callback)
@@ -79,36 +112,56 @@ OBJY.Object(id)
 OBJY.Object(id).replace(newObject).save(callback);
 ```
 
-#### Delete
+### Delete
 
 ```javascript
 // delete one
-OBJY.Object(id).delete(callback);
+OBJY.object(id).delete(callback);
 ```
+
 
 ## Customize
 
-Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast. When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed.
-
-### Use an adapter
+Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast. When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed, along with other options.
 
 ```javascript
-// define a custom object family
 OBJY.define({
-   name : "InMemObject",
-   pluralName: "InMemObjects",
-   persistence: new InMemoryMapper(),
-   observer: new RealTimeObserver(),
-   processor: new RealTimeProcessor()
-});
-
-// use the object familys
-OBJY.InMemObject({...});
+	// manatory
+	name: "object",
+	pluralName: "objects"
+	
+	// mappers 
+	storage: {}, // defaults to "in memory"
+	processor: {}, // defaults to "eval"
+	observer: {} // defaults to "interval",
+	
+	// + other optional options
+})
 ```
+> Default mappers are already initialized! If you'd like to work in memory, just ignore the mappers section
+
+### Mapper types
+
+| Type        | Explanation           | 
+| ------------- |-------------| 
+| `storage`      | Storage mappers can be plugged in to define where and how objects in an object family are persistent. | 
+| `processor`      | Processor Mappers define, how object actions are executed. | 
+| `observer`      | Observer Mappers define, how object events are observed and time-based actions triggered. | 
+
+### Optional options
+
+| Option        | Explanation           | 
+| ------------- |-------------| 
+| `authable`      | Defines wether objects in a family can have privileges for access control | 
+| `templateFamily`      | Defines from which object family is the source for inheritence. Defaults to the own object family. |
+| `staticProps`      | Defines static properties that are preset for all objects in the object family. |
+| `staticFuncs`      | Defines static functions that are preset for all objects in the object family. |
+| `hasAffects`      | Defines wether the object family serves as bucket for defining affectables |
+
 
 ## Authors
 
-* **Marco Boelling** - *Creator of OBJY* - [Twitter](https://twitter.com/marcoboelling)
+* **Marco Boelling** - *Initial author* - [Twitter](https://twitter.com/marcoboelling)
 
 ## License
 

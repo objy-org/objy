@@ -1,3 +1,4 @@
+
 var Query;
 (function() {
     function objectify(a) {
@@ -321,10 +322,14 @@ var Query;
         }
     };
     Query.undot = function(obj, key) {
+      
         var keys = key.split("."),
             sub = obj;
+
         for (var i = 0; i < keys.length; i++) {
-            sub = sub[keys[i]]
+          
+            if(sub)
+                sub = sub[keys[i]]
         }
         return sub
     };
@@ -347,127 +352,4 @@ var Query;
     return Query
 })(this);
 
-
-
-
-
-var checkAuthroisations = function(obj, user, condition, app) {
-
-    var authorisations;
-    if (!user) return;
-
-    function throwError() {
-        throw new Error("Lack of permissions")
-    }
-
-    if (Object.keys(user.authorisations || {}).length == 0) throwError();
-
-    if (!app && !user.authorisations['*']) {
-        console.warn('app, !authorisationsapp');
-        throwError();
-    }
-
-    if (user.authorisations['*']) authorisations = user.authorisations['*'];
-    else if (app && !user.authorisations[app]) {
-        console.warn('app, !authorisationsapp')
-        throwError();
-    } else authorisations = user.authorisations[app];
-
-    var permCheck = [obj];
-
-    var query = { $or: [] }
-
-    authorisations.forEach(function(a) {
-        console.warn('_a', a, condition)
-        if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
-    })
-
-    if (query.$or.length == 0) throwError();
-
-    // CONSOLE LOGGING FOR TESTING PURPOSES!
-
-    console.log('query', query)
-
-    console.log('perm result', Query.query(permCheck, query, Query.undot))
-
-    if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
-};
-
-
-
-var buildAuthroisationQuery = function(obj, user, condition, app) {
-
-    var authorisations;
-    if (!user) return obj;
-
-    function throwError() {
-        throw new Error("Lack of permissions")
-    }
-
-    if (Object.keys(user.authorisations || {}).length == 0) throwError();
-
-    if (!app && !user.authorisations['*']) {
-        console.warn('app, !authorisationsapp');
-        throwError();
-    }
-
-    if (user.authorisations['*']) authorisations = user.authorisations['*'];
-    else if (app && !user.authorisations[app]) {
-        console.warn('app, !authorisationsapp')
-        throwError();
-    } else authorisations = user.authorisations[app];
-
-    var permCheck = [obj];
-
-    var query = [] 
-    var wildcard = false;
-
-    authorisations.forEach(function(a) {
-        console.warn('_a', a, condition)
-        if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
-            if (Object.keys(a.query).length == 0) wildcard = true;
-            else {
-                console.log([a.query, obj])
-                query.push({'$and': [a.query, obj]})
-            }
-        }
-    })
-
-    if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
-
-    // CONSOLE LOGGING FOR TESTING PURPOSES!
-
-    query = {$or: query};
-
-    console.log('build query', query)
-
-    console.log('query', query)
-
-    console.log('perm result', Query.query(permCheck, query, Query.undot))
-
-    return query;
-}
-
-/*
-checkAuthroisations({ type: "test", role: "user" }, {
-    authorisations: {
-        '*': [
-            { query: {}, perm: "r" },
-            { query: { type: 'test1', role: 'user' }, perm: "d" }
-        ]
-    }
-}, 'd', 'crm')*/
-
-
-buildAuthroisationQuery({ type: "test", role: "user" }, {
-    authorisations: {
-        '*': [
-           // { query: {}, perm: "r" },
-            { query: { type: 'test1' }, perm: "r" },
-            { query: { role: 'user' }, perm: "r" }
-        ]
-    }
-}, 'r', 'crm')
-
-
-//asf
+module.exports = Query;

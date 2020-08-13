@@ -21,7 +21,7 @@ Mapper = function(OBJY, options) {
     this.OBJY = OBJY;
     this.multitenancy = (options || {}).multitenancy || CONSTANTS.MULTITENANCY.ISOLATED;
 
-    this..setObjectFamily = function(value) {
+    this.setObjectFamily = function(value) {
         this.objectFamily = value;
     };
 
@@ -51,25 +51,28 @@ Mapper = function(OBJY, options) {
     };
 
     this.getEvent = function(objId, propName, success, error, client) {
-        var db = this.getDBByMultitenancy(client);
+       var db = this.getDBByMultitenancy(client);
 
-        if (!db[objId])
-            return error('object not found: ' + objId);
+        if (!this.index[client][objId + ':' + propName])
+            return error('object not found: ' + objId + ':' + propName);
 
-        if (this.multitenancy == CONSTANTS.MULTITENANCY.ISOLATED)
-            if (db[this.index[client][objId]].tenantId != client)
-                error('object not found: ' + objId);
-
-        success(db[this.index[client][objId]]);
+        /*if(this.multitenancy == CONSTANTS.MULTITENANCY.ISOLATED)
+            if(this.index[client][objId + ':'+propName].tenantId != client) 
+                return error('object not found: ' + objId + ':'+propName);*/
+        
+        db.splice(this.index[client][objId + ':' + propName], 1);
+        success(this.index[client][objId + ':' + propName]);
     };
 
     this.addEvent = function(objId, propName, event, success, error, client) {
         var self = this;
 
+        this.OBJY.Logger.log('added event ' + objId + ':' + propName);
+
         if (!this.database[client])
             this.database[client] = [];
 
-        if (!this.index[client]) this.index[client] = [];
+        if (!this.index[client]) this.index[client] = {};
 
         if (this.index[client][objId + ':' + propName])
             return error('object with that id already exists: ' + objId);
@@ -89,7 +92,8 @@ Mapper = function(OBJY, options) {
             db.push(setTimeout(function() {
 
                 // @TODO: link to processor
-                self.OBJY.processors[self.objectFamily].execute(event.action, {}, {}, {}, function(){}, client, null, null, {});
+                if(self.OBJY.processors[self.objectFamily]) self.OBJY.processors[self.objectFamily].execute(event.action, {}, {}, {}, function(){}, client, null, null, {});
+                else self.OBJY.Logger.warn('No processor defined')
 
             }, difference))
         } else if (event.interval) {
@@ -102,32 +106,37 @@ Mapper = function(OBJY, options) {
 
             db.push(setInterval(function() {
 
-                console.log(event.action);
-
-                self.OBJY.processors[self.objectFamily].execute(event.action, {}, {}, {}, function(){}, client, null, null, {});
+                if(self.OBJY.processors[self.objectFamily]) self.OBJY.processors[self.objectFamily].execute(event.action, {}, {}, {}, function(){}, client, null, null, {});
+                else self.OBJY.Logger.warn('No processor defined')
 
             }, interval))
         }
 
-        this.index[client][objId + ':' + propName] = db.length;
+        this.index[client][objId + ':' + propName] = db.length-1;
 
         success(event);
-
     };
 
     this.removeEvent = function(objId, propName, success, error, client) {
 
+        this.OBJY.Logger.log('removed event ' + objId + ':' + propName);
+
         var db = this.getDBByMultitenancy(client);
 
-        if (!this.index[client][objId + ':' + propName])
-            return error('object not found: ' + objId + ':' + propName);
+        console.log(this.index[client]);
 
+        if (this.index[client][objId + ':' + propName] === 'undefined')
+            return error('object not found: ' + objId + ':' + propName);
 
         /*if(this.multitenancy == CONSTANTS.MULTITENANCY.ISOLATED)
             if(this.index[client][objId + ':'+propName].tenantId != client) 
                 return error('object not found: ' + objId + ':'+propName);*/
+        console.log(this.index[client][objId + ':' + propName], db[this.index[client][objId + ':' + propName]])
 
-        console.log(this.index[client]);
+        try {
+            clearInterval(db[this.index[client][objId + ':' + propName]]);
+            clearTimeout(db[this.index[client][objId + ':' + propName]]);
+        } catch(e){ }
 
         db.splice(this.index[client][objId + ':' + propName], 1);
         delete this.index[client][objId + ':' + propName];
