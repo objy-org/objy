@@ -1,10 +1,286 @@
 const OBJY = require('./objy.js');
 const stream = require('stream');
 const fs = require('fs')
+<<<<<<< Updated upstream
 const EventMapper = require('./mappers/observers/inMemoryStream.js')
 
 //OBJY.storage = new MongoMapper();
 
+=======
+//const EventMapper = require('./mappers/observers/inMemoryStream.js')
+//var Processor = require('./mappers/processors/eval.js');
+
+
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects",
+    authable:true
+})
+
+/*
+OBJY.useUser({
+    privileges: {
+        testapp: [{
+            name: "admin",
+            value: "r"
+        }]
+    }
+})*/
+
+OBJY.app('testapp');
+
+
+OBJY.object({
+    privileges: {
+        testapp: [{
+            name: "admin"
+        }]
+    }
+}).add(function(data) {
+    console.log('added', data);
+
+
+    OBJY.objects({}).get(function(data2) {
+        console.log('data2', data2);
+
+        data2 = data2[0]
+
+        data2.addPrivilege('admin2').update()
+    })
+})
+
+
+
+
+return;
+
+
+console.log(OBJY.object({ name: "asfaf" }).add())
+
+
+
+
+return;
+
+
+var Object = OBJY.Object;
+
+Object({
+    properties: {
+        warnMe: {
+            on: "2020",
+            do: ""
+        },
+        onChange: {
+
+        }
+    }
+})
+
+Object({ name: "test", type: "car" }, { age: 2 });
+
+
+
+
+var DefaultProcessor = new Processor(OBJY, {});
+
+
+DefaultProcessor.pushToWorkspace = function(obj, targetWorkspace) {
+    var ws = OBJY.activeTenant;
+
+    console.log('aaaaaaaaaaööööllll--', obj);
+
+    OBJY[obj.role](obj._id).get(function(data) {
+        console.log('data:::', data);
+        if (data.length == 0) {
+            // ADD
+            OBJY.client(targetWorkspace);
+
+            OBJY[obj.role](obj).add(function(data) {
+                console.log('added', data);
+                OBJY.client(ws);
+            }, function(e) {
+                console.log('e', e);
+                OBJY.client(ws);
+            })
+        } else if (data.length > 0) {
+            // UPDATE
+            OBJY.client(targetWorkspace);
+
+            OBJY[obj.role](data[0]).replace(obj).update(function(data) {
+                console.log('updated', data);
+                OBJY.client(ws);
+            }, function(e) {
+                console.log('e', e);
+                OBJY.client(ws);
+            })
+
+        }
+    }, function(err) {
+        console.log('err', targetWorkspace, err);
+        OBJY.client(targetWorkspace);
+        console.log(OBJY.activeTenant);
+        OBJY[obj.role](obj).add(function(data) {
+            console.log('added', data);
+            console.log(OBJY.mappers);
+            OBJY.client(ws);
+        }, function(e) {
+            console.log('e', e);
+            OBJY.client(ws);
+        })
+
+    })
+};
+
+
+
+//OBJY.storage = new MongoMapper();
+
+OBJY.affectables = [
+
+    {
+        _id: "user readonly",
+        affects: { role: 'user' },
+        apply: { permissions: { admin: "*" } }
+    },
+
+
+    {
+        _id: "general",
+        affects: { role: 'object' },
+        apply: { applications: ['ssg'], properties: { firstName: 23 } }
+    }, {
+        _id: "general2",
+        affects: {},
+        apply: { _clients: ["ssg"], onCreate: { replicate: { value: "console.log('sfsfsf');this.pushToWorkspace({_id:'222', role:'object'}, 'aaa')", trigger: "after" } } }
+    }
+];
+
+
+
+
+OBJY.useUser({
+    authorisations: {
+        '*': [{ query: {}, perm: 'cru' }]
+    }
+})
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects",
+    templateSource: 'aaa',
+    templateFamily: 'object',
+    processor: DefaultProcessor,
+    authable: true
+})
+
+
+OBJY.define({
+    processor: DefaultProcessor,
+    name: "affect",
+    pluralName: "affects",
+    isRule: true
+})
+
+OBJY.affect({
+    processor: DefaultProcessor,
+    name: "Users",
+    affects: {
+        role: 'user'
+    },
+    apply: {
+        firstName: null,
+        lastName: null
+    }
+}).add((d, e) => {
+    console.log('d', d)
+})
+
+
+OBJY.object({
+    "authorisations": {
+        '*': [{ query: { type: "test", perm: "crud" } }]
+    },
+    "properties": {
+        "timeGroups": {
+            "type": "bag",
+            "template": "123",
+            "properties": {
+                test: 124
+            }
+        },
+        stops: {
+            type: "bag",
+            template: "22424",
+            properties: {
+                "1131414": {
+                    type: "bag",
+                    "proeprties": {}
+                }
+            }
+        }
+    }
+}).add(function(data) {
+
+    console.log('added', data);
+
+
+    OBJY.object({
+        "inherits": [data._id],
+        "properties": {
+            "timeGroups": {
+                "type": "bag",
+                "template": "123",
+                "properties": {
+                    test: 124
+                }
+            },
+            stops: {
+                type: "bag",
+                template: data._id,
+                properties: {
+                    "1131414": {
+                        type: "bag",
+                        "proeprties": {}
+                    }
+                }
+            }
+        }
+    }).add(function(data) {
+        data.addProperty('ttt', 222).update(function(data) {
+            console.log('up', JSON.stringify(data, null, 4));
+        })
+    })
+
+
+
+    return;
+
+    OBJY.object({
+        "authorisations": {
+            '*': [{ query: { type: "test111", perm: "*" } }]
+        },
+    }).add(function(data5) {
+
+        OBJY.object({
+            name: "inherited",
+            inherits: [data._id, data5._id]
+        }).add(function(d2) {
+
+            OBJY.object(d2).get(function(d3) {
+                console.log('Asfafs', JSON.stringify(d3, null, 4));
+            })
+
+        })
+
+    })
+
+})
+
+
+return;
+>>>>>>> Stashed changes
 
 OBJY.client('mb');
 
