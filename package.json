@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/spoo-technologies/spoo.git"
+    "url": "git+https://github.com/objy-org/objy.git"
   },
   "keywords": [
     "platform",
@@ -19,9 +19,9 @@
   "author": "Marco Boelling",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/spoo-technologies/spoo/issues"
+    "url": "https://github.com/objy-org/objy/issues"
   },
-  "homepage": "https://github.com/spoo-technologies/objy#readme",
+  "homepage": "https://objy.io",
   "dependencies": {
     "bcrypt": "^3.0.8",
     "bull": "^3.13.0",
