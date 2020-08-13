@@ -2,7 +2,7 @@
 
 An object-driven, cross-platform programming framework, written in JavaScript, that uses behaviour-driven objects for modelling use cases.
 
-![OBJY LOGO](assets/objy-icon-full.png "OBJY")
+![OBJY LOGO](https://objy-org.github.io/logo.png "OBJY")
 
 ## Installing
 
@@ -37,8 +37,8 @@ Programming on OBJY is done in two simple steps:
 //Define Object Family
 
 OBJY.define({
-	name: "object", // singular constructor name
-	pluralName: "objects" // plural constructor name
+   name: "object", // singular constructor name
+   pluralName: "objects" // plural constructor name
 })
 
 // OBJY now has the contructors:
@@ -126,18 +126,24 @@ Objects can be very different in their nature. Some objects are big, some are sm
 
 ```javascript
 OBJY.define({
-	// manatory
-	name: "object",
-	pluralName: "objects"
-	
-	// mappers 
-	storage: {}, // defaults to "in memory"
-	processor: {}, // defaults to "eval"
-	observer: {} // defaults to "interval",
-	
-	// + other optional options
+   // manatory
+   name: "object",
+   pluralName: "objects"
+   
+   // mappers
+   storage: {}, // defaults to "in memory"
+   processor: {}, // defaults to "eval"
+   observer: {} // defaults to "interval",
+   
+   // + other optional options
+   authable: false, // Defines wether objects in a family can have privileges for access control
+   templateFamily: null, // Defines which object family is the source for inheritence. Defaults to the own object family
+   staticProps: {}, // Defines static properties that are preset for all objects in the object family
+   staticFuncs: {}, // Defines static functions that are preset for all objects in the object family
+   hasAffects: false // Defines wether the object family serves as bucket for defining affectables
 })
 ```
+
 > Default mappers are already initialized! If you'd like to work in memory, just ignore the mappers section
 
 ### Mapper types
@@ -148,15 +154,6 @@ OBJY.define({
 | `processor`      | Processor Mappers define, how object actions are executed. | 
 | `observer`      | Observer Mappers define, how object events are observed and time-based actions triggered. | 
 
-### Optional options
-
-| Option        | Explanation           | 
-| ------------- |-------------| 
-| `authable`      | Defines wether objects in a family can have privileges for access control | 
-| `templateFamily`      | Defines from which object family is the source for inheritence. Defaults to the own object family. |
-| `staticProps`      | Defines static properties that are preset for all objects in the object family. |
-| `staticFuncs`      | Defines static functions that are preset for all objects in the object family. |
-| `hasAffects`      | Defines wether the object family serves as bucket for defining affectables |
 
 
 ## Authors
@@ -170,5 +167,4 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 ## Connect
 
 * [objy.io](https://objy.io) - OBJY's official website
-* [Twitter](https://www.twitter.com/objy7) - OBJY's Twitter
 
