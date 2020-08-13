@@ -606,18 +606,32 @@ var OBJY = {
 
         if (!user) return true;
 
+        if (user.spooAdmin) return true;
+
         var privileges = user.privileges;
         var permissions = obj.permissions;
 
         if (!permissions) return true;
 
+        if (Object.keys(permissions || {}).length == 0) return true;
+
         // if permissions present and user has no privileges
         if (!privileges && permissions) {
-            if (!soft) throw new LackOfPermissionsException();
+            if (!soft) return false;
             else return false;
         }
 
         var allowed = false;
+
+        if (Array.isArray(permissions)) {
+            var perms = {};
+
+            permissions.forEach(function(p) {
+                perms[p.name] = { value: p.value };
+            })
+
+            permissions = perms;
+        }
 
         if (app) {
             if (privileges['*']) {
@@ -652,12 +666,12 @@ var OBJY = {
                     }
                 })
 
-                if (!allowed) throw new LackOfPermissionsException();
+                if (!allowed) return false;
                 else return true
 
-            } else throw new LackOfPermissionsException();
+            } else return false;
 
-        } else throw new LackOfPermissionsException();
+        } else return false;
 
     },
 
@@ -715,6 +729,11 @@ var OBJY = {
      */
     buildPermissionQuery: function(query, user, app) {
 
+        if (query.$query) {
+            query = JSON.parse(JSON.stringify(query.$query));
+            delete query.$query;
+        }
+
         if (!user.spooAdmin) {
 
             if (!user.privileges) return query;
@@ -733,18 +752,22 @@ var OBJY = {
                     inn = {};
                     inn["permissions." + p.name + ".value"] = "*";
                     privArr.push(inn);
+
+                    inn = {};
+                    inn["permissions.name"] = p.name;
+                    privArr.push(inn);
                     //inn = {};
                     //inn["permissions." + p.name] = "*";
                     //privArr.push(inn);
                 })
 
-                /*var inn = {};
-                inn["permissions.*" + ".value"] = { $regex: "r" }
-                privArr.push(inn);*/
-                //var inn = {};
-                //inn["permissions.*"] = { $regex: "r"}
-                //privArr.push(inn);
                 var inn = {};
+                inn["permissions.*" + ".value"] = { $regex: "r" }
+                privArr.push(inn);
+                inn = {};
+                inn["permissions.*"] = { $regex: "r" }
+                privArr.push(inn);
+                inn = {};
                 inn["permissions.*" + ".value"] = "*"
                 privArr.push(inn);
                 //var inn = {};
@@ -1021,7 +1044,7 @@ var OBJY = {
 
         if (property.hasOwnProperty('conditions')) {
 
-            //new ConditionEngine(undefined, property, undefined, value).execute(property.conditions);
+            // TODO
         }
     },
 
@@ -1036,8 +1059,10 @@ var OBJY = {
         else return element.permissions;
     },
 
-    updateInheritedObjs: function(templ, pluralName, success, error, client, params) { //@TPDO: Fix this!
-        var templateFamily;
+    updateInheritedObjs: function(templ, pluralName, success, error, client, params) {
+        // TODO
+
+        /*var templateFamily;
 
         if (params.templateFamily) templateFamily = `'${params.templateFamily}'`
 
@@ -1068,7 +1093,7 @@ var OBJY = {
 
         this.execProcessorAction(code, templ, null, null, function(data) {
 
-        }, client, {})
+        }, client, {})*/
     },
 
     removeInheritedObjs: function(templ, pluralName, success, error, client) {
@@ -1093,11 +1118,6 @@ var OBJY = {
             if (newObj[p] != oldObj[p]) oldObj[p] = newObj[p];
         })
 
-        /*Object.keys(newObj).forEach(function(p)
-        {
-            if(typeof newObj[p] !== "object")
-                if(newObj[p] != oldObj[p]) oldObj[p] = newObj[p];
-        })*/
 
         var handlers = ['onCreate', 'onChange', 'onDelete'];
         handlers.forEach(function(h) {
@@ -1189,7 +1209,7 @@ var OBJY = {
 
         doTheProps(newObj);
 
-        // Applications TODO
+        // Applications: TODO!!!
 
         // Permissions
         if (newObj.permissions) {
@@ -1226,175 +1246,6 @@ var OBJY = {
 
         var self = this;
 
-        /*console.log("CHECKING FOR TEMPLATE_: " + templateId);
-        console.log(arguments);
-        this.getObjectById(templateRole || obj.role, templateId, function(template) {
-                console.log("CHECKING FOR TEMPLATE: " + templateId);
-                if (!template) {
-                    error('no such template');
-                    return;
-                }
-                if (template.type) {
-                    if (!obj.type) obj.type = template.type;
-                }
-                if (template.onCreate) {
-                    if (!obj.onCreate) obj.onCreate = template.onCreate;
-                    if (!obj.onCreateOverwritten) {
-                        if (!obj.onCreate) obj.onCreate = template.onCreate;
-                    }
-                }
-                if (template.onDelete) {
-                    if (!obj.onDelete) obj.onDelete = template.onDelete;
-                    if (!obj.onDeleteOverwritten) {
-                        if (!obj.onDelete) obj.onDelete = template.onDelete;
-                    }
-                }
-                var propertyKeys = Object.keys(template.properties);
-                console.log("PORPKEYS");
-                console.log(propertyKeys);
-                var derievedProps = {};
-                propertyKeys.forEach(function(property) {
-                    if (!obj.properties.hasOwnProperty(property)) {
-                        template.properties[property].template = templateId;
-                        if (template.properties[property].overwritten) delete template.properties[property].overwritten;
-                        var cloned = JSON.parse(JSON.stringify(template.properties[property]));
-                        obj.properties[property] = cloned;
-                        console.log("ggg-");
-                        console.log(property);
-                        console.log(obj.properties[property]);
-                    } else {
-                        obj.properties[property].template = templateId;
-                        obj.properties[property].overwritten = true;
-                        if (!obj.properties[property].overwrittenOnCreate) {
-                            if (!obj.properties[property].onCreate) obj.properties[property].onCreate = template.properties[property].onCreate;
-                        }
-                        if (!obj.properties[property].overwrittenOnChange) {
-                            if (!obj.properties[property].onChange) obj.properties[property].onChange = template.properties[property].onChange;
-                        }
-                        if (!obj.properties[property].overwrittenOnDelete) {
-                            if (!obj.properties[property].onDelete) obj.properties[property].onDelete = template.properties[property].onDelete;
-                        }
-                        if (!obj.properties[property].overwrittenMeta) {
-                            if (!obj.properties[property].meta) obj.properties[property].meta = template.properties[property].meta;
-                        }
-                        function getBagProperties(objBag, tmplBag) {
-                            console.log("tmplBag");
-                            console.log(tmplBag);
-                            console.log(objBag);
-                            if (!objBag) {
-                                objBag = {};
-                                objBag[Object.keys(tmplBag)[0]] = tmplBag;
-                                console.log("new objBag");
-                                console.log(objBag);
-                            } else {
-                                if (!objBag.overwritten) {
-                                    if (objBag.permissions) objBag.permissions = Object.assign(objBag.permissions, tmplBag.permissions);
-                                    else objBag.permissions = tmplBag.permissions;
-                                }
-                            }
-                            objBag.template = template._id;
-                            if (!objBag.overwrittenOnCreate) objBag.onCreate = tmplBag.onCreate;
-                            if (!objBag.overwrittenOnChange) objBag.onChange = tmplBag.onChange;
-                            if (!objBag.overwrittenOnDelete) objBag.onDelete = tmplBag.onDelete;
-                            if (!objBag.overwrittenMeta) objBag.meta = tmplBag.meta;
-                            if (objBag.type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG && tmplBag.type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                var templateInnerKeys = Object.keys(tmplBag.properties);
-                                templateInnerKeys.forEach(function(templKey) {
-
-                                    var hasProp = false;
-                                    var innerPropKeys = Object.keys(objBag.properties);
-                                    innerPropKeys.forEach(function(objKey) {
-                                        if (templKey == objKey) hasProp = true;
-                                    })
-                                    if (!hasProp) {
-                                        console.log("NOT HAS PROP: " + templKey);
-                                        objBag.properties[templKey] = tmplBag.properties[templKey];
-                                        objBag.properties[templKey].template = template._id;
-                                    } else {
-                                        if (objBag.properties[templKey].value === undefined && tmplBag.properties[templKey].hasOwnProperty('value')) {
-                                            if (objBag.properties[templKey].triggered) tmplBag.properties[templKey].triggered = objBag.properties[templKey].triggered;
-                                            objBag.properties[templKey] = tmplBag.properties[templKey];
-                                            objBag.properties[templKey].template = template._id;
-                                        }
-                                        console.log("tmpl prop");
-                                        console.log(tmplBag.properties[templKey]);
-                                        console.log("obj prop");
-                                        console.log(objBag.properties[templKey]);
-                                    }
-                                    console.log("istypebag");
-                                    console.log(tmplBag.properties[templKey].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG);
-                                    if (tmplBag.properties[templKey].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
-                                        getBagProperties(objBag.properties[templKey], tmplBag.properties[templKey])
-                                    else objBag.properties[templKey].template = template._id;
-                                })
-                            } else {
-                                objBag.template = template._id;
-                            }
-                        }
-                        getBagProperties(obj.properties[property], template.properties[property]);
-
-                        console.log("ggg-");
-                        console.log(property);
-                        console.log(obj.properties[property]);
-                    }
-                });
-                if (template.applications)
-                    if (Array.isArray(template.applications)) {
-                        console.log("APPPPPPPPP");
-                        console.log(template.applications);
-                        if (!obj.applications) obj.applications = [];
-                        template.applications.forEach(function(app) {
-                            console.log(app);
-                            console.log(obj.applications);
-                            if (obj.applications.indexOf(app) == -1) obj.applications.push(app);
-                        })
-                    }
-                var permissionKeys = Object.keys(template.permissions);
-                var derievedPermissions = {};
-                permissionKeys.forEach(function(permission) {
-                    if (!obj.permissions.hasOwnProperty(permission)) {
-                        template.permissions[permission].template = templateId;
-                        var cloned = JSON.parse(JSON.stringify(template.permissions[permission]));
-                        obj.permissions[permission] = cloned;
-                    }
-                });
-
-                var privilegeAppKeys = Object.keys(template.privileges);
-                var derievedPrivileges = {};
-                if (!obj.privileges) obj.privileges = {};
-
-                privilegeAppKeys.forEach(function(tApp) {
-                    console.log("tApp: " + tApp);
-                    if (!obj.privileges[tApp]) obj.privileges[tApp] = [];
-                    var j;
-                    for (j = 0; j < template.privileges[tApp].length; j++) {
-                        var contains = false;
-                        var i;
-                        for (i = 0; i < obj.privileges[tApp].length; i++) {
-                            if (obj.privileges[tApp][i].name == template.privileges[tApp][j].name) contains = true;
-                        }
-                        if (!contains) {
-                            obj.privileges[tApp].push(Object.assign({ template: templateId }, template.privileges[tApp][j]));
-                        }
-                    }
-                })
-            
-                success();
-            },
-            function(err) {
-                error(err);
-            }, OBJY.activeApp, templateSource || OBJY.activeTenant)
-
-
-*/
-
-
-
-
-
-
-
-
 
         var isObject = function(a) {
             return (!!a) && (a.constructor === Object);
@@ -1426,8 +1277,6 @@ var OBJY = {
                         if (!obj[h][oC]) {
                             obj[h][oC] = template[h][oC];
 
-                            // console.log('o', obj[h][oC]);
-
                             obj[h][oC].template = templateId;
                         }
                     })
@@ -1444,7 +1293,6 @@ var OBJY = {
                     obj.properties = {};
                 }
 
-                //console.info('compare', template, 'obj:', obj)
 
                 if (!template.properties) template.properties = {};
 
@@ -1453,18 +1301,12 @@ var OBJY = {
                     var cloned = JSON.parse(JSON.stringify(template.properties[p]));
 
 
-                    //  console.log('--', p, obj.properties[p], cloned);
-
                     if (!obj.properties[p]) {
                         obj.properties[p] = cloned;
                         obj.properties[p].template = templateId;
                         delete obj.properties[p].overwritten;
                     } else {
 
-                        //if (!obj.properties[p].onCreateOverwritten && !obj.properties[p].onCreate) obj.properties[p].onCreate = cloned.onCreate;
-                        //if (!obj.properties[p].onChangeOverwritten && !obj.properties[p].onChange) obj.properties[p].onChange = cloned.onChange;
-                        //if (!obj.properties[p].onDeleteOverwritten && !obj.properties[p].onDelete) obj.properties[p].onDelete = cloned.onDelete;
-                        // if (!obj.properties[p].metaOverwritten && !obj.properties[p].meta) obj.properties[p].meta = cloned.meta;
 
                         if (cloned.meta) {
                             if (!obj.properties[p].meta) {
@@ -1482,15 +1324,6 @@ var OBJY = {
                         obj.properties[p].overwritten = true;
 
 
-                        /*if (!obj.properties[p].overwritten) {
-                            obj.properties[p].template = templateId;
-                            if (obj.properties[p].value == null) obj.properties[p].value = cloned.value;
-                            //obj.properties[p].overwritten = true;
-                        }
-
-                        if (!obj.properties[p].metaOverwritten) {
-                            obj.properties[p].meta = cloned.meta;
-                        }*/
                     }
 
                     if (template.permissions) {
@@ -1522,18 +1355,6 @@ var OBJY = {
 
                     if (template.properties[p].type == 'bag') {
 
-                        /*if (!obj.properties[p]) {
-
-                            obj.properties[p] = cloned;
-                            obj.properties[p].template = templateId;
-                        } else {
-                            if (!obj.properties[p].overwritten && Object.keys(obj.properties[p]).length == 0) {
-                                obj.properties[p] = cloned;
-                            }
-
-                            obj.properties[p].template = templateId;
-                            //obj.properties[p].overwritten = true;
-                        }*/
 
                         doTheProps(cloned, obj.properties[p]);
                     }
@@ -1643,23 +1464,13 @@ var OBJY = {
 
         } else {
 
-            /*self.getObjectById(templateRole || obj.role, templateId, function(template) {
-                run(template);
-                //if(!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId,  template);
-            }, function(err) {
-                error(err);
-            }, undefined, client)*/
 
-
-            //console.log('looking in templateSource', templateSource);
 
             OBJY.getObjectById(templateRole || obj.role, templateId, function(template) {
 
                 //if (!self.caches[templateRole || obj.role].get(templateId)) self.caches[templateRole || obj.role].add(templateId, template);
 
                 var counter = 0;
-
-                //console.log('init gtfo', templateId, counter);
 
 
                 if ((template.inherits || []).length == 0) run(template)
@@ -1740,62 +1551,6 @@ var OBJY = {
             return (!!a) && (a.constructor === Object);
         };
 
-        // Properties
-        /*function doTheProps(obj) {
-
-            if (!obj) obj = {}
-
-            if (obj.type == 'bag') {
-                if (!obj.properties) {
-                    obj.properties = {};
-                }
-            }
-
-            Object.keys(obj).forEach(function(p) {
-
-                if (!isObject(obj[p])) return;
-
-                if ((obj[p] || {}).type == 'bag') {
-                    doTheProps(obj[p].properties);
-                } else if (isObject(obj[p])) {
-                    doTheProps(obj[p]);
-                }
-
-                if (obj[p]) {
-                    if (obj[p].value != null) obj[p].overwritten = true;
-                    if (obj[p].template == templateId && !obj[p].overwritten) {
-                        //console.info('deleting obj', p, obj[p])
-                        delete obj[p];
-                    }
-                }
-
-                if (obj.permissions) {
-                    Object.keys(obj.permissions).forEach(function(p) {
-                        if (obj.permissions[p]) {
-                            if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
-                                delete obj.permissions[p]
-                        }
-                    })
-                }
-
-                if (obj[p]) {
-                    ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                        if (obj[p][h]) {
-
-                            Object.keys(obj[p][h]).forEach(function(oC) {
-
-                                if (obj[p][h][oC]) {
-                                    if (obj[p][h][oC].template == templateId && !obj[p][h][oC].overwritten)
-                                        delete obj[p][h][oC];
-                                }
-                            })
-                        }
-                    })
-                }
-            })
-        }*/
-
-        // doTheProps(obj.properties || {});
 
 
         function doTheProps(obj) {
@@ -1846,65 +1601,14 @@ var OBJY = {
                 })
 
             }
-            /*else {
 
-
-                           Object.keys(obj).forEach(function(p) {
-
-
-
-                               if (!isObject(obj[p])) return;
-
-
-
-                               if (obj.permissions) {
-                                   Object.keys(obj.permissions).forEach(function(p) {
-                                       if (obj.permissions[p]) {
-                                           if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
-                                               delete obj.permissions[p]
-                                       }
-                                   })
-                               }
-
-                               if (obj[p]) {
-                                   ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                                       if (obj[p][h]) {
-
-                                           Object.keys(obj[p][h]).forEach(function(oC) {
-
-                                               if (obj[p][h][oC]) {
-                                                   if (obj[p][h][oC].template == templateId && !obj[p][h][oC].overwritten)
-                                                       delete obj[p][h][oC];
-                                               }
-                                           })
-                                       }
-                                   })
-                               }
-
-
-                               if (obj[p].type == 'bag') {
-                                   return doTheProps(obj[p]);
-                               }
-
-                               if (obj[p]) {
-                                   if (obj[p].value != null) obj[p].overwritten = true;
-                                   if (obj[p].template == templateId && !obj[p].overwritten) {
-                                       //console.info('deleting obj', p, obj[p])
-                                       delete obj[p];
-                                   }
-                               }
-
-
-                           })
-
-                       }*/
 
         }
 
         doTheProps(obj);
 
 
-        // Applications TODO
+        // Applications: TODO!!!
 
         // Permissions
         if (obj.permissions) {
@@ -2017,25 +1721,6 @@ var OBJY = {
         });
 
         if (obj.inherits.indexOf(templateId) != -1) {
-            /*var propKeys = Object.keys(obj.properties);
-            var i;
-            for (i = 0; i < propKeys.length; i++) {
-                console.log("properties inherit");
-                console.log(obj.properties[propKeys[i]] + ' . ' + templateId);
-                if (obj.properties[propKeys[i]].template == templateId) delete obj.properties[propKeys[i]];
-            }
-            var permissionKeys = Object.keys(obj.permissions);
-            var i;
-            for (i = 0; i < permissionKeys.length; i++) {
-                console.log("permissions inherit");
-                console.log(obj.permissions[permissionKeys[i]] + ' . ' + templateId);
-                if (obj.permissions[permissionKeys[i]].template == templateId) delete obj.permissions[permissionKeys[i]];
-            }
-            var i;
-            for (i = 0; i < obj.inherits.length; i++) {
-                if (obj.inherits[i] == templateId) obj.inherits.splice(i, 1);
-            }*/
-
 
             obj.inherits.splice(obj.inherits.indexOf(templateId), 1);
 
@@ -2143,31 +1828,6 @@ var OBJY = {
 
         return;
 
-        /*
-                var propKeys = Object.keys(obj.properties);
-                propKeys.forEach(function(property) {
-                    {
-                        if (obj.properties[property].template) {
-                            if (!obj.properties[property].overwrittenOnCreate) delete obj.properties[property].onCreate;
-                            if (!obj.properties[property].overwrittenOnChange) delete obj.properties[property].onChange;
-                            if (!obj.properties[property].overwrittenOnDelete) delete obj.properties[property].onDelete;
-                            if (!obj.properties[property].meta) delete obj.properties[property].meta;
-                            if (!obj.properties[property].overwritten) delete obj.properties[property];
-                        }
-                    }
-                })
-                if (obj.privileges) {
-                    var appKeys = Object.keys(obj.privileges);
-                    appKeys.forEach(function(app) {
-                        var k;
-                        for (k = 0; k < obj.privileges[app].length; k++) {
-                        }
-                        if (obj.privileges[app].length == 0) delete obj.privileges[app];
-                    })
-                }
-                this.updateObject(obj, success, error, app, client);*/
-
-
         // ADD TENANT AND APPLICATION!!!
     },
 
@@ -2184,7 +1844,6 @@ var OBJY = {
 
         this.mappers[role].getById(id, function(data) {
 
-            // console.log("---", data)
 
             if (data == null) {
                 error('Error - object not found: ' + id);
@@ -2540,7 +2199,7 @@ var OBJY = {
     },
 
     PropertyBagItemRemover: function(obj, propertyName, instance) {
-        var allProperties = obj.properties; //obj.getProperties();
+        var allProperties = obj.properties;
         var thisRef = this;
 
 
@@ -2655,8 +2314,6 @@ var OBJY = {
 
         if (typeof property !== 'object') {
             throw new InvalidFormatException();
-            //obj.properties[propertyKey] = property[propertyKey];
-            //return;
         }
 
 
@@ -2665,7 +2322,7 @@ var OBJY = {
 
         } catch (e) {}
 
-        /*iif (!property[propertyKey].type) {
+        /*if (!property[propertyKey].type) {
             obj.properties[propertyKey] = property[propertyKey];
            
             f (typeof property[propertyKey].value === 'string') {
@@ -2678,7 +2335,7 @@ var OBJY = {
 
         if (existing) throw new DuplicatePropertyException(propertyKey);
 
-        //console.debug(property);
+
         switch ((property[propertyKey] || {}).type) {
             case undefined:
                 obj.properties[propertyKey] = property[propertyKey];
@@ -3254,7 +2911,7 @@ var OBJY = {
             if (access.length > 1) {
                 setOnDelete(obj.properties[access.shift()], access, onDelete);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3264,7 +2921,7 @@ var OBJY = {
                 if (!obj.properties[access[0]].onDelete) obj.properties[access[0]].onDelete = {};
                 if (!obj.properties[access[0]].onDelete[name]) obj.properties[access[0]].onDelete[name] = {};
 
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
+
                 if (obj.properties[access[0]].onDelete[name].template) obj.properties[access[0]].onDelete[name].overwritten = true;
                 obj.properties[access[0]].onDelete[name].value = onDelete;
                 obj.properties[access[0]].onDelete[name].trigger = trigger || 'after';
@@ -3286,14 +2943,12 @@ var OBJY = {
             if (access.length > 1) {
                 setConditions(obj.properties[access.shift()], access, conditions);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
                     throw new NoSuchPropertyException(propertyKey);
                 }
-
-                //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
 
                 obj.properties[access[0]].conditions = conditions;
             }
@@ -3314,7 +2969,7 @@ var OBJY = {
             if (access.length > 1) {
                 setPermission(obj.properties[access.shift()], access, permission);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3332,28 +2987,6 @@ var OBJY = {
 
         setPermission(obj, propertyKey, permission);
 
-
-
-        /*switch(existingProperty.type)
-        {
-            case constants.PROPERTY_TYPE_SHORTTEXT:
-                obj.properties[propertyKey].value = newValue;
-            break;
-            default : 
-                throw new InvalidTypeException(existingProperty.type);
-        }*/
-
-        /*if(obj.role == 'template') 
-        {
-            OBJY.addTemplateFieldToObjects(obj, propertyKey, function(data)
-                {
-                    console.log("template added!");
-                },
-                function(error)
-                {
-                    throw new NoSuchTemplateException(error);
-                });
-        }*/
     },
 
 
@@ -3371,18 +3004,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3420,27 +3053,6 @@ var OBJY = {
         setValue(obj, propertyKey, newValue);
 
 
-
-        /*switch(existingProperty.type)
-        {
-            case constants.PROPERTY_TYPE_SHORTTEXT:
-                obj.properties[propertyKey].value = newValue;
-            break;
-            default : 
-                throw new InvalidTypeException(existingProperty.type);
-        }*/
-
-        /*if(obj.role == 'template') 
-        {
-            OBJY.addTemplateFieldToObjects(obj, propertyKey, function(data)
-                {
-                    console.log("template added!");
-                },
-                function(error)
-                {
-                    throw new NoSuchTemplateException(error);
-                });
-        }*/
     },
 
 
@@ -3458,18 +3070,16 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
 
                 if (!force) {
                     try {
@@ -3527,18 +3137,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3598,18 +3208,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
@@ -3646,18 +3256,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
 
                     var t = obj.properties[access[0]].type;
@@ -3695,18 +3305,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3748,18 +3358,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3797,18 +3407,18 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
 
                 setValue(obj.properties[shift], access, value);
             } else {
-                //obj[access[0]] = value;
+
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
@@ -3860,11 +3470,11 @@ var OBJY = {
                     if (obj.properties[shift].type) {
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                         if (obj.properties[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                             if (obj.properties[shift].template) obj.properties[shift].overwritten = true;
-                            //obj.properties[shift].hello = true;
+
                         }
                     }
                 } catch (e) {}
@@ -3973,9 +3583,6 @@ var OBJY = {
 
     PrivilegesChecker: function(obj) {
 
-        //obj = JSON.stringify(obj);
-        //var nObj = JSON.parse(obj);
-
         return obj.privileges;
     },
 
@@ -4037,11 +3644,8 @@ var OBJY = {
 
             objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
 
-            console.log('instance.activeUser', instance.activeUser);
-
             if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
 
-            console.log('perm query', JSON.stringify(objs, null, 4));
 
             this.get = function(success, error) {
 
@@ -4056,17 +3660,10 @@ var OBJY = {
 
                     var i;
                     for (i = 0; i < data.length; i++) {
-                        console.log('d.role', data[i].role);
+
                         if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](OBJY.deserialize(data[i]))
                     }
 
-                    /*data.forEach(function(d) {
-                        console.log('d.role', d.role);
-                        d = OBJY[d.role](OBJY.deserialize(d));
-                    })*/
-
-                    // success(data);
-                    //    return;
 
                     // TODO : change!!!
 
@@ -4093,15 +3690,13 @@ var OBJY = {
                             return d.inherits.indexOf(item) == pos;
                         });*/
 
-                        //console.info(d)
+
                         var counter = 0;
 
 
 
                         if (d.inherits.length == 0) {
                             allCounter++;
-
-                            //  console.info('1', d.inherits.length, counter, data.length, allCounter)
 
                             if (allCounter == data.length) {
 
@@ -4120,7 +3715,6 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-                                        // console.info('2', d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -4133,7 +3727,6 @@ var OBJY = {
 
                                         if (counter == d.inherits.length) allCounter++;
 
-                                        // console.info('3', d.inherits.length, counter, data.length, allCounter)
 
                                         if (allCounter == data.length) {
 
@@ -4225,7 +3818,6 @@ var OBJY = {
 
                                             if (counter == data.inherits.length) allCounter++;
 
-                                            //console.info(data.inherits.length, counter, objs.length, allCounter)
 
                                             if (allCounter == objs.length) {
                                                 success(objs);
@@ -4304,19 +3896,19 @@ var OBJY = {
 
         this.role = role || 'object';
 
-        if (params.customProps) {
-            for (var prop in params.customProps) {
-                this[prop] = params.customProps[prop];
+        if (params.staticProps) {
+            for (var prop in params.staticProps) {
+                this[prop] = params.staticProps[prop];
             }
         }
 
-        if (params.customFuncs) {
-            for (var func in params.customFuncs) {
-                this[func] = params.customFuncs[func];
+        if (params.staticFuncs) {
+            for (var func in params.staticFuncs) {
+                this[func] = params.staticFuncs[func];
             }
         }
 
-        if (params.isRule) {
+        if (params.hasAffects) {
             this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance);
             this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
         }
@@ -4344,11 +3936,6 @@ var OBJY = {
 
             this._aggregatedEvents = obj._aggregatedEvents;
 
-            /*if (this.role == 'template') {
-                this.privileges = obj.privileges;
-                this.addPrivilege = obj.addPrivilege;
-                this.removePrivilege = obj.removePrivilege;
-            }*/
 
             this.authorisations = obj.authorisations || undefined;
 
@@ -4466,7 +4053,7 @@ var OBJY = {
                         doTheProps(self[k], o[k])
                     }
 
-                    //if (Object.keys(self[k] || {}).length > 0) self[k].overwritten = true;
+
                 })
             }
 
@@ -4505,7 +4092,7 @@ var OBJY = {
         this.setOnChange = function(name, onChangeObj) {
 
             if (typeof onChangeObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onChangeObj)[0];
+            var key = name;
 
             new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
             return this;
@@ -4514,7 +4101,7 @@ var OBJY = {
         this.setOnDelete = function(name, onDeleteObj) {
 
             if (typeof onDeleteObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onDeleteObj)[0];
+            var key = name;
 
             new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
             return this;
@@ -4523,7 +4110,7 @@ var OBJY = {
         this.setOnCreate = function(name, onCreateObj) {
 
             if (typeof onCreateObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onCreateObj)[0];
+            var key = name;
 
             new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
             return this;
@@ -4564,17 +4151,6 @@ var OBJY = {
 
         this.setPropertyValue = function(property, value, client) {
 
-            /*var propertyKey = Object.keys(property)[0];
-            if (propertyKey.indexOf('.') != -1) {
-                var lastDot = propertyKey.lastIndexOf(".");
-                var bag = propertyKey.substring(0, lastDot);
-                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
-                var newProp = {};
-                this.setBagPropertyValue(bag, newProKey, value,  client);
-                return;
-            }
-            new OBJY.ConditionsChecker(this.getProperty(property), value);*/
-
             new OBJY.PropertySetWrapper(this, property, value, instance, ['addObject']);
 
 
@@ -4583,16 +4159,7 @@ var OBJY = {
 
         this.setProperty = function(property, value, client) {
 
-            /*var propertyKey = Object.keys(property)[0];
-            if (propertyKey.indexOf('.') != -1) {
-                var lastDot = propertyKey.lastIndexOf(".");
-                var bag = propertyKey.substring(0, lastDot);
-                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
-                var newProp = {};
-                this.setBagPropertyValue(bag, newProKey, value,  client);
-                return;
-            }
-            new OBJY.ConditionsChecker(this.getProperty(property), value);*/
+
 
             new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject']);
 
@@ -4602,16 +4169,7 @@ var OBJY = {
 
         this.makeProperty = function(property, value, client) {
 
-            /*var propertyKey = Object.keys(property)[0];
-            if (propertyKey.indexOf('.') != -1) {
-                var lastDot = propertyKey.lastIndexOf(".");
-                var bag = propertyKey.substring(0, lastDot);
-                var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
-                var newProp = {};
-                this.setBagPropertyValue(bag, newProKey, value,  client);
-                return;
-            }
-            new OBJY.ConditionsChecker(this.getProperty(property), value);*/
+
 
             new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject'], true);
 
@@ -4648,7 +4206,7 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
+
 
             new OBJY.EventActionSetWrapper(this, property, value, client, instance);
             return this;
@@ -4666,7 +4224,6 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
 
             new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance);
             return this;
@@ -4683,8 +4240,6 @@ var OBJY = {
                 this.setBagEventLastOccurence(bag, newProKey, value, client);
                 return;
             }
-
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
 
 
             new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, ['addObject']);
@@ -4703,8 +4258,6 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
-
             new OBJY.EventIntervalSetWrapper(this, property, value, client, instance);
             return this;
         };
@@ -4721,7 +4274,6 @@ var OBJY = {
                 return;
             }
 
-            // new OBJY.ConditionsChecker(this.getProperty(property), value);
 
             new OBJY.EventReminderSetWrapper(this, property, reminder, client, ['addObject']);
             return this;
@@ -4870,7 +4422,7 @@ var OBJY = {
         this.setPropertyOnDelete = function(property, name, onDeleteObj) {
 
             if (typeof onDeleteObj !== 'object') throw new InvalidArgumentException()
-            var key = name; //Object.keys(onDeleteObj)[0];
+            var key = name;
 
             new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
             return this;
@@ -5004,7 +4556,7 @@ var OBJY = {
                 this.removePropertyPermissionFromBag(propertyName, permissionKey);
                 return;
             } else {
-                console.log(permissionKey);
+
                 if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
                 if (!this.properties[propertyName].permissions[permissionKey]) throw new NoSuchPermissionException(permissionKey);
 
@@ -5055,7 +4607,6 @@ var OBJY = {
         this.addPropertyToBag = function(bag, property) {
 
             var tmpBag = this.getProperty(bag);
-            //if (tmpBag.template) tmpBag.overwritten = true;
 
             new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance);
 
@@ -5146,7 +4697,7 @@ var OBJY = {
         };
 
         this.getProperty = function(propertyName) {
-            //return this.properties[propertyName];
+
             return OBJY.PropertyParser(this, propertyName);
         };
 
@@ -5190,7 +4741,6 @@ var OBJY = {
 
                     if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
 
-                        //dsl, obj, prop, data, callback, client, options
                         instance.execProcessorAction(thisRef.onCreate[key].value, thisRef, null, null, function(data) {
 
                         }, client, null);
@@ -5247,7 +4797,7 @@ var OBJY = {
                             })
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString()) 
+
                                 thisRef._aggregatedEvents.push({
                                     propName: prePropsString + "." + p,
                                     date: date
@@ -5269,7 +4819,8 @@ var OBJY = {
                             })
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString()) 
+
+
                                 thisRef._aggregatedEvents.push({
                                     propName: p,
                                     date: date
@@ -5293,7 +4844,7 @@ var OBJY = {
             var addFn = function(obj) {
 
 
-                OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c')
+                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c')) return error({ error: "Lack of Permissions" });
 
                 OBJY.add(obj, function(data) {
 
@@ -5305,7 +4856,7 @@ var OBJY = {
                         if (data.onCreate) {
                             Object.keys(data.onCreate).forEach(function(key) {
                                 if (data.onCreate[key].trigger == 'after') {
-                                    //dsl, obj, prop, data, callback, client, options
+
                                     instance.execProcessorAction(data.onCreate[key].value, data, null, null, function(data) {
 
                                     }, client, null);
@@ -5408,7 +4959,7 @@ var OBJY = {
                 return OBJY.deserialize(this);
             }
 
-            OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')
+            if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')) return error({ error: 'Lack of Permissions' })
 
             if ((instance.permissionSequence[thisRef._id] || []).length > 0) {
                 throw new LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
@@ -5476,7 +5027,6 @@ var OBJY = {
 
                         if (prePropsString) {
 
-                            // instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: prePropsString + "." + p, date: date });
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
@@ -5485,7 +5035,7 @@ var OBJY = {
 
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString())
+
                                 thisRef._aggregatedEvents.push({
                                     propName: prePropsString + "." + p,
                                     date: date
@@ -5493,7 +5043,6 @@ var OBJY = {
 
                         } else {
 
-                            //instance.eventAlterationSequence.push({ operation: 'add', obj: thisRef, propName: p, date: date })
 
                             var found = false;
                             thisRef._aggregatedEvents.forEach(function(aE) {
@@ -5501,7 +5050,7 @@ var OBJY = {
                             })
 
                             if (!found && props[p].triggered != true)
-                                //if(moment().toISOString() >= moment(date).toISOString())
+
                                 thisRef._aggregatedEvents.push({
                                     propName: p,
                                     date: date
@@ -5527,7 +5076,7 @@ var OBJY = {
                         if (data.onChange) {
                             Object.keys(data.onChange).forEach(function(key) {
                                 if (data.onChange[key].trigger == 'after') {
-                                    //dsl, obj, prop, data, callback, client, options
+
                                     instance.execProcessorAction(data.onChange[key].action, data, null, null, function(data) {
 
                                     }, client, null);
@@ -5675,12 +5224,12 @@ var OBJY = {
             }
 
 
-            OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd');
+            if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd')) return error({ error: 'Lack of Permissions' })
 
             if (thisRef.onDelete) {
                 Object.keys(thisRef.onDelete).forEach(function(key) {
                     if (thisRef.onDelete[key].trigger == 'before') {
-                        //dsl, obj, prop, data, callback, client, options
+
                         instance.execProcessorAction(thisRef.onDelete[key].action, thisRef, null, null, function(data) {
 
                         }, client, null);
@@ -5861,7 +5410,7 @@ var OBJY = {
 
                 OBJY.applyAffects(data)
 
-                OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')
+                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
                 if (dontInherit) {
                     if (success) success(OBJY[data.role](OBJY.deserialize(data)));
@@ -5916,9 +5465,8 @@ var OBJY = {
                 });
             }
 
-            //console.warn('cccache', thisRef._id, instance.caches[thisRef.role].data[thisRef._id])
             if (instance.caches[thisRef.role].data[thisRef._id]) {
-                //console.warn('________________id', thisRef._id)
+
                 prepareObj(instance.caches[thisRef.role].data[thisRef._id]);
             } else {
 
@@ -5927,7 +5475,6 @@ var OBJY = {
                     prepareObj(data);
 
                     if (!instance.caches[thisRef.role].data[thisRef._id]) {
-                        //console.warn('writing to cache', thisRef._id, data)
                         //instance.caches[thisRef.role].add(thisRef._id, data);
                     }
 
