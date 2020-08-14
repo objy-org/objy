@@ -5497,6 +5497,7 @@ var OBJY = {
     }
 }
 
+objy = OBJY;
 
 if (_nodejs) module.exports = OBJY;
 else if (window) window.OBJY = OBJY;
