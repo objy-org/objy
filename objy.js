@@ -896,6 +896,8 @@ var OBJY = {
 
         var thisRef = this;
 
+        if (typeof params == 'string') params = { name: params, pluralName: params + 's' };
+
         if (!params.name || !params.pluralName) {
             throw new Error("Invalid arguments");
         }

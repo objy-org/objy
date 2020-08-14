@@ -1,6 +1,6 @@
 {
   "name": "objy",
-  "version": "0.5.104",
+  "version": "0.5.105",
   "description": "A JavaScript framework for building object-driven use cases",
   "main": "objy.js",
   "scripts": {
