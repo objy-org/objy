@@ -1,5 +1,7 @@
 # OBJY
 
+[![Gitter](https://badges.gitter.im/objy-dev/community.svg)](https://gitter.im/objy-dev/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+
 An object-driven, cross-platform programming framework, written in JavaScript, that uses behaviour-driven objects for modelling use cases.
 
 ![OBJY LOGO](https://objy-org.github.io/logo.png "OBJY")
