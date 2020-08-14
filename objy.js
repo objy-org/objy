@@ -2377,6 +2377,7 @@ var OBJY = {
                     if (property[propertyKey].value != null)
                         if (isNaN(property[propertyKey].value)) throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
                 }
+                property[propertyKey].value = +property[propertyKey].value;
                 obj.properties[propertyKey] = property[propertyKey];
                 OBJY.ValuePropertyMetaSubstituter(obj.properties[propertyKey]);
                 break;
