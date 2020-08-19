@@ -3948,35 +3948,10 @@ var OBJY = {
                 this.username = obj.username || null;
                 this.email = obj.email || null;
                 this.password = obj.password || null;
-                this.privileges = OBJY.PrivilegesChecker(obj) || {};
+
                 this.spooAdmin = obj.spooAdmin;
-                this._clients = obj._clients;
-
-                this.addClient = function(client) {
-                    if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
-                    this._clients.push(client);
-                    return this;
-                };
-
-                this.removeClient = function(client) {
-                    if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
-                    this._clients.splice(this._clients.indexOf(client), 1);
-                    return this;
-                };
 
                 delete this.name;
-
-                this.addPrivilege = function(privilege) {
-
-                    if (instance.activeApp) {
-                        var tmpPriv = {};
-                        tmpPriv[instance.activeApp] = { name: privilege }
-                        new OBJY.PrivilegeChecker(this, tmpPriv);
-                        return this;
-                    } else throw new Error('Invalid app id');
-
-                    return this;
-                };
 
                 this.setUsername = function(username) {
                     this.username = username;
@@ -3996,8 +3971,42 @@ var OBJY = {
                     return this;
                 }
 
+
+
+            }
+
+            // TODO: explain this!
+            if (params.authable || params.authableTemplate) {
+
+                this.privileges = OBJY.PrivilegesChecker(obj) || {};
+                this._clients = obj._clients;
+
+                this.addPrivilege = function(privilege) {
+
+                    if (instance.activeApp) {
+                        var tmpPriv = {};
+                        tmpPriv[instance.activeApp] = { name: privilege }
+                        new OBJY.PrivilegeChecker(this, tmpPriv);
+                        return this;
+                    } else throw new Error('Invalid app id');
+
+                    return this;
+                };
+
                 this.removePrivilege = function(privilege) {
                     new OBJY.PrivilegeRemover(this, privilege);
+                    return this;
+                };
+
+                this.addClient = function(client) {
+                    if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
+                    this._clients.push(client);
+                    return this;
+                };
+
+                this.removeClient = function(client) {
+                    if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
+                    this._clients.splice(this._clients.indexOf(client), 1);
                     return this;
                 };
 
