@@ -3593,6 +3593,8 @@ var OBJY = {
         if (!typeof privilege == 'object') throw new InvalidPrivilegeException();
         var privilegeKey = Object.keys(privilege)[0];
 
+        if (!obj.privileges) obj.privileges = {};
+
         if (!obj.privileges[privilegeKey]) {
             obj.privileges[privilegeKey] = [];
         }
