@@ -11,7 +11,6 @@ Mapper = function(OBJY) {
                     else if (OBJY.dslType == 'custom') {
                         OBJY.lang.parse(dsl);
                     }
-
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }

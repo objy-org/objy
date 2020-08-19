@@ -243,7 +243,6 @@ var OBJY = {
 
     dsl: fluent_dsl,
 
-
     instance: this,
 
     activeTenant: null,
