@@ -1,0 +1,33 @@
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/objy/dist/browser.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/objy-org/objy-catalog/mappers/storage/neDBMapper.browser.js"></script>
+<script>
+//console.log(OBJY)
+var mapper = new LocalMapper(OBJY);
+
+
+OBJY.define({
+	name: "object",
+	pluralName: "objects",
+	storage: mapper
+})
+
+
+OBJY.client('test');
+mapper.createClient('test', function(){
+	console.log('client created')
+})
+
+console.log(mapper)
+
+OBJY.object({name: "test"}).add(obj => {
+	console.log('obj', obj);
+}, (err) => {
+	console.log(err)
+});
+</script>
+</head>
+<body>
+	</body>
+</html>

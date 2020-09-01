@@ -1553,7 +1553,6 @@ var OBJY = {
         };
 
 
-
         function doTheProps(obj) {
 
             if (obj.properties) {
@@ -1561,7 +1560,6 @@ var OBJY = {
                 Object.keys(obj.properties).forEach(function(p) {
 
                     if (!isObject(obj.properties[p])) return;
-
 
                     if (obj.permissions) {
                         Object.keys(obj.permissions).forEach(function(p) {
@@ -1703,7 +1701,6 @@ var OBJY = {
             if (app == application) {
                 obj.applications.splice(i, 1);
                 contains = true;
-                return;
             }
         });
 
@@ -1793,7 +1790,6 @@ var OBJY = {
     updateO: function(obj, success, error, app, client) {
 
         var thisRef = this;
-
 
         if (obj.inherits.length == 0) thisRef.updateObject(obj, success, error, app, client);
 
@@ -2385,6 +2381,8 @@ var OBJY = {
 
             case CONSTANTS.PROPERTY.TYPE_EVENT:
 
+                OBJY.chainPermission(obj, instance, 'evt', 'addProperty (Event)', propertyKey);
+
                 var _event = {};
                 var eventKey = propertyKey;
                 _event[eventKey] = property[propertyKey];
@@ -2546,6 +2544,8 @@ var OBJY = {
                 break;
 
             case CONSTANTS.PROPERTY.TYPE_ACTION:
+
+                OBJY.chainPermission(obj, instance, 'act', 'addProperty (Action)', propertyKey);
 
                 if (property[propertyKey].value) {
                     if (typeof property[propertyKey].value !== 'string') throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
@@ -3085,7 +3085,7 @@ var OBJY = {
 
                 if (!force) {
                     try {
-                        var t = obj.properties[access[0]].value;
+                        var t = obj.properties[access[0]];
                     } catch (e) {
                         throw new NoSuchPropertyException(propertyKey);
                     }
@@ -3846,7 +3846,6 @@ var OBJY = {
                             });
 
 
-
                         } else {
                             allCounter++;
                             if (allCounter == objs.length) {
@@ -3856,8 +3855,9 @@ var OBJY = {
                         }
 
                     }, function(err) {
-                        counter++;
-                        if (objs.length == counter) error(err);
+                        //counter++;
+                        /*if (objs.length == counter)*/
+                        error(err);
                     });
                 }
             }
@@ -3955,13 +3955,13 @@ var OBJY = {
 
                 this.setUsername = function(username) {
                     this.username = username;
-                    OBJY.chainPermission(this, this, 'o', 'setUsername', username);
+                    OBJY.chainPermission(this, instance, 'o', 'setUsername', username);
                     return this;
                 }
 
                 this.setEmail = function(email) {
                     this.email = email;
-                    OBJY.chainPermission(this, this, 'h', 'setEmail', email);
+                    OBJY.chainPermission(this, instance, 'h', 'setEmail', email);
                     return this;
                 }
 
