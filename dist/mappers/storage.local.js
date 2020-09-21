@@ -15,6 +15,7 @@ var Mapper = function(OBJY, options) {
         index: {},
 
         createClient: function(client, success, error) {
+            if (!client) client = 'default';
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
                 if (this.database[client + '_' + this.objectFamily])
@@ -25,7 +26,22 @@ var Mapper = function(OBJY, options) {
             }
         },
 
+        getConnection: function() {
+            return this.database;
+        },
+
+        useConnection: function(connection, success, error) {
+            this.database = connection;
+
+            return this;
+        },
+
         getDBByMultitenancy: function(client) {
+            if (!client) client = 'default';
+
+            console.log(client, this.objectFamily);
+
+            if (!this.database[client + '_' + this.objectFamily]) this.database[client + '_' + this.objectFamily] = new Datastore({ filename: client + '_' + this.objectFamily + '.db', autoload: true })
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.SHARED) {
                 if (!Array.isArray(this.database)) this.database = [];
@@ -54,6 +70,7 @@ var Mapper = function(OBJY, options) {
         },
 
         getById: function(id, success, error, app, client) {
+            if (!client) client = 'default';
 
             var db = this.getDBByMultitenancy(client);
 
@@ -67,6 +84,7 @@ var Mapper = function(OBJY, options) {
         },
 
         getByCriteria: function(criteria, success, error, app, client, flags) {
+            if (!client) client = 'default';
 
             var db = this.getDBByMultitenancy(client);
 
@@ -90,6 +108,7 @@ var Mapper = function(OBJY, options) {
         },
 
         count: function(criteria, success, error, app, client, flags) {
+            if (!client) client = 'default';
 
             var db = this.getDBByMultitenancy(client);
 
@@ -112,6 +131,7 @@ var Mapper = function(OBJY, options) {
         },
 
         update: function(spooElement, success, error, app, client) {
+            if (!client) client = 'default';
 
             var db = this.getDBByMultitenancy(client);
 
@@ -122,6 +142,7 @@ var Mapper = function(OBJY, options) {
         },
 
         add: function(spooElement, success, error, app, client) {
+            if (!client) client = 'default';
 
             var db = this.getDBByMultitenancy(client);
 
@@ -135,6 +156,7 @@ var Mapper = function(OBJY, options) {
             });
         },
         remove: function(spooElement, success, error, app, client) {
+            if (!client) client = 'default';
 
             var db = this.getDBByMultitenancy(client);
 
