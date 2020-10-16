@@ -59,11 +59,19 @@ OBJY.objects() // as wrapper for multiple objects
 //Build an object
 
 OBJY.object({
-   name: "Passport",
    properties: {
+      name: "Passport",
       expires: "2020-10-10",
       number: "123"
    }
+})
+
+// or:
+
+OBJY.object().props({
+   name: "Passport",
+   expires: "2020-10-10",
+   number: "123"
 })
 ```
 

@@ -497,7 +497,8 @@ var OBJY = {
 
                 if (template.applications) {
                     template.applications.forEach(function(a) {
-                        if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
+                        if (obj.applications)
+                            if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
                     })
                 }
 
@@ -887,6 +888,21 @@ var OBJY = {
     },
 
     /**
+     * Defines a proxy for single object families
+     * @returns the object
+     */
+    /*SingleProxy: function(obj, name, instance, params) {
+        if (this.seperateProperties) {
+            return new OBJY.Obj(obj, name, instance, params);
+        }
+        return new OBJY.Obj(Object.assign(obj, obj.properties), name, instance, params);
+    },
+
+    PluralProxy: function(objs, name, instance, params, flags) {
+
+    },*/
+
+    /**
      * Defines an Object Family. Creates a constructor with the single name and one with the plural name
      * @param {params} an object containing the information.
      * @returns {this} an array of all object families
@@ -902,6 +918,7 @@ var OBJY = {
         }
 
         this[params.name] = function(obj) {
+            //return OBJY.SingleProxy(obj, params.name, this, params);
             return new OBJY.Obj(obj, params.name, this, params);
         }
 
@@ -1370,7 +1387,8 @@ var OBJY = {
 
             if (template.applications) {
                 template.applications.forEach(function(a) {
-                    if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
+                    if (obj.applications)
+                        if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
                 })
             }
 
@@ -1561,14 +1579,14 @@ var OBJY = {
 
                     if (!isObject(obj.properties[p])) return;
 
-                    if (obj.permissions) {
+                    /*if (obj.permissions) {
                         Object.keys(obj.permissions).forEach(function(p) {
                             if (obj.permissions[p]) {
                                 if (obj.permissions[p].template == templateId && !obj.permissions[p].overwritten)
                                     delete obj.permissions[p]
                             }
                         })
-                    }
+                    }*/
 
                     if (obj.properties[p]) {
                         ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
@@ -2290,7 +2308,7 @@ var OBJY = {
 
         if (typeof action !== 'object') throw new InvalidFormatException();
         var actionKey = Object.keys(action)[0];
-
+        var existing= null;
         try {
             existing = obj.actions[actionKey]
 
@@ -2303,11 +2321,13 @@ var OBJY = {
 
     PropertyCreateWrapper: function(obj, property, isBag, instance) {
 
+        if(!obj.properties) obj.properties = {};
 
         property = Object.assign({}, property);
 
 
         var propertyKey = Object.keys(property)[0];
+        var existing= null;
 
         if (typeof property !== 'object') {
             throw new InvalidFormatException();
@@ -2743,7 +2763,8 @@ var OBJY = {
     },
 
     ObjectPermissionSetWrapper: function(obj, permission, instance) //addTemplateToObject!!!
-    {
+    {   
+        if(!obj.permissions) obj.permissions = {};
         if (!typeof permission == 'object') throw new InvalidPermissionException();
 
         if (!permission) throw new InvalidPermissionException();
@@ -3640,7 +3661,7 @@ var OBJY = {
             var flags = flags || {};
 
             Object.keys(objs).forEach(function(oK) {
-                if (["$page", "$sort"].indexOf(oK) != -1) {
+                if (["$page", "$sort", "$pageSize"].indexOf(oK) != -1) {
                     flags[oK] = objs[oK];
                     delete objs[oK]
                 }
@@ -3864,12 +3885,22 @@ var OBJY = {
 
             return this;
         } else {
+
             this.auth = function(userObj, callback, error) {
 
-                instance[params.pluralName]({
-                    username: userObj.username
-                }).get(function(data) {
+                var query = { username: userObj.username };
 
+                if (instance.authableFields) {
+                    query = { $or: [] };
+                    instance.authableFields.forEach(function(field) {
+                        var f = {};
+                        f[field] = userObj[field];
+                        if(f[field]) query.$or.push(f)
+                    })
+                    if (Object.keys(query.$or).length == 0) query = { username: userObj.username }
+                }
+
+                instance[params.pluralName](query).get(function(data) {
                     if (data.length == 0) error("User not found");
                     callback(data[0])
 
@@ -3887,7 +3918,7 @@ var OBJY = {
 
         if (instance.metaPropPrefix != '' && typeof obj !== "string") obj = OBJY.serialize(obj);
 
-        if (!obj) throw new Error("Invalid param");
+        if (!obj) obj = {}; //throw new Error("Invalid param");
 
         if (obj._id) this._id = obj._id;
 
@@ -3919,13 +3950,15 @@ var OBJY = {
 
         if (!params.structure) {
 
+            //@TODO: DEPRECATE THIS!
             this.type = obj.type;
 
-            this.applications = OBJY.ApplicationsChecker(this, obj.applications) || [];
+            this.applications = OBJY.ApplicationsChecker(this, obj.applications); // || [];
 
-            this.inherits = OBJY.InheritsChecker(this, obj.inherits) || [];
+            this.inherits = OBJY.InheritsChecker(this, obj.inherits); // || [];
 
-            this.name = obj.name || null;
+            //@TODO: DEPRECATE THIS!
+            this.name = obj.name; // || null;
 
             this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
             this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
@@ -3934,12 +3967,11 @@ var OBJY = {
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
-            this.properties = OBJY.PropertiesChecker(this, obj.properties, instance) || {};
+            this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
 
-            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions) || {};
+            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
 
             this._aggregatedEvents = obj._aggregatedEvents;
-
 
             this.authorisations = obj.authorisations || undefined;
 
@@ -4015,6 +4047,11 @@ var OBJY = {
         } else {
             Object.assign(this, params.structure)
         }
+
+        this.props = function(properties) {
+            this.properties = OBJY.PropertiesChecker(this, properties, instance) || {};
+            return this;
+        };
 
         this.addInherit = function(templateId) {
             OBJY.addTemplateToObject(this, templateId, instance);
@@ -4851,7 +4888,8 @@ var OBJY = {
 
             if (app) {
                 if (!this.applications) this.applications = [];
-                if (this.applications.indexOf(app) == -1) this.applications.push(app);
+                if (this.applications)
+                    if (this.applications.indexOf(app) == -1) this.applications.push(app);
             }
 
             var addFn = function(obj) {
