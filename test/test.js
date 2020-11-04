@@ -103,9 +103,11 @@ describe('Object', function() {
     	obj
     	  .removeProperty('test')
     	  .removePermission('admin')
+    	  .removeApplication('one')
     	
     	expect(obj.properties.test).toBe(undefined);
     	expect(obj.permissions.admin).toBe(undefined);
+    	expect(obj.applications).not.toContain('one')
 
     	done();
 
