@@ -257,6 +257,8 @@ var OBJY = {
 
     affectables: [],
 
+    staticRules: [],
+
     handlerSequence: [],
     permissionSequence: [],
     commandSequence: [],
@@ -296,6 +298,11 @@ var OBJY = {
      * @returns {this}
      */
     deserialize: function(obj) {
+        /*if(obj.hasOwnProperty('onCreate')){
+            Object.keys(obj.onCreate).forEach(h => {
+               if(obj.onCreate[h].hidden) delete obj.onCreate[h]
+            })
+        }*/
         return obj;
     },
 
@@ -344,8 +351,11 @@ var OBJY = {
     /**
      * Applies affect rules
      * @param {obj} - the object
+     * @param {operation} - the operation (onChange, onCreate and onDelete)
+     * @param {insstance} - the current objy instance
+     * @param {client} - the active client
      */
-    applyAffects: function(obj) {
+    applyAffects: function(obj, operation, instance, client) {
         var self = this;
         self.affectables.forEach(function(a) {
             if (Query.query([obj], a.affects, Query.undot).length != 0) {
@@ -366,6 +376,7 @@ var OBJY = {
                 ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                     if (template[h]) {
                         Object.keys(template[h]).forEach(function(oC) {
+                            if (!obj[h]) obj[h] = {};
                             if (!obj[h][oC]) {
                                 obj[h][oC] = template[h][oC];
                                 obj[h][oC].template = templateId;
@@ -589,6 +600,41 @@ var OBJY = {
 
             }
         })
+
+        this.applyRules(obj, operation, instance, client);
+    },
+
+    /**
+     * Applies static rules
+     * @param {obj} - the object
+     * @param {operation} - the operation (onChange, onCreate and onDelete)
+     * @param {insstance} - the current objy instance
+     * @param {client} - the active client
+     */
+
+    applyRules: function(obj, operation, instance, client) {
+        var self = this;
+        self.staticRules.forEach(function(a) {
+            if (Query.query([obj], a.affects, Query.undot).length != 0) {
+
+                var template = a.apply;
+                var templateId = a._id;
+
+                ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                    if (template[h]) {
+                        Object.keys(template[h]).forEach(function(oC) {
+
+                            if (operation != h) return;
+
+                            instance.execProcessorAction(template[h][oC].value, obj, null, null, function(data) {
+
+                            }, client, null);
+
+                        })
+                    }
+                })
+            }
+        })
     },
 
     /**
@@ -608,6 +654,9 @@ var OBJY = {
 
         if (user.spooAdmin) return true;
 
+        // A user can always see himself
+        if (user._id == obj._id && permission == 'r') return true;
+
         var privileges = user.privileges;
         var permissions = obj.permissions;
 
@@ -620,6 +669,8 @@ var OBJY = {
             if (!soft) return false;
             else return false;
         }
+
+
 
         var allowed = false;
 
@@ -1337,10 +1388,10 @@ var OBJY = {
                                 }
                             }
                         }
+                        if (!obj.properties[p].type) obj.properties[p].type = cloned.type;
 
                         obj.properties[p].template = templateId;
                         obj.properties[p].overwritten = true;
-
 
                     }
 
@@ -2308,7 +2359,7 @@ var OBJY = {
 
         if (typeof action !== 'object') throw new InvalidFormatException();
         var actionKey = Object.keys(action)[0];
-        var existing= null;
+        var existing = null;
         try {
             existing = obj.actions[actionKey]
 
@@ -2321,13 +2372,13 @@ var OBJY = {
 
     PropertyCreateWrapper: function(obj, property, isBag, instance) {
 
-        if(!obj.properties) obj.properties = {};
+        if (!obj.properties) obj.properties = {};
 
         property = Object.assign({}, property);
 
 
         var propertyKey = Object.keys(property)[0];
-        var existing= null;
+        var existing = null;
 
         if (typeof property !== 'object') {
             throw new InvalidFormatException();
@@ -2763,8 +2814,8 @@ var OBJY = {
     },
 
     ObjectPermissionSetWrapper: function(obj, permission, instance) //addTemplateToObject!!!
-    {   
-        if(!obj.permissions) obj.permissions = {};
+    {
+        if (!obj.permissions) obj.permissions = {};
         if (!typeof permission == 'object') throw new InvalidPermissionException();
 
         if (!permission) throw new InvalidPermissionException();
@@ -3632,22 +3683,23 @@ var OBJY = {
         return privilege;
     },
 
-    PrivilegeRemover: function(obj, privilege) {
+    PrivilegeRemover: function(obj, privilege, instance) {
 
-        if (!typeof privilege == 'object') throw new InvalidPrivilegeException();
-        var privilegeKey = Object.keys(privilege)[0];
 
-        if (!obj.privileges[privilegeKey]) {
+        //if (!typeof privilege == 'object') throw new InvalidPrivilegeException();
+        var appId = instance.activeApp; //Object.keys(privilege)[0];
+
+        if (!obj.privileges[appId]) {
             throw new NoSuchPrivilegeException();
         }
 
         var i;
-        for (i = 0; i < obj.privileges[privilegeKey].length; i++) {
-            if (obj.privileges[privilegeKey][i].name == privilege[privilegeKey]) obj.privileges[privilegeKey].splice(i, 1);
+        for (i = 0; i < obj.privileges[appId].length; i++) {
+            if (obj.privileges[appId][i].name == privilege) obj.privileges[appId].splice(i, 1);
         }
 
-        if (obj.privileges[privilegeKey].length == 0) {
-            delete obj.privileges[privilegeKey];
+        if (obj.privileges[appId].length == 0) {
+            delete obj.privileges[appId];
         }
 
         return privilege;
@@ -3707,7 +3759,7 @@ var OBJY = {
 
                     data.forEach(function(d) {
 
-                        OBJY.applyAffects(d)
+                        OBJY.applyAffects(d, null, instance, client)
 
                         if (!d.inherits) d.inherits = [];
 
@@ -3816,7 +3868,7 @@ var OBJY = {
                 for (i = 0; i < objs.length; i++) {
                     objs[i] = OBJY[role](objs[i]).add(function(data) {
 
-                        OBJY.applyAffects(data)
+                        OBJY.applyAffects(data, 'onCreate', instance, client)
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
@@ -3895,7 +3947,7 @@ var OBJY = {
                     instance.authableFields.forEach(function(field) {
                         var f = {};
                         f[field] = userObj[field];
-                        if(f[field]) query.$or.push(f)
+                        if (f[field]) query.$or.push(f)
                     })
                     if (Object.keys(query.$or).length == 0) query = { username: userObj.username }
                 }
@@ -4026,7 +4078,7 @@ var OBJY = {
                 };
 
                 this.removePrivilege = function(privilege) {
-                    new OBJY.PrivilegeRemover(this, privilege);
+                    new OBJY.PrivilegeRemover(this, privilege, instance);
                     return this;
                 };
 
@@ -4762,6 +4814,8 @@ var OBJY = {
 
             var thisRef = this;
 
+            OBJY.applyAffects(thisRef, 'onCreate', instance, client)
+
             OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
 
             if (!this._id) this._id = OBJY.ID();
@@ -4901,10 +4955,9 @@ var OBJY = {
 
                         obj._id = data._id;
 
-                        OBJY.applyAffects(data)
-
 
                         if (data.onCreate) {
+
                             Object.keys(data.onCreate).forEach(function(key) {
                                 if (data.onCreate[key].trigger == 'after') {
 
@@ -5122,7 +5175,7 @@ var OBJY = {
 
                 OBJY.updateO(thisRef, function(data) {
 
-                        OBJY.applyAffects(data)
+                        OBJY.applyAffects(data, 'onChange', instance, client)
 
                         if (data.onChange) {
                             Object.keys(data.onChange).forEach(function(key) {
@@ -5459,7 +5512,7 @@ var OBJY = {
 
             function prepareObj(data) {
 
-                OBJY.applyAffects(data)
+                OBJY.applyAffects(data, null, instance, client)
 
                 if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
