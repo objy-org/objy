@@ -90,6 +90,7 @@ describe('Object', function() {
 	      .setPermission('admin', {value:'r'})
 	      .setPermission('admin2', {value:'*'})
 	      .addApplication('three')
+	      .setOnChange('init', {value: 'test'})
 
 	    expect(obj.name).toBe(testStringFinal);
 	    expect(obj.type).toBe(testStringFinal);
@@ -99,6 +100,7 @@ describe('Object', function() {
 	    expect(obj.permissions.admin.value).toBe('r');
 	   	expect(obj.permissions.admin2.value).toBe('*');
 	   	expect(obj.applications).toContain('three');
+	   	expect(obj.onChange.init).toBeTruthy();
 
     	obj
     	  .removeProperty('test')

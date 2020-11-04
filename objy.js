@@ -2693,6 +2693,8 @@ var OBJY = {
 
         if (!onCreate) throw new InvalidHandlerException();
 
+        if(!obj.onCreate) obj.onCreate = {};
+
         if (obj.onCreate[name]) throw new HandlerExistsException(name);
 
         if (!name) name = OBJY.RANDOM();
@@ -2742,7 +2744,6 @@ var OBJY = {
     ObjectOnChangeCreateWrapper: function(obj, onChange, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
-
         if (!onChange) return;
 
         Object.keys(onChange).forEach(function(oC) {
@@ -2756,7 +2757,6 @@ var OBJY = {
 
     ObjectOnDeleteCreateWrapper: function(obj, onDelete, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
-
 
         if (!onDelete) return;
 
@@ -2773,6 +2773,8 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
         if (!onChange) throw new InvalidHandlerException();
+
+        if(!obj.onChange) obj.onChange = {};
 
         if (obj.onChange[name]) throw new HandlerExistsException(name);
 
@@ -2795,6 +2797,8 @@ var OBJY = {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
         if (!onDelete) throw new InvalidHandlerException();
+
+        if(!obj.onDelete) obj.onDelete = {};
 
         if (obj.onDelete[name]) throw new HandlerExistsException(name);
 
