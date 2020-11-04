@@ -1,0 +1,15 @@
+const OBJY = require('../objy.js');
+var assert = require('assert');
+
+OBJY.Logger.enabled = ["error"];
+
+describe('Permissions', function() {
+
+    OBJY.define({
+        name: "Object",
+        pluralName: "Objects"
+      });
+
+  	
+
+  });
