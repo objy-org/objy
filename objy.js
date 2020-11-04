@@ -2793,7 +2793,7 @@ var OBJY = {
         return onChange;
     },
 
-    ObjectOnDeleteSetWrapper: function(obj, name, onDelete, trigger, type, isntance) {
+    ObjectOnDeleteSetWrapper: function(obj, name, onDelete, trigger, type, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
         if (!onDelete) throw new InvalidHandlerException();
