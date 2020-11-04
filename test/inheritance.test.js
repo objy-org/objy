@@ -10,7 +10,6 @@ describe('Inheritance', function() {
         pluralName: "Objects"
       });
 
-  	// Inheritance
   	test('should inherit form object', function(done) {
 
   		OBJY.Object({name: "template", properties: {

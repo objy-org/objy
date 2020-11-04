@@ -10,6 +10,14 @@ describe('Permissions', function() {
         pluralName: "Objects"
       });
 
-  	
+     var userName = 'peter';
 
-  });
+  	test('should set user', function(done) {
+
+        OBJY.useUser(userName);
+    		expect(OBJY.activeUser).toBe(userName);
+        done();
+
+    });
+
+});

@@ -5,7 +5,6 @@ OBJY.Logger.enabled = ["error"];
 
 describe('Structure', function() {
 
-    // Basic
     test('should form an object', function(done) {
 
     	OBJY.define({
@@ -20,7 +19,6 @@ describe('Structure', function() {
     });
 
 
-    // Structure
     test('should have added the structure', function(done) {
 
     	OBJY.app('two'); 
@@ -55,7 +53,6 @@ describe('Structure', function() {
     });
 
 
-    // Structure Mutation
     test('should have mutated the structure', function(done) {
 
     	OBJY.app('two'); 
