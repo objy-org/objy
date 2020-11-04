@@ -10,7 +10,7 @@ ObserverMapperTemplate = function(OBJY, options, content) {
         }
     };
     this.OBJY = OBJY;
-    this.interval = (options || {}).interval || 10000;
+    this.interval = (options || {}).interval || 60000;
     this.objectFamily = null;
     this.type = (options || {}).type || this.CONSTANTS.TYPES.QUERIED;
     this.multitenancy = (options || {}).multitenancy || this.CONSTANTS.MULTITENANCY.ISOLATED;
