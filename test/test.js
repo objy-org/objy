@@ -107,13 +107,18 @@ describe('Object', function() {
 	   	expect(obj.onDelete.init).toBeTruthy();
 
     	obj
+    	  .setProperty('weight', testStringFinal)
     	  .removeProperty('test')
     	  .removePermission('admin')
     	  .removeApplication('one')
+    	  .removeOnCreate('init')
     	
-    	expect(obj.properties.test).toBe(undefined);
+    	expect(obj.properties.weight).toBe(testStringFinal);
     	expect(obj.permissions.admin).toBe(undefined);
     	expect(obj.applications).not.toContain('one')
+    	expect(obj.onCreate).not.toContain('init')
+    	expect(obj.onChange).not.toContain('init')
+    	expect(obj.onDelete).not.toContain('init')
 
     	done();
 
