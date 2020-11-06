@@ -2693,7 +2693,7 @@ var OBJY = {
 
         if (!onCreate) throw new InvalidHandlerException();
 
-        if(!obj.onCreate) obj.onCreate = {};
+        if (!obj.onCreate) obj.onCreate = {};
 
         if (obj.onCreate[name]) throw new HandlerExistsException(name);
 
@@ -2774,7 +2774,7 @@ var OBJY = {
 
         if (!onChange) throw new InvalidHandlerException();
 
-        if(!obj.onChange) obj.onChange = {};
+        if (!obj.onChange) obj.onChange = {};
 
         if (obj.onChange[name]) throw new HandlerExistsException(name);
 
@@ -2798,7 +2798,7 @@ var OBJY = {
 
         if (!onDelete) throw new InvalidHandlerException();
 
-        if(!obj.onDelete) obj.onDelete = {};
+        if (!obj.onDelete) obj.onDelete = {};
 
         if (obj.onDelete[name]) throw new HandlerExistsException(name);
 
