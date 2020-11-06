@@ -626,7 +626,7 @@ var OBJY = {
 
                             if (operation != h) return;
 
-                            instance.execProcessorAction(template[h][oC].value, obj, null, null, function(data) {
+                            instance.execProcessorAction(template[h][oC].action, obj, null, null, function(data) {
 
                             }, client, null);
 
@@ -1342,7 +1342,7 @@ var OBJY = {
 
 
                         if (!template[h][oC] || !isObject(template[h][oC])) return;
-
+                        if(!obj[h]) obj[h] = {};
                         if (!obj[h][oC]) {
                             obj[h][oC] = template[h][oC];
 
