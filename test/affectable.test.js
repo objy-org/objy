@@ -14,6 +14,13 @@ describe('Affectable', function() {
       _id: 123,
       affects: {},
       apply: {
+        properties: {
+          hello: "world",
+          hi: {
+            type: "shortText",
+            value: "there"
+          }
+        },
         permissions: {
           admin: {
             value: "*"
@@ -32,6 +39,8 @@ describe('Affectable', function() {
   			age: 22
   		}}).add(data => {
   			expect(data.permissions.admin.value).toBe('*');
+        expect(data.properties.hello).toBe('world');
+        expect(data.properties.hi.value).toBe('there');
         done();
   		})
   	});
