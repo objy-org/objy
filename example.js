@@ -7,8 +7,11 @@ OBJY.define({
 })
 
 OBJY.user({username: "test"}).add(data => {
+	data.setEmail('sdgdg');
 	data.addApplication("one");
 	OBJY.app('one')
 	data.addPrivilege('admin')
+
+	data.update()
 	console.log(data)
 })

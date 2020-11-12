@@ -1342,7 +1342,7 @@ var OBJY = {
 
 
                         if (!template[h][oC] || !isObject(template[h][oC])) return;
-                        if(!obj[h]) obj[h] = {};
+                        if (!obj[h]) obj[h] = {};
                         if (!obj[h][oC]) {
                             obj[h][oC] = template[h][oC];
 
@@ -1860,10 +1860,10 @@ var OBJY = {
 
         var thisRef = this;
 
-        if (obj.inherits.length == 0) thisRef.updateObject(obj, success, error, app, client);
+        if ((obj.inherits || []).length == 0) thisRef.updateObject(obj, success, error, app, client);
 
         var counter = 0;
-        obj.inherits.forEach(function(template) {
+        (obj.inherits || []).forEach(function(template) {
 
             if (obj._id != template) {
 
