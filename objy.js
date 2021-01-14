@@ -626,6 +626,8 @@ var OBJY = {
 
                             if (operation != h) return;
 
+                            console.log('action...', template[h][oC]);
+
                             instance.execProcessorAction(template[h][oC].action, obj, null, null, function(data) {
 
                             }, client, null);
@@ -669,7 +671,6 @@ var OBJY = {
             if (!soft) return false;
             else return false;
         }
-
 
 
         var allowed = false;
@@ -901,6 +902,11 @@ var OBJY = {
      * @param {key} - the permission key
      */
     chainPermission: function(obj, instance, code, name, key) {
+
+        if (['c', 'r', 'u', 'd', 'x'].includes(code)) {
+
+        } else code = 'u';
+
         if (obj.permissions) {
             if (Object.keys(obj.permissions).length > 0) {
                 if (!instance.permissionSequence[obj._id]) instance.permissionSequence[obj._id] = [];
@@ -3790,7 +3796,9 @@ var OBJY = {
 
                             if (d._id != template) {
 
-                                OBJY.getTemplateFieldsForObject(d, template, function() {
+                                OBJY.getTemplateFieldsForObject(_d, template, function() {
+
+                                        d = _d;
 
                                         counter++;
 
