@@ -258,6 +258,7 @@ var OBJY = {
     affectables: [],
 
     staticRules: [],
+    
 
     handlerSequence: [],
     permissionSequence: [],
