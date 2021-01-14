@@ -274,6 +274,18 @@ var OBJY = {
     ProcessorTemplate: ProcessorTemplate,
     ObserverTemplate: ObserverTemplate,
 
+    customStorage: function(data, options) {
+        return Object.assign(new OBJY.StorageTemplate(OBJY, options), data)
+    },
+
+    customProcessor: function(data, options) {
+        return Object.assign(new OBJY.ProcessorTemplate(OBJY, options), data)
+    },
+
+    customObserver: function(data, options) {
+        return Object.assign(new OBJY.ObserverTemplate(OBJY, options), data)
+    },
+
     /**
      * Runs luke code (comming soon)
      * @param {code} - luke code
@@ -4068,8 +4080,6 @@ var OBJY = {
                     this.password = password;
                     return this;
                 }
-
-
 
             }
 
