@@ -17,6 +17,7 @@ var Query = require('./dependencies/query.js');
 var Logger = require('./dependencies/logger.js')
 var fluent_dsl = require('./dependencies/fluent-dsl.js')
 var CONSTANTS = require('./dependencies/constants.js')
+var exceptions = require('./dependencies/exceptions.js')
 
 var StorageMapperTemplate = require('./mappers/templates/storage.js');
 var ProcessorMapperTemplate = require('./mappers/templates/processor.js')
@@ -29,201 +30,6 @@ var ObserverTemplate = ObserverMapperTemplate;
 var DefaultStorageMapper = require('./mappers/storage.inmemory.js')
 var DefaultProcessorMapper = require('./mappers/processor.eval.js')
 var DefaultObserverMapper = require('./mappers/observer.interval.js')
-
-
-function NoOnChangeException(message) {
-    this.message = "onChange not found";
-    this.name = 'NoOnChangeException';
-}
-
-function NoMetaException(message) {
-    this.message = "meta not found";
-    this.name = 'NoMetaException';
-}
-
-function NoOnDeleteException(message) {
-    this.message = "onDelete not found";
-    this.name = 'NoOnDeleteException';
-}
-
-function NoEventIdException(message) {
-    this.message = "No Event ID provided";
-    this.name = 'NoEventIdException';
-}
-
-function InvalidTypeException(message) {
-    this.message = message + " is not a valid type";
-    this.name = 'InvalidTypeException';
-}
-
-function InvalidValueException(value, type) {
-    this.message = value + " is not valid. Type must be: " + type;
-    this.name = 'InvalidValueException';
-}
-
-function InvalidFormatException() {
-    this.message = "Invlid format";
-    this.name = 'InvalidFormatException';
-}
-
-function DuplicatePropertyException(message) {
-    this.message = "Property " + message + " already exists in this object";
-    this.name = 'DuplicatePropertyException';
-}
-
-function DuplicateActionException(message) {
-    this.message = "Action " + message + " already exists in this object";
-    this.name = 'DuplicateActionException';
-}
-
-function DuplicateApplicationException(message) {
-    this.message = "Application " + message + " already exists in this object";
-    this.name = 'DuplicateApplicationException';
-}
-
-function NoSuchApplicationException(message) {
-    this.message = "Application " + message + " does not exist in this object";
-    this.name = 'NoSuchApplicationException';
-}
-
-function NoSuchReminderException(message) {
-    this.message = "Reminder " + message + " does not exist in this event";
-    this.name = 'NoSuchReminderException';
-}
-
-function DuplicateEventException(message) {
-    this.message = "Event " + message + " already exists in this object";
-    this.name = 'DuplicateEventException';
-}
-
-function NoSuchTemplateException(message) {
-    this.message = "Template id " + message + " does not exist";
-    this.name = 'NoSuchTemplateException';
-}
-
-function NotAnEventException(message) {
-    this.message = "Property " + message + " is not an event";
-    this.name = 'NotAnEventException';
-}
-
-function NoSuchObjectException(message) {
-    this.message = "Object id " + message + " does not exist";
-    this.name = 'NoSuchObjectException';
-}
-
-function NoSuchPropertyException(message) {
-    this.message = "Property " + message + " does not exist in this object";
-    this.name = 'NoSuchPropertyException';
-}
-
-function NoSuchEventException(message) {
-    this.message = "Event " + message + " does not exist in this object";
-    this.name = 'NoSuchEventException';
-}
-
-function PropertyNotFoundException(message) {
-    this.message = "Property " + message + " does not exist in this object";
-    this.name = 'PropertyNotFoundException';
-}
-
-function MissingAttributeException(message) {
-    this.message = "Missing attibute " + message + " in this object";
-    this.name = 'MissingAttributeException';
-}
-
-function CallbackErrorException(message) {
-    this.message = message;
-    this.name = 'CallbackErrorException';
-}
-
-function InvalidDateException(message) {
-    this.message = message + " is not a valid date";
-    this.name = 'InvalidDateException';
-}
-
-function InvalidActionException(message) {
-    this.message = message + " is not a valid event action";
-    this.name = 'InvalidActionException';
-}
-
-function InvalidDataTypeException(message, type) {
-    this.message = message + " is not of type " + type;
-    this.name = 'InvalidDataTypeException';
-}
-
-function NotATemplateExteptopn(message) {
-    this.message = message + " is not a template";
-    this.name = 'NotATemplateExteptopn';
-}
-
-function InvalidPrivilegeException(message) {
-    this.message = "Invalid privileges format";
-    this.name = 'InvalidPrivilegeException';
-}
-
-function NoSuchPrivilegeException(message) {
-    this.message = "Privilege does not exist";
-    this.name = 'NoSuchPrivilegeException';
-}
-
-function NoSuchPermissionException(message) {
-    this.message = "Permission " + message + " does not exist";
-    this.name = 'NoSuchPermissionException';
-}
-
-function InvalidPermissionException(message) {
-    this.message = "Permission format invalid";
-    this.name = 'InvalidPermissionException';
-}
-
-function InvalidEventIdException(message) {
-    this.message = "Event ID format not valid: " + message;
-    this.name = 'InvalidEventIdException';
-}
-
-
-function NoHandlerProvidedException(message) {
-    this.message = "No handler provided " + message;
-    this.name = 'NoHandlerProvidedException';
-}
-
-function HandlerExistsException(message) {
-    this.message = "Handler " + message + " already exists";
-    this.name = 'HandlerExistsException';
-}
-
-function HandlerNotFoundException(message) {
-    this.message = "Handler " + message + " not found";
-    this.name = 'HandlerNotFoundException';
-}
-
-function InvalidArgumentException(message) {
-    this.message = "Invalid argument";
-    this.name = 'InvalidArgumentException';
-}
-
-function InvalidHandlerException(message) {
-    this.message = "Invalid handler";
-    this.name = 'InvalidHandlerException';
-}
-
-function LackOfPermissionsException(message) {
-
-    if (Array.isArray(message)) {
-        var result = "No permissions to perform these operations: ";
-
-        message.forEach(function(m) {
-            result += "(" + m.name + ": " + m.key + ") ";
-        })
-
-        this.message = result;
-        this.name = 'LackOfPermissionsException';
-    } else {
-        this.message = "No permissions to perform this operation";
-        this.name = 'LackOfPermissionsException';
-    }
-
-}
 
 
 /**
@@ -295,7 +101,6 @@ var OBJY = {
         this.dsl.parse(code);
         return this;
     },
-
 
     /**
      * Serialises an object into the objy structure (comming soon)
@@ -1780,7 +1585,7 @@ var OBJY = {
             obj.applications.push(application);
             OBJY.chainPermission(obj, instance, 'a', 'addApplication', application);
 
-        } else throw new DuplicateApplicationException(application);
+        } else throw new exceptions.DuplicateApplicationException(application);
 
     },
 
@@ -1796,7 +1601,7 @@ var OBJY = {
         OBJY.chainPermission(obj, instance, 'a', 'removeApplication', application);
 
         if (!contains) {
-            throw new NoSuchApplicationException(application);
+            throw new exceptions.NoSuchApplicationException(application);
         }
     },
 
@@ -2013,9 +1818,9 @@ var OBJY = {
 
         }
 
-        if (!propertyToReturn) throw new PropertyNotFoundException(propertyName);
+        if (!propertyToReturn) throw new exceptions.PropertyNotFoundException(propertyName);
 
-        if (!propertyToReturn.type == 'objectRef') throw new PropertyNotFoundException(propertyName);
+        if (!propertyToReturn.type == 'objectRef') throw new exceptions.PropertyNotFoundException(propertyName);
 
 
         return OBJY.getObjectByIdSyn(propertyToReturn.value);
@@ -2039,7 +1844,7 @@ var OBJY = {
                 try {
                     var t = obj.events[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchEventException(propertyName);
+                    throw new exceptions.NoSuchEventException(propertyName);
                 }
 
                 eventToReturn = obj.events[access[0]];
@@ -2072,10 +1877,10 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].query) throw new NoSuchPermissionException(permissionKey);
+                if (!obj.properties[access[0]].query) throw new exceptions.NoSuchPermissionException(permissionKey);
 
 
                 delete obj.properties[access[0]].query;
@@ -2107,10 +1912,10 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].conditions) throw new NoSuchPermissionException(permissionKey);
+                if (!obj.properties[access[0]].conditions) throw new exceptions.NoSuchPermissionException(permissionKey);
 
 
                 delete obj.properties[access[0]].conditions;
@@ -2141,10 +1946,10 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].onChange[name]) throw new HandlerNotFoundException(name);
+                if (!obj.properties[access[0]].onChange[name]) throw new exceptions.HandlerNotFoundException(name);
 
                 delete obj.properties[access[0]].onChange[name];
                 return;
@@ -2172,10 +1977,10 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].meta) throw new NoSuchPermissionException(permissionKey);
+                if (!obj.properties[access[0]].meta) throw new exceptions.NoSuchPermissionException(permissionKey);
 
                 delete obj.properties[access[0]].meta;
                 return;
@@ -2203,11 +2008,11 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].onCreate) throw new HandlerNotFoundException();
-                if (!obj.properties[access[0]].onCreate[handlerName]) throw new HandlerNotFoundException();
+                if (!obj.properties[access[0]].onCreate) throw new exceptions.HandlerNotFoundException();
+                if (!obj.properties[access[0]].onCreate[handlerName]) throw new exceptions.HandlerNotFoundException();
 
                 delete obj.properties[access[0]].onCreate[handlerName];
                 return;
@@ -2235,10 +2040,10 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].onDelete[name]) throw new HandlerNotFoundException(name);
+                if (!obj.properties[access[0]].onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
 
                 delete obj.properties[access[0]].onDelete[name];
                 return;
@@ -2267,11 +2072,11 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
-                if (!obj.properties[access[0]].permissions) throw new NoSuchPermissionException(permissionKey);
-                if (!obj.properties[access[0]].permissions[permissionKey]) throw new NoSuchPermissionException(permissionKey);
+                if (!obj.properties[access[0]].permissions) throw new exceptions.NoSuchPermissionException(permissionKey);
+                if (!obj.properties[access[0]].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
                 OBJY.chainPermission(obj, instance, 'x', 'removePropertyPermission', propertyName)
 
@@ -2303,7 +2108,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
 
@@ -2345,7 +2150,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyName);
+                    throw new exceptions.NoSuchPropertyException(propertyName);
                 }
 
                 propertyToReturn = obj.properties[access[0]];
@@ -2377,7 +2182,7 @@ var OBJY = {
 
         action = Object.assign({}, action);
 
-        if (typeof action !== 'object') throw new InvalidFormatException();
+        if (typeof action !== 'object') throw new exceptions.InvalidFormatException();
         var actionKey = Object.keys(action)[0];
         var existing = null;
         try {
@@ -2385,7 +2190,7 @@ var OBJY = {
 
         } catch (e) {}
 
-        if (existing) throw new DuplicateActionException(actionKey);
+        if (existing) throw new exceptions.DuplicateActionException(actionKey);
     },
 
 
@@ -2401,7 +2206,7 @@ var OBJY = {
         var existing = null;
 
         if (typeof property !== 'object') {
-            throw new InvalidFormatException();
+            throw new exceptions.InvalidFormatException();
         }
 
 
@@ -2421,7 +2226,7 @@ var OBJY = {
             else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
         }*/
 
-        if (existing) throw new DuplicatePropertyException(propertyKey);
+        if (existing) throw new exceptions.DuplicatePropertyException(propertyKey);
 
 
         switch ((property[propertyKey] || {}).type) {
@@ -2450,7 +2255,7 @@ var OBJY = {
                         try {
                             obj.properties[propertyKey].value = JSON.parse(obj.properties[propertyKey].value);
                         } catch (e) {
-                            //throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_JSON);
+                            //throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_JSON);
                         }
                     } else {
 
@@ -2463,7 +2268,7 @@ var OBJY = {
             case CONSTANTS.PROPERTY.TYPE_NUMBER:
                 if (property[propertyKey].value != '') {
                     if (property[propertyKey].value != null)
-                        if (isNaN(property[propertyKey].value)) throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
+                        if (isNaN(property[propertyKey].value)) throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
                 }
                 property[propertyKey].value = +property[propertyKey].value;
                 obj.properties[propertyKey] = property[propertyKey];
@@ -2486,7 +2291,7 @@ var OBJY = {
                 if (_event[eventKey].interval !== undefined) {
 
                     if (_event[eventKey].lastOccurence == undefined) _event[eventKey].lastOccurence = null;
-                    else if (!moment(_event[eventKey].lastOccurence).isValid()) throw new InvalidDateException(_event[eventKey].lastOccurence);
+                    else if (!moment(_event[eventKey].lastOccurence).isValid()) throw new exceptions.InvalidDateException(_event[eventKey].lastOccurence);
                     else _event[eventKey].lastOccurence = moment(_event[eventKey].lastOccurence).utc().format();
 
 
@@ -2496,7 +2301,7 @@ var OBJY = {
                     if (_event[eventKey].action === undefined) _event[eventKey].action = '';
 
 
-                    if (_event[eventKey].interval === undefined) throw new MissingAttributeException('interval');
+                    if (_event[eventKey].interval === undefined) throw new exceptions.MissingAttributeException('interval');
 
                     _event[eventKey].nextOccurence = moment(_event[eventKey].lastOccurence || moment().utc()).utc().add(_event[eventKey].interval).toISOString();
 
@@ -2513,7 +2318,7 @@ var OBJY = {
 
                     if (_event[eventKey].date == null) _event[eventKey].date = moment().utc().toISOString();
 
-                    if (!_event[eventKey].date) throw new MissingAttributeException('date');
+                    if (!_event[eventKey].date) throw new exceptions.MissingAttributeException('date');
 
                     try {
                         _event[eventKey].date = moment(_event[eventKey].date).utc().format();
@@ -2531,7 +2336,7 @@ var OBJY = {
 
                     if (!_event[eventKey].action) _event[eventKey].action = '';
                 } else {
-                    //throw new InvalidTypeException("No interval or date provided");
+                    //throw new exceptions.InvalidTypeException("No interval or date provided");
                 }
 
                 obj.properties[propertyKey] = _event[eventKey];
@@ -2629,7 +2434,7 @@ var OBJY = {
                 break;
 
             case CONSTANTS.PROPERTY.TYPE_BOOLEAN:
-                if (!typeof property[propertyKey].value === 'boolean') throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
+                if (!typeof property[propertyKey].value === 'boolean') throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
                 obj.properties[propertyKey] = property[propertyKey];
                 OBJY.ValuePropertyMetaSubstituter(obj.properties[propertyKey]);
                 break;
@@ -2639,7 +2444,7 @@ var OBJY = {
                 OBJY.chainPermission(obj, instance, 'act', 'addProperty (Action)', propertyKey);
 
                 if (property[propertyKey].value) {
-                    if (typeof property[propertyKey].value !== 'string') throw new InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
+                    if (typeof property[propertyKey].value !== 'string') throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
                 }
 
                 obj.properties[propertyKey] = property[propertyKey];
@@ -2647,7 +2452,7 @@ var OBJY = {
                 break;
 
             default:
-                throw new InvalidTypeException(property[propertyKey].type);
+                throw new exceptions.InvalidTypeException(property[propertyKey].type);
         }
 
         if ((property[propertyKey] || {}).onCreate) {
@@ -2690,7 +2495,7 @@ var OBJY = {
 
     ObjectPermissionsCreateWrapper: function(obj, permissions) //addTemplateToObject!!!
     {
-        if (!typeof permissions == 'object') throw new InvalidPermissionException();
+        if (!typeof permissions == 'object') throw new exceptions.InvalidPermissionException();
 
         if (!permissions) return;
 
@@ -2709,13 +2514,13 @@ var OBJY = {
     },
 
     ObjectOnCreateSetWrapper: function(obj, name, onCreate, trigger, type, instance) {
-        //if (!typeof onchange == 'object') throw new InvalidPermissionException();
+        //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
-        if (!onCreate) throw new InvalidHandlerException();
+        if (!onCreate) throw new exceptions.InvalidHandlerException();
 
         if (!obj.onCreate) obj.onCreate = {};
 
-        if (obj.onCreate[name]) throw new HandlerExistsException(name);
+        if (obj.onCreate[name]) throw new exceptions.HandlerExistsException(name);
 
         if (!name) name = OBJY.RANDOM();
 
@@ -2733,7 +2538,7 @@ var OBJY = {
     },
 
     ObjectOnCreateCreateWrapper: function(obj, onCreate, instance) {
-        //if (!typeof onchange == 'object') throw new InvalidPermissionException();
+        //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
 
         if (!onCreate) return;
@@ -2762,7 +2567,7 @@ var OBJY = {
     },
 
     ObjectOnChangeCreateWrapper: function(obj, onChange, instance) {
-        //if (!typeof onchange == 'object') throw new InvalidPermissionException();
+        //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
         if (!onChange) return;
 
@@ -2776,7 +2581,7 @@ var OBJY = {
     },
 
     ObjectOnDeleteCreateWrapper: function(obj, onDelete, instance) {
-        //if (!typeof onchange == 'object') throw new InvalidPermissionException();
+        //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
         if (!onDelete) return;
 
@@ -2790,13 +2595,13 @@ var OBJY = {
     },
 
     ObjectOnChangeSetWrapper: function(obj, name, onChange, trigger, type, instance) {
-        //if (!typeof onchange == 'object') throw new InvalidPermissionException();
+        //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
-        if (!onChange) throw new InvalidHandlerException();
+        if (!onChange) throw new exceptions.InvalidHandlerException();
 
         if (!obj.onChange) obj.onChange = {};
 
-        if (obj.onChange[name]) throw new HandlerExistsException(name);
+        if (obj.onChange[name]) throw new exceptions.HandlerExistsException(name);
 
         if (!name) name = OBJY.RANDOM();
 
@@ -2816,11 +2621,11 @@ var OBJY = {
     ObjectOnDeleteSetWrapper: function(obj, name, onDelete, trigger, type, instance) {
         //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
-        if (!onDelete) throw new InvalidHandlerException();
+        if (!onDelete) throw new exceptions.InvalidHandlerException();
 
         if (!obj.onDelete) obj.onDelete = {};
 
-        if (obj.onDelete[name]) throw new HandlerExistsException(name);
+        if (obj.onDelete[name]) throw new exceptions.HandlerExistsException(name);
 
         if (!name) name = OBJY.RANDOM();
 
@@ -2840,9 +2645,9 @@ var OBJY = {
     ObjectPermissionSetWrapper: function(obj, permission, instance) //addTemplateToObject!!!
     {
         if (!obj.permissions) obj.permissions = {};
-        if (!typeof permission == 'object') throw new InvalidPermissionException();
+        if (!typeof permission == 'object') throw new exceptions.InvalidPermissionException();
 
-        if (!permission) throw new InvalidPermissionException();
+        if (!permission) throw new exceptions.InvalidPermissionException();
 
         var permissionKey = Object.keys(permission)[0];
 
@@ -2858,11 +2663,11 @@ var OBJY = {
 
     ObjectPermissionRemoveWrapper: function(obj, permissionName, instance) //addTemplateToObject!!!
     {
-        if (!permissionName) throw new InvalidPermissionException();
+        if (!permissionName) throw new exceptions.InvalidPermissionException();
 
-        if (!typeof permissionName == 'string') throw new InvalidPermissionException();
+        if (!typeof permissionName == 'string') throw new exceptions.InvalidPermissionException();
 
-        if (!obj.permissions[permissionName]) throw new NoSuchPermissionException(permissionName);
+        if (!obj.permissions[permissionName]) throw new exceptions.NoSuchPermissionException(permissionName);
 
         OBJY.chainPermission(obj, instance, 'x', 'removePermission', permissionName);
 
@@ -2889,11 +2694,11 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
-                if (typeof value !== 'object') throw new InvalidDataTypeException(value, 'object');
+                if (typeof value !== 'object') throw new exceptions.InvalidDataTypeException(value, 'object');
 
                 obj.properties[access[0]].query = query;
             }
@@ -2919,7 +2724,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
@@ -2945,7 +2750,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
@@ -2978,7 +2783,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 //if (!obj.properties[access[0]].on) obj.properties[access[0]].on = {};
@@ -3013,7 +2818,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 if (!obj.properties[access[0]].onDelete) obj.properties[access[0]].onDelete = {};
@@ -3045,7 +2850,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 obj.properties[access[0]].conditions = conditions;
@@ -3071,7 +2876,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 var permissionKey = Object.keys(permission)[0];
@@ -3117,14 +2922,14 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 if (obj.properties[access[0]].type == 'boolean') {
-                    if (typeof(newValue) != 'boolean') throw new InvalidValueException(newValue, obj.properties[access[0]].type);
+                    if (typeof(newValue) != 'boolean') throw new exceptions.InvalidValueException(newValue, obj.properties[access[0]].type);
                 }
                 if (obj.properties[access[0]].type == 'number') {
-                    if (isNaN(newValue)) throw new InvalidValueException(newValue, obj.properties[access[0]].type);
+                    if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, obj.properties[access[0]].type);
                 }
 
 
@@ -3183,7 +2988,7 @@ var OBJY = {
                     try {
                         var t = obj.properties[access[0]];
                     } catch (e) {
-                        throw new NoSuchPropertyException(propertyKey);
+                        throw new exceptions.NoSuchPropertyException(propertyKey);
                     }
                 }
 
@@ -3220,7 +3025,7 @@ var OBJY = {
 
         var prop = obj.getProperty(propertyKey);
 
-        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new NotAnEventException(propertyKey);
+        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
 
 
@@ -3250,7 +3055,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
@@ -3291,7 +3096,7 @@ var OBJY = {
 
         var prop = obj.getProperty(propertyKey);
 
-        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new NotAnEventException(propertyKey);
+        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
 
         function setValue(obj, access, value) {
@@ -3321,7 +3126,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].type;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
                 if (obj.properties[access[0]].interval)
@@ -3340,7 +3145,7 @@ var OBJY = {
 
         var prop = obj.getProperty(propertyKey);
 
-        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new NotAnEventException(propertyKey);
+        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
 
         function setValue(obj, access, value) {
@@ -3371,7 +3176,7 @@ var OBJY = {
                     var t = obj.properties[access[0]].type;
 
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
@@ -3390,7 +3195,7 @@ var OBJY = {
 
         var prop = obj.getProperty(propertyKey);
 
-        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new NotAnEventException(propertyKey);
+        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
         function setValue(obj, access, value) {
             if (typeof(access) == 'string') {
@@ -3418,7 +3223,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
@@ -3443,7 +3248,7 @@ var OBJY = {
 
         var prop = obj.getProperty(propertyKey);
 
-        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new NotAnEventException(propertyKey);
+        if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
         function setValue(obj, access, value) {
             if (typeof(access) == 'string') {
@@ -3471,7 +3276,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
@@ -3479,7 +3284,7 @@ var OBJY = {
                     try {
                         delete obj.properties[access[0]].reminders[reminder];
                     } catch (e) {
-                        throw new NoSuchReminderException(reminder);
+                        throw new exceptions.NoSuchReminderException(reminder);
                     }
                 }
 
@@ -3520,7 +3325,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
@@ -3583,7 +3388,7 @@ var OBJY = {
                 try {
                     var t = obj.properties[access[0]].value;
                 } catch (e) {
-                    throw new NoSuchPropertyException(propertyKey);
+                    throw new exceptions.NoSuchPropertyException(propertyKey);
                 }
 
 
@@ -3686,7 +3491,7 @@ var OBJY = {
 
     PrivilegeChecker: function(obj, privilege) {
 
-        if (!typeof privilege == 'object') throw new InvalidPrivilegeException();
+        if (!typeof privilege == 'object') throw new exceptions.InvalidPrivilegeException();
         var privilegeKey = Object.keys(privilege)[0];
 
         if (!obj.privileges) obj.privileges = {};
@@ -3710,11 +3515,11 @@ var OBJY = {
     PrivilegeRemover: function(obj, privilege, instance) {
 
 
-        //if (!typeof privilege == 'object') throw new InvalidPrivilegeException();
+        //if (!typeof privilege == 'object') throw new exceptions.InvalidPrivilegeException();
         var appId = instance.activeApp; //Object.keys(privilege)[0];
 
         if (!obj.privileges[appId]) {
-            throw new NoSuchPrivilegeException();
+            throw new exceptions.NoSuchPrivilegeException();
         }
 
         var i;
@@ -4217,7 +4022,7 @@ var OBJY = {
 
         this.setOnChange = function(name, onChangeObj) {
 
-            if (typeof onChangeObj !== 'object') throw new InvalidArgumentException()
+            if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
 
             new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
@@ -4226,7 +4031,7 @@ var OBJY = {
 
         this.setOnDelete = function(name, onDeleteObj) {
 
-            if (typeof onDeleteObj !== 'object') throw new InvalidArgumentException()
+            if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
 
             new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
@@ -4235,7 +4040,7 @@ var OBJY = {
 
         this.setOnCreate = function(name, onCreateObj) {
 
-            if (typeof onCreateObj !== 'object') throw new InvalidArgumentException()
+            if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
 
             new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
@@ -4243,19 +4048,19 @@ var OBJY = {
         };
 
         this.removeOnChange = function(name) {
-            if (!this.onChange[name]) throw new HandlerNotFoundException(name);
+            if (!this.onChange[name]) throw new exceptions.HandlerNotFoundException(name);
             else delete this.onChange[name];
             return this;
         };
 
         this.removeOnDelete = function(name) {
-            if (!this.onDelete[name]) throw new HandlerNotFoundException(name);
+            if (!this.onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
             else delete this.onDelete[name];
             return this;
         };
 
         this.removeOnCreate = function(name) {
-            if (!this.onCreate[name]) throw new HandlerNotFoundException(name);
+            if (!this.onCreate[name]) throw new exceptions.HandlerNotFoundException(name);
             else delete this.onCreate[name];
             return this;
         };
@@ -4411,13 +4216,13 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].reminders) throw new NoSuchReminderException(reminder); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].reminders) throw new exceptions.NoSuchReminderException(reminder); // CHANGE!!!
 
                 try {
                     delete this.properties[propertyName].reminders[reminder];
                 } catch (e) {
-                    throw new NoSuchReminderException(reminder);
+                    throw new exceptions.NoSuchReminderException(reminder);
                 }
 
             }
@@ -4449,7 +4254,7 @@ var OBJY = {
 
         this.setPropertyOnCreate = function(property, name, onCreateObj) {
 
-            if (typeof onCreateObj !== 'object') throw new InvalidArgumentException()
+            if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
 
             new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
@@ -4462,9 +4267,9 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].onCreate) throw new NoOnCreateException(); // CHANGE!!!
-                if (!this.properties[propertyName].onCreate[handlerName]) throw new NoOnCreateException(); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].onCreate) throw new exceptions.NoOnCreateException(); // CHANGE!!!
+                if (!this.properties[propertyName].onCreate[handlerName]) throw new exceptions.NoOnCreateException(); // CHANGE!!!
                 delete this.properties[propertyName].onCreate[propertyName];
             }
 
@@ -4506,8 +4311,8 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].meta) throw new NoMetaException(); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].meta) throw new exceptions.NoMetaException(); // CHANGE!!!
                 delete this.properties[propertyName].meta;
             }
 
@@ -4517,7 +4322,7 @@ var OBJY = {
 
         this.setPropertyOnChange = function(property, name, onChangeObj) {
 
-            if (typeof onChangeObj !== 'object') throw new InvalidArgumentException()
+            if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name; //Object.keys(onChangeObj)[0];
 
             new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
@@ -4530,8 +4335,8 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].onDelete[name]) throw new HandlerNotFoundException(name); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].onDelete[name]) throw new exceptions.HandlerNotFoundException(name); // CHANGE!!!
                 delete this.properties[propertyName][name];
             }
 
@@ -4547,7 +4352,7 @@ var OBJY = {
 
         this.setPropertyOnDelete = function(property, name, onDeleteObj) {
 
-            if (typeof onDeleteObj !== 'object') throw new InvalidArgumentException()
+            if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
 
             new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
@@ -4560,8 +4365,8 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].onDelete[name]) throw new HandlerNotFoundException(name); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].onDelete[name]) throw new exceptions.HandlerNotFoundException(name); // CHANGE!!!
                 delete this.properties[propertyName].onDelete[name]
             }
 
@@ -4636,8 +4441,8 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].query) throw new NoSuchPermissionException(permissionKey); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].query) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
                 delete this.properties[propertyName].query;
             }
 
@@ -4657,8 +4462,8 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].conditions) throw new NoSuchPermissionException(permissionKey); // CHANGE!!!
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].conditions) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
                 delete this.properties[propertyName].conditions;
             }
 
@@ -4683,8 +4488,8 @@ var OBJY = {
                 return;
             } else {
 
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
-                if (!this.properties[propertyName].permissions[permissionKey]) throw new NoSuchPermissionException(permissionKey);
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
                 OBJY.chainPermission(this, instance, 'x', 'removePropertyPermission', permissionKey);
 
@@ -4760,7 +4565,7 @@ var OBJY = {
                 this.removePropertyFromBag(propertyName, client);
                 return;
             } else {
-                if (!this.properties[propertyName]) throw new NoSuchPropertyException(propertyName);
+                if (!this.properties[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
 
                 var tmpProp = Object.assign({}, this.properties[propertyName]);
 
@@ -5090,7 +4895,7 @@ var OBJY = {
             if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')) return error({ error: 'Lack of Permissions' })
 
             if ((instance.permissionSequence[thisRef._id] || []).length > 0) {
-                throw new LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
+                throw new exceptions.LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
             }
 
             if (thisRef.onChange) {
