@@ -219,7 +219,6 @@ var OBJY = {
                         }
                     }
 
-
                     Object.keys(template || {}).forEach(function(p) {
 
                         var isO = isObject(template[p]);
@@ -251,9 +250,7 @@ var OBJY = {
 
                                 if (p != 'properties' && isO) obj[p].template = templateId;
 
-
                             } else {
-
 
                                 if (!obj[p].overwritten && Object.keys(obj[p]).length == 0) {
                                     obj[p] = template[p];
