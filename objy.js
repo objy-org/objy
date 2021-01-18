@@ -133,7 +133,7 @@ var OBJY = {
     tenant: function(client) {
         return this.client(client);
     },
-
+ 
     /**
      * Sets client (workspace) context
      * @param {client} - the tenant identifier
