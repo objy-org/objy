@@ -21,12 +21,15 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
           node-version: 12
           registry-url: https://registry.npmjs.org/
-      - run: npm version patch
+      - run: npm version ${{steps.get_version.outputs.VERSION}}
       - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
@@ -35,12 +38,15 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
           node-version: 12
           registry-url: https://npm.pkg.github.com/
-      - run: npm version patch
+      - run: npm version ${{steps.get_version.outputs.VERSION}}
       - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
