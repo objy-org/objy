@@ -44,7 +44,7 @@ var OBJY = {
     metaProperties: ['id', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
     // @TODO make this better!
-    predefinedProperties: ['onCreate', 'onChange', 'onDelete'],
+    predefinedProperties: ['onCreate', 'onChange', 'onDelete', 'properties'],
 
     metaPropPrefix: '',
 
@@ -2109,10 +2109,11 @@ var OBJY = {
 
 
 
-    PropertyCreateWrapper: function(obj, property, isBag, instance) {
+    PropertyCreateWrapper: function(obj, property, isBag, instance, params) {
 
         // if (!obj) obj = {};
 
+     
         property = Object.assign({}, property);
 
 
@@ -2309,7 +2310,7 @@ var OBJY = {
                     tmpProp = {};
                     tmpProp[property] = innerProperties[property];
 
-                    new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance);
+                    new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                 })
 
                 break;
@@ -2336,7 +2337,7 @@ var OBJY = {
                     tmpProp = {};
                     tmpProp[property] = innerProperties[property];
 
-                    new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance);
+                    new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                 })
 
                 break;
@@ -2374,7 +2375,7 @@ var OBJY = {
             }
         }
 
-     
+
         OBJY.chainPermission(obj, instance, 'p', 'addProperty', propertyKey);
 
         /*if(obj.permissions) {
@@ -3166,17 +3167,19 @@ var OBJY = {
         }
     },
 
-    PropertiesChecker: function(obj, properties, instance) {
+    PropertiesChecker: function(obj, properties, instance, params) {
         if (properties === undefined) return;
 
+        
         //obj.properties = {};
         var propertyKeys = Object.keys(properties);
         propertyKeys.forEach(function(property) {
             var propKey = {};
             propKey[property] = properties[property];
             var newProp = propKey;
-            new OBJY.PropertyCreateWrapper(obj, newProp, false, instance);
+            new OBJY.PropertyCreateWrapper(obj, newProp, false, instance, params);
         })
+
         return obj;
     },
 
@@ -3585,7 +3588,7 @@ var OBJY = {
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
             //this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
-            OBJY.PropertiesChecker(this, obj, instance);
+            OBJY.PropertiesChecker(this, obj, instance, params);
 
             this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
 
@@ -3663,6 +3666,11 @@ var OBJY = {
         } else {
             Object.assign(this, params.structure)
         }
+
+        /*if (params.propsObject) {
+            // @TODO add type checking
+            this.properties = OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params); // || {};
+        }*/
 
         /* this.props = function(properties) {
              this.properties = OBJY.PropertiesChecker(this, properties, instance) || {};
@@ -3750,7 +3758,7 @@ var OBJY = {
                 return;
             }
 
-            new OBJY.PropertyCreateWrapper(this, property, false, instance);
+            new OBJY.PropertyCreateWrapper(this, property, false, instance, params);
 
             return this;
         };
@@ -4215,7 +4223,7 @@ var OBJY = {
 
             var tmpBag = this.getProperty(bag);
 
-            new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance);
+            new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance, params);
 
             return this;
         };

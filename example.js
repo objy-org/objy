@@ -4,6 +4,7 @@ OBJY.define({
     //authable:true,
     name: "user",
     pluralName: "users",
+    propsObject: 'properties'
     /*storage: OBJY.customStorage({
     	add: function(elem){
     		console.log('ä', elem)
@@ -13,7 +14,12 @@ OBJY.define({
 
 
 
-OBJY.user({ username: "sdgdg", onCreate: {
+OBJY.user({ username: "sdgdg", properties: {
+	innerProp: {
+		type: 'shortText',
+		value: 'hello'
+	}
+}, onCreate: {
 	test: {
 		value: "console.log(',,,,,,,')"
 	}
