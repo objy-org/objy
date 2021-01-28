@@ -15,7 +15,6 @@ var shortid = require('shortid');
 
 var Query = require('./dependencies/query.js');
 var Logger = require('./dependencies/logger.js')
-var fluent_dsl = require('./dependencies/fluent-dsl.js')
 var CONSTANTS = require('./dependencies/constants.js')
 var exceptions = require('./dependencies/exceptions.js')
 
@@ -41,16 +40,10 @@ var OBJY = {
 
     Logger: Logger,
 
-    metaProperties: ['id', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
-
     // @TODO make this better!
-    predefinedProperties: ['onCreate', 'onChange', 'onDelete', 'properties'],
+    predefinedProperties: ['_aggregatedEvents', 'authorisations', '_id', 'properties', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
     metaPropPrefix: '',
-
-    dslType: 'js',
-
-    dsl: fluent_dsl,
 
     instance: this,
 
@@ -95,15 +88,30 @@ var OBJY = {
         return Object.assign(new OBJY.ObserverTemplate(OBJY, options), data)
     },
 
-    /**
-     * Runs luke code (comming soon)
-     * @param {code} - luke code
-     * @returns {this}
-     */
-    lang: function(code) {
-        this.dsl.parse(code);
-        return this;
+    serializePropsObject: function(realObj, obj, propsObject, instance, params) {
+        if (!obj.hasOwnProperty(propsObject)) return;
+        Object.keys(obj[propsObject]).forEach(p => {
+            if (!OBJY.predefinedProperties.includes(p)) {
+                var prop = {};
+                prop[p] = obj[propsObject][p]
+
+                new OBJY.PropertyCreateWrapper(realObj, prop, false, instance, params);
+            }
+        })
+        delete obj[propsObject];
     },
+
+    deSerializePropsObject: function(obj, params) {
+        if (!obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
+        Object.keys(obj).forEach(p => {
+            if (!OBJY.predefinedProperties.includes(p) && typeof obj[p] !== 'function') {
+                obj[params.propsObject][p] = obj[p];
+                delete obj[p];
+            }
+        })
+        return obj;
+    },
+
 
     /**
      * Serialises an object into the objy structure (comming soon)
@@ -1638,7 +1646,7 @@ var OBJY = {
         }, app, client);
     },
 
-    add: function(obj, success, error, app, client) {
+    add: function(obj, success, error, app, client, params) {
 
         if (obj) {
 
@@ -1658,12 +1666,13 @@ var OBJY = {
 
         }
 
-        this.addObject(obj, success, error, app, client);
+        this.addObject(obj, success, error, app, client, params);
 
     },
 
-    addObject: function(obj, success, error, app, client) {
+    addObject: function(obj, success, error, app, client, params) {
 
+       // OBJY.deSerializePropsObject(obj, params)
         this.mappers[obj.role].add(obj, function(data) {
             success(data);
 
@@ -1673,11 +1682,11 @@ var OBJY = {
 
     },
 
-    updateO: function(obj, success, error, app, client) {
+    updateO: function(obj, success, error, app, client, params) {
 
         var thisRef = this;
 
-        if ((obj.inherits || []).length == 0) thisRef.updateObject(obj, success, error, app, client);
+        if ((obj.inherits || []).length == 0) thisRef.updateObject(obj, success, error, app, client, params);
 
         var counter = 0;
         (obj.inherits || []).forEach(function(template) {
@@ -1688,19 +1697,19 @@ var OBJY = {
                         counter++;
                         if (counter == obj.inherits.length) {
 
-                            thisRef.updateObject(obj, success, error, app, client);
+                            thisRef.updateObject(obj, success, error, app, client, params);
 
                             return obj;
                         }
                     },
                     function(err) {
 
-                        thisRef.updateObject(obj, success, error, app, client);
+                        thisRef.updateObject(obj, success, error, app, client, params);
                         return obj;
                     }, client)
             } else {
                 if (obj.inherits.length == 1) {
-                    thisRef.updateObject(obj, success, error, app, client);
+                    thisRef.updateObject(obj, success, error, app, client, params);
                     return obj;
                 } else {
                     counter++;
@@ -1714,7 +1723,7 @@ var OBJY = {
         // ADD TENANT AND APPLICATION!!!
     },
 
-    updateObject: function(obj, success, error, app, client) {
+    updateObject: function(obj, success, error, app, client, params) {
 
         this.mappers[obj.role].update(obj, function(data) {
             success(data);
@@ -1723,7 +1732,8 @@ var OBJY = {
         }, app, client);
     },
 
-    getObjectById: function(role, id, success, error, app, client) {
+    getObjectById: function(role, id, success, error, app, client, instance, params) {
+
 
         this.mappers[role].getById(id, function(data) {
 
@@ -1733,6 +1743,7 @@ var OBJY = {
                 return;
             }
 
+          
             success(data);
 
             /*OBJY[data.role](data).get(function(ob){
@@ -2113,7 +2124,7 @@ var OBJY = {
 
         // if (!obj) obj = {};
 
-     
+
         property = Object.assign({}, property);
 
 
@@ -3170,7 +3181,7 @@ var OBJY = {
     PropertiesChecker: function(obj, properties, instance, params) {
         if (properties === undefined) return;
 
-        
+
         //obj.properties = {};
         var propertyKeys = Object.keys(properties);
         propertyKeys.forEach(function(property) {
@@ -3568,17 +3579,23 @@ var OBJY = {
             this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
         }
 
+        if (params.propsObject) {
+            // @TODO add type checking
+            OBJY.serializePropsObject(this, obj, params.propsObject, instance, params)
+            //this.properties = OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params); // || {};
+        }
+
         if (!params.structure) {
 
             //@TODO: DEPRECATE THIS!
-            this.type = obj.type;
+            //this.type = obj.type;
 
             this.applications = OBJY.ApplicationsChecker(this, obj.applications); // || [];
 
             this.inherits = OBJY.InheritsChecker(this, obj.inherits); // || [];
 
             //@TODO: DEPRECATE THIS!
-            this.name = obj.name; // || null;
+            //this.name = obj.name; // || null;
 
             this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
             this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
@@ -3588,7 +3605,7 @@ var OBJY = {
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
             //this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
-            OBJY.PropertiesChecker(this, obj, instance, params);
+            if (!params.propsObject) OBJY.PropertiesChecker(this, obj, instance, params);
 
             this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
 
@@ -3667,10 +3684,6 @@ var OBJY = {
             Object.assign(this, params.structure)
         }
 
-        /*if (params.propsObject) {
-            // @TODO add type checking
-            this.properties = OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params); // || {};
-        }*/
 
         /* this.props = function(properties) {
              this.properties = OBJY.PropertiesChecker(this, properties, instance) || {};
@@ -4338,6 +4351,8 @@ var OBJY = {
 
                         thisRef._id = data._id;
 
+                        OBJY.deSerializePropsObject(data, params)
+
                         if (success) success(OBJY.deserialize(data));
 
                         delete thisRef.instance;
@@ -4346,7 +4361,7 @@ var OBJY = {
                     function(err) {
                         console.warn('err', err, error)
                         if (error) error(err);
-                    }, app, client);
+                    }, app, client, params);
 
                 return OBJY.deserialize(this);
             }
@@ -4508,6 +4523,8 @@ var OBJY = {
 
                         Logger.log("Added Object: " + JSON.stringify(data, null, 2));
 
+                        OBJY.deSerializePropsObject(data, params)
+
                         if (success) success(OBJY.deserialize(data));
 
                         delete thisRef.instance;
@@ -4515,7 +4532,7 @@ var OBJY = {
                     },
                     function(err) {
                         if (error) error(err);
-                    }, app, client);
+                    }, app, client, params);
             }
 
 
@@ -4568,12 +4585,14 @@ var OBJY = {
 
                         instance.eventAlterationSequence = [];
 
+                        OBJY.deSerializePropsObject(data, params)
+
                         if (success) success(OBJY.deserialize(data));
 
                     },
                     function(err) {
                         if (error) error(err);
-                    }, app, client);
+                    }, app, client, params);
 
                 return OBJY.deserialize(this);
             }
@@ -4743,13 +4762,13 @@ var OBJY = {
                         }
 
                         Logger.log("Updated Object: " + data);
-
+                        OBJY.deSerializePropsObject(data, params)
                         if (success) success(OBJY.deserialize(data));
 
                     },
                     function(err) {
                         if (error) error(err);
-                    }, app, client);
+                    }, app, client, params);
 
             }
 
@@ -4824,6 +4843,7 @@ var OBJY = {
 
                     return OBJY.remove(thisRef, function(_data) {
 
+                        OBJY.deSerializePropsObject(data, params)
                         success(OBJY.deserialize(data));
 
                     }, function(err) {
@@ -4833,7 +4853,7 @@ var OBJY = {
 
                 }, function(err) {
                     if (error) error(err)
-                }, app, client);
+                }, app, client, instance, params);
 
                 return OBJY.deserialize(this);
 
@@ -4956,6 +4976,7 @@ var OBJY = {
 
                     Logger.log("Removed Object: " + data);
 
+                    OBJY.deSerializePropsObject(data, params)
                     if (success) success(OBJY.deserialize(data));
 
 
@@ -4966,7 +4987,7 @@ var OBJY = {
 
             }, function(err) {
                 if (error) error(err)
-            }, app, client);
+            }, app, client, instance, params);
 
             return OBJY.deserialize(this);
         };
@@ -4983,12 +5004,12 @@ var OBJY = {
             if (params.dirty) {
 
                 OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
-
+                    OBJY.deSerializePropsObject(data, params)
                     if (success) success(OBJY[data.role](OBJY.deserialize(data)));
 
                 }, function(err) {
                     if (error) error(err)
-                }, app, client);
+                }, app, client, instance, params);
 
                 return OBJY.deserialize(this);
             }
@@ -5021,22 +5042,24 @@ var OBJY = {
 
             function prepareObj(data) {
 
+                var returnObject = OBJY[data.role](OBJY.deserialize(data));
+
                 OBJY.applyAffects(data, null, instance, client)
 
                 if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
                 if (dontInherit) {
-                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(returnObject);
                     return data;
                 }
 
                 if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
-                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(returnObject);
                     return data;
                 }
 
                 if ((data.inherits || []).length == 0) {
-                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                    if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                     return data;
                 }
 
@@ -5047,11 +5070,13 @@ var OBJY = {
 
                         OBJY.getTemplateFieldsForObject(data, template, function() {
 
+                                var returnObject = OBJY[data.role](OBJY.deserialize(data));
+
                                 counter++;
 
                                 if (counter == data.inherits.length) {
 
-                                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                                    if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                     return data;
                                 }
                             },
@@ -5059,16 +5084,20 @@ var OBJY = {
 
                                 counter++;
 
+                                var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
                                 if (counter == data.inherits.length) {
-                                    if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                                    if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                     return data;
                                 }
                             }, client, params.templateFamily, params.templateSource)
                     } else {
 
+                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+
                         if (thisRef.inherits.length == 1) {
-                            if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+
+                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                             return data;
                         } else {
                             counter++;
@@ -5085,6 +5114,7 @@ var OBJY = {
 
                 OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
 
+                    console.log('innergot', data)
                     prepareObj(data);
 
                     if (!instance.caches[thisRef.role].data[thisRef._id]) {
@@ -5093,7 +5123,7 @@ var OBJY = {
 
                 }, function(err) {
                     if (error) error(err)
-                }, app, client);
+                }, app, client, instance, params);
             }
 
             return OBJY.deserialize(this);

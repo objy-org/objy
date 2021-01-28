@@ -14,43 +14,63 @@ OBJY.define({
 
 
 
-OBJY.user({ username: "sdgdg", properties: {
-	innerProp: {
-		type: 'shortText',
-		value: 'hello'
-	}
-}, onCreate: {
-	test: {
-		value: "console.log(',,,,,,,')"
-	}
-}, evt: {
-	type: "event",
-	date: "100000",
-	action: "console.log(1)"
-} }).add(data => {
+OBJY.user({
+    username: "sdgdg",
+    properties: {
+        innerProp: {
+            type: 'shortText',
+            value: 'hello'
+        },
+        rinnerProp: {
+            type: 'shortText',
+            value: 'hello'
+        }
+    },
+    onCreate: {
+        test: {
+            value: "console.log(',,,,,,,')"
+        }
+    }
+}).add(data => {
     //console.log(data);
 
-    data.addProperty('sdgdhdfh__', { type: "shortText", value: "sgsdg", onCreate: {
-	test: {
-		action: "console.log(',,,####,,,,')"
-	}
-}});
+ 
+    data.addProperty('sdgdhdfh__', {
+        type: "shortText",
+        value: "sgsdg",
+        onCreate: {
+            test: {
+                action: "console.log(',,,####,,,,')"
+            }
+        }
+    });
+
+    data.update(d => {
+        console.log('uuud', d)
+
+        OBJY.user(d._id).get(u => {
+        	console.log('got:', u)
+        })
+    })
+
+    /*
     data.addProperty('sdgdhdfh__bag', {
 
-            inner: {
-                type: "boolean",
-                value: true
-            }
-        
+        inner: {
+            type: "boolean",
+            value: true
+        }
+
     });
     data.setPropertyValue('sdgdhdfh__', 'new');
     data.setPropertyValue('sdgdhdfh__bag.inner', false);
     data.setProperty('ddd', 'dddd')
 
     data.update(d => {
-    	console.log('uuu', d)
-    })
-    console.log('__data', data);
+        console.log('uuu', d)
+    })*/
+       console.log('__data', data);
+    
 })
 
 
