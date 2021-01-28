@@ -102,6 +102,7 @@ var OBJY = {
     },
 
     deSerializePropsObject: function(obj, params) {
+        if(!params.propsObject) return obj;
         if (!obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
         Object.keys(obj).forEach(p => {
             if (!OBJY.predefinedProperties.includes(p) && typeof obj[p] !== 'function') {
