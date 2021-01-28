@@ -14,17 +14,10 @@ var moment = require('moment');
 var shortid = require('shortid');
 
 var Query = require('./dependencies/query.js');
-var Logger = require('./dependencies/logger.js')
 var CONSTANTS = require('./dependencies/constants.js')
 var exceptions = require('./dependencies/exceptions.js')
+var globalAttributes = require('./dependencies/global-objy-attributes.js')
 
-var StorageMapperTemplate = require('./mappers/templates/storage.js');
-var ProcessorMapperTemplate = require('./mappers/templates/processor.js')
-var ObserverMapperTemplate = require('./mappers/templates/observer.js')
-
-var StorageTemplate = StorageMapperTemplate;
-var ProcessorTemplate = ProcessorMapperTemplate;
-var ObserverTemplate = ObserverMapperTemplate;
 
 var DefaultStorageMapper = require('./mappers/storage.inmemory.js')
 var DefaultProcessorMapper = require('./mappers/processor.eval.js')
@@ -36,45 +29,7 @@ var DefaultObserverMapper = require('./mappers/observer.interval.js')
  */
 var OBJY = {
 
-    self: this,
-
-    Logger: Logger,
-
-    // @TODO make this better!
-    predefinedProperties: ['_aggregatedEvents', 'authorisations', '_id', 'properties', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
-
-    metaPropPrefix: '',
-
-    instance: this,
-
-    activeTenant: null,
-
-    activeUser: null,
-
-    activeApp: null,
-
-    schema: {
-
-    },
-
-    affectables: [],
-
-    staticRules: [],
-
-    backgroundAffectables: this.staticRules,
-
-    handlerSequence: [],
-    permissionSequence: [],
-    commandSequence: [],
-    eventAlterationSequence: [],
-
-    storage: null,
-    processor: null,
-    observer: null,
-
-    StorageTemplate: StorageTemplate,
-    ProcessorTemplate: ProcessorTemplate,
-    ObserverTemplate: ObserverTemplate,
+    ...globalAttributes,
 
     customStorage: function(data, options) {
         return Object.assign(new OBJY.StorageTemplate(OBJY, options), data)
@@ -102,7 +57,7 @@ var OBJY = {
     },
 
     deSerializePropsObject: function(obj, params) {
-        if(!params.propsObject) return obj;
+        if (!params.propsObject) return obj;
         if (!obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
         Object.keys(obj).forEach(p => {
             if (!OBJY.predefinedProperties.includes(p) && typeof obj[p] !== 'function') {
@@ -950,7 +905,7 @@ var OBJY = {
     },
 
     execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
-        Logger.log("triggering dsl")
+        OBJY.Logger.log("triggering dsl")
         this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, this.instance.activeUser, options);
     },
 
@@ -1673,7 +1628,7 @@ var OBJY = {
 
     addObject: function(obj, success, error, app, client, params) {
 
-       // OBJY.deSerializePropsObject(obj, params)
+        // OBJY.deSerializePropsObject(obj, params)
         this.mappers[obj.role].add(obj, function(data) {
             success(data);
 
@@ -1744,7 +1699,7 @@ var OBJY = {
                 return;
             }
 
-          
+
             success(data);
 
             /*OBJY[data.role](data).get(function(ob){
@@ -3302,7 +3257,7 @@ var OBJY = {
             if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
 
 
-            this.get = function(success, error) {
+            Object.getPrototypeOf(this).get = function(success, error) {
 
                 var client = instance.activeTenant;
                 var app = instance.activeApp;
@@ -3415,7 +3370,7 @@ var OBJY = {
 
             }
 
-            this.count = function(success, error) {
+            Object.getPrototypeOf(this).count = function(success, error) {
 
                 var client = instance.activeTenant;
                 var app = instance.activeApp;
@@ -3437,7 +3392,7 @@ var OBJY = {
 
         } else if (Array.isArray(objs)) {
 
-            this.add = function(success, error) {
+            Object.getPrototypeOf(this).add = function(success, error) {
 
                 var client = instance.activeTenant;
                 var app = instance.activeApp;
@@ -3518,7 +3473,7 @@ var OBJY = {
             return this;
         } else {
 
-            this.auth = function(userObj, callback, error) {
+            Object.getPrototypeOf(this).auth = function(userObj, callback, error) {
 
                 var query = { username: userObj.username };
 
@@ -3546,7 +3501,7 @@ var OBJY = {
 
     Obj: function(obj, role, instance, params) {
 
-        Logger.log("Plain Object: " + obj);
+        OBJY.Logger.log("Plain Object: " + obj);
 
         if (instance.metaPropPrefix != '' && typeof obj !== "string") obj = OBJY.serialize(obj);
 
@@ -3691,12 +3646,12 @@ var OBJY = {
              return this;
          };*/
 
-        this.addInherit = function(templateId) {
+        Object.getPrototypeOf(this).addInherit = function(templateId) {
             OBJY.addTemplateToObject(this, templateId, instance);
             return this;
         };
 
-        this.removeInherit = function(templateId, success, error) {
+        Object.getPrototypeOf(this).removeInherit = function(templateId, success, error) {
             OBJY.removeTemplateFromObject(this, templateId, function(data) {
                     if (success) success(templateId);
                 },
@@ -3706,17 +3661,17 @@ var OBJY = {
             return this;
         };
 
-        this.addApplication = function(application) {
+        Object.getPrototypeOf(this).addApplication = function(application) {
             OBJY.addApplicationToObject(this, application, instance);
             return this;
         };
 
-        this.removeApplication = function(application) {
+        Object.getPrototypeOf(this).removeApplication = function(application) {
             OBJY.removeApplicationFromObject(this, application, instance);
             return this;
         };
 
-        this.replace = function(newObj) {
+        Object.getPrototypeOf(this).replace = function(newObj) {
 
             newObj = OBJY[this.role](newObj);
 
@@ -3753,7 +3708,7 @@ var OBJY = {
             //OBJY.prepareObjectDelta(this, newObj);
         };
 
-        this.addProperty = function(name, property) {
+        Object.getPrototypeOf(this).addProperty = function(name, property) {
 
             var prop = {};
             prop[name] = property;
@@ -3777,7 +3732,7 @@ var OBJY = {
             return this;
         };
 
-        this.setOnChange = function(name, onChangeObj) {
+        Object.getPrototypeOf(this).setOnChange = function(name, onChangeObj) {
 
             if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
@@ -3786,7 +3741,7 @@ var OBJY = {
             return this;
         };
 
-        this.setOnDelete = function(name, onDeleteObj) {
+        Object.getPrototypeOf(this).setOnDelete = function(name, onDeleteObj) {
 
             if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
@@ -3795,7 +3750,7 @@ var OBJY = {
             return this;
         };
 
-        this.setOnCreate = function(name, onCreateObj) {
+        Object.getPrototypeOf(this).setOnCreate = function(name, onCreateObj) {
 
             if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
@@ -3804,25 +3759,25 @@ var OBJY = {
             return this;
         };
 
-        this.removeOnChange = function(name) {
+        Object.getPrototypeOf(this).removeOnChange = function(name) {
             if (!this.onChange[name]) throw new exceptions.HandlerNotFoundException(name);
             else delete this.onChange[name];
             return this;
         };
 
-        this.removeOnDelete = function(name) {
+        Object.getPrototypeOf(this).removeOnDelete = function(name) {
             if (!this.onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
             else delete this.onDelete[name];
             return this;
         };
 
-        this.removeOnCreate = function(name) {
+        Object.getPrototypeOf(this).removeOnCreate = function(name) {
             if (!this.onCreate[name]) throw new exceptions.HandlerNotFoundException(name);
             else delete this.onCreate[name];
             return this;
         };
 
-        this.setPermission = function(name, permission) {
+        Object.getPrototypeOf(this).setPermission = function(name, permission) {
 
             var perm = {};
             perm[name] = permission;
@@ -3832,12 +3787,12 @@ var OBJY = {
             return this;
         };
 
-        this.removePermission = function(permission) {
+        Object.getPrototypeOf(this).removePermission = function(permission) {
             new OBJY.ObjectPermissionRemoveWrapper(this, permission, instance);
             return this;
         };
 
-        this.setPropertyValue = function(property, value, client) {
+        Object.getPrototypeOf(this).setPropertyValue = function(property, value, client) {
 
             new OBJY.PropertySetWrapper(this, property, value, instance, ['addObject']);
 
@@ -3845,7 +3800,7 @@ var OBJY = {
             return this;
         };
 
-        this.setProperty = function(property, value, client) {
+        Object.getPrototypeOf(this).setProperty = function(property, value, client) {
 
 
 
@@ -3855,14 +3810,14 @@ var OBJY = {
             return this;
         };
 
-        this.makeProperty = function(property, value, client) {
+        Object.getPrototypeOf(this).makeProperty = function(property, value, client) {
 
             new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject'], true);
 
             return this;
         };
 
-        this.setEventDate = function(property, value, client) {
+        Object.getPrototypeOf(this).setEventDate = function(property, value, client) {
 
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
@@ -3878,7 +3833,7 @@ var OBJY = {
             return this;
         };
 
-        this.setEventAction = function(property, value, client) {
+        Object.getPrototypeOf(this).setEventAction = function(property, value, client) {
 
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
@@ -3894,7 +3849,7 @@ var OBJY = {
             return this;
         };
 
-        this.setEventTriggered = function(property, value, client) {
+        Object.getPrototypeOf(this).setEventTriggered = function(property, value, client) {
 
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
@@ -3910,7 +3865,7 @@ var OBJY = {
             return this;
         };
 
-        this.setEventLastOccurence = function(property, value, client) {
+        Object.getPrototypeOf(this).setEventLastOccurence = function(property, value, client) {
 
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
@@ -3927,7 +3882,7 @@ var OBJY = {
             return this;
         };
 
-        this.setEventInterval = function(property, value, client) {
+        Object.getPrototypeOf(this).setEventInterval = function(property, value, client) {
 
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
@@ -3943,7 +3898,7 @@ var OBJY = {
             return this;
         };
 
-        this.pushToArray = function(array, value) {
+        Object.getPrototypeOf(this).pushToArray = function(array, value) {
 
             var propKey = Object.keys(value)[0];
             var tmpProp = {};
@@ -3955,7 +3910,7 @@ var OBJY = {
             this.addPropertyToBag(array, tmpProp);
         };
 
-        this.setPropertyPermission = function(property, name, permission) {
+        Object.getPrototypeOf(this).setPropertyPermission = function(property, name, permission) {
 
             var perm = {};
             perm[name] = permission;
@@ -3965,7 +3920,7 @@ var OBJY = {
             return this;
         };
 
-        this.setPropertyOnCreate = function(property, name, onCreateObj) {
+        Object.getPrototypeOf(this).setPropertyOnCreate = function(property, name, onCreateObj) {
 
             if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
@@ -3974,7 +3929,7 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyOnCreate = function(propertyName, handlerName) {
+        Object.getPrototypeOf(this).removePropertyOnCreate = function(propertyName, handlerName) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyOnCreateFromBag(propertyName, handlerName);
                 return;
@@ -3989,7 +3944,7 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyOnCreateFromBag = function(property, handlerName) {
+        Object.getPrototypeOf(this).removePropertyOnCreateFromBag = function(property, handlerName) {
             var bag = this.getProperty(property);
             if (this.role == 'template') {
 
@@ -3998,12 +3953,12 @@ var OBJY = {
             return this;
         };
 
-        this.setPropertyMeta = function(property, meta) {
+        Object.getPrototypeOf(this).setPropertyMeta = function(property, meta) {
             new OBJY.PropertyMetaSetWrapper(this, property, meta);
             return this;
         };
 
-        this.removePropertyMetaFromBag = function(property) {
+        Object.getPrototypeOf(this).removePropertyMetaFromBag = function(property) {
             var bag = this.getProperty(property);
             if (this.role == 'template') {
 
@@ -4012,7 +3967,7 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyMeta = function(propertyName) {
+        Object.getPrototypeOf(this).removePropertyMeta = function(propertyName) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyMetaFromBag(propertyName);
                 return;
@@ -4026,7 +3981,7 @@ var OBJY = {
         };
 
 
-        this.setPropertyOnChange = function(property, name, onChangeObj) {
+        Object.getPrototypeOf(this).setPropertyOnChange = function(property, name, onChangeObj) {
 
             if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name; //Object.keys(onChangeObj)[0];
@@ -4035,7 +3990,7 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyOnChange = function(propertyName, name) {
+        Object.getPrototypeOf(this).removePropertyOnChange = function(propertyName, name) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyOnChangeFromBag(propertyName, name);
                 return;
@@ -4048,14 +4003,14 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyOnChangeFromBag = function(property, name) {
+        Object.getPrototypeOf(this).removePropertyOnChangeFromBag = function(property, name) {
             var bag = this.getProperty(property);
 
             new OBJY.PropertyBagItemOnChangeRemover(this, property, name);
             return this;
         };
 
-        this.setPropertyOnDelete = function(property, name, onDeleteObj) {
+        Object.getPrototypeOf(this).setPropertyOnDelete = function(property, name, onDeleteObj) {
 
             if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException()
             var key = name;
@@ -4064,7 +4019,7 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyOnDelete = function(propertyName, name) {
+        Object.getPrototypeOf(this).removePropertyOnDelete = function(propertyName, name) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyOnDeleteFromBag(propertyName, name);
                 return;
@@ -4077,14 +4032,14 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyOnDeleteFromBag = function(property, name) {
+        Object.getPrototypeOf(this).removePropertyOnDeleteFromBag = function(property, name) {
             var bag = this.getProperty(property);
 
             new OBJY.PropertyBagItemOnDeleteRemover(this, property, name);
             return this;
         };
 
-        this.setPropertyConditions = function(property, conditions) {
+        Object.getPrototypeOf(this).setPropertyConditions = function(property, conditions) {
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
                 var lastDot = propertyKey.lastIndexOf(".");
@@ -4098,18 +4053,18 @@ var OBJY = {
             return this;
         };
 
-        this.setBagPropertyConditions = function(bag, property, conditions) {
+        Object.getPrototypeOf(this).setBagPropertyConditions = function(bag, property, conditions) {
             new OBJY.PropertyConditionsSetWrapper(this.getProperty(bag), property, conditions);
             return this;
         };
 
 
-        this.setBagPropertyPermission = function(bag, property, permission) {
+        Object.getPrototypeOf(this).setBagPropertyPermission = function(bag, property, permission) {
             new OBJY.PropertyPermissionSetWrapper(this.getProperty(bag), property, permission);
             return this;
         };
 
-        this.setPropertyQuery = function(property, options) {
+        Object.getPrototypeOf(this).setPropertyQuery = function(property, options) {
             var propertyKey = Object.keys(property)[0];
             if (propertyKey.indexOf('.') != -1) {
                 var lastDot = propertyKey.lastIndexOf(".");
@@ -4137,7 +4092,7 @@ var OBJY = {
             return this;
         };*/
 
-        this.removePropertyQuery = function(propertyName) {
+        Object.getPrototypeOf(this).removePropertyQuery = function(propertyName) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyQueryFromBag(propertyName);
                 return;
@@ -4151,14 +4106,14 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyQueryFromBag = function(property) {
+        Object.getPrototypeOf(this).removePropertyQueryFromBag = function(property) {
             var bag = this.getProperty(property);
 
             new OBJY.PropertyBagItemQueryRemover(this, property);
             return this;
         };
 
-        this.removePropertyConditions = function(propertyName) {
+        Object.getPrototypeOf(this).removePropertyConditions = function(propertyName) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyConditionsFromBag(propertyName);
                 return;
@@ -4172,20 +4127,20 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyConditionsFromBag = function(property) {
+        Object.getPrototypeOf(this).removePropertyConditionsFromBag = function(property) {
             var bag = this.getProperty(property);
 
             new OBJY.PropertyBagItemConditionsRemover(this, property);
             return this;
         };
 
-        this.setBagPropertyQuery = function(bag, property, options) {
+        Object.getPrototypeOf(this).setBagPropertyQuery = function(bag, property, options) {
             // @TODO ...
             //new OBJY.setBagPropertyQuery(this.getProperty(bag), property, permoptionsission);
             return this;
         };
 
-        this.removePropertyPermission = function(propertyName, permissionKey) {
+        Object.getPrototypeOf(this).removePropertyPermission = function(propertyName, permissionKey) {
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyPermissionFromBag(propertyName, permissionKey);
                 return;
@@ -4202,38 +4157,38 @@ var OBJY = {
             return this;
         };
 
-        this.setBagPropertyValue = function(bag, property, value, client) {
+        Object.getPrototypeOf(this).setBagPropertyValue = function(bag, property, value, client) {
             new OBJY.PropertySetWrapper(this.getProperty(bag), property, value, instance);
             return this;
         };
 
-        this.setBagEventDate = function(bag, property, value, client) {
+        Object.getPrototypeOf(this).setBagEventDate = function(bag, property, value, client) {
             new OBJY.EventDateSetWrapper(this.getProperty(bag), property, value, ['addObject']);
             return this;
         };
 
-        this.setBagEventAction = function(bag, property, value, client) {
+        Object.getPrototypeOf(this).setBagEventAction = function(bag, property, value, client) {
             new OBJY.EventActionSetWrapper(this.getProperty(bag), property, value, ['addObject']);
             return this;
         };
 
-        this.setBagEventInterval = function(bag, property, value, client) {
+        Object.getPrototypeOf(this).setBagEventInterval = function(bag, property, value, client) {
             new OBJY.EventIntervalSetWrapper(this.getProperty(bag), property, value, instance);
             return this;
         };
 
-        this.setBagEventTriggered = function(bag, property, value, client) {
+        Object.getPrototypeOf(this).setBagEventTriggered = function(bag, property, value, client) {
             new OBJY.EventTriggeredSetWrapper(this.getProperty(bag), property, value, ['addObject']);
             return this;
         };
 
-        this.setBagEventLastOccurence = function(bag, property, value, client) {
+        Object.getPrototypeOf(this).setBagEventLastOccurence = function(bag, property, value, client) {
             new OBJY.EventLastOccurenceSetWrapper(this.getProperty(bag), property, value, ['addObject']);
             return this;
         };
 
 
-        this.addPropertyToBag = function(bag, property) {
+        Object.getPrototypeOf(this).addPropertyToBag = function(bag, property) {
 
             var tmpBag = this.getProperty(bag);
 
@@ -4242,21 +4197,21 @@ var OBJY = {
             return this;
         };
 
-        this.removePropertyFromBag = function(property, client) {
+        Object.getPrototypeOf(this).removePropertyFromBag = function(property, client) {
             var bag = this.getProperty(property);
 
             new OBJY.PropertyBagItemRemover(this, property, instance);
             return this;
         };
 
-        this.removePropertyPermissionFromBag = function(property, permissionKey) {
+        Object.getPrototypeOf(this).removePropertyPermissionFromBag = function(property, permissionKey) {
             var bag = this.getProperty(property);
 
             new OBJY.PropertyBagItemPermissionRemover(this, property, permissionKey, instance);
             return this;
         };
 
-        this.removeProperty = function(propertyName, client) {
+        Object.getPrototypeOf(this).removeProperty = function(propertyName, client) {
 
             if (propertyName.indexOf('.') != -1) {
                 this.removePropertyFromBag(propertyName, client);
@@ -4294,15 +4249,15 @@ var OBJY = {
         };
 
 
-        this.getId = function() {
+        Object.getPrototypeOf(this).getId = function() {
             return this._id;
         };
 
-        this.getName = function() {
+        Object.getPrototypeOf(this).getName = function() {
             return this.name;
         };
 
-        this.setName = function(name) {
+        Object.getPrototypeOf(this).setName = function(name) {
             this.name = name;
 
             OBJY.chainPermission(this, instance, 'n', 'setName', name);
@@ -4310,30 +4265,30 @@ var OBJY = {
             return this;
         };
 
-        this.setType = function(type) {
+        Object.getPrototypeOf(this).setType = function(type) {
             this.type = type;
             OBJY.chainPermission(this, instance, 't', 'setType', type);
             return this;
         };
 
-        this.getType = function() {
+        Object.getPrototypeOf(this).getType = function() {
             return this.type;
         };
 
-        this.getRef = function(propertyName) {
+        Object.getPrototypeOf(this).getRef = function(propertyName) {
             return new OBJY.PropertyRefParser(this, propertyName);
         };
 
-        this.getProperty = function(propertyName) {
+        Object.getPrototypeOf(this).getProperty = function(propertyName) {
 
             return OBJY.PropertyParser(this, propertyName);
         };
 
-        this.getProperties = function() {
+        Object.getPrototypeOf(this).getProperties = function() {
             return this;
         };
 
-        this.add = function(success, error, client) {
+        Object.getPrototypeOf(this).add = function(success, error, client) {
 
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
@@ -4522,7 +4477,7 @@ var OBJY = {
 
                         instance.eventAlterationSequence = [];
 
-                        Logger.log("Added Object: " + JSON.stringify(data, null, 2));
+                        OBJY.Logger.log("Added Object: " + JSON.stringify(data, null, 2));
 
                         OBJY.deSerializePropsObject(data, params)
 
@@ -4569,7 +4524,7 @@ var OBJY = {
             return OBJY.deserialize(this);
         };
 
-        this.update = function(success, error, client) {
+        Object.getPrototypeOf(this).update = function(success, error, client) {
 
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
@@ -4762,7 +4717,7 @@ var OBJY = {
                             }, client, params)
                         }
 
-                        Logger.log("Updated Object: " + data);
+                        OBJY.Logger.log("Updated Object: " + data);
                         OBJY.deSerializePropsObject(data, params)
                         if (success) success(OBJY.deserialize(data));
 
@@ -4829,7 +4784,7 @@ var OBJY = {
             return OBJY.deserialize(this);
         };
 
-        this.remove = function(success, error, client) {
+        Object.getPrototypeOf(this).remove = function(success, error, client) {
 
             var client = client || instance.activeTenant;
             var app = instance.activeApp;
@@ -4975,7 +4930,7 @@ var OBJY = {
 
                     }
 
-                    Logger.log("Removed Object: " + data);
+                    OBJY.Logger.log("Removed Object: " + data);
 
                     OBJY.deSerializePropsObject(data, params)
                     if (success) success(OBJY.deserialize(data));
@@ -4993,7 +4948,7 @@ var OBJY = {
             return OBJY.deserialize(this);
         };
 
-        this.get = function(success, error, dontInherit) {
+        Object.getPrototypeOf(this).get = function(success, error, dontInherit) {
 
             var client = instance.activeTenant;
             var app = instance.activeApp;
@@ -5134,7 +5089,7 @@ var OBJY = {
     },
 
     hello: function() {
-        Logger.log("Hello from OBJY!");
+        OBJY.Logger.log("Hello from OBJY!");
     }
 }
 
