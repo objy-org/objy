@@ -1,4 +1,4 @@
-var Query = require('../dependencies/query.js');
+var Query = require('../lib/dependencies/query.js');
 
 module.exports = function(OBJY) {
     return {

@@ -1,4 +1,4 @@
-var CONSTANTS = require('../dependencies/constants.js')
+var CONSTANTS = require('../lib/dependencies/constants.js')
 
 module.exports = function(OBJY) {
     return {

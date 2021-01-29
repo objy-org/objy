@@ -1,6 +1,6 @@
 var moment = require('moment');
-var CONSTANTS = require('../dependencies/constants.js');
-var exceptions = require('../dependencies/exceptions.js')
+var CONSTANTS = require('../lib/dependencies/constants.js');
+var exceptions = require('../lib/dependencies/exceptions.js')
 
 
 var isObject = function(a) {

@@ -1,3 +1,5 @@
+var Query = require('../lib/dependencies/query.js');
+
 module.exports = function(OBJY) {
     return {
         /**
@@ -252,6 +254,41 @@ module.exports = function(OBJY) {
             query = { $or: query };
 
             return query;
-        }
+        },
+
+        /**
+         * Chains permission information, when performing multiple operations
+         * @param {obj} - the object
+         * @param {instance} - the OBJY instance
+         * @param {code} - the permission code
+         * @param {name} - the permission name
+         * @param {key} - the permission key
+         */
+        chainPermission: function(obj, instance, code, name, key) {
+
+            if (['c', 'r', 'u', 'd', 'x'].includes(code)) {
+
+            } else code = 'u';
+
+            if (obj.permissions) {
+                if (Object.keys(obj.permissions).length > 0) {
+                    if (!instance.permissionSequence[obj._id]) instance.permissionSequence[obj._id] = [];
+
+                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, code, true))
+                        instance.permissionSequence[obj._id].push({
+                            name: name,
+                            key: key
+                        });
+                }
+            }
+        },
+
+        getElementPermisson: function(element) {
+            if (!element) return {};
+            else if (!element.permissions) return {};
+            else return element.permissions;
+        },
+
+
     }
 }

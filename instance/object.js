@@ -1,4 +1,4 @@
-var exceptions = require('../dependencies/exceptions.js')
+var exceptions = require('../lib/dependencies/exceptions.js')
 
 module.exports = function(OBJY) {
     return {
