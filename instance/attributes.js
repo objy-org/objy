@@ -1,6 +1,6 @@
-var StorageMapperTemplate = require('../lib/mappers/templates/storage.js');
-var ProcessorMapperTemplate = require('../lib/mappers/templates/processor.js')
-var ObserverMapperTemplate = require('../lib/mappers/templates/observer.js')
+var StorageMapperTemplate = require('../mappers/templates/storage.js');
+var ProcessorMapperTemplate = require('../mappers/templates/processor.js')
+var ObserverMapperTemplate = require('../mappers/templates/observer.js')
 var Logger = require('../lib/dependencies/logger.js')
 
 var StorageTemplate = StorageMapperTemplate;

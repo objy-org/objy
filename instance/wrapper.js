@@ -1,6 +1,6 @@
-var DefaultStorageMapper = require('../lib/mappers/storage.inmemory.js')
-var DefaultProcessorMapper = require('../lib/mappers/processor.eval.js')
-var DefaultObserverMapper = require('../lib/mappers/observer.interval.js')
+var DefaultStorageMapper = require('../mappers/storage.inmemory.js')
+var DefaultProcessorMapper = require('../mappers/processor.eval.js')
+var DefaultObserverMapper = require('../mappers/observer.interval.js')
 
 module.exports = function(OBJY) {
     return {
