@@ -11,7 +11,7 @@ OBJY.define({
 	})
 })
 
-OBJY.user({username: "sdgdg"}).add(data => {
+OBJY.user({username: "sdgdg", onCreate: {test: {value: function(){console.log('ffff----')}}}}).add(data => {
 	console.log(data);
 })
 

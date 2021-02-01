@@ -3612,9 +3612,9 @@ var OBJY = {
 
                             if (d._id != template) {
 
-                                OBJY.getTemplateFieldsForObject(_d, template, function() {
+                                OBJY.getTemplateFieldsForObject(d, template, function() {
 
-                                        d = _d;
+                                        //d = _d;
 
                                         counter++;
 
