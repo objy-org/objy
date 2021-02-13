@@ -257,7 +257,7 @@ module.exports = function(OBJY) {
 
         },
 
-        PropertyParser: function(obj, propertyName) {
+        PropertyParser: function(obj, propertyName, instance) {
             var thisRef = this;
 
             var propertyToReturn;

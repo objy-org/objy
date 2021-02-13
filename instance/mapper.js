@@ -207,9 +207,7 @@ module.exports = function(OBJY) {
 
         getObjectById: function(role, id, success, error, app, client, instance, params) {
 
-
             this.mappers[role].getById(id, function(data) {
-
 
                 if (data == null) {
                     error('Error - object not found: ' + id);

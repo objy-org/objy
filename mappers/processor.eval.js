@@ -14,7 +14,7 @@ Mapper = function(OBJY, mapperOptions) {
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }
-                callback();
+                if(callback) callback();
             } else {
                 try {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
@@ -25,7 +25,7 @@ Mapper = function(OBJY, mapperOptions) {
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }
-                callback();
+                if(callback) callback();
             }
         }
     })

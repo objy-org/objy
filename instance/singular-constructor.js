@@ -8,9 +8,9 @@ var isObject = function(a) {
 };
 
 
+
 module.exports = function(OBJY) {
     return {
-
 
         Obj: function(obj, role, instance, params) {
 
@@ -794,7 +794,7 @@ module.exports = function(OBJY) {
 
             Object.getPrototypeOf(this).getProperty = function(propertyName) {
 
-                return OBJY.PropertyParser(this, propertyName);
+                return OBJY.PropertyParser(this, propertyName, instance);
             };
 
             Object.getPrototypeOf(this).getProperties = function() {
@@ -1598,8 +1598,56 @@ module.exports = function(OBJY) {
                 return OBJY.deserialize(this);
             }
 
+            const validator = {
+              get: (obj, prop) => {
+                console.log('gett')
+                if (typeof obj[prop] === 'object' && obj[prop] !== null) {
+                  return new Proxy(obj[prop], validator)
+                } else {
+                  return obj[prop]
+                }
+              },
+              set: (obj, prop, value) => {
+                if(Array.isArray(obj) && prop == 'length') return true;
+                console.log('set', obj, prop)
+                obj[prop] = value;
+                this.update();
+                return true
+              },
 
+              deleteProperty: (obj, prop, value) => {
+                console.log('delete', obj, prop)
+                delete obj[prop];
+                this.update();
+                return true;
+              }
+            }
+                
+            if(!params.storage) {
+                this.add();
+                var thisRef = this;
+                 (this.inherits || []).forEach(function(template) {
+
+                        console.log('fffff', instance.activeTenant)
+
+                            OBJY.getTemplateFieldsForObject(thisRef, template, function() {
+                                    console.log('got')
+                                },
+                                function(err) {
+                                    console.log('errr', err)
+                                }, instance.activeTenant, params.templateFamily, params.templateSource)
+                        
+                    });
+
+                 console.log('thisRef', thisRef)
+
+                return new Proxy(this, validator);
+            }
+            return OBJY.deserialize(this);
         },
 
     }
+
 }
+
+

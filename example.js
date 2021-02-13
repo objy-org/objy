@@ -12,7 +12,44 @@ OBJY.define({
     })*/
 })
 
+OBJY.client('fff')
 
+var myO = OBJY.user({
+    _id:123,
+    username: "sdgdg",
+    onCreate: {
+        test: {
+            action: "console.log('ddddd')"
+        }
+    }
+});
+
+console.log(myO);
+console.log('mappers', OBJY.mappers.user, OBJY.mappers.user.database.fff)
+
+myO.type = {};
+myO.type.test = true;
+delete myO.type.test;
+
+myO.addProperty('ddd', true)
+
+console.log(myO)
+
+//myO.remove();
+
+console.log(OBJY.bucket)
+
+console.log(OBJY.user({inherits:[123]}))
+
+
+OBJY.user({
+    ac: {
+        type: "action",
+        value: "console.log('ölölölölö')"
+    }
+}).getProperty('ac').call();
+
+return;
 
 OBJY.user({
     username: "sdgdg",
