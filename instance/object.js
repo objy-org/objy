@@ -237,6 +237,8 @@ module.exports = function(OBJY) {
 
                     Object.keys(template).forEach(function(p) {
 
+                        if(OBJY.predefinedProperties.includes(p) && (isObject(template[p]) || Array.isArray(template[p]))) return;
+
                         if(!template[p]) return;
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));

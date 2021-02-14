@@ -12,7 +12,44 @@ OBJY.define({
     })*/
 })
 
+OBJY.define({
+    name: "object",
+    pluralName: "objects"
+})
+
 OBJY.client('fff')
+
+OBJY.object({
+    _id: 'general',
+    permissions: {
+        admin: {
+            value: "crud"
+        }
+    }
+})
+
+
+var kassenautomat = OBJY.object({
+    name: "kassenautomat",
+    inherits: ['general']
+})
+
+
+console.log(kassenautomat)
+
+
+return;
+
+
+
+
+
+
+
+
+
+
+
 
 var myO = OBJY.user({
     _id:123,
