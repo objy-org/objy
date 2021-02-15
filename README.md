@@ -1,11 +1,10 @@
-# OBJY
+# OBJY - JavaScript objects with behaviour
 
 [![MIT License](https://img.shields.io/apm/l/atomic-design-ui.svg?)](LICENSE.md)
 [![Gitter](https://badges.gitter.im/objy-dev/community.svg)](https://gitter.im/objy-dev/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 
-
-An object-driven, cross-platform programming framework, written in JavaScript, that uses behaviour-driven objects for modelling use cases.
+An object-driven programming framework, that uses behaviour-driven objects for building use cases.
 
 ![OBJY LOGO](https://objy-org.github.io/logo.png "OBJY")
 
@@ -22,152 +21,185 @@ npm install objy
 ### Browser
 
 ```html
-<script src="https://raw.githubusercontent.com/objy-org/objy/dev/dist/browser.js">
+<script src="https://cdn.jsdelivr.net/npm/objy/dist/browser.js">
 ```
-
 
 
 ## Programming with OBJY
 
 Programming on OBJY is done in two simple steps:
 
-1. Define an Object Family (a bucket of objects) an choose how objects in this family are stored, processed and observed.
+1. Define an object family (a bucket of objects)
 2. Build and handle objects and tell them what to do.
 
 
-### Object Family
+### Quick example
 
 ```javascript
-
 //Define Object Family
-
 OBJY.define({
    name: "object", // singular constructor name
    pluralName: "objects" // plural constructor name
 })
 
-// OBJY now has the contructors:
-
-OBJY.object() // as a wrapper for single objects
-OBJY.objects() // as wrapper for multiple objects
-```
-
-### Simple object
-
-```javascript
-
-//Build an object
-
 OBJY.object({
-   properties: {
-      name: "Passport",
-      expires: "2020-10-10",
-      number: "123"
+   expired: false,
+   expiration_date: {
+      date: "12/31/2022",
+      action: () => {
+         obj.setProperty('expired', true).update();
+      }
+   },
+   maintenance: {
+      interval: "1PY",
+      action: () => {
+         console.log('annually maintenence');
+      }
    }
 })
-
-// or:
-
-OBJY.object().props({
-   name: "Passport",
-   expires: "2020-10-10",
-   number: "123"
-})
 ```
 
-### Object with behaviour
+
+### Handling objects
+
+Objects are handled using an OBJY wrapper: OBJY.object().
 
 ```javascript
+// Create an object (onCreate handlers will trigger)
+var myObj = OBJY.object({
+   name: "Hello"
+});
+// Update an object (onChange handlers will trigger)
+myObj.name = "Hello World";
+// or use the built-in methods:
+myObj.addProperty('color', 'blue');
+// Delete an object (onDelete handlers will trigger)
+myObj.remove();
+```
 
-//Build an object
+### Date or interval-based events:
 
+Events can either have a date or an interval. OBJY takes care of running the associated action.
+
+```javascript
 OBJY.object({
    ...
-   warnMe: {
-      date: "2020-10-05",
-      action: "email('expiring soon!')"
+   expiration_date: {
+      date: "12/31/2022",
+      action: () => {
+         obj.setProperty('expired', true).update();
+      }
    },
-   onChange: "if(this.number.length == 0) return;"
+   maintenance: {
+      interval: "1PY",
+      action: () => {
+         console.log('annually maintenence');
+      }
+   }
 })
 ```
 
-### Add
+### Triggers
+
+Use onCreate, onChange or onDelete to capture these events and OBJY runs a custom action.
 
 ```javascript
-// add one
-OBJY.object({}).add(callback);
-
-// add multiple
-OBJY.objects([{}],[{}]).add(callback);
+OBJY.object({
+   ...
+   onDelete: {
+      quit: {
+         action: () => {
+            console.log('Im now gone...')
+         }}
+   }
+})
 ```
 
-### Get one
-```javascript
-OBJY.object(id).get(callback);
-```
-
-### Query
-
-```javascript
-OBJY.objects({type:'example', 'properties.expired' : false}).get(callback);
-```
-
-### Update
+### Custom actions
 
 ```javascript
-// update one
-OBJY.object(id)
-   .setPropertyValue('expired', false)
-   .addProperty('open', false).
-   .save(callback)
-
-// replace one
-OBJY.Object(id).replace(newObject).save(callback);
+OBJY.object({
+   ...
+   _id: 123,
+   openMe: {
+      type: "action",
+      value: () => {x
+         console.log('i am now open')
+      }
+   }
+})
+// call it like this
+OBJY.object({...}).getProperty('openMe').call()
 ```
 
-### Delete
+### Inheritance
 
 ```javascript
-// delete one
-OBJY.object(id).delete(callback);
+// first object
+OBJY.object({
+   _id: 123,
+   type: "yogurt"
+})
+// second object that inherits from first object
+// inherit from one or more other objects using their id
+OBJY.object({
+   ... 
+   inherits: [123], 
+   // type: "yogurt" and all other props are present here
+})
+``` 
+
+### Querying your objects
+
+Every object you create lives inside the OBJY instance. For accessing and working with all your objects, OBJY offers the following built-in query API:
+
+```javascript
+// Query all active objects
+OBJY.objects({json query}).get(objects => {
+   console.log(objects) // an array containing the matched objects
+})
 ```
 
 
-## Customize
+### Persistence
 
-Objects can be very different in their nature. Some objects are big, some are small, some are produced very vast, some not so fast. When you define an object family, you can tell OBJY where objects in this family are stored, how they are processed and observed, along with other options.
+OBJY objects either live in your JS instance or can come from other sources, like databases, file systems, or third-party systems. These sources are be defined when defining custom object wrappers.
+
+```javascript
+// Define you own object wrapper with a storage mapper
+OBJY.define({
+   name: "item",
+   pluralName: "items",
+   storage: new mongoDB(...)
+})
+// Use one object:
+OBJY.item({})
+// Use multiple objects:
+OBJY.items([{},{}])
+```
+
+### Customization
 
 ```javascript
 OBJY.define({
-   // manatory
-   name: "object",
-   pluralName: "objects"
-   
-   // mappers
-   storage: {}, // defaults to "in memory"
-   processor: {}, // defaults to "eval"
-   observer: {} // defaults to "interval",
-   
-   // + other optional options
-   authable: false, // Defines wether objects in a family can have privileges for access control
-   templateFamily: null, // Defines which object family is the source for inheritence. Defaults to the own object family
-   staticProps: {}, // Defines static properties that are preset for all objects in the object family
-   staticFuncs: {}, // Defines static functions that are preset for all objects in the object family
-   hasAffects: false // Defines wether the object family serves as bucket for defining affectables
+   ...
+   // Attach your own storage (can be anything that supports crud)
+   storage: OBJY.customStorage({
+      add: () => {},
+      getById: () => {},
+      ...
+   }),
+   // Customize, how actions are executed
+   processor: OBJY.customProcessor({
+      execute: (action) => {}, 
+      ...
+   }),
+   // Observe events yourself
+   observer: OBJY.customObserver({
+      run: () => {}
+   })
 })
 ```
-
-> Default mappers are already initialized! If you'd like to work in memory, just ignore the mappers section
-
-### Mapper types
-
-| Type        | Explanation           | 
-| ------------- |-------------| 
-| `storage`      | Storage mappers can be plugged in to define where and how objects in an object family are persistent. | 
-| `processor`      | Processor Mappers define, how object actions are executed. | 
-| `observer`      | Observer Mappers define, how object events are observed and time-based actions triggered. | 
-
-
 
 ## Authors
 
