@@ -13,7 +13,7 @@ module.exports = function(OBJY) {
         Logger: Logger,
 
         // @TODO make this better!
-        predefinedProperties: ['_aggregatedEvents', 'authorisations', '_id', 'properties', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
+        predefinedProperties: ['username', 'name', 'type', 'email', 'password', '_aggregatedEvents', 'authorisations', '_id', 'properties', 'role', 'applications', 'inherits', 'onCreate', 'onChange', 'onDelete', 'permissions', 'privileges', 'created', 'lastModified'],
 
         metaPropPrefix: '',
 
