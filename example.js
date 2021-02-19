@@ -25,6 +25,11 @@ OBJY.object({
         admin: {
             value: "crud"
         }
+    },
+    evt: {
+    	type: 'event',
+    	interval: 100,
+    	action: 'console.log("acrion...")'
     }
 })
 

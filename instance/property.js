@@ -316,11 +316,6 @@ module.exports = function(OBJY) {
             }
 
 
-            try {
-                existing = propsObj[propertyKey]
-
-            } catch (e) {}
-
             /*if (!property[propertyKey].type) {
                 obj.properties[propertyKey] = property[propertyKey];
                
@@ -332,8 +327,7 @@ module.exports = function(OBJY) {
                 else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
             }*/
 
-            if (existing) throw new exceptions.DuplicatePropertyException(propertyKey);
-
+            if(propsObj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey)) throw new exceptions.DuplicatePropertyException(propertyKey);
 
             switch ((property[propertyKey] || {}).type) {
                 case undefined:
