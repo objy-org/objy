@@ -1,5 +1,14 @@
 var OBJY = require('./objy.js');
 
+
+OBJY.affectables = [{
+	_id: 123,
+	affects: {},
+	apply: {
+		test: 'hh'
+	}
+}]
+
 OBJY.define({
     //authable:true,
     name: "user",
