@@ -179,7 +179,7 @@ module.exports = function(OBJY) {
 
                             thisRef.updateObject(obj, success, error, app, client, params);
                             return obj;
-                        }, client)
+                        }, client, params)
                 } else {
                     if (obj.inherits.length == 1) {
                         thisRef.updateObject(obj, success, error, app, client, params);

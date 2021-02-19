@@ -67,29 +67,52 @@ module.exports = function(OBJY) {
             return this;
         },
 
+        getPropsObject: function(obj, params){
+            if(obj.hasOwnProperty('role'))
+                if(params.hasOwnProperty('propsObject'))
+                    if(!obj.hasOwnProperty(params.propsObject))
+                        obj[params.propsObject] = {};
+
+            return obj[params.propsObject] || obj;
+        },
+
         serializePropsObject: function(realObj, obj, propsObject, instance, params) {
+            /*
             if (!obj.hasOwnProperty(propsObject)) return;
             Object.keys(obj[propsObject]).forEach(p => {
-                if (!OBJY.predefinedProperties.includes(p)) {
+                if (!OBJY.predefinedProperties.includes(p) && realObj.hasOwnProperty('role')) {
                     var prop = {};
                     prop[p] = obj[propsObject][p]
-
-                    new OBJY.PropertyCreateWrapper(realObj, prop, false, instance, params);
+                    realObj[p] =  obj[propsObject][p]
+                    //new OBJY.PropertyCreateWrapper(realObj, prop, false, instance, params);
                 }
             })
-            delete obj[propsObject];
+            delete obj[propsObject];*/
         },
 
         deSerializePropsObject: function(obj, params) {
+            return obj;
+
             if (!params.propsObject) return obj;
             if (!obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
             Object.keys(obj).forEach(p => {
                 if (!OBJY.predefinedProperties.includes(p) && typeof obj[p] !== 'function') {
+                    console.log('---', p)
                     obj[params.propsObject][p] = obj[p];
                     delete obj[p];
                 }
             })
             return obj;
+        },
+
+        deSerializePropsObjectMulti: function(objs, params) {
+            /*if (!params.propsObject) return objs;
+            
+            objs.forEach(obj => {
+                OBJY.deSerializePropsObject(obj, params)
+            })*/
+
+            return objs;
         },
 
         /**

@@ -21,7 +21,6 @@ module.exports = function(OBJY) {
 
                 if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
 
-
                 Object.getPrototypeOf(this).get = function(success, error) {
 
                     var client = instance.activeTenant;
@@ -35,7 +34,6 @@ module.exports = function(OBJY) {
 
                         var i;
                         for (i = 0; i < data.length; i++) {
-
                             if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](OBJY.deserialize(data[i]))
                         }
 
@@ -44,14 +42,14 @@ module.exports = function(OBJY) {
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
-                            success(data);
+                            success(OBJY.deSerializePropsObjectMulti(data, params));
                             return;
                         }
 
                         if (data.length == 0) {
                             //console.info(data)
 
-                            success(data);
+                            success(OBJY.deSerializePropsObjectMulti(data, params));
                             return;
                         }
 
@@ -75,7 +73,7 @@ module.exports = function(OBJY) {
 
                                 if (allCounter == data.length) {
 
-                                    success(data);
+                                    success(OBJY.deSerializePropsObjectMulti(data, params));
                                     return d;
                                 }
                             }
@@ -84,9 +82,8 @@ module.exports = function(OBJY) {
 
                                 if (d._id != template) {
 
-                                    OBJY.getTemplateFieldsForObject(_d, template, function() {
+                                    OBJY.getTemplateFieldsForObject(d, template, function() {
 
-                                            d = _d;
 
                                             counter++;
 
@@ -95,7 +92,7 @@ module.exports = function(OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                success(data);
+                                                success(OBJY.deSerializePropsObjectMulti(data, params));
                                                 return d;
                                             }
                                         },
@@ -107,16 +104,16 @@ module.exports = function(OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                success(data);
+                                                success(OBJY.deSerializePropsObjectMulti(data, params));
                                                 return d;
                                             }
 
-                                        }, client, params.templateFamily, params.templateSource)
+                                        }, client, params.templateFamily, params.templateSource, params)
                                 } else {
 
                                     if (d.inherits.length == 1) {
 
-                                        success(data);
+                                        success(OBJY.deSerializePropsObjectMulti(data, params));
                                         return d;
                                     } else {
                                         counter++;
@@ -204,7 +201,7 @@ module.exports = function(OBJY) {
                                             function(err) {
                                                 error(err);
                                                 return data;
-                                            }, client, params.templateFamily, params.templateSource)
+                                            }, client, params.templateFamily, params.templateSource, params)
                                     } else {
 
                                         if (data.inherits.length == 1) {

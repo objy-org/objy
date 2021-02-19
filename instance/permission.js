@@ -149,6 +149,7 @@ module.exports = function(OBJY) {
                 delete query.$query;
             }
 
+           
             if (!user.spooAdmin) {
 
                 if (!user.privileges) return query;
@@ -189,6 +190,7 @@ module.exports = function(OBJY) {
                     //inn["permissions.*"] = "*"
                     //privArr.push(inn);
 
+                    
                     if (Object.keys(query).length > 0) {
 
                         return { $and: [query, { $or: privArr }] }
@@ -198,6 +200,7 @@ module.exports = function(OBJY) {
                 } else if (!app) {
                     return query;
                 }
+                
             } else {
                 return query
             }

@@ -257,22 +257,24 @@ module.exports = function(OBJY) {
 
         },
 
-        PropertyParser: function(obj, propertyName, instance) {
+        PropertyParser: function(obj, propertyName, instance, params) {
             var thisRef = this;
 
             var propertyToReturn;
 
             function getValue(obj, access) {
+                var propsObj = obj[params.propsObject] || obj;
+
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    getValue(obj[access.shift()], access);
+                    getValue(propsObj[access.shift()], access);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
-                    propertyToReturn = obj[access[0]];
+                    propertyToReturn = propsObj[access[0]];
                 }
             }
 
@@ -297,29 +299,13 @@ module.exports = function(OBJY) {
         },
 
 
-        ActionCreateWrapper: function(obj, action, client) {
-
-            action = Object.assign({}, action);
-
-            if (typeof action !== 'object') throw new exceptions.InvalidFormatException();
-            var actionKey = Object.keys(action)[0];
-            var existing = null;
-            try {
-                existing = obj.actions[actionKey]
-
-            } catch (e) {}
-
-            if (existing) throw new exceptions.DuplicateActionException(actionKey);
-        },
-
-
-
         PropertyCreateWrapper: function(obj, property, isBag, instance, params) {
 
-            // if (!obj) obj = {};
-
+            if (params.propsObject && !obj[params.propsObject]) obj[params.propsObject] = {};
 
             property = Object.assign({}, property);
+
+            var propsObj = obj[params.propsObject] || obj;
 
 
             var propertyKey = Object.keys(property)[0];
@@ -328,6 +314,12 @@ module.exports = function(OBJY) {
             if (typeof property !== 'object') {
                 throw new exceptions.InvalidFormatException();
             }
+
+
+            try {
+                existing = propsObj[propertyKey]
+
+            } catch (e) {}
 
             /*if (!property[propertyKey].type) {
                 obj.properties[propertyKey] = property[propertyKey];
@@ -340,34 +332,34 @@ module.exports = function(OBJY) {
                 else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
             }*/
 
-            if (obj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey)) throw new exceptions.DuplicatePropertyException(propertyKey);
+            if (existing) throw new exceptions.DuplicatePropertyException(propertyKey);
 
 
             switch ((property[propertyKey] || {}).type) {
                 case undefined:
-                    obj[propertyKey] = property[propertyKey];
+                    propsObj[propertyKey] = property[propertyKey];
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_SHORTTEXT:
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_LONGTEXT:
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_INDEXEDTEXT:
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_JSON:
                     if (property[propertyKey].value) {
                         if (typeof property[propertyKey].value === 'string') {
                             try {
-                                obj[propertyKey].value = JSON.parse(obj[propertyKey].value);
+                                propsObj[propertyKey].value = JSON.parse(propsObj[propertyKey].value);
                             } catch (e) {
                                 //throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_JSON);
                             }
@@ -375,8 +367,8 @@ module.exports = function(OBJY) {
 
                         }
                     }
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_NUMBER:
@@ -385,8 +377,8 @@ module.exports = function(OBJY) {
                             if (isNaN(property[propertyKey].value)) throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
                     }
                     property[propertyKey].value = +property[propertyKey].value;
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_EVENT:
@@ -453,30 +445,30 @@ module.exports = function(OBJY) {
                         //throw new exceptions.InvalidTypeException("No interval or date provided");
                     }
 
-                    obj[propertyKey] = _event[eventKey];
+                    propsObj[propertyKey] = _event[eventKey];
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_DATE:
                     if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = null;
                     //else property[propertyKey].value = property[propertyKey];
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
 
                 case CONSTANTS.PROPERTY.TYPE_SHORTID:
                     if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = OBJY.RANDOM();
                     if (obj.role == 'template') property[propertyKey].value = null;
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_REF_OBJ:
 
 
                     // FOR NOW: no checking for existing object, since callback!!!
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_REF_USR:
@@ -484,8 +476,8 @@ module.exports = function(OBJY) {
 
 
                     // FOR NOW: no checking for existing object, since callback!!!
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_REF_FILE:
@@ -493,44 +485,44 @@ module.exports = function(OBJY) {
 
 
                     // FOR NOW: no checking for existing object, since callback!!!
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG:
 
-                    if (!property[propertyKey]) property[propertyKey] = {};
+                    if (!property[propertyKey].properties) property[propertyKey].properties = {};
 
-                    var innerProperties = property[propertyKey];
+                    var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
 
                     var propertyKeys = Object.keys(innerProperties);
 
                     parentProp = property;
 
-                    obj[propertyKey] = property[propertyKey];
-                    obj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
-                    obj[propertyKey] = {};
+                    propsObj[propertyKey] = property[propertyKey];
+                    propsObj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
+                    propsObj[propertyKey].properties = {};
 
                     propertyKeys.forEach(function(property) {
                         tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
-                        new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
+                        new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                     })
 
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_ARRAY:
 
-                    if (!property[propertyKey]) property[propertyKey] = {};
+                    if (!property[propertyKey].properties) property[propertyKey].properties = {};
 
-                    var innerProperties = property[propertyKey];
+                    var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
 
                     var propertyKeys = Object.keys(innerProperties);
 
                     parentProp = property;
 
-                    obj[propertyKey] = {
+                    propsObj[propertyKey] = {
                         type: CONSTANTS.PROPERTY.TYPE_ARRAY,
                         properties: {},
                         query: property[propertyKey].query,
@@ -542,15 +534,15 @@ module.exports = function(OBJY) {
                         tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
-                        new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
+                        new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                     })
 
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_BOOLEAN:
                     if (!typeof property[propertyKey].value === 'boolean') throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_ACTION:
@@ -561,8 +553,8 @@ module.exports = function(OBJY) {
                         if (typeof property[propertyKey].value !== 'string') throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
                     }
 
-                    obj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj[propertyKey]);
+                    propsObj[propertyKey] = property[propertyKey];
+                    OBJY.ValuePropertyMetaSubstituter(obj.properties[propertyKey]);
                     break;
 
                 default:
@@ -595,21 +587,23 @@ module.exports = function(OBJY) {
 
 
 
-        PropertyQuerySetWrapper: function(obj, propertyKey, query) {
+        PropertyQuerySetWrapper: function(obj, propertyKey, query, params) {
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
+
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setValue(obj[access.shift()], access, value);
+                    setValue(propsObj[access.shift()], access, value);
                 } else {
                     //obj[access[0]] = value;
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (typeof value !== 'object') throw new exceptions.InvalidDataTypeException(value, 'object');
 
-                    obj[access[0]].query = query;
+                    propsObj[access[0]].query = query;
                 }
             }
 
@@ -618,82 +612,86 @@ module.exports = function(OBJY) {
 
 
 
-        PropertyMetaSetWrapper: function(obj, propertyKey, meta) {
-            function setOnChange(obj, access, meta) {
+        PropertyMetaSetWrapper: function(obj, propertyKey, meta, params) {
+            
+            function setMeta(obj, access, meta) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setOnChange(obj[access.shift()], access, meta);
+                    setMeta(propsObj[access.shift()], access, meta);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                    if (obj[access[0]].template) obj[access[0]].metaOverwritten = true;
-                    obj[access[0]].meta = meta;
+                    if (propsObj[access[0]].template) propsObj[access[0]].metaOverwritten = true;
+                    propsObj[access[0]].meta = meta;
                 }
             }
 
-            setOnChange(obj, propertyKey, meta);
+            setMeta(obj, propertyKey, meta);
         },
 
 
-        PropertyOnChangeSetWrapper: function(obj, propertyKey, name, onChange, trigger, type, instance) {
+        PropertyOnChangeSetWrapper: function(obj, propertyKey, name, onChange, trigger, type, instance, params) {
             function setOnChange(obj, access, onChange) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setOnChange(obj[access.shift()], access, onChange);
+                    setOnChange(propsObj[access.shift()], access, onChange);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                    if (!obj[access[0]].onChange) obj[access[0]].onChange = {}
+                    if (!propsObj[access[0]].onChange) propsObj[access[0]].onChange = {}
 
-                    if (!obj[access[0]].onChange[name]) obj[access[0]].onChange[name] = {}
+                    if (!propsObj[access[0]].onChange[name]) propsObj[access[0]].onChange[name] = {}
 
-                    if (obj[access[0]].onChange[name].template) obj[access[0]].onChange[name].overwritten = true;
-                    obj[access[0]].onChange[name].value = onChange;
-                    obj[access[0]].onChange[name].trigger = trigger || 'after';
-                    obj[access[0]].onChange[name].type = type || 'async';
+                    if (propsObj[access[0]].onChange[name].template) propsObj[access[0]].onChange[name].overwritten = true;
+                    propsObj[access[0]].onChange[name].value = onChange;
+                    propsObj[access[0]].onChange[name].trigger = trigger || 'after';
+                    propsObj[access[0]].onChange[name].type = type || 'async';
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'w', 'setPropertyOnChangeHandler', name);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'w', 'setPropertyOnChangeHandler', name);
                 }
             }
 
             setOnChange(obj, propertyKey, onChange);
         },
 
-        PropertyOnCreateSetWrapper: function(obj, propertyKey, name, onCreate, trigger, type, instance) {
+        PropertyOnCreateSetWrapper: function(obj, propertyKey, name, onCreate, trigger, type, instance, params) {
             function setOnCreate(obj, access, onCreate) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setOnCreate(obj[access.shift()], access, onCreate);
+                    setOnCreate(propsObj[access.shift()], access, onCreate);
                 } else {
                     //obj[access[0]] = value;
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                    if (!obj[access[0]].onCreate) obj[access[0]].onCreate = {};
+                    if (!propsObj[access[0]].onCreate) propsObj[access[0]].onCreate = {};
 
-                    if (!obj[access[0]].onCreate[name]) obj[access[0]].onCreate[name] = {};
+                    if (!propsObj[access[0]].onCreate[name]) propsObj[access[0]].onCreate[name] = {};
 
-                    if (obj[access[0]].onCreate[name].templateId) obj[access[0]].onCreate[name].overwritten = true;
+                    if (propsObj[access[0]].onCreate[name].templateId) propsObj[access[0]].onCreate[name].overwritten = true;
 
-                    obj[access[0]].onCreate[name].value = onCreate;
-                    obj[access[0]].onCreate[name].trigger = trigger || 'after';
-                    obj[access[0]].onCreate[name].type = type || 'async';
+                    propsObj[access[0]].onCreate[name].value = onCreate;
+                    propsObj[access[0]].onCreate[name].trigger = trigger || 'after';
+                    propsObj[access[0]].onCreate[name].type = type || 'async';
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'v', 'setPropertyOnCreateHandler', name);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'v', 'setPropertyOnCreateHandler', name);
 
                 }
             }
@@ -701,70 +699,73 @@ module.exports = function(OBJY) {
             setOnCreate(obj, propertyKey, onCreate);
         },
 
-        PropertyOnDeleteSetWrapper: function(obj, propertyKey, name, onDelete, trigger, type, instance) {
+        PropertyOnDeleteSetWrapper: function(obj, propertyKey, name, onDelete, trigger, type, instance, params) {
             function setOnDelete(obj, access, onDelete) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setOnDelete(obj[access.shift()], access, onDelete);
+                    setOnDelete(propsObj[access.shift()], access, onDelete);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (!obj[access[0]].onDelete) obj[access[0]].onDelete = {};
-                    if (!obj[access[0]].onDelete[name]) obj[access[0]].onDelete[name] = {};
+                    if (!propsObj[access[0]].onDelete) propsObj[access[0]].onDelete = {};
+                    if (!propsObj[access[0]].onDelete[name]) propsObj[access[0]].onDelete[name] = {};
 
 
-                    if (obj[access[0]].onDelete[name].template) obj[access[0]].onDelete[name].overwritten = true;
-                    obj[access[0]].onDelete[name].value = onDelete;
-                    obj[access[0]].onDelete[name].trigger = trigger || 'after';
-                    obj[access[0]].onDelete[name].type = type || 'async';
+                    if (propsObj[access[0]].onDelete[name].template) propsObj[access[0]].onDelete[name].overwritten = true;
+                    propsObj[access[0]].onDelete[name].value = onDelete;
+                    propsObj[access[0]].onDelete[name].trigger = trigger || 'after';
+                    propsObj[access[0]].onDelete[name].type = type || 'async';
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'z', 'setPropertyOnDeleteHandler', name);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'z', 'setPropertyOnDeleteHandler', name);
                 }
             }
 
             setOnDelete(obj, propertyKey, onDelete);
         },
 
-        PropertyConditionsSetWrapper: function(obj, propertyKey, conditions) {
+        PropertyConditionsSetWrapper: function(obj, propertyKey, conditions, params) {
 
             function setConditions(obj, access, conditions) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setConditions(obj[access.shift()], access, conditions);
+                    setConditions(propsObj[access.shift()], access, conditions);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    obj[access[0]].conditions = conditions;
+                    propsObj[access[0]].conditions = conditions;
                 }
             }
 
             setConditions(obj, propertyKey, conditions);
         },
 
-        PropertyPermissionSetWrapper: function(obj, propertyKey, permission, instance) {
+        PropertyPermissionSetWrapper: function(obj, propertyKey, permission, instance, params) {
 
             function setPermission(obj, access, permission) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-                    setPermission(obj[access.shift()], access, permission);
+                    setPermission(propsObj[access.shift()], access, permission);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     var permissionKey = Object.keys(permission)[0];
-                    if (!obj[access[0]].permissions) obj[access[0]].permissions = {};
+                    if (!propsObj[access[0]].permissions) propsObj[access[0]].permissions = {};
 
-                    obj[access[0]].permissions[permissionKey] = permission[permissionKey];
+                    propsObj[access[0]].permissions[permissionKey] = permission[permissionKey];
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'x', 'setPropertyPermission', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'x', 'setPropertyPermission', propertyKey);
                 }
             }
 
@@ -773,10 +774,11 @@ module.exports = function(OBJY) {
         },
 
 
-        PropertySetWrapper: function(obj, propertyKey, newValue, instance, notPermitted) {
+        PropertySetWrapper: function(obj, propertyKey, newValue, instance, params) {
 
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -784,47 +786,47 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (obj[access[0]].type == 'boolean') {
-                        if (typeof(newValue) != 'boolean') throw new exceptions.InvalidValueException(newValue, obj[access[0]].type);
+                    if (propsObj[access[0]].type == 'boolean') {
+                        if (typeof(newValue) != 'boolean') throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
                     }
-                    if (obj[access[0]].type == 'number') {
-                        if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, obj[access[0]].type);
+                    if (propsObj[access[0]].type == 'number') {
+                        if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
                     }
 
 
-                    if (obj[access[0]].template) obj[access[0]].overwritten = true;
-                    obj[access[0]].value = newValue;
+                    if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
+                    propsObj[access[0]].value = newValue;
 
 
-                    if (obj[access[0]].onChange) {
-                        if (Object.keys(obj[access[0]].onChange).length > 0) {
-                            if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
-                            if (!instance.handlerSequence[obj._id].onChange) instance.handlerSequence[obj._id].onChange = [];
-                            instance.handlerSequence[obj._id].onChange.push({
-                                handler: obj[access[0]].onChange,
-                                prop: obj[access[0]]
+                    if (propsObj[access[0]].onChange) {
+                        if (Object.keys(propsObj[access[0]].onChange).length > 0) {
+                            if (!instance.handlerSequence[propsObj._id]) instance.handlerSequence[propsObj._id] = {};
+                            if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
+                            instance.handlerSequence[propsObj._id].onChange.push({
+                                handler: propsObj[access[0]].onChange,
+                                prop: propsObj[access[0]]
                             });
                         }
                     }
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
 
                 }
             }
@@ -835,10 +837,11 @@ module.exports = function(OBJY) {
         },
 
 
-        PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, notPermitted, force) {
+        PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, force, params) {
 
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -846,47 +849,47 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
                     if (!force) {
                         try {
-                            var t = obj[access[0]];
+                            var t = propsObj[access[0]];
                         } catch (e) {
                             throw new exceptions.NoSuchPropertyException(propertyKey);
                         }
                     }
 
-                    if (isObject(obj[access[0]]) && obj[access[0]].template) {
+                    if (isObject(propsObj[access[0]]) && propsObj[access[0]].template) {
                         newValue.overwritten = true;
-                        newValue.template = obj[access[0]].template
+                        newValue.template = propsObj[access[0]].template
                     }
 
-                    obj[access[0]] = newValue;
+                    propsObj[access[0]] = newValue;
 
-                    if (isObject(obj[access[0]]) && obj[access[0]].onChange) {
-                        if (Object.keys(obj[access[0]].onChange).length > 0) {
-                            if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
-                            if (!instance.handlerSequence[obj._id].onChange) instance.handlerSequence[obj._id].onChange = [];
-                            instance.handlerSequence[obj._id].onChange.push({
-                                handler: obj[access[0]].onChange,
-                                prop: obj[access[0]]
+                    if (isObject(propsObj[access[0]]) && propsObj[access[0]].onChange) {
+                        if (Object.keys(propsObj[access[0]].onChange).length > 0) {
+                            if (!instance.handlerSequence[propsObj._id]) instance.handlerSequence[propsObj._id] = {};
+                            if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
+                            instance.handlerSequence[propsObj._id].onChange.push({
+                                handler: propsObj[access[0]].onChange,
+                                prop: propsObj[access[0]]
                             });
                         }
                     }
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'u', 'setProperty', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setProperty', propertyKey);
 
 
                 }
@@ -896,7 +899,7 @@ module.exports = function(OBJY) {
 
         },
 
-        EventIntervalSetWrapper: function(obj, propertyKey, newValue, client, instance) {
+        EventIntervalSetWrapper: function(obj, propertyKey, newValue, client, instance, params) {
 
 
             var prop = obj.getProperty(propertyKey);
@@ -906,6 +909,7 @@ module.exports = function(OBJY) {
 
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -913,48 +917,48 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (obj[access[0]].template) obj[access[0]].overwritten = true;
+                    if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
 
-                    delete obj[access[0]].date;
-                    obj[access[0]].interval = newValue;
+                    delete propsObj[access[0]].date;
+                    propsObj[access[0]].interval = newValue;
 
-                    if (obj[access[0]].lastOccurence) {
+                    if (propsObj[access[0]].lastOccurence) {
 
-                        var nextOccurence = moment(obj[access[0]].lastOccurence).utc().add(newValue);
+                        var nextOccurence = moment(propsObj[access[0]].lastOccurence).utc().add(newValue);
                         instance.eventAlterationSequence.push({
                             operation: 'remove',
                             obj: obj,
                             propName: propertyKey,
-                            property: obj[access[0]],
+                            property: propsObj[access[0]],
                             date: nextOccurence
                         })
                         instance.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
-                            property: obj[access[0]],
+                            property: propsObj[access[0]],
                             date: nextOccurence
                         })
                     }
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'u', 'setEventInterval', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventInterval', propertyKey);
 
                 }
             }
@@ -963,13 +967,14 @@ module.exports = function(OBJY) {
 
         },
 
-        EventTriggeredSetWrapper: function(obj, propertyKey, newValue, client, notPermitted) {
+        EventTriggeredSetWrapper: function(obj, propertyKey, newValue, client, params) {
 
             var prop = obj.getProperty(propertyKey);
 
             if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -978,26 +983,26 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (obj[access[0]].interval)
-                        obj[access[0]].nextOccurence = moment().utc().add(obj[access[0]].interval).toISOString();
-                    else obj[access[0]].triggered = newValue;
+                    if (propsObj[access[0]].interval)
+                        propsObj[access[0]].nextOccurence = moment().utc().add(propsObj[access[0]].interval).toISOString();
+                    else propsObj[access[0]].triggered = newValue;
                     //obj[access[0]].overwritten = true;
                 }
             }
@@ -1007,7 +1012,7 @@ module.exports = function(OBJY) {
         },
 
 
-        EventLastOccurenceSetWrapper: function(obj, propertyKey, newValue, client, notPermitted) {
+        EventLastOccurenceSetWrapper: function(obj, propertyKey, newValue, client, params) {
 
             var prop = obj.getProperty(propertyKey);
 
@@ -1015,6 +1020,7 @@ module.exports = function(OBJY) {
 
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -1022,26 +1028,26 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    obj[access[0]].lastOccurence = newValue;
+                    propsObj[access[0]].lastOccurence = newValue;
 
-                    obj[access[0]].nextOccurence = moment(newValue).utc().add(moment.duration(obj[access[0]].interval)).toISOString();
+                    propsObj[access[0]].nextOccurence = moment(newValue).utc().add(moment.duration(propsObj[access[0]].interval)).toISOString();
                 }
             }
 
@@ -1050,10 +1056,11 @@ module.exports = function(OBJY) {
         },
 
 
-        EventDateSetWrapper: function(obj, propertyKey, newValue, client, instance) {
+        EventDateSetWrapper: function(obj, propertyKey, newValue, client, instance, params) {
 
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -1061,47 +1068,47 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
 
-                    if (obj[access[0]].template) obj[access[0]].overwritten = true;
-                    delete obj[access[0]].interval;
-                    delete obj[access[0]].lastOccurence;
-                    delete obj[access[0]].nextOccurence;
-                    obj[access[0]].date = newValue;
+                    if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
+                    delete propsObj[access[0]].interval;
+                    delete propsObj[access[0]].lastOccurence;
+                    delete propsObj[access[0]].nextOccurence;
+                    propsObj[access[0]].date = newValue;
 
 
                     instance.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: obj,
                         propName: propertyKey,
-                        property: obj[access[0]],
+                        property: propsObj[access[0]],
                         date: newValue
                     })
                     instance.eventAlterationSequence.push({
                         operation: 'add',
                         obj: obj,
                         propName: propertyKey,
-                        property: obj[access[0]],
+                        property: propsObj[access[0]],
                         date: newValue
                     })
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'u', 'setEventDate', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventDate', propertyKey);
 
                 }
             }
@@ -1110,9 +1117,11 @@ module.exports = function(OBJY) {
 
         },
 
-        EventActionSetWrapper: function(obj, propertyKey, newValue, client, instance) {
+        EventActionSetWrapper: function(obj, propertyKey, newValue, client, instance, params) {
 
             function setValue(obj, access, value) {
+                var propsObj = obj[params.propsObject] || obj;
+
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -1120,28 +1129,28 @@ module.exports = function(OBJY) {
 
                     var shift = access.shift();
                     try {
-                        if (obj[shift].type) {
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                        if (propsObj[shift].type) {
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
-                            if (obj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
-                                if (obj[shift].template) obj[shift].overwritten = true;
+                            if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
+                                if (propsObj[shift].template) propsObj[shift].overwritten = true;
 
                             }
                         }
                     } catch (e) {}
 
-                    setValue(obj[shift], access, value);
+                    setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+                    if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (obj[access[0]].template) obj[access[0]].overwritten = true;
+                    if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
 
-                    obj[access[0]].action = newValue;
+                    propsObj[access[0]].action = newValue;
 
-                    OBJY.chainPermission(obj[access[0]], instance, 'u', 'setEventAction', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventAction', propertyKey);
 
                     //instance.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj[access[0]], date: newValue })
                     //instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })

@@ -55,7 +55,7 @@ module.exports = function(OBJY) {
         },
 
 
-        prepareObjectDelta: function(oldObj, newObj) {
+        prepareObjectDelta: function(oldObj, newObj, params) {
 
             var meta = ['name', 'type'];
             meta.forEach(function(p) {
@@ -79,68 +79,70 @@ module.exports = function(OBJY) {
             // Properties
             function doTheProps(newObj) {
 
-                Object.keys(newObj).forEach(function(p) {
+                var propsObj = obj[params.propsObject] || obj;
 
-                    if (newObj[p].type == 'bag') {
-                        doTheProps(newObj[p]);
+                Object.keys(propsObj).forEach(function(p) {
+
+                    if (propsObj[p].type == 'bag') {
+                        doTheProps(propsObj[p]);
                     }
 
-                    if (newObj[p]) {
-                        if (newObj[p].template && oldObj[p]) {
+                    if (propsObj[p]) {
+                        if (propsObj[p].template && oldObj[p]) {
 
-                            if (newObj[p].value != oldObj[p].value) {
+                            if (propsObj[p].value != oldObj[p].value) {
 
-                                oldObj[p].value = newObj[p].value;
+                                oldObj[p].value = propsObj[p].value;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (newObj[p].action != oldObj[p].action) {
+                            if (propsObj[p].action != oldObj[p].action) {
 
-                                oldObj[p].action = newObj[p].action;
+                                oldObj[p].action = propsObj[p].action;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (newObj[p].date != oldObj[p].date) {
+                            if (propsObj[p].date != oldObj[p].date) {
 
-                                oldObj[p].date = newObj[p].date;
+                                oldObj[p].date = propsObj[p].date;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (newObj[p].interval != oldObj[p].interval) {
+                            if (propsObj[p].interval != oldObj[p].interval) {
 
-                                oldObj[p].interval = newObj[p].interval;
+                                oldObj[p].interval = propsObj[p].interval;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (JSON.stringify(newObj[p].meta) != JSON.stringify(oldObj[p].interval)) {
+                            if (JSON.stringify(propsObj[p].meta) != JSON.stringify(oldObj[p].interval)) {
 
-                                oldObj[p].meta = newObj[p].meta;
+                                oldObj[p].meta = propsObj[p].meta;
                                 oldObj[p].overwritten = true;
                             }
                         }
 
                     }
 
-                    if (!oldObj[p]) oldObj[p] = newObj[p];
+                    if (!oldObj[p]) oldObj[p] = propsObj[p];
 
 
-                    if (newObj.permissions) {
-                        Object.keys(newObj.permissions).forEach(function(p) {
-                            if (newObj.permissions[p]) {
-                                if (JSON.stringify(newObj.permissions[p]) != JSON.stringify(oldObj.permissions[p]))
-                                    oldObj.permissions[p] = newObj.permissions[p]
+                    if (propsObj.permissions) {
+                        Object.keys(propsObj.permissions).forEach(function(p) {
+                            if (propsObj.permissions[p]) {
+                                if (JSON.stringify(propsObj.permissions[p]) != JSON.stringify(oldObj.permissions[p]))
+                                    oldObj.permissions[p] = propsObj.permissions[p]
                                 oldObj.permissions[p].overwritten = true;
                             }
                         })
                     }
 
-                    if (newObj[p]) {
+                    if (propsObj[p]) {
                         handlers.forEach(function(h) {
-                            if (newObj[p][h]) {
-                                Object.keys(newObj[p][h]).forEach(function(oC) {
-                                    if (newObj[p][h][oC]) {
-                                        if (newObj[p][h][oC].value != oldObj[p][h][oC].value)
-                                            oldObj[p][h][oC].value = newObj[p][h][oC].value;
+                            if (propsObj[p][h]) {
+                                Object.keys(propsObj[p][h]).forEach(function(oC) {
+                                    if (propsObj[p][h][oC]) {
+                                        if (propsObj[p][h][oC].value != oldObj[p][h][oC].value)
+                                            oldObj[p][h][oC].value = propsObj[p][h][oC].value;
                                         oldObj[p][h][oC].overwritten = true;
                                     }
                                 })
@@ -186,7 +188,7 @@ module.exports = function(OBJY) {
 
         },
 
-        getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource) {
+        getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource, params) {
 
             var self = this;
 
@@ -235,61 +237,64 @@ module.exports = function(OBJY) {
 
                     if (!template) template = {};
 
+                    var propsObj = obj[params.propsObject] || obj;
+
+
                     Object.keys(template).forEach(function(p) {
 
-                        if(OBJY.predefinedProperties.includes(p) && (isObject(template[p]) || Array.isArray(template[p]))) return;
+                        if (OBJY.predefinedProperties.includes(p) || (isObject(template[p]) || Array.isArray(template[p]))) return;
 
-                        if(!template[p]) return;
+                        if (!template[p]) return;
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
 
-                        if (!obj[p]) {
-                            obj[p] = cloned;
-                            obj[p].template = templateId;
-                            delete obj[p].overwritten;
+                        if (!propsObj[p]) {
+                            propsObj[p] = cloned;
+                            propsObj[p].template = templateId;
+                            delete propsObj[p].overwritten;
                         } else {
 
 
                             if (cloned.meta) {
-                                if (!obj[p].meta) {
-                                    obj[p].meta = cloned.meta;
-                                    obj[p].meta.overwritten = true;
+                                if (!propsObj[p].meta) {
+                                    propsObj[p].meta = cloned.meta;
+                                    propsObj[p].meta.overwritten = true;
                                 } else {
-                                    if (!obj[p].meta.overwritten) {
-                                        obj[p].meta = cloned.meta;
-                                        obj[p].meta.overwritten = true;
+                                    if (!propsObj[p].meta.overwritten) {
+                                        propsObj[p].meta = cloned.meta;
+                                        propsObj[p].meta.overwritten = true;
                                     }
                                 }
                             }
-                            if (!obj[p].type) obj[p].type = cloned.type;
+                            if (!propsObj[p].type) propsObj[p].type = cloned.type;
 
-                            obj[p].template = templateId;
-                            obj[p].overwritten = true;
+                            propsObj[p].template = templateId;
+                            propsObj[p].overwritten = true;
 
                         }
 
                         if (template.permissions) {
-                            if (!obj.permissions) obj.permissions = {};
+                            if (!propsObj.permissions) propsObj.permissions = {};
                             Object.keys(template.permissions).forEach(function(p) {
-                                if (!obj.permissions[p]) {
-                                    obj.permissions[p] = template.permissions[p];
-                                    obj.permissions[p].template = templateId;
+                                if (!propsObj.permissions[p]) {
+                                    propsObj.permissions[p] = template.permissions[p];
+                                    propsObj.permissions[p].template = templateId;
                                 } else {
-                                    obj.permissions[p].template = templateId;
-                                    obj.permissions[p].overwritten = true;
+                                    propsObj.permissions[p].template = templateId;
+                                    propsObj.permissions[p].overwritten = true;
                                 }
                             })
                         }
 
                         ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                             if (template[p][h]) {
-                                if (!obj[p][h]) obj[p][h] = {};
+                                if (!propsObj[p][h]) propsObj[p][h] = {};
 
                                 Object.keys(template[p][h]).forEach(function(oC) {
 
-                                    if (!obj[p][h][oC]) {
-                                        obj[p][h][oC] = template[p][h][oC];
-                                        if (obj[p][h][oC]) obj[p][h][oC].template = templateId;
+                                    if (!propsObj[p][h][oC]) {
+                                        propsObj[p][h][oC] = template[p][h][oC];
+                                        if (propsObj[p][h][oC]) propsObj[p][h][oC].template = templateId;
                                     }
                                 })
                             }
@@ -298,7 +303,7 @@ module.exports = function(OBJY) {
                         if (template[p].type == 'bag') {
 
 
-                            doTheProps(cloned, obj[p]);
+                            doTheProps(cloned, propsObj[p]);
                         }
 
                     })
@@ -439,7 +444,7 @@ module.exports = function(OBJY) {
                                     if (counter == template.inherits.length) run(template);
 
 
-                                }, client, templateRole || obj.role, templateSource || OBJY.activeTenant)
+                                }, client, templateRole || obj.role, templateSource || OBJY.activeTenant, params)
 
 
                         })
@@ -468,7 +473,7 @@ module.exports = function(OBJY) {
 
         },
 
-        removeTemplateFieldsForObject: function(obj, templateId, success, error, client) {
+        removeTemplateFieldsForObject: function(obj, templateId, success, error, client, params) {
 
 
             if (!templateId) {
@@ -495,11 +500,13 @@ module.exports = function(OBJY) {
 
             function doTheProps(obj) {
 
-                if (obj) {
+                var propsObj = obj[params.propsObject] || obj;
 
-                    Object.keys(obj).forEach(function(p) {
+                if (propsObj) {
 
-                        if (!isObject(obj[p])) return;
+                    Object.keys(propsObj).forEach(function(p) {
+
+                        if (!isObject(propsObj[p])) return;
 
                         /*if (obj.permissions) {
                             Object.keys(obj.permissions).forEach(function(p) {
@@ -510,30 +517,30 @@ module.exports = function(OBJY) {
                             })
                         }*/
 
-                        if (obj[p]) {
+                        if (propsObj[p]) {
                             ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                                if (obj[p][h]) {
+                                if (propsObj[p][h]) {
 
-                                    Object.keys(obj[p][h]).forEach(function(oC) {
+                                    propsObject.keys(propsObj[p][h]).forEach(function(oC) {
 
-                                        if (obj[p][h][oC]) {
-                                            if (obj[p][h][oC].template == templateId && !obj[p][h][oC].overwritten)
-                                                delete obj[p][h][oC];
+                                        if (propsObj[p][h][oC]) {
+                                            if (propsObj[p][h][oC].template == templateId && !propsObj[p][h][oC].overwritten)
+                                                delete propsObj[p][h][oC];
                                         }
                                     })
                                 }
                             })
                         }
 
-                        if (obj[p].type == 'bag') {
-                            return doTheProps(obj[p]);
+                        if (propsObj[p].type == 'bag') {
+                            return doTheProps(propsObj[p]);
                         }
 
-                        if (obj[p]) {
-                            if (obj[p].value != null) obj[p].overwritten = true;
-                            if (obj[p].template == templateId && !obj[p].overwritten) {
-                                console.info('deleting obj', p, obj[p])
-                                delete obj[p];
+                        if (propsObj[p]) {
+                            if (propsObj[p].value != null) propsObj[p].overwritten = true;
+                            if (propsObj[p].template == templateId && !propsObj[p].overwritten) {
+                                console.info('deleting propsObj', p, propsObj[p])
+                                delete propsObj[p];
                             }
                         }
 
@@ -888,8 +895,10 @@ module.exports = function(OBJY) {
         PropertiesChecker: function(obj, properties, instance, params) {
             if (properties === undefined) return;
 
-
             //obj.properties = {};
+
+            if(params.propsObject) obj[params.propsObject] = {};
+
             var propertyKeys = Object.keys(properties);
             propertyKeys.forEach(function(property) {
                 var propKey = {};
@@ -897,8 +906,7 @@ module.exports = function(OBJY) {
                 var newProp = propKey;
                 new OBJY.PropertyCreateWrapper(obj, newProp, false, instance, params);
             })
-
-            return obj;
+            return obj[params.propsObject] || obj;
         },
 
         ApplicationsChecker: function(obj, applications) {

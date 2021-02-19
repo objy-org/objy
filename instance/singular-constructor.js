@@ -31,15 +31,16 @@ module.exports = function(OBJY) {
 
             this.role = role || 'object';
 
-            if (params.staticProps) {
-                for (var prop in params.staticProps) {
-                    this[prop] = params.staticProps[prop];
-                }
-            }
+            if (params.extendedStructure) {
+                for (var prop in params.extendedStructure) {
+                    if(params.extendedStructure[prop] === null) this[prop] = obj[prop];
+                    else if(params.extendedStructure[prop] === '$useForProps') {
+                        params.propsObject = prop;
+                        this[params.propsObject] = obj[params.propsObject]//OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
+                    }
+                    else this[prop] = params.extendedStructure[prop];
 
-            if (params.staticFuncs) {
-                for (var func in params.staticFuncs) {
-                    this[func] = params.staticFuncs[func];
+                    if(!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
                 }
             }
 
@@ -48,109 +49,97 @@ module.exports = function(OBJY) {
                 this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
             }
 
-            if (params.propsObject) {
-                // @TODO add type checking
-                OBJY.serializePropsObject(this, obj, params.propsObject, instance, params)
-                //this.properties = OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params); // || {};
+            //@TODO: DEPRECATE THIS!
+            // this.type = obj.type;
+
+            this.applications = OBJY.ApplicationsChecker(this, obj.applications); // || [];
+
+            this.inherits = OBJY.InheritsChecker(this, obj.inherits); // || [];
+
+            //@TODO: DEPRECATE THIS!
+            // this.name = obj.name; // || null;
+
+            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
+            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
+            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance);
+
+            this.created = obj.created || moment().utc().toDate().toISOString();
+            this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
+
+            //this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
+            if (!params.propsObject) OBJY.PropertiesChecker(this, obj, instance, params);
+
+            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
+
+            this._aggregatedEvents = obj._aggregatedEvents;
+
+            this.authorisations = obj.authorisations || undefined;
+
+            if (params.authable) {
+
+                this.username = obj.username || null;
+                this.email = obj.email || null;
+                this.password = obj.password || null;
+
+                this.spooAdmin = obj.spooAdmin;
+
+                delete this.name;
+
+                this.setUsername = function(username) {
+                    this.username = username;
+                    OBJY.chainPermission(this, instance, 'o', 'setUsername', username);
+                    return this;
+                }
+
+                this.setEmail = function(email) {
+                    this.email = email;
+                    OBJY.chainPermission(this, instance, 'h', 'setEmail', email);
+                    return this;
+                }
+
+                this.setPassword = function(password) {
+                    // should be encrypted at this point
+                    this.password = password;
+                    return this;
+                }
+
             }
 
-            if (!params.structure) {
+            // TODO: explain this!
+            if (params.authable || params.authableTemplate) {
 
-                //@TODO: DEPRECATE THIS!
-                //this.type = obj.type;
+                this.privileges = OBJY.PrivilegesChecker(obj) || {};
+                this._clients = obj._clients;
 
-                this.applications = OBJY.ApplicationsChecker(this, obj.applications); // || [];
+                this.addPrivilege = function(privilege) {
 
-                this.inherits = OBJY.InheritsChecker(this, obj.inherits); // || [];
-
-                //@TODO: DEPRECATE THIS!
-                //this.name = obj.name; // || null;
-
-                this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
-                this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
-                this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance);
-
-                this.created = obj.created || moment().utc().toDate().toISOString();
-                this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
-
-                //this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
-                if (!params.propsObject) OBJY.PropertiesChecker(this, obj, instance, params);
-
-                this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
-
-                this._aggregatedEvents = obj._aggregatedEvents;
-
-                this.authorisations = obj.authorisations || undefined;
-
-                if (params.authable) {
-
-                    this.username = obj.username || null;
-                    this.email = obj.email || null;
-                    this.password = obj.password || null;
-
-                    this.spooAdmin = obj.spooAdmin;
-
-                    delete this.name;
-
-                    this.setUsername = function(username) {
-                        this.username = username;
-                        OBJY.chainPermission(this, instance, 'o', 'setUsername', username);
+                    if (instance.activeApp) {
+                        var tmpPriv = {};
+                        tmpPriv[instance.activeApp] = { name: privilege }
+                        new OBJY.PrivilegeChecker(this, tmpPriv);
                         return this;
-                    }
+                    } else throw new Error('Invalid app id');
 
-                    this.setEmail = function(email) {
-                        this.email = email;
-                        OBJY.chainPermission(this, instance, 'h', 'setEmail', email);
-                        return this;
-                    }
+                    return this;
+                };
 
-                    this.setPassword = function(password) {
-                        // should be encrypted at this point
-                        this.password = password;
-                        return this;
-                    }
+                this.removePrivilege = function(privilege) {
+                    new OBJY.PrivilegeRemover(this, privilege, instance);
+                    return this;
+                };
 
-                }
+                this.addClient = function(client) {
+                    if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
+                    this._clients.push(client);
+                    return this;
+                };
 
-                // TODO: explain this!
-                if (params.authable || params.authableTemplate) {
+                this.removeClient = function(client) {
+                    if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
+                    this._clients.splice(this._clients.indexOf(client), 1);
+                    return this;
+                };
 
-                    this.privileges = OBJY.PrivilegesChecker(obj) || {};
-                    this._clients = obj._clients;
-
-                    this.addPrivilege = function(privilege) {
-
-                        if (instance.activeApp) {
-                            var tmpPriv = {};
-                            tmpPriv[instance.activeApp] = { name: privilege }
-                            new OBJY.PrivilegeChecker(this, tmpPriv);
-                            return this;
-                        } else throw new Error('Invalid app id');
-
-                        return this;
-                    };
-
-                    this.removePrivilege = function(privilege) {
-                        new OBJY.PrivilegeRemover(this, privilege, instance);
-                        return this;
-                    };
-
-                    this.addClient = function(client) {
-                        if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
-                        this._clients.push(client);
-                        return this;
-                    };
-
-                    this.removeClient = function(client) {
-                        if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
-                        this._clients.splice(this._clients.indexOf(client), 1);
-                        return this;
-                    };
-
-                }
-
-            } else {
-                Object.assign(this, params.structure)
             }
 
 
@@ -307,7 +296,7 @@ module.exports = function(OBJY) {
 
             Object.getPrototypeOf(this).setPropertyValue = function(property, value, client) {
 
-                new OBJY.PropertySetWrapper(this, property, value, instance, ['addObject']);
+                new OBJY.PropertySetWrapper(this, property, value, instance, params);
 
 
                 return this;
@@ -315,17 +304,14 @@ module.exports = function(OBJY) {
 
             Object.getPrototypeOf(this).setProperty = function(property, value, client) {
 
-
-
-                new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject']);
-
+                new OBJY.PropertySetFullWrapper(this, property, value, instance, false, params);
 
                 return this;
             };
 
             Object.getPrototypeOf(this).makeProperty = function(property, value, client) {
 
-                new OBJY.PropertySetFullWrapper(this, property, value, instance, ['addObject'], true);
+                new OBJY.PropertySetFullWrapper(this, property, value, instance, true, params);
 
                 return this;
             };
@@ -342,7 +328,7 @@ module.exports = function(OBJY) {
                     return;
                 }
 
-                new OBJY.EventDateSetWrapper(this, property, value, client, instance);
+                new OBJY.EventDateSetWrapper(this, property, value, client, instance, params);
                 return this;
             };
 
@@ -358,7 +344,7 @@ module.exports = function(OBJY) {
                     return;
                 }
 
-                new OBJY.EventActionSetWrapper(this, property, value, client, instance);
+                new OBJY.EventActionSetWrapper(this, property, value, client, instance, params);
                 return this;
             };
 
@@ -374,7 +360,7 @@ module.exports = function(OBJY) {
                     return;
                 }
 
-                new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance);
+                new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance, params);
                 return this;
             };
 
@@ -391,7 +377,7 @@ module.exports = function(OBJY) {
                 }
 
 
-                new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, ['addObject']);
+                new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, params);
                 return this;
             };
 
@@ -407,7 +393,7 @@ module.exports = function(OBJY) {
                     return;
                 }
 
-                new OBJY.EventIntervalSetWrapper(this, property, value, client, instance);
+                new OBJY.EventIntervalSetWrapper(this, property, value, client, instance, params);
                 return this;
             };
 
@@ -429,7 +415,7 @@ module.exports = function(OBJY) {
                 perm[name] = permission;
                 permission = perm;
 
-                new OBJY.PropertyPermissionSetWrapper(this, property, permission, instance);
+                new OBJY.PropertyPermissionSetWrapper(this, property, permission, instance, params);
                 return this;
             };
 
@@ -438,7 +424,7 @@ module.exports = function(OBJY) {
                 if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException()
                 var key = name;
 
-                new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
+                new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance, params);
                 return this;
             };
 
@@ -467,7 +453,7 @@ module.exports = function(OBJY) {
             };
 
             Object.getPrototypeOf(this).setPropertyMeta = function(property, meta) {
-                new OBJY.PropertyMetaSetWrapper(this, property, meta);
+                new OBJY.PropertyMetaSetWrapper(this, property, meta, params);
                 return this;
             };
 
@@ -499,7 +485,7 @@ module.exports = function(OBJY) {
                 if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException()
                 var key = name; //Object.keys(onChangeObj)[0];
 
-                new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
+                new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance, params);
                 return this;
             };
 
@@ -528,7 +514,7 @@ module.exports = function(OBJY) {
                 if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException()
                 var key = name;
 
-                new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
+                new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance, params);
                 return this;
             };
 
@@ -562,18 +548,18 @@ module.exports = function(OBJY) {
                     this.setBagPropertyConditions(bag, newProKey, conditions);
                     return;
                 }
-                new OBJY.PropertyConditionsSetWrapper(this, property, conditions);
+                new OBJY.PropertyConditionsSetWrapper(this, property, conditions, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagPropertyConditions = function(bag, property, conditions) {
-                new OBJY.PropertyConditionsSetWrapper(this.getProperty(bag), property, conditions);
+                new OBJY.PropertyConditionsSetWrapper(this.getProperty(bag), property, conditions, params);
                 return this;
             };
 
 
             Object.getPrototypeOf(this).setBagPropertyPermission = function(bag, property, permission) {
-                new OBJY.PropertyPermissionSetWrapper(this.getProperty(bag), property, permission);
+                new OBJY.PropertyPermissionSetWrapper(this.getProperty(bag), property, permission, params);
                 return this;
             };
 
@@ -587,7 +573,7 @@ module.exports = function(OBJY) {
                     this.setBagPropertyQuery(bag, newProKey, value);
                     return;
                 }
-                new OBJY.PropertyQuerySetWrapper(this, property, options);
+                new OBJY.PropertyQuerySetWrapper(this, property, options, params);
                 return this;
             };
 
@@ -671,32 +657,32 @@ module.exports = function(OBJY) {
             };
 
             Object.getPrototypeOf(this).setBagPropertyValue = function(bag, property, value, client) {
-                new OBJY.PropertySetWrapper(this.getProperty(bag), property, value, instance);
+                new OBJY.PropertySetWrapper(this.getProperty(bag), property, value, instance, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventDate = function(bag, property, value, client) {
-                new OBJY.EventDateSetWrapper(this.getProperty(bag), property, value, ['addObject']);
+                new OBJY.EventDateSetWrapper(this.getProperty(bag), property, value, instance, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventAction = function(bag, property, value, client) {
-                new OBJY.EventActionSetWrapper(this.getProperty(bag), property, value, ['addObject']);
+                new OBJY.EventActionSetWrapper(this.getProperty(bag), property, value, instance, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventInterval = function(bag, property, value, client) {
-                new OBJY.EventIntervalSetWrapper(this.getProperty(bag), property, value, instance);
+                new OBJY.EventIntervalSetWrapper(this.getProperty(bag), property, value, instance, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventTriggered = function(bag, property, value, client) {
-                new OBJY.EventTriggeredSetWrapper(this.getProperty(bag), property, value, ['addObject']);
+                new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventLastOccurence = function(bag, property, value, client) {
-                new OBJY.EventLastOccurenceSetWrapper(this.getProperty(bag), property, value, ['addObject']);
+                new OBJY.EventLastOccurenceSetWrapper(this.getProperty(bag), property, value, client, params);
                 return this;
             };
 
@@ -794,11 +780,11 @@ module.exports = function(OBJY) {
 
             Object.getPrototypeOf(this).getProperty = function(propertyName) {
 
-                return OBJY.PropertyParser(this, propertyName, instance);
+                return OBJY.PropertyParser(this, propertyName, instance, params);
             };
 
             Object.getPrototypeOf(this).getProperties = function() {
-                return this;
+                return this[params.propsObject] || this;
             };
 
             Object.getPrototypeOf(this).add = function(success, error, client) {
@@ -1026,7 +1012,7 @@ module.exports = function(OBJY) {
 
                                     if (error) error(thisRef);
                                     return this;
-                                }, client, params.templateFamily, params.templateSource)
+                                }, client, params.templateFamily, params.templateSource, params)
                         }
                     });
 
@@ -1271,7 +1257,7 @@ module.exports = function(OBJY) {
                                 function(err) {
                                     if (error) error(thisRef);
                                     return thisRef;
-                                }, client, params.templateFamily, params.templateSource)
+                                }, client, params.templateFamily, params.templateSource, params)
                         }
 
                         if (i.name == 'removeInherit' && thisRef.inherits.indexOf(i.value) == -1) {
@@ -1286,7 +1272,7 @@ module.exports = function(OBJY) {
                                 function(err) {
                                     if (error) error(thisRef);
                                     return thisRef;
-                                }, client)
+                                }, client, params)
                         }
                     })
 
@@ -1559,7 +1545,7 @@ module.exports = function(OBJY) {
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                         return data;
                                     }
-                                }, client, params.templateFamily, params.templateSource)
+                                }, client, params.templateFamily, params.templateSource, params)
                         } else {
 
                             var returnObject = OBJY[data.role](OBJY.deserialize(data));
@@ -1599,47 +1585,47 @@ module.exports = function(OBJY) {
             }
 
             const validator = {
-              get: (obj, prop) => {
-                console.log('gett')
-                if (typeof obj[prop] === 'object' && obj[prop] !== null) {
-                  return new Proxy(obj[prop], validator)
-                } else {
-                  return obj[prop]
-                }
-              },
-              set: (obj, prop, value) => {
-                if(Array.isArray(obj) && prop == 'length') return true;
-                console.log('set', obj, prop)
-                obj[prop] = value;
-                this.update();
-                return true
-              },
+                get: (obj, prop) => {
+                    console.log('gett')
+                    if (typeof obj[prop] === 'object' && obj[prop] !== null) {
+                        return new Proxy(obj[prop], validator)
+                    } else {
+                        return obj[prop]
+                    }
+                },
+                set: (obj, prop, value) => {
+                    if (Array.isArray(obj) && prop == 'length') return true;
+                    console.log('set', obj, prop)
+                    obj[prop] = value;
+                    this.update();
+                    return true
+                },
 
-              deleteProperty: (obj, prop, value) => {
-                console.log('delete', obj, prop)
-                delete obj[prop];
-                this.update();
-                return true;
-              }
+                deleteProperty: (obj, prop, value) => {
+                    console.log('delete', obj, prop)
+                    delete obj[prop];
+                    this.update();
+                    return true;
+                }
             }
-                
-            if(!params.storage) {
+
+            if (!params.storage) {
                 this.add();
                 var thisRef = this;
-                 (this.inherits || []).forEach(function(template) {
+                (this.inherits || []).forEach(function(template) {
 
-                        console.log('fffff', instance.activeTenant)
+                    console.log('fffff', instance.activeTenant)
 
-                            OBJY.getTemplateFieldsForObject(thisRef, template, function() {
-                                    console.log('got')
-                                },
-                                function(err) {
-                                    console.log('errr', err)
-                                }, instance.activeTenant, params.templateFamily, params.templateSource)
-                        
-                    });
+                    OBJY.getTemplateFieldsForObject(thisRef, template, function() {
+                            console.log('got')
+                        },
+                        function(err) {
+                            console.log('errr', err)
+                        }, instance.activeTenant, params.templateFamily, params.templateSource, params)
 
-                 console.log('thisRef', thisRef)
+                });
+
+                console.log('thisRef', thisRef)
 
                 return new Proxy(this, validator);
             }
@@ -1649,5 +1635,3 @@ module.exports = function(OBJY) {
     }
 
 }
-
-
