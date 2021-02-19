@@ -1586,7 +1586,6 @@ module.exports = function(OBJY) {
 
             const validator = {
                 get: (obj, prop) => {
-                    console.log('gett')
                     if (typeof obj[prop] === 'object' && obj[prop] !== null) {
                         return new Proxy(obj[prop], validator)
                     } else {
@@ -1595,14 +1594,12 @@ module.exports = function(OBJY) {
                 },
                 set: (obj, prop, value) => {
                     if (Array.isArray(obj) && prop == 'length') return true;
-                    console.log('set', obj, prop)
                     obj[prop] = value;
                     this.update();
                     return true
                 },
 
                 deleteProperty: (obj, prop, value) => {
-                    console.log('delete', obj, prop)
                     delete obj[prop];
                     this.update();
                     return true;
