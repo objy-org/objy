@@ -69,10 +69,13 @@ Objects are handled using an OBJY wrapper: OBJY.object().
 var myObj = OBJY.object({
    name: "Hello"
 });
+
 // Update an object (onChange handlers will trigger)
 myObj.name = "Hello World";
+
 // or use the built-in methods:
 myObj.addProperty('color', 'blue');
+
 // Delete an object (onDelete handlers will trigger)
 myObj.remove();
 ```
@@ -165,6 +168,8 @@ OBJY.objects({json query}).get(objects => {
 
 OBJY objects either live in your JS instance or can come from other sources, like databases, file systems, or third-party systems. These sources are be defined when defining custom object wrappers.
 
+> Important: When using persistence, the built-in CRUD operations `.add()`, `.get()`, `.update()` and `.delete()` must be used to commit changes to the persistence.
+
 ```javascript
 // Define you own object wrapper with a storage mapper
 OBJY.define({
@@ -173,11 +178,19 @@ OBJY.define({
    storage: new mongoDB(...)
 })
 
-// Example: Add an object to persistence:
+// Add an object to persistence:
 OBJY.item({}).add(obj => {})
 
-// Example: Query objects
+// Query objects
 OBJY.items({query}).get(objy => {})
+
+// Update an object
+OBJY.item({...})
+   .setProperty('name', 'test')
+   .update(objy => {})
+
+// Delete an object
+OBJY.item({...}).delete(objy => {})
 ```
 
 ### Customization
