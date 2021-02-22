@@ -172,10 +172,12 @@ OBJY.define({
    pluralName: "items",
    storage: new mongoDB(...)
 })
-// Use one object:
-OBJY.item({})
-// Use multiple objects:
-OBJY.items([{},{}])
+
+// Example: Add an object to persistence:
+OBJY.item({}).add(obj => {})
+
+// Example: Query objects
+OBJY.items({query}).get(objy => {})
 ```
 
 ### Customization
