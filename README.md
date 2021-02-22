@@ -6,7 +6,7 @@
 
 An object-driven programming framework, that uses behaviour-driven objects for building use cases.
 
-![OBJY LOGO](https://objy-org.github.io/logo.png "OBJY")
+![OBJY LOGO](https://objy.io/assets/img/OBJY-object-code.png "OBJY")
 
 ## Installing
 
