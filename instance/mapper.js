@@ -42,7 +42,12 @@ module.exports = function(OBJY) {
         plugInPersistenceMapper: function(name, mapper) {
             if (!name) throw new Error("No mapper name provided");
             this.mappers[name] = mapper;
-            this.mappers[name].setObjectFamily(name);
+
+            if (Array.isArray(this.mappers[name])) {
+                this.mappers[name].forEach(mapper => {
+                    mapper.setObjectFamily(name);
+                })
+            } else this.mappers[name].setObjectFamily(name);
 
             this.caches[name] = {
                 data: {},
@@ -146,12 +151,38 @@ module.exports = function(OBJY) {
         addObject: function(obj, success, error, app, client, params) {
 
             // OBJY.deSerializePropsObject(obj, params)
-            this.mappers[obj.role].add(obj, function(data) {
-                success(data);
 
-            }, function(err) {
-                error(err);
-            }, app, client);
+            if (Array.isArray(this.mappers[obj.role])) {
+
+                var idx = 0;
+                var len = this.mappers[obj.role].length;
+                var sequence = [];
+
+                function commit(idx) {
+                    this.mappers[obj.role][idx].add(obj, function(data) {
+                        sequence.push(obj);
+                        ++idx;
+                        if (idx == len) return success(data);
+                        commit(idx)
+
+                    }, function(err) {
+                        error(err);
+                    }, app, client, sequence[idx - 1]);
+                }
+
+                commit(idx);
+
+                this.mappers[obj.role].forEach(mapper => {
+
+                })
+            } else {
+                this.mappers[obj.role].add(obj, function(data) {
+                    success(data);
+
+                }, function(err) {
+                    error(err);
+                }, app, client);
+            }
 
         },
 

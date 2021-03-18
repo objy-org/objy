@@ -2,11 +2,11 @@ var OBJY = require('./objy.js');
 
 
 OBJY.affectables = [{
-	_id: 123,
-	affects: {},
-	apply: {
-		test: 'hh'
-	}
+    _id: 123,
+    affects: {},
+    apply: {
+        test: 'hh'
+    }
 }]
 
 OBJY.define({
@@ -14,11 +14,21 @@ OBJY.define({
     name: "user",
     pluralName: "users",
     //propsObject: 'properties'
-    /*storage: OBJY.customStorage({
-    	add: function(elem){
-    		console.log('ä', elem)
-    	}
-    })*/
+    storage: [
+    	OBJY.customStorage({
+            add: function(elem, success, client, app, prev) {
+                console.log('ä', elem)
+            },
+            get: (elem, success) => {
+
+            }
+        }),
+        OBJY.customStorage({
+            add: function(elem, success, client, app, prev) {
+                elem.permissions = prev.permissions
+            }
+        })
+    ]
 })
 
 OBJY.define({
@@ -36,9 +46,9 @@ OBJY.object({
         }
     },
     evt: {
-    	type: 'event',
-    	interval: 100,
-    	action: 'console.log("acrion...")'
+        type: 'event',
+        interval: 100,
+        action: 'console.log("acrion...")'
     }
 })
 
@@ -66,7 +76,7 @@ return;
 
 
 var myO = OBJY.user({
-    _id:123,
+    _id: 123,
     username: "sdgdg",
     onCreate: {
         test: {
@@ -90,7 +100,7 @@ console.log(myO)
 
 console.log(OBJY.bucket)
 
-console.log(OBJY.user({inherits:[123]}))
+console.log(OBJY.user({ inherits: [123] }))
 
 
 OBJY.user({
@@ -137,7 +147,7 @@ OBJY.user({
         console.log('uuud', d)
 
         OBJY.user(d._id).get(u => {
-        	console.log('got:', u)
+            console.log('got:', u)
         })
     })
 
@@ -157,8 +167,8 @@ OBJY.user({
     data.update(d => {
         console.log('uuu', d)
     })*/
-       console.log('__data', data);
-    
+    console.log('__data', data);
+
 })
 
 

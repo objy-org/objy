@@ -272,6 +272,7 @@ module.exports = function(OBJY) {
                     getValue(propsObj[access.shift()], access);
                 } else {
 
+                    console.log('ddddd', propsObj, access[0])
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     propertyToReturn = propsObj[access[0]];
@@ -299,14 +300,13 @@ module.exports = function(OBJY) {
         },
 
 
-        PropertyCreateWrapper: function(obj, property, isBag, instance, params) {
+        PropertyCreateWrapper: function(obj, property, isBag, instance, params, reallyAdd) {
 
             if (params.propsObject && !obj[params.propsObject]) obj[params.propsObject] = {};
-
+//console.warn(obj, property, params.propsObject)
             property = Object.assign({}, property);
 
             var propsObj = obj[params.propsObject] || obj;
-
 
             var propertyKey = Object.keys(property)[0];
             var existing = null;
@@ -327,7 +327,7 @@ module.exports = function(OBJY) {
                 else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
             }*/
 
-            if(propsObj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey)) throw new exceptions.DuplicatePropertyException(propertyKey);
+            if(reallyAdd && propsObj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey)) throw new exceptions.DuplicatePropertyException(propertyKey);
 
             switch ((property[propertyKey] || {}).type) {
                 case undefined:
@@ -795,6 +795,7 @@ module.exports = function(OBJY) {
                     setValue(propsObj[shift], access, value);
                 } else {
 
+                    console.log('sdgsdgsdgsdg', propsObj,access[0] )
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (propsObj[access[0]].type == 'boolean') {

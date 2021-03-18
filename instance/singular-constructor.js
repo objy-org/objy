@@ -36,7 +36,8 @@ module.exports = function(OBJY) {
                     if(params.extendedStructure[prop] === null) this[prop] = obj[prop];
                     else if(params.extendedStructure[prop] === '$useForProps') {
                         params.propsObject = prop;
-                        this[params.propsObject] = obj[params.propsObject]//OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
+                        //this[params.propsObject] = obj[params.propsObject]//
+                        OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
                     }
                     else this[prop] = params.extendedStructure[prop];
 
@@ -229,7 +230,7 @@ module.exports = function(OBJY) {
                     return;
                 }
 
-                new OBJY.PropertyCreateWrapper(this, property, false, instance, params);
+                new OBJY.PropertyCreateWrapper(this, property, false, instance, params, true);
 
                 return this;
             };
@@ -691,7 +692,7 @@ module.exports = function(OBJY) {
 
                 var tmpBag = this.getProperty(bag);
 
-                new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance, params);
+                new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance, params, true);
 
                 return this;
             };
@@ -712,13 +713,18 @@ module.exports = function(OBJY) {
 
             Object.getPrototypeOf(this).removeProperty = function(propertyName, client) {
 
+                var thisRef = this;
+
+                if (params.propsObject) thisRef = obj[params.propsObject];
+
+                console.log('propertyName', propertyName, this)
                 if (propertyName.indexOf('.') != -1) {
                     this.removePropertyFromBag(propertyName, client);
                     return;
                 } else {
-                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!thisRef[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
 
-                    var tmpProp = Object.assign({}, this[propertyName]);
+                    var tmpProp = Object.assign({}, thisRef[propertyName]);
 
                     if (tmpProp.onDelete) {
                         if (Object.keys(tmpProp.onDelete).length > 0) {
@@ -731,16 +737,16 @@ module.exports = function(OBJY) {
                         }
                     }
 
-                    OBJY.chainPermission(this[propertyName], instance, 'd', 'removeProperty', propertyName);
+                    OBJY.chainPermission(thisRef[propertyName], instance, 'd', 'removeProperty', propertyName);
 
-                    if (this[propertyName].type == 'date') instance.eventAlterationSequence.push({
+                    /*if (this[propertyName].type == 'date') instance.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: this,
                         propName: propertyName,
                         date: date
-                    })
+                    })*/
 
-                    delete this[propertyName];
+                    delete thisRef[propertyName];
 
                 }
 
@@ -794,7 +800,7 @@ module.exports = function(OBJY) {
 
                 var thisRef = this;
 
-                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params)
+                OBJY.applyAffects(thisRef, 'onCreate', instance, client)
 
                 OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
 
@@ -1163,7 +1169,7 @@ module.exports = function(OBJY) {
 
                     OBJY.updateO(thisRef, function(data) {
 
-                            OBJY.applyAffects(data, 'onChange', instance, client, params)
+                            OBJY.applyAffects(data, 'onChange', instance, client)
 
                             if (data.onChange) {
                                 Object.keys(data.onChange).forEach(function(key) {
@@ -1499,7 +1505,7 @@ module.exports = function(OBJY) {
 
                     var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
-                    OBJY.applyAffects(data, null, instance, client, params)
+                    OBJY.applyAffects(data, null, instance, client)
 
                     if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
