@@ -33,15 +33,14 @@ module.exports = function(OBJY) {
 
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
-                    if(params.extendedStructure[prop] === null) this[prop] = obj[prop];
-                    else if(params.extendedStructure[prop] === '$useForProps') {
+                    if (params.extendedStructure[prop] === null) this[prop] = obj[prop];
+                    else if (params.extendedStructure[prop] === '$useForProps') {
                         params.propsObject = prop;
                         //this[params.propsObject] = obj[params.propsObject]//
                         OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
-                    }
-                    else this[prop] = params.extendedStructure[prop];
+                    } else this[prop] = params.extendedStructure[prop];
 
-                    if(!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
+                    if (!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
                 }
             }
 
@@ -101,6 +100,16 @@ module.exports = function(OBJY) {
                 this.setPassword = function(password) {
                     // should be encrypted at this point
                     this.password = password;
+                    return this;
+                }
+
+                this.setAuthorisation = function(authorisationObj) {
+                    new OBJY.ObjectAuthorisationSetWrapper(this, authorisationObj, instance);
+                    return this;
+                }
+
+                this.removeAuthorisation = function(authorisationId) {
+                    new OBJY.ObjectAuthorisationRemoveWrapper(this, authorisationId, instance);
                     return this;
                 }
 

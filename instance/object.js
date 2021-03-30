@@ -772,6 +772,46 @@ module.exports = function(OBJY) {
             return onChange;
         },
 
+        ObjectAuthorisationSetWrapper: function(obj, authorisationObj, instance) {
+
+            var app = instance.activeApp || '*';
+
+            if (!obj.authorisations) obj.authorisations = {};
+
+            if (!obj.authorisations[app]) obj.authorisations[app] = [];
+
+            if (!authorisationObj.name) authorisationObj.name = OBJY.RANDOM();
+
+            var found = false;
+            obj.authorisations[app].forEach(au => {
+                if (au.name == authorisationObj.name) {
+                    au = authorisationObj;
+                    found = true;
+                }
+            })
+
+            if (!found) obj.authorisations[app].push(authorisationObj)
+
+            return authorisationObj;
+        },
+
+        ObjectAuthorisationRemoveWrapper: function(obj, authorisationId, instance) {
+
+            var app = instance.activeApp || '*';
+
+            if (!obj.authorisations) throw new Error('No authorisations present')
+
+            if (!obj.authorisations[app]) throw new Error('No authorisations for this app present')
+
+            obj.authorisations[app].forEach((au, i) => {
+                if (au.name == authorisationId) obj.authorisations[app].splice(i, 1)
+            })
+
+            if(Object.keys(obj.authorisations[app]).length == 0) delete obj.authorisations[app];
+
+            return authorisationId;
+        },
+
         ObjectOnDeleteCreateWrapper: function(obj, onDelete, instance) {
             //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
@@ -897,7 +937,7 @@ module.exports = function(OBJY) {
 
             //obj.properties = {};
 
-            if(params.propsObject) obj[params.propsObject] = {};
+            if (params.propsObject) obj[params.propsObject] = {};
 
             var propertyKeys = Object.keys(properties);
             propertyKeys.forEach(function(property) {
