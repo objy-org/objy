@@ -807,7 +807,7 @@ module.exports = function(OBJY) {
                 if (au.name == authorisationId) obj.authorisations[app].splice(i, 1)
             })
 
-            if(Object.keys(obj.authorisations[app]).length == 0) delete obj.authorisations[app];
+            if (Object.keys(obj.authorisations[app]).length == 0) delete obj.authorisations[app];
 
             return authorisationId;
         },

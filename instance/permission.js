@@ -131,7 +131,6 @@ module.exports = function(OBJY) {
 
             if (query.$or.length == 0) throwError();
 
-
             if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
         },
 
