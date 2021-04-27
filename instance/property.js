@@ -305,7 +305,7 @@ module.exports = function(OBJY) {
 
 
         PropertyCreateWrapper: function(obj, property, isBag, instance, params, reallyAdd) {
-
+    
             if (params.propsObject && !obj[params.propsObject]) obj[params.propsObject] = {};
             //console.warn(obj, property, params.propsObject)
             property = Object.assign({}, property);
@@ -855,6 +855,7 @@ module.exports = function(OBJY) {
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
+
                             }
                         }
                     } catch (e) {}
@@ -862,22 +863,22 @@ module.exports = function(OBJY) {
                     setValue(propsObj[shift], access, value);
                 } else {
 
-                    if (!force) {
-                        try {
-                            var t = propsObj[access[0]];
-                        } catch (e) {
-                            throw new exceptions.NoSuchPropertyException(propertyKey);
-                        }
+                    console.log('sdgsdgsdgsdg', propsObj, access[0])
+                    //if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
+
+                    if ((propsObj[access[0]] || {}).type == 'boolean') {
+                        if (typeof(newValue) != 'boolean') throw new exceptions.InvalidValueException(newValue, (propsObj[access[0]] || {}).type);
+                    }
+                    if ((propsObj[access[0]] || {}).type == 'number') {
+                        if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, (propsObj[access[0]] || {}).type);
                     }
 
-                    if (isObject(propsObj[access[0]]) && propsObj[access[0]].template) {
-                        newValue.overwritten = true;
-                        newValue.template = propsObj[access[0]].template
-                    }
 
+                    if ((propsObj[access[0]] || {}).template) propsObj[access[0]].overwritten = true;
                     propsObj[access[0]] = newValue;
 
-                    if (isObject(propsObj[access[0]]) && propsObj[access[0]].onChange) {
+
+                    if (propsObj[access[0]].onChange) {
                         if (Object.keys(propsObj[access[0]].onChange).length > 0) {
                             if (!instance.handlerSequence[propsObj._id]) instance.handlerSequence[propsObj._id] = {};
                             if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
@@ -889,7 +890,6 @@ module.exports = function(OBJY) {
                     }
 
                     OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setProperty', propertyKey);
-
 
                 }
             }

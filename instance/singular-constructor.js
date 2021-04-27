@@ -724,7 +724,7 @@ module.exports = function(OBJY) {
 
                 var thisRef = this;
 
-                if (params.propsObject) thisRef = obj[params.propsObject];
+                if (params.propsObject) thisRef = this[params.propsObject];
 
                 console.log('propertyName', propertyName, this)
                 if (propertyName.indexOf('.') != -1) {
@@ -754,6 +754,7 @@ module.exports = function(OBJY) {
                         propName: propertyName,
                         date: date
                     })*/
+
 
                     delete thisRef[propertyName];
 
@@ -809,7 +810,7 @@ module.exports = function(OBJY) {
 
                 var thisRef = this;
 
-                OBJY.applyAffects(thisRef, 'onCreate', instance, client)
+                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params)
 
                 OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
 
@@ -1178,7 +1179,7 @@ module.exports = function(OBJY) {
 
                     OBJY.updateO(thisRef, function(data) {
 
-                            OBJY.applyAffects(data, 'onChange', instance, client)
+                            OBJY.applyAffects(data, 'onChange', instance, client, params)
 
                             if (data.onChange) {
                                 Object.keys(data.onChange).forEach(function(key) {
@@ -1514,7 +1515,7 @@ module.exports = function(OBJY) {
 
                     var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
-                    OBJY.applyAffects(data, null, instance, client)
+                    OBJY.applyAffects(data, null, instance, client, params)
 
                     if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
