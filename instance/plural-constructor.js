@@ -234,7 +234,7 @@ module.exports = function(OBJY) {
 
                 if (params.authMethod) Object.getPrototypeOf(this).auth = params.authMethod;
                 else {
-                    Object.getPrototypeOf(this).auth = function(userObj, callback, error) {
+                    Object.getPrototypeOf(this).auth = function(userObj, callback, error, client, app) {
 
                         var query = { username: userObj.username };
 
