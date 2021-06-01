@@ -67,10 +67,10 @@ module.exports = function(OBJY) {
             return this;
         },
 
-        getPropsObject: function(obj, params){
-            if(obj.hasOwnProperty('role'))
-                if(params.hasOwnProperty('propsObject'))
-                    if(!obj.hasOwnProperty(params.propsObject))
+        getPropsObject: function(obj, params) {
+            if (obj.hasOwnProperty('role'))
+                if (params.hasOwnProperty('propsObject'))
+                    if (!obj.hasOwnProperty(params.propsObject))
                         obj[params.propsObject] = {};
 
             return obj[params.propsObject] || obj;
@@ -158,6 +158,44 @@ module.exports = function(OBJY) {
             return shortid.generate();
         },
 
+
+        checkConstraints: function(obj, operation) {
+
+            var self = this;
+            var _return = true;
+            var messages = [];
+            if (!obj.hasOwnProperty('_constraints')) return false;
+            obj._constraints.forEach(c => {
+                if (obj[c.key]) {
+                    if (typeof c.validate === 'function') {
+                        var res = c.validate(obj[c.key]);
+                        if (!res) messages.push(c.key)
+                    }
+                } else if (c.key.indexOf('.') != -1) {
+                    function getValue(_obj, access) {
+                        
+                        if (typeof(access) == 'string') {
+                            access = access.split('.');
+                        }
+                        if (access.length > 1) {
+                            getValue(_obj[access.shift()], access);
+                        } else if(_obj){
+
+                            propertyToReturn = _obj[access[0]];
+
+                            if (typeof c.validate === 'function') {
+                                var res = c.validate(propertyToReturn);
+                                if (!res && !messages.includes(c.key)) messages.push(c.key)
+                            }
+                        }
+                    }
+                    console.log('getValue', c.key)
+                    getValue(obj, c.key);
+                }
+            })
+            if (!messages.length) return true;
+            else return messages
+        }
 
     }
 }

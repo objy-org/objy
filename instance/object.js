@@ -3,7 +3,7 @@ var exceptions = require('../lib/dependencies/exceptions.js')
 module.exports = function(OBJY) {
     return {
 
-        updateInheritedObjs: function(templ, pluralName, success, error, client, params) {
+        updateInheritedObjs: function(templ, pluralName, success, error, client, params, instance) {
             // TODO
 
             /*var templateFamily;
@@ -55,7 +55,7 @@ module.exports = function(OBJY) {
         },
 
 
-        prepareObjectDelta: function(oldObj, newObj, params) {
+        prepareObjectDelta: function(oldObj, newObj, params, instance) {
 
             var meta = ['name', 'type'];
             meta.forEach(function(p) {
@@ -188,7 +188,7 @@ module.exports = function(OBJY) {
 
         },
 
-        getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource, params) {
+        getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource, params, instance) {
 
             var self = this;
 
@@ -237,16 +237,18 @@ module.exports = function(OBJY) {
 
                     if (!template) template = {};
 
+                    if(params.propsObject && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
+                    
                     var propsObj = obj[params.propsObject] || obj;
+                    var propsTmpl = template[params.propsObject] || template;
 
+                    Object.keys(propsTmpl).forEach(function(p) {
 
-                    Object.keys(template).forEach(function(p) {
+                        if (!params.propsObject && (OBJY.predefinedProperties.includes(p) || (isObject(propsTmpl[p]) || Array.isArray(propsTmpl[p])))) return;
 
-                        if (OBJY.predefinedProperties.includes(p) || (isObject(template[p]) || Array.isArray(template[p]))) return;
+                        if (!propsTmpl[p]) return;
 
-                        if (!template[p]) return;
-
-                        var cloned = JSON.parse(JSON.stringify(template[p]));
+                        var cloned = JSON.parse(JSON.stringify(propsTmpl[p]));
 
                         if (!propsObj[p]) {
                             propsObj[p] = cloned;
@@ -273,11 +275,11 @@ module.exports = function(OBJY) {
 
                         }
 
-                        if (template.permissions) {
+                        if (propsTmpl.permissions) {
                             if (!propsObj.permissions) propsObj.permissions = {};
-                            Object.keys(template.permissions).forEach(function(p) {
+                            Object.keys(propsTmpl.permissions).forEach(function(p) {
                                 if (!propsObj.permissions[p]) {
-                                    propsObj.permissions[p] = template.permissions[p];
+                                    propsObj.permissions[p] = propsTmpl.permissions[p];
                                     propsObj.permissions[p].template = templateId;
                                 } else {
                                     propsObj.permissions[p].template = templateId;
@@ -287,20 +289,20 @@ module.exports = function(OBJY) {
                         }
 
                         ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                            if (template[p][h]) {
+                            if (propsTmpl[p][h]) {
                                 if (!propsObj[p][h]) propsObj[p][h] = {};
 
-                                Object.keys(template[p][h]).forEach(function(oC) {
+                                Object.keys(propsTmpl[p][h]).forEach(function(oC) {
 
                                     if (!propsObj[p][h][oC]) {
-                                        propsObj[p][h][oC] = template[p][h][oC];
+                                        propsObj[p][h][oC] = propsTmpl[p][h][oC];
                                         if (propsObj[p][h][oC]) propsObj[p][h][oC].template = templateId;
                                     }
                                 })
                             }
                         })
 
-                        if (template[p].type == 'bag') {
+                        if (propsTmpl[p].type == 'bag') {
 
 
                             doTheProps(cloned, propsObj[p]);
@@ -473,7 +475,7 @@ module.exports = function(OBJY) {
 
         },
 
-        removeTemplateFieldsForObject: function(obj, templateId, success, error, client, params) {
+        removeTemplateFieldsForObject: function(obj, templateId, success, error, client, params, instance) {
 
 
             if (!templateId) {

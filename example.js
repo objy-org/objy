@@ -1,6 +1,80 @@
 var OBJY = require('./objy.js');
 
 
+
+OBJY.staticRules = [{
+    _id: 123,
+    affects: {},
+    apply: {
+        /*_constraints: {
+            "properties.contactPhone.value": (val) => {
+                return /^[0-9()-]+$/.test(val)
+
+            },
+            "properties.contactMail.value": (val) => {
+                return /(.+)@(.+){2,}\.(.+){2,}/.test(val)
+            }
+        },*/
+        _constraints: [{
+            key: "properties.contactPhone.value",
+            validate: (val) => {
+                console.log('dddd', val)
+                return false
+            }
+        }],
+    }
+}]
+
+
+
+OBJY.define({
+    name: "user",
+    pluralName: "users",
+    extendedStructure: {
+        email: null
+    }
+})
+
+
+OBJY.user({properties: {
+    contactPhone: {
+        value: "sdgsdg@sdgg.deeee"
+    }
+}}).add(d => console.log(d), e => console.log(e))
+
+
+return;
+
+
+
+OBJY.define({
+    name: "template",
+    pluralName: "templates",
+    extendedStructure: {
+        properties: '$useForProps'
+    }
+})
+
+
+var one = OBJY.template({
+    properties: {
+        test: {
+            type: "shortText",
+            value: "sgsdg"
+        }
+    }
+})
+
+console.log('one', one)
+
+var two = OBJY.template({
+    inherits: [one._id]
+})
+
+console.log('two', two)
+
+return;
+
 OBJY.affectables = [{
     _id: 123,
     affects: {},
@@ -15,7 +89,7 @@ OBJY.define({
     pluralName: "users",
     //propsObject: 'properties'
     storage: [
-    	OBJY.customStorage({
+        OBJY.customStorage({
             add: function(elem, success, client, app, prev) {
                 console.log('ä', elem)
             },
@@ -33,10 +107,30 @@ OBJY.define({
 
 OBJY.define({
     name: "object",
-    pluralName: "objects"
+    pluralName: "objects",
+    extendedStructure: {
+        properties: '$useForProps'
+    }
 })
 
 OBJY.client('fff')
+
+
+var oo = OBJY.object({
+    properties: {
+        attributeGroups: {
+            type: "bag"
+        }
+    }
+})
+
+oo.removeProperty('attributeGroups')
+oo.update()
+
+
+console.log(oo)
+
+return;
 
 OBJY.object({
     _id: 'general',
@@ -55,7 +149,12 @@ OBJY.object({
 
 var kassenautomat = OBJY.object({
     name: "kassenautomat",
-    inherits: ['general']
+    inherits: ['general'],
+    constraints: {
+        inherits: (val) => {
+            //if val.length == 0 alert()
+        }
+    }
 })
 
 

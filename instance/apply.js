@@ -286,8 +286,22 @@ module.exports = function(OBJY) {
                             })
                         }
                     })
+
+
+                    console.log('coooooooooooooo')
+                    if (template._constraints) {
+                        if (!obj._constraints) obj._constraints = [];
+                        template._constraints.forEach(c => {
+                            obj._constraints.push(c)
+                        })
+                    }
+
+
+
                 }
             })
-        }
+        },
+
+
     }
 }

@@ -49,6 +49,8 @@ module.exports = function(OBJY) {
                 this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
             }
 
+            this._constraints = obj._constraints;
+
             //@TODO: DEPRECATE THIS!
             // this.type = obj.type;
 
@@ -818,6 +820,13 @@ module.exports = function(OBJY) {
 
                 if (params.dirty) {
 
+                    var constraints = OBJY.checkConstraints(obj);
+                    if (Array.isArray(constraints) && error) {
+                        return error({
+                            message: "constraints error: " + constraints.join(','),
+                        })
+                    }
+
                     OBJY.add(thisRef, function(data) {
 
                             thisRef._id = data._id;
@@ -952,6 +961,13 @@ module.exports = function(OBJY) {
 
                     if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c')) return error({ error: "Lack of Permissions" });
 
+                    var constraints = OBJY.checkConstraints(obj);
+                    if (Array.isArray(constraints) && error) {
+                        return error({
+                            message: "constraints error: " + constraints.join(','),
+                        })
+                    }
+
                     OBJY.add(obj, function(data) {
 
                             obj._id = data._id;
@@ -1003,7 +1019,7 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             if (error) error(err);
-                        }, app, client, params);
+                        }, app, client, params, instance);
                 }
 
 
@@ -1050,6 +1066,13 @@ module.exports = function(OBJY) {
 
                 if (params.dirty) {
 
+                    var constraints = OBJY.checkConstraints(this);
+                    if (Array.isArray(constraints) && error) {
+                        return error({
+                            message: "constraints error: " + constraints.join(','),
+                        })
+                    }
+
                     OBJY.updateO(thisRef, function(data) {
 
                             delete instance.handlerSequence[this._id];
@@ -1063,7 +1086,7 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             if (error) error(err);
-                        }, app, client, params);
+                        }, app, client, params, instance);
 
                     return OBJY.deserialize(this);
                 }
@@ -1177,6 +1200,13 @@ module.exports = function(OBJY) {
 
                 function updateFn() {
 
+                    var constraints = OBJY.checkConstraints(thisRef);
+                    if (Array.isArray(constraints) && error) {
+                        return error({
+                            message: "constraints error: " + constraints.join(','),
+                        })
+                    }
+
                     OBJY.updateO(thisRef, function(data) {
 
                             OBJY.applyAffects(data, 'onChange', instance, client, params)
@@ -1239,7 +1269,7 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             if (error) error(err);
-                        }, app, client, params);
+                        }, app, client, params, instance);
 
                 }
 
@@ -1273,7 +1303,7 @@ module.exports = function(OBJY) {
                                 function(err) {
                                     if (error) error(thisRef);
                                     return thisRef;
-                                }, client, params.templateFamily, params.templateSource, params)
+                                }, client, params.templateFamily, params.templateSource, params, instance)
                         }
 
                         if (i.name == 'removeInherit' && thisRef.inherits.indexOf(i.value) == -1) {
@@ -1288,7 +1318,7 @@ module.exports = function(OBJY) {
                                 function(err) {
                                     if (error) error(thisRef);
                                     return thisRef;
-                                }, client, params)
+                                }, client, params, instance)
                         }
                     })
 
@@ -1324,7 +1354,7 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         if (error) error(err)
-                    }, app, client, instance, params);
+                    }, app, client, instance, params, instance);
 
                     return OBJY.deserialize(this);
 
@@ -1458,7 +1488,7 @@ module.exports = function(OBJY) {
 
                 }, function(err) {
                     if (error) error(err)
-                }, app, client, instance, params);
+                }, app, client, instance, params, instance);
 
                 return OBJY.deserialize(this);
             };
@@ -1480,7 +1510,7 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         if (error) error(err)
-                    }, app, client, instance, params);
+                    }, app, client, instance, params, instance);
 
                     return OBJY.deserialize(this);
                 }
@@ -1561,7 +1591,7 @@ module.exports = function(OBJY) {
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                         return data;
                                     }
-                                }, client, params.templateFamily, params.templateSource, params)
+                                }, client, params.templateFamily, params.templateSource, params, instance)
                         } else {
 
                             var returnObject = OBJY[data.role](OBJY.deserialize(data));
@@ -1594,7 +1624,7 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         if (error) error(err)
-                    }, app, client, instance, params);
+                    }, app, client, instance, params, instance);
                 }
 
                 return OBJY.deserialize(this);
@@ -1634,7 +1664,7 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             console.log('errr', err)
-                        }, instance.activeTenant, params.templateFamily, params.templateSource, params)
+                        }, instance.activeTenant, params.templateFamily, params.templateSource, params, instance)
 
                 });
 

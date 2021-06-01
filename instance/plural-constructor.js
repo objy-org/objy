@@ -108,7 +108,7 @@ module.exports = function(OBJY) {
                                                 return d;
                                             }
 
-                                        }, client, params.templateFamily, params.templateSource, params)
+                                        }, client, params.templateFamily, params.templateSource, params, instance)
                                 } else {
 
                                     if (d.inherits.length == 1) {
@@ -128,7 +128,7 @@ module.exports = function(OBJY) {
                     }, function(err) {
                         console.log('err', err);
                         error(err)
-                    }, app, client, flags || {});
+                    }, app, client, flags || {}, params, instance);
 
                 }
 
@@ -146,7 +146,7 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         error(err)
-                    }, app, client, flags || {});
+                    }, app, client, flags || {}, params, instance);
 
                     return;
                 }
@@ -192,7 +192,6 @@ module.exports = function(OBJY) {
 
                                                 if (counter == data.inherits.length) allCounter++;
 
-
                                                 if (allCounter == objs.length) {
                                                     success(objs);
                                                     return data;
@@ -201,7 +200,7 @@ module.exports = function(OBJY) {
                                             function(err) {
                                                 error(err);
                                                 return data;
-                                            }, client, params.templateFamily, params.templateSource, params)
+                                            }, client, params.templateFamily, params.templateSource, params, instance)
                                     } else {
 
                                         if (data.inherits.length == 1) {
@@ -211,10 +210,8 @@ module.exports = function(OBJY) {
                                             counter++;
                                             return;
                                         }
-
                                     }
                                 });
-
 
                             } else {
                                 allCounter++;
@@ -235,28 +232,32 @@ module.exports = function(OBJY) {
                 return this;
             } else {
 
-                Object.getPrototypeOf(this).auth = function(userObj, callback, error) {
+                if (params.authMethod) Object.getPrototypeOf(this).auth = params.authMethod;
+                else {
+                    Object.getPrototypeOf(this).auth = function(userObj, callback, error) {
 
-                    var query = { username: userObj.username };
+                        var query = { username: userObj.username };
 
-                    if (instance.authableFields) {
-                        query = { $or: [] };
-                        instance.authableFields.forEach(function(field) {
-                            var f = {};
-                            f[field] = userObj[field];
-                            if (f[field]) query.$or.push(f)
+                        if (instance.authableFields) {
+                            query = { $or: [] };
+                            instance.authableFields.forEach(function(field) {
+                                var f = {};
+                                f[field] = userObj[field];
+                                if (f[field]) query.$or.push(f)
+                            })
+                            if (Object.keys(query.$or).length == 0) query = { username: userObj.username }
+                        }
+
+                        instance[params.pluralName](query).get(function(data) {
+                            if (data.length == 0) error("User not found");
+                            callback(data[0])
+
+                        }, function(err) {
+                            error(err);
                         })
-                        if (Object.keys(query.$or).length == 0) query = { username: userObj.username }
-                    }
+                    };
 
-                    instance[params.pluralName](query).get(function(data) {
-                        if (data.length == 0) error("User not found");
-                        callback(data[0])
-
-                    }, function(err) {
-                        error(err);
-                    })
-                };
+                }
             }
 
         },
