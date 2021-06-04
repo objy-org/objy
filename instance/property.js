@@ -276,7 +276,6 @@ module.exports = function(OBJY) {
                     getValue(propsObj[access.shift()], access);
                 } else {
 
-                    console.log('ddddd', propsObj, access[0])
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     propertyToReturn = propsObj[access[0]];
@@ -799,7 +798,6 @@ module.exports = function(OBJY) {
                     setValue(propsObj[shift], access, value);
                 } else {
 
-                    console.log('sdgsdgsdgsdg', propsObj, access[0])
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (propsObj[access[0]].type == 'boolean') {
@@ -863,7 +861,6 @@ module.exports = function(OBJY) {
                     setValue(propsObj[shift], access, value);
                 } else {
 
-                    console.log('sdgsdgsdgsdg', propsObj, access[0])
                     //if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if ((propsObj[access[0]] || {}).type == 'boolean') {

@@ -97,7 +97,6 @@ module.exports = function(OBJY) {
             if (!obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
             Object.keys(obj).forEach(p => {
                 if (!OBJY.predefinedProperties.includes(p) && typeof obj[p] !== 'function') {
-                    console.log('---', p)
                     obj[params.propsObject][p] = obj[p];
                     delete obj[p];
                 }
@@ -189,7 +188,6 @@ module.exports = function(OBJY) {
                             }
                         }
                     }
-                    console.log('getValue', c.key)
                     getValue(obj, c.key);
                 }
             })

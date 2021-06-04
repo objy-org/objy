@@ -728,7 +728,6 @@ module.exports = function(OBJY) {
 
                 if (params.propsObject) thisRef = this[params.propsObject];
 
-                console.log('propertyName', propertyName, this)
                 if (propertyName.indexOf('.') != -1) {
                     this.removePropertyFromBag(propertyName, client);
                     return;
@@ -869,8 +868,6 @@ module.exports = function(OBJY) {
 
                     Object.keys(props).forEach(function(p) {
 
-                        console.log('eprop', p)
-
                         if (!isObject(props[p])) return;
 
                         if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
@@ -947,7 +944,7 @@ module.exports = function(OBJY) {
                 var mapper = instance.observers[thisRef.role];
 
                 //if (this) aggregateAllEvents(this.properties);
-                console.log('thisRef', thisRef)
+
                 aggregateAllEvents(thisRef);
 
 
@@ -1615,7 +1612,6 @@ module.exports = function(OBJY) {
 
                     OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
 
-                        console.log('innergot', data)
                         prepareObj(data);
 
                         if (!instance.caches[thisRef.role].data[thisRef._id]) {
@@ -1657,18 +1653,14 @@ module.exports = function(OBJY) {
                 var thisRef = this;
                 (this.inherits || []).forEach(function(template) {
 
-                    console.log('fffff', instance.activeTenant)
-
                     OBJY.getTemplateFieldsForObject(thisRef, template, function() {
-                            console.log('got')
+
                         },
                         function(err) {
                             console.log('errr', err)
                         }, instance.activeTenant, params.templateFamily, params.templateSource, params, instance)
 
                 });
-
-                console.log('thisRef', thisRef)
 
                 return new Proxy(this, validator);
             }
