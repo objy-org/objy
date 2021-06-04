@@ -40,27 +40,27 @@ StorageMapperTemplate = function(OBJY, options) {
 
     };
 
-    this.getById = function(id, success, error, app, client) {
+    this.getById = function(id, success, error, app, client, user) {
 
     }
 
-    this.getByCriteria = function(criteria, success, error, app, client, flags) {
+    this.getByCriteria = function(criteria, success, error, app, client, user, params, flags) {
 
     }
 
-    this.count = function(criteria, success, error, app, client, flags) {
+    this.count = function(criteria, success, error, app, client, user, params, flags) {
 
     }
 
-    this.update = function(spooElement, success, error, app, client) {
+    this.update = function(spooElement, success, error, app, client, user, params) {
 
     };
 
-    this.add = function(spooElement, success, error, app, client) {
+    this.add = function(spooElement, success, error, app, client, user, params) {
 
     };
 
-    this.remove = function(spooElement, success, error, app, client) {
+    this.remove = function(spooElement, success, error, app, client, user, params) {
 
     };
 };
