@@ -287,7 +287,6 @@ module.exports = function(OBJY) {
                         }
                     })
 
-                    console.log('coooooooooooooo')
                     if (template._constraints) {
                         if (!Array.isArray(obj._constraints)) obj._constraints = [];
                         template._constraints.forEach(c => {
