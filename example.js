@@ -2,6 +2,45 @@ var OBJY = require('./objy.js');
 
 
 
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects",
+    extendedStructure: {
+        properties: '$useForProps'
+    }
+})
+
+
+var o = OBJY.object({
+    properties: {
+        advancedView: {
+            type: 'bag',
+            properties: {
+                isActive: {
+                    type: 'boolean',
+                    value: true
+                }
+            }
+        }
+    }
+})
+
+
+o.setPropertyValue('advancedView.properties.isActive', false)
+
+o.addProperty('advancedView.properties.hello', {type: 'boolean', value: true})
+
+o.removeProperty('advancedView.properties.hello')
+
+console.log(JSON.stringify(o, null, 4))
+
+
+
+
+return;
+
+
 OBJY.staticRules = [{
     _id: 123,
     affects: {},

@@ -292,7 +292,7 @@ module.exports = function(OBJY) {
             }, app, client, flags, params, instance);
         },
 
-        countObjects: function(criteria, role, success, error, app, client, flags, params) {
+        countObjects: function(criteria, role, success, error, app, client, flags, params, instance) {
 
             var templatesCache = [];
             var objectsCache = [];

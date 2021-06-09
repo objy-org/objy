@@ -711,7 +711,7 @@ module.exports = function(OBJY) {
             Object.getPrototypeOf(this).removePropertyFromBag = function(property, client) {
                 var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemRemover(this, property, instance);
+                new OBJY.PropertyBagItemRemover(this, property, params, instance);
                 return this;
             };
 
