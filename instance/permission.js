@@ -110,13 +110,11 @@ module.exports = function(OBJY) {
             if (Object.keys(user.authorisations || {}).length == 0) return; //throwError();
 
             if (!app && !user.authorisations['*']) {
-                console.warn('app, !authorisationsapp');
                 throwError();
             }
 
             if (user.authorisations['*']) authorisations = user.authorisations['*'];
             else if (app && !user.authorisations[app]) {
-                console.warn('app, !authorisationsapp')
                 throwError();
             } else authorisations = user.authorisations[app];
 
@@ -125,7 +123,6 @@ module.exports = function(OBJY) {
             var query = { $or: [] }
 
             authorisations.forEach(function(a) {
-                console.warn('_a', a, condition)
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
 
@@ -225,13 +222,11 @@ module.exports = function(OBJY) {
             if (Object.keys(user.authorisations || {}).length == 0) return obj; //throwError();
 
             if (!app && !user.authorisations['*']) {
-                console.warn('app, !authorisationsapp');
                 throwError();
             }
 
             if (user.authorisations['*']) authorisations = user.authorisations['*'];
             else if (app && !user.authorisations[app]) {
-                console.warn('app, !authorisationsapp')
                 throwError();
             } else authorisations = user.authorisations[app];
 
@@ -241,7 +236,6 @@ module.exports = function(OBJY) {
             var wildcard = false;
 
             authorisations.forEach(function(a) {
-                console.warn('_a', a, condition)
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                     if (Object.keys(a.query).length == 0) wildcard = true;
                     else {
