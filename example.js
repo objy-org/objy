@@ -29,14 +29,11 @@ var o = OBJY.object({
 
 o.setPropertyValue('advancedView.properties.isActive', false)
 
-o.addProperty('advancedView.properties.hello', {type: 'boolean', value: true})
+o.addProperty('advancedView.properties.hello', { type: 'boolean', value: true })
 
 o.removeProperty('advancedView.properties.hello')
 
 console.log(JSON.stringify(o, null, 4))
-
-
-
 
 return;
 
@@ -75,11 +72,13 @@ OBJY.define({
 })
 
 
-OBJY.user({properties: {
-    contactPhone: {
-        value: "sdgsdg@sdgg.deeee"
+OBJY.user({
+    properties: {
+        contactPhone: {
+            value: "sdgsdg@sdgg.deeee"
+        }
     }
-}}).add(d => console.log(d), e => console.log(e))
+}).add(d => console.log(d), e => console.log(e))
 
 
 return;

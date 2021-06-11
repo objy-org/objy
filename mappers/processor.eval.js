@@ -9,23 +9,25 @@ Mapper = function(OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        eval(dsl);
+                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options)
+                        else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }
-                if(callback) callback();
+                if (callback) callback();
             } else {
                 try {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        eval(dsl);
+                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options)
+                        else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e)
                 }
-                if(callback) callback();
+                if (callback) callback();
             }
         }
     })
