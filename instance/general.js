@@ -164,7 +164,6 @@ module.exports = function(OBJY) {
             var _return = true;
             var messages = [];
             if (!obj['_constraints']) return false;
-            console.log('_constraints', obj._constraints)
             obj._constraints.forEach(c => {
                 if (obj[c.key]) {
                     if (typeof c.validate === 'function') {

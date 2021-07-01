@@ -3,7 +3,8 @@ Mapper = function(OBJY, mapperOptions) {
 
         execute: function(dsl, obj, prop, data, callback, client, app, user, options) {
 
-            OBJY.Logger.log("Executing dsl in mapper")
+            OBJY.Logger.log("Executing dsl in mapper");
+
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
                 try {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {

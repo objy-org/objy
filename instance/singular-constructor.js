@@ -210,7 +210,6 @@ module.exports = function(OBJY) {
                             doTheProps(self[k], o[k])
                         }
 
-
                     })
                 }
 
@@ -845,7 +844,8 @@ module.exports = function(OBJY) {
                     return OBJY.deserialize(this);
                 }
 
-
+                
+                console.log('thisRef.onCreate', thisRef.onCreate)
                 if (thisRef.onCreate) {
                     Object.keys(thisRef.onCreate).forEach(function(key) {
 
@@ -967,11 +967,14 @@ module.exports = function(OBJY) {
 
                     OBJY.add(obj, function(data) {
 
+                            OBJY.applyAffects(data, 'onCreate', instance, client, params)
+
                             obj._id = data._id;
 
+                            console.log('added data.', data)
 
                             if (data.onCreate) {
-
+                                console.log('data.onCreate', data.onCreate)
                                 Object.keys(data.onCreate).forEach(function(key) {
                                     if (data.onCreate[key].trigger == 'after') {
 
@@ -1056,6 +1059,8 @@ module.exports = function(OBJY) {
 
                 var client = client || instance.activeTenant;
                 var app = instance.activeApp;
+
+                OBJY.applyAffects(this, 'onChange', instance, client, params)
 
                 OBJY.checkAuthroisations(this, instance.activeUser, "u", instance.activeApp);
 
@@ -1333,6 +1338,8 @@ module.exports = function(OBJY) {
 
                 var thisRef = JSON.parse(JSON.stringify(this));
 
+                OBJY.applyAffects(thisRef, 'onDelete', instance, client, params)
+
                 OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp);
 
                 if (params.dirty) {
@@ -1374,6 +1381,9 @@ module.exports = function(OBJY) {
                 OBJY.getObjectById(this.role, this._id, function(data) {
 
                     return OBJY.remove(thisRef, function(_data) {
+
+
+                        OBJY.applyAffects(data, 'onDelete', instance, client, params)
 
                         if (thisRef.onDelete) {
                             Object.keys(thisRef.onDelete).forEach(function(key) {

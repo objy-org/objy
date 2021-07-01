@@ -32,6 +32,7 @@ module.exports = function(OBJY) {
                             Object.keys(template[h]).forEach(function(oC) {
                                 if (!obj[h]) obj[h] = {};
                                 if (!obj[h][oC]) {
+                                    if(!template[h][oC]) return;
                                     obj[h][oC] = template[h][oC];
                                     obj[h][oC].template = templateId;
                                 }
@@ -46,7 +47,11 @@ module.exports = function(OBJY) {
                     // Properties
                     function doTheProps(template, obj) {
 
-                        if (!obj) obj = {}
+                        var propsObj = obj[params.propsObject] || obj;
+                        if(!template[params.propsObject]) return;
+                        var propsTmpl = template[params.propsObject] || template;
+
+                        if (!propsObj) propsObj = {}
 
                         /*if (obj.type == 'bag') {
                             if (!obj.properties) {
@@ -54,67 +59,65 @@ module.exports = function(OBJY) {
                             }
                         }*/
 
-                        Object.keys(template || {}).forEach(function(p) {
+                        Object.keys(propsTmpl || {}).forEach(function(p) {
+                       
+                            var isO = isObject(propsTmpl[p]);
 
-                            var propsObj = obj[params.propsObject] || obj;
-
-                            var isO = isObject(template[p]);
-
-                            if ((template[p] || {}).type == 'bag') {
+                            if ((propsTmpl[p] || {}).type == 'bag') {
 
                                 if (!propsObj[p]) {
 
-                                    propsObj[p] = template[p];
-                                    if (isO) propsObj[p].template = templateId;
+                                    propsObj[p] = propsTmpl[p];
+                                    if (isO) propsObj[p].propsTmpl = templateId;
                                 } else {
                                     if (!propsObj[p].overwritten && Object.keys(propsObj[p]).length == 0) {
-                                        propsObj[p] = template[p];
+                                        propsObj[p] = propsTmpl[p];
                                     }
 
-                                    if (isO) propsObj[p].template = templateId;
+                                    if (isO) propsObj[p].propsTmpl = templateId;
                                     //propsObj.properties[p].overwritten = true;
                                 }
 
                                 if (!propsObj[propsObj]) propsObj[p] = {};
 
-                                doTheProps(template[p], propsObj[p]);
+                                doTheProps(propsTmpl[p], propsObj[p]);
 
-                            } else if (isObject(template[p])) {
+                            } else if (isObject(propsTmpl[p])) {
 
                                 if (!propsObj[p]) {
 
-                                    propsObj[p] = template[p];
+                                    propsObj[p] = propsTmpl[p];
 
-                                    if (p != 'properties' && isO) propsObj[p].template = templateId;
+                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
 
                                 } else {
 
                                     if (!propsObj[p].overwritten && Object.keys(propsObj[p]).length == 0) {
-                                        propsObj[p] = template[p];
+                                        propsObj[p] = propsTmpl[p];
                                     }
 
-                                    if (p != 'properties' && isO) propsObj[p].template = templateId;
+                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
                                     //propsObj[p].overwritten = true;
                                 }
 
-                                doTheProps(template[p], propsObj[p]);
+                                doTheProps(propsTmpl[p], propsObj[p]);
                             }
 
 
                             if (!propsObj[p]) {
-                                propsObj[p] = template[p];
-                                if (p != 'properties' && isO) propsObj[p].template = templateId;
+                                propsObj[p] = propsTmpl[p];
+                                if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
                                 if (isO) delete propsObj[p].overwritten;
                             } else {
 
                                 if (!propsObj[p].overwritten) {
-                                    if (p != 'properties' && isO) propsObj[p].template = templateId;
-                                    if (propsObj[p].value == null && isO) propsObj[p].value = template[p].value;
+                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
+                                    if (propsObj[p].value == null && isO) propsObj[p].value = propsTmpl[p].value;
                                     //obj[p].overwritten = true;
                                 }
 
                                 if (!propsObj[p].metaOverwritten) {
-                                    propsObj[p].meta = template[p].meta;
+                                    propsObj[p].meta = propsTmpl[p].meta;
                                 }
 
                                 /*if (obj[p].type == 'bag') {
@@ -125,29 +128,29 @@ module.exports = function(OBJY) {
                             }
 
 
-                            if (template.permissions) {
+                            if (propsTmpl.permissions) {
                                 if (!propsObj.permissions) propsObj.permissions = {};
-                                Object.keys(template.permissions).forEach(function(p) {
+                                Object.keys(propsTmpl.permissions).forEach(function(p) {
                                     if (!propsObj.permissions[p]) {
-                                        propsObj.permissions[p] = template.permissions[p];
-                                        if (isO) propsObj.permissions[p].template = templateId;
+                                        propsObj.permissions[p] = propsTmpl.permissions[p];
+                                        if (isO) propsObj.permissions[p].propsTmpl = templateId;
                                     } else {
-                                        if (isO) propsObj.permissions[p].template = templateId;
+                                        if (isO) propsObj.permissions[p].propsTmpl = templateId;
                                         if (isO) propsObj.permissions[p].overwritten = true;
                                     }
                                 })
                             }
 
                             ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                                if (!isObject(template[p])) return;
-                                if (template[p][h]) {
+                                if (!isObject(propsTmpl[p])) return;
+                                if (propsTmpl[p][h]) {
                                     if (!propsObj[p][h]) propsObj[p][h] = {};
 
-                                    Object.keys(template[p][h]).forEach(function(oC) {
+                                    Object.keys(propsTmpl[p][h]).forEach(function(oC) {
 
                                         if (!propsObj[p][h][oC]) {
-                                            propsObj[p][h][oC] = template[p][h][oC];
-                                            propsObj[p][h][oC].template = templateId;
+                                            propsObj[p][h][oC] = propsTmpl[p][h][oC];
+                                            propsObj[p][h][oC].propsTmpl = templateId;
                                         }
                                     })
                                 }
@@ -181,8 +184,6 @@ module.exports = function(OBJY) {
                         }
 
                         keys.forEach(function(k) {
-
-
 
                             if (!obj.authorisations[k]) {
                                 obj.authorisations[k] = template.authorisations[k]
@@ -289,6 +290,10 @@ module.exports = function(OBJY) {
                     if (template._constraints) {
                         if (!Array.isArray(obj._constraints)) obj._constraints = [];
                         template._constraints.forEach(c => {
+
+                            if (obj._constraints.find(el => el.key == c.key)) return;
+
+                            c.templateId = templateId;
                             obj._constraints.push(c)
                         })
                     }

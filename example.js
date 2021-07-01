@@ -1,7 +1,20 @@
 var OBJY = require('./objy.js');
 
 
-
+OBJY.affectables.push({
+    _id: 123,
+    affects: {
+        role: "object"
+    },
+    apply: {
+        onCreate: {
+            processFiles: {
+                trigger: 'after',
+                action: 'processPlantFile(obj)'
+            }
+        }
+    }
+})
 
 OBJY.define({
     name: "object",
@@ -24,7 +37,12 @@ var o = OBJY.object({
             }
         }
     }
+}).add(data => {
+    console.log('ddd', data)
 })
+
+
+return;
 
 
 o.setPropertyValue('advancedView.properties.isActive', false)

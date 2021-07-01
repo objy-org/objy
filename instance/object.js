@@ -237,8 +237,8 @@ module.exports = function(OBJY) {
 
                     if (!template) template = {};
 
-                    if(params.propsObject && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
-                    
+                    if (params.propsObject && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
+
                     var propsObj = obj[params.propsObject] || obj;
                     var propsTmpl = template[params.propsObject] || template;
 
@@ -578,6 +578,16 @@ module.exports = function(OBJY) {
                     })
                 })
             }
+
+
+            if (obj._constraints) {
+                if (!Array.isArray(obj._constraints)) return;
+                obj._constraints.forEach((c, i) => {
+                    if (c.templateId == templateId && !c.overwritten) obj._constraints.splice(i, 1)
+                })
+            }
+
+
             success(obj);
         },
 
