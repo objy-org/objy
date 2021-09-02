@@ -841,8 +841,6 @@ module.exports = function(OBJY) {
                     return OBJY.deserialize(this);
                 }
 
-                
-                console.log('thisRef.onCreate', thisRef.onCreate)
                 if (thisRef.onCreate) {
                     Object.keys(thisRef.onCreate).forEach(function(key) {
 
@@ -968,10 +966,8 @@ module.exports = function(OBJY) {
 
                             obj._id = data._id;
 
-                            console.log('added data.', data)
-
                             if (data.onCreate) {
-                                console.log('data.onCreate', data.onCreate)
+                                
                                 Object.keys(data.onCreate).forEach(function(key) {
                                     if (data.onCreate[key].trigger == 'after') {
 
@@ -1664,7 +1660,7 @@ module.exports = function(OBJY) {
 
                         },
                         function(err) {
-                            console.log('errr', err)
+                            console.log('err', err)
                         }, instance.activeTenant, params.templateFamily, params.templateSource, params, instance)
 
                 });

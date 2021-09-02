@@ -271,7 +271,7 @@ module.exports = function(OBJY) {
             var propertyToReturn;
 
             function getValue(obj, access) {
-                
+
                 var propsObj = obj;
 
                 if (typeof(access) == 'string') {
@@ -309,9 +309,9 @@ module.exports = function(OBJY) {
 
 
         PropertyCreateWrapper: function(obj, property, isBag, instance, params, reallyAdd) {
-    
+
             if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
-            //console.warn(obj, property, params.propsObject)
+
             property = Object.assign({}, property);
 
             var propsObj = obj[params.propsObject] || obj;
@@ -790,9 +790,9 @@ module.exports = function(OBJY) {
             var propsObj = obj[params.propsObject] || obj;
 
             function setValue(obj, access, value) {
-                
-                var propsObj = obj    
-                
+
+                var propsObj = obj
+
                 if (typeof(access) == 'string') {
                     access = access.split('.');
                 }
@@ -856,7 +856,7 @@ module.exports = function(OBJY) {
             var propsObj = obj[params.propsObject] || obj;
 
             function setValue(obj, access, value) {
-                
+
                 var propsObj = obj
 
                 if (typeof(access) == 'string') {

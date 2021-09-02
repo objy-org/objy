@@ -541,7 +541,6 @@ module.exports = function(OBJY) {
                         if (propsObj[p]) {
                             if (propsObj[p].value != null) propsObj[p].overwritten = true;
                             if (propsObj[p].template == templateId && !propsObj[p].overwritten) {
-                                console.info('deleting propsObj', p, propsObj[p])
                                 delete propsObj[p];
                             }
                         }
