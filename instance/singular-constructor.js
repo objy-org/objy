@@ -8,13 +8,10 @@ var isObject = function(a) {
 };
 
 
-
 module.exports = function(OBJY) {
     return {
 
         Obj: function(obj, role, instance, params) {
-
-            OBJY.Logger.log("Plain Object: " + obj);
 
             if (instance.metaPropPrefix != '' && typeof obj !== "string") obj = OBJY.serialize(obj);
 
