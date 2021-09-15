@@ -123,6 +123,13 @@ module.exports = function(OBJY) {
             var query = { $or: [] }
 
             authorisations.forEach(function(a) {
+                if (typeof a.query === "string") {
+                    try {
+                        a.query = JSON.parse(a.query)
+                    } catch (e) {
+                        a.query = {};
+                    }
+                }
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
 
@@ -145,7 +152,7 @@ module.exports = function(OBJY) {
                 delete query.$query;
             }
 
-           
+
             if (!user.spooAdmin) {
 
                 if (!user.privileges) return query;
@@ -186,7 +193,7 @@ module.exports = function(OBJY) {
                     //inn["permissions.*"] = "*"
                     //privArr.push(inn);
 
-                    
+
                     if (Object.keys(query).length > 0) {
 
                         return { $and: [query, { $or: privArr }] }
@@ -196,7 +203,7 @@ module.exports = function(OBJY) {
                 } else if (!app) {
                     return query;
                 }
-                
+
             } else {
                 return query
             }
@@ -236,6 +243,13 @@ module.exports = function(OBJY) {
             var wildcard = false;
 
             authorisations.forEach(function(a) {
+                if (typeof a.query === "string") {
+                    try {
+                        a.query = JSON.parse(a.query)
+                    } catch (e) {
+                        a.query = {};
+                    }
+                }
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                     if (Object.keys(a.query).length == 0) wildcard = true;
                     else {
