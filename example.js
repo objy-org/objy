@@ -1,6 +1,31 @@
 var OBJY = require('./objy.js');
 
 
+
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects",
+    authable: true
+})
+
+OBJY.app("test");
+
+OBJY.useUser({username: "sg", authorisations: {test: [{query: "{\"$and\":[{\"name\":{\"$regex\":\"f\",\"$options\":\"i\"}}]}", perm: "crud", name: 1}]}})
+
+var o = OBJY.object({id: 124});
+
+//o.setAuthorisation({query: "{\"$and\":[{\"name\":{\"$regex\":\"e\",\"$options\":\"i\"}}]}", perm: "crud"})
+
+//console.log(JSON.stringify(o, null, 4))
+
+OBJY.objects({}).get(_o => {
+    console.log(_o)
+})
+
+console.log(JSON.stringify(o, null, 4))
+
+return;
 OBJY.affectables.push({
     _id: 123,
     affects: {

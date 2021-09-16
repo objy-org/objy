@@ -243,12 +243,10 @@ module.exports = function(OBJY) {
             var wildcard = false;
 
             authorisations.forEach(function(a) {
-                if (typeof a.query === "string") {
-                    try {
-                        a.query = JSON.parse(a.query)
-                    } catch (e) {
-                        a.query = {};
-                    }
+                try {
+                    a.query = JSON.parse(a.query)
+                } catch (e) {
+
                 }
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                     if (Object.keys(a.query).length == 0) wildcard = true;
