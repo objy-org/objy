@@ -130,6 +130,12 @@ module.exports = function(OBJY) {
                         a.query = {};
                     }
                 }
+
+                if (a.query.$query) {
+                    a.query = JSON.parse(JSON.stringify(a.query.$query));
+                    delete a.query.$query;
+                }
+                
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
 
@@ -248,6 +254,12 @@ module.exports = function(OBJY) {
                 } catch (e) {
 
                 }
+
+                if (a.query.$query) {
+                    a.query = JSON.parse(JSON.stringify(a.query.$query));
+                    delete a.query.$query;
+                }
+
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                     if (Object.keys(a.query).length == 0) wildcard = true;
                     else {
