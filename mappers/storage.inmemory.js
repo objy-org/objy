@@ -72,7 +72,6 @@ var Mapper = function(OBJY, options) {
                     tenantId: client
                 })
 
-
             success(Query.query(db, criteria, Query.undot));
         },
 

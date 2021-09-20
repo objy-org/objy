@@ -123,6 +123,7 @@ module.exports = function(OBJY) {
             var query = { $or: [] }
 
             authorisations.forEach(function(a) {
+
                 if (typeof a.query === "string") {
                     try {
                         a.query = JSON.parse(a.query)
@@ -135,7 +136,7 @@ module.exports = function(OBJY) {
                     a.query = JSON.parse(JSON.stringify(a.query.$query));
                     delete a.query.$query;
                 }
-                
+
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
 
@@ -242,6 +243,12 @@ module.exports = function(OBJY) {
             else if (app && !user.authorisations[app]) {
                 throwError();
             } else authorisations = user.authorisations[app];
+
+            //...
+            if (obj.$query) {
+               obj = JSON.parse(JSON.stringify(obj.$query));
+               delete obj.$query;
+            }
 
             var permCheck = [obj];
 
