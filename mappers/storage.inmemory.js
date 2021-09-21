@@ -71,6 +71,8 @@ var Mapper = function(OBJY, options) {
                 Object.assign(criteria, {
                     tenantId: client
                 })
+            
+            console.log('final query', JSON.stringify(criteria, null, 4))
 
             success(Query.query(db, criteria, Query.undot));
         },
