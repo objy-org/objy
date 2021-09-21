@@ -19,7 +19,11 @@ module.exports = function(OBJY) {
 
                 objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
 
+                console.log(4, objs)
+
                 if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
+
+                console.log(5, objs)
 
                 Object.getPrototypeOf(this).get = function(success, error) {
 
@@ -30,6 +34,8 @@ module.exports = function(OBJY) {
 
                     var allCounter = 0;
 
+                    console.log(6, objs)
+                    
                     OBJY.findObjects(objs, role, function(data) {
 
                         var i;
