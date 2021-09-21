@@ -255,12 +255,16 @@ module.exports = function(OBJY) {
             var query = []
             var wildcard = false;
 
+            console.log(1, query)
+
             authorisations.forEach(function(a) {
                 try {
                     a.query = JSON.parse(a.query)
                 } catch (e) {
 
                 }
+
+                console.log(2, a.query)
 
                 /*if (a.query.$query) {
                     a.query = JSON.parse(JSON.stringify(a.query.$query));
@@ -276,6 +280,8 @@ module.exports = function(OBJY) {
                 }
             })
 
+            console.log(3, query);
+            
             if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
 
             query = { $or: query };
