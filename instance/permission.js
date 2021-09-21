@@ -132,10 +132,10 @@ module.exports = function(OBJY) {
                     }
                 }
 
-                /*if (a.query.$query) {
+                if (a.query.$query) {
                     a.query = JSON.parse(JSON.stringify(a.query.$query));
                     delete a.query.$query;
-                }*/
+                }
 
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
@@ -245,10 +245,10 @@ module.exports = function(OBJY) {
             } else authorisations = user.authorisations[app];
 
             //...
-            /*if (obj.$query) {
+            if (obj.$query) {
                obj = JSON.parse(JSON.stringify(obj.$query));
                delete obj.$query;
-            }*/
+            }
 
             var permCheck = [obj];
 
@@ -266,10 +266,10 @@ module.exports = function(OBJY) {
 
                 console.log(2, a.query)
 
-                /*if (a.query.$query) {
+                if (a.query.$query) {
                     a.query = JSON.parse(JSON.stringify(a.query.$query));
                     delete a.query.$query;
-                }*/
+                }
 
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                     if (Object.keys(a.query).length == 0) wildcard = true;
