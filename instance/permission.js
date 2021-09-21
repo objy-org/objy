@@ -101,21 +101,17 @@ module.exports = function(OBJY) {
         checkAuthroisations: function(obj, user, condition, app) {
 
             var authorisations;
-            if (!user) return;
+            if (!user) return true;
 
-            function throwError() {
-                throw new Error("Lack of permissions")
-            }
-
-            if (Object.keys(user.authorisations || {}).length == 0) return; //throwError();
+            if (Object.keys(user.authorisations || {}).length == 0) return true; //throwError();
 
             if (!app && !user.authorisations['*']) {
-                throwError();
+                return false
             }
 
             if (user.authorisations['*']) authorisations = user.authorisations['*'];
             else if (app && !user.authorisations[app]) {
-                throwError();
+                return false
             } else authorisations = user.authorisations[app];
 
             var permCheck = [obj];
@@ -140,9 +136,10 @@ module.exports = function(OBJY) {
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
 
-            if (query.$or.length == 0) throwError();
+            if (query.$or.length == 0) return false;
 
-            if (Query.query(permCheck, query, Query.undot).length == 0) throw new Error("Lack of permissions")
+            if (Query.query(permCheck, query, Query.undot).length == 0) return false;
+            else return true
         },
 
         /**

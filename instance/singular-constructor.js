@@ -809,7 +809,7 @@ module.exports = function(OBJY) {
 
                 OBJY.applyAffects(thisRef, 'onCreate', instance, client, params)
 
-                OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp);
+                if(!OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp)) return error({ error: 'Lack of Permissions' });
 
                 if (!this._id) this._id = OBJY.ID();
 
@@ -1055,7 +1055,7 @@ module.exports = function(OBJY) {
 
                 OBJY.applyAffects(this, 'onChange', instance, client, params)
 
-                OBJY.checkAuthroisations(this, instance.activeUser, "u", instance.activeApp);
+                if(!OBJY.checkAuthroisations(this, instance.activeUser, "u", instance.activeApp)) return error({ error: 'Lack of Permissions' });
 
                 var thisRef = this;
 
@@ -1333,7 +1333,7 @@ module.exports = function(OBJY) {
 
                 OBJY.applyAffects(thisRef, 'onDelete', instance, client, params)
 
-                OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp);
+                if(!OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp)) return error({ error: 'Lack of Permissions' })
 
                 if (params.dirty) {
 
@@ -1500,7 +1500,7 @@ module.exports = function(OBJY) {
 
                 var thisRef = this;
 
-                OBJY.checkAuthroisations(this, instance.activeUser, "r", instance.activeApp);
+                if(!OBJY.checkAuthroisations(this, instance.activeUser, "r", instance.activeApp)) return error({ error: 'Lack of Permissions' })
 
                 if (params.dirty) {
 
