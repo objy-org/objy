@@ -209,7 +209,7 @@ module.exports = function(OBJY) {
                     }
                 } else if (!app) {
                     return query;
-                }
+                } else return query;
 
             } else {
                 return query
