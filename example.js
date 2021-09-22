@@ -6,28 +6,27 @@ var OBJY = require('./objy.js');
 OBJY.define({
     name: "object",
     pluralName: "objects",
-    authable: true,
     extendedStructure: {
-        name: null,
+        username: null,
         type: null
     }
 })
 
 OBJY.app("test");
 
-OBJY.useUser({username: "benjamin", authorisations: {test: [{query: "{\"username\":\"33\"}", perm: "cru", name: "NNtMriLOU"}]}})
+OBJY.useUser({username: "benjamin", authorisations: {test: [{query: "{\"username\":\"33\"}", perm: "crud", name: "NNtMriLOU"}]}})
 
-var o = OBJY.object({id: 124, username:"33", type: 'pile'});
+var o = OBJY.object({id: 124, username:"33", test: 'hello', type: 'pile'})
 
 //o.setAuthorisation({query: "{\"$and\":[{\"name\":{\"$regex\":\"e\",\"$options\":\"i\"}}]}", perm: "crud"})
 
 //console.log(JSON.stringify(o, null, 4))
 
-OBJY.objects({$query: {"type":"pile"}}).get(_o => {
-    console.log('results', _o)
-})
 
-console.log(JSON.stringify(o, null, 4))
+
+OBJY.object(124).get(ob => {console.log('sing', ob)})
+
+//console.log(JSON.stringify(o, null, 4))
 
 return;
 OBJY.affectables.push({

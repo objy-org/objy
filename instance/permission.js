@@ -103,6 +103,8 @@ module.exports = function(OBJY) {
             var authorisations;
             if (!user) return true;
 
+            console.log(arguments)
+
             if (Object.keys(user.authorisations || {}).length == 0) return true; //throwError();
 
             if (!app && !user.authorisations['*']) {
@@ -137,6 +139,8 @@ module.exports = function(OBJY) {
             })
 
             if (query.$or.length == 0) return false;
+
+            console.log('sdgsdg', permCheck, query, Query.query(permCheck, query, Query.undot))
 
             if (Query.query(permCheck, query, Query.undot).length == 0) return false;
             else return true
@@ -222,7 +226,7 @@ module.exports = function(OBJY) {
          * @returns {query} - the final query with permissions
          */
         buildAuthroisationQuery: function(obj, user, condition, app) {
-
+            
             var authorisations;
             if (!user) return obj;
 

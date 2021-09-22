@@ -30,13 +30,14 @@ module.exports = function(OBJY) {
 
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
+                    console.log('obj[prop]', obj, prop, obj[prop])
                     if (params.extendedStructure[prop] === null) this[prop] = obj[prop];
                     else if (params.extendedStructure[prop] === '$useForProps') {
                         params.propsObject = prop;
                         //this[params.propsObject] = obj[params.propsObject]//
                         OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
                     } else this[prop] = params.extendedStructure[prop];
-
+                    console.log('using prog', this, obj, prop)
                     if (!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
                 }
             }
@@ -1333,11 +1334,12 @@ module.exports = function(OBJY) {
 
                 OBJY.applyAffects(thisRef, 'onDelete', instance, client, params)
 
-                if(!OBJY.checkAuthroisations(this, instance.activeUser, "d", instance.activeApp)) return error({ error: 'Lack of Permissions' })
-
+                
                 if (params.dirty) {
 
                     OBJY.getObjectById(this.role, this._id, function(data) {
+
+                        if(!OBJY.checkAuthroisations(thisRef, instance.activeUser, "d", instance.activeApp)) return error({ error: 'Lack of Permissions' })
 
                         return OBJY.remove(thisRef, function(_data) {
 
@@ -1500,12 +1502,12 @@ module.exports = function(OBJY) {
 
                 var thisRef = this;
 
-                if(!OBJY.checkAuthroisations(this, instance.activeUser, "r", instance.activeApp)) return error({ error: 'Lack of Permissions' })
-
                 if (params.dirty) {
 
                     OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
                         OBJY.deSerializePropsObject(data, params)
+                        if(!OBJY.checkAuthroisations(data, instance.activeUser, "r", instance.activeApp)) return error({ error: 'Lack of Permissions' })
+
                         if (success) success(OBJY[data.role](OBJY.deserialize(data)));
 
                     }, function(err) {
@@ -1546,6 +1548,8 @@ module.exports = function(OBJY) {
                     var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
                     OBJY.applyAffects(data, null, instance, client, params)
+
+                    if(!OBJY.checkAuthroisations(returnObject, instance.activeUser, "r", instance.activeApp)) return error({ error: 'Lack of Permissions' })
 
                     if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
 
