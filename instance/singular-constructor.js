@@ -30,14 +30,12 @@ module.exports = function(OBJY) {
 
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
-                    console.log('obj[prop]', obj, prop, obj[prop])
                     if (params.extendedStructure[prop] === null) this[prop] = obj[prop];
                     else if (params.extendedStructure[prop] === '$useForProps') {
                         params.propsObject = prop;
                         //this[params.propsObject] = obj[params.propsObject]//
                         OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
                     } else this[prop] = params.extendedStructure[prop];
-                    console.log('using prog', this, obj, prop)
                     if (!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
                 }
             }

@@ -14,17 +14,17 @@ OBJY.define({
 
 OBJY.app("test");
 
-OBJY.ignoreAuthorisations = true;
 
-OBJY.useUser({username: "benjamin", authorisations: {test: [{query: "{\"$and\":[{\"username\":{\"$regex\":\"(.*?)\",\"$options\":\"i\"}}]}", perm: "", name: "NNtMriLOU"}]}})
+OBJY.useUser({username: "benjamin", authorisations: {test: [{query: "{\"$and\":[{\"type\":\"card_form\"}]}", perm: "crud", name: "NNtMriLOU"}]}})
 
-var o = OBJY.object({id: 124, username:"33", test: 'hello', type: 'pile'}).add()
+var o = OBJY.object({id: 124, username:"33", type: 'card_form'}).add()
 
 //o.setAuthorisation({query: "{\"$and\":[{\"name\":{\"$regex\":\"e\",\"$options\":\"i\"}}]}", perm: "crud"})
 
 //console.log(JSON.stringify(o, null, 4))
 
 
+OBJY.objects({}).get(oo => console.log('got', oo))
 //OBJY.object(124).get(ob => {console.log('sing', ob)})
 
 //console.log(JSON.stringify(o, null, 4))

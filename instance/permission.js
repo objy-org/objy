@@ -107,8 +107,6 @@ module.exports = function(OBJY) {
             var authorisations;
             if (!user) return true;
 
-            console.log(arguments)
-
             if (Object.keys(user.authorisations || {}).length == 0) return true; //throwError();
 
             if (!app && !user.authorisations['*']) {
@@ -143,8 +141,6 @@ module.exports = function(OBJY) {
             })
 
             if (query.$or.length == 0) return false;
-
-            console.log('sdgsdg', permCheck, query, Query.query(permCheck, query, Query.undot))
 
             if (Query.query(permCheck, query, Query.undot).length == 0) return false;
             else return true
@@ -264,16 +260,12 @@ module.exports = function(OBJY) {
             var query = []
             var wildcard = false;
 
-            console.log(1, query)
-
             authorisations.forEach(function(a) {
                 try {
                     a.query = JSON.parse(a.query)
                 } catch (e) {
 
                 }
-
-                console.log(2, a.query)
 
                 if (a.query.$query) {
                     a.query = JSON.parse(JSON.stringify(a.query.$query));
@@ -283,14 +275,11 @@ module.exports = function(OBJY) {
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) {
                     if (Object.keys(a.query).length == 0) wildcard = true;
                     else {
-
                         query.push({ '$and': [a.query, obj] })
                     }
                 }
             })
-
-            console.log(3, query);
-            
+  
             if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
 
             query = { $or: query };
