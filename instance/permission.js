@@ -11,9 +11,11 @@ module.exports = function(OBJY) {
          * @param {soft} - ...
          * @returns true or false
          */
-        checkPermissions: function(user, app, obj, permission, soft) {
+        checkPermissions: function(user, app, obj, permission, soft, instance) {
 
-            var result = false;
+            if(instance.ignorePermissions == true) return true;
+
+            var result = false; 
 
             if (!user) return true;
 
@@ -98,7 +100,9 @@ module.exports = function(OBJY) {
          * @param {app} - the current application
          * @returns true or false
          */
-        checkAuthroisations: function(obj, user, condition, app) {
+        checkAuthroisations: function(obj, user, condition, app, instance) {
+
+            if(instance.ignoreAuthorisations == true) return true;
 
             var authorisations;
             if (!user) return true;
@@ -153,7 +157,9 @@ module.exports = function(OBJY) {
          * @param {app} - the current application
          * @returns {query} - the final query with permissions
          */
-        buildPermissionQuery: function(query, user, app) {
+        buildPermissionQuery: function(query, user, app, instance) {
+
+            if(instance.ignorePermissions == true) return query;
 
             if (query.$query) {
                 query = JSON.parse(JSON.stringify(query.$query));
@@ -225,7 +231,9 @@ module.exports = function(OBJY) {
          * @param {app} - the current application
          * @returns {query} - the final query with permissions
          */
-        buildAuthroisationQuery: function(obj, user, condition, app) {
+        buildAuthroisationQuery: function(obj, user, condition, app, instance) {
+
+            if(instance.ignoreAuthorisations == true) return obj;
             
             var authorisations;
             if (!user) return obj;

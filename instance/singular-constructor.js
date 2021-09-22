@@ -810,7 +810,7 @@ module.exports = function(OBJY) {
 
                 OBJY.applyAffects(thisRef, 'onCreate', instance, client, params)
 
-                if(!OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp)) return error({ error: 'Lack of Permissions' });
+                if(!OBJY.checkAuthroisations(this, instance.activeUser, "c", instance.activeApp, instance)) return error({ error: 'Lack of Permissions' });
 
                 if (!this._id) this._id = OBJY.ID();
 
@@ -952,7 +952,7 @@ module.exports = function(OBJY) {
 
                 var addFn = function(obj) {
 
-                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c')) return error({ error: "Lack of Permissions" });
+                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'c', false, instance)) return error({ error: "Lack of Permissions" });
 
                     var constraints = OBJY.checkConstraints(obj);
                     if (Array.isArray(constraints) && error) {
@@ -1056,7 +1056,7 @@ module.exports = function(OBJY) {
 
                 OBJY.applyAffects(this, 'onChange', instance, client, params)
 
-                if(!OBJY.checkAuthroisations(this, instance.activeUser, "u", instance.activeApp)) return error({ error: 'Lack of Permissions' });
+                if(!OBJY.checkAuthroisations(this, instance.activeUser, "u", instance.activeApp, instance)) return error({ error: 'Lack of Permissions' });
 
                 var thisRef = this;
 
@@ -1087,7 +1087,7 @@ module.exports = function(OBJY) {
                     return OBJY.deserialize(this);
                 }
 
-                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u')) return error({ error: 'Lack of Permissions' })
+                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'u', false, instance)) return error({ error: 'Lack of Permissions' })
 
                 if ((instance.permissionSequence[thisRef._id] || []).length > 0) {
                     throw new exceptions.LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
@@ -1339,7 +1339,7 @@ module.exports = function(OBJY) {
 
                     OBJY.getObjectById(this.role, this._id, function(data) {
 
-                        if(!OBJY.checkAuthroisations(thisRef, instance.activeUser, "d", instance.activeApp)) return error({ error: 'Lack of Permissions' })
+                        if(!OBJY.checkAuthroisations(data, instance.activeUser, "d", instance.activeApp, instance)) return error({ error: 'Lack of Permissions' })
 
                         return OBJY.remove(thisRef, function(_data) {
 
@@ -1360,7 +1360,7 @@ module.exports = function(OBJY) {
                 }
 
 
-                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd')) return error({ error: 'Lack of Permissions' })
+                if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, thisRef, 'd', false, instance)) return error({ error: 'Lack of Permissions' })
 
                 if (thisRef.onDelete) {
                     Object.keys(thisRef.onDelete).forEach(function(key) {
@@ -1506,7 +1506,7 @@ module.exports = function(OBJY) {
 
                     OBJY.getObjectById(thisRef.role, thisRef._id, function(data) {
                         OBJY.deSerializePropsObject(data, params)
-                        if(!OBJY.checkAuthroisations(data, instance.activeUser, "r", instance.activeApp)) return error({ error: 'Lack of Permissions' })
+                        if(!OBJY.checkAuthroisations(data, instance.activeUser, "r", instance.activeApp, instance)) return error({ error: 'Lack of Permissions' })
 
                         if (success) success(OBJY[data.role](OBJY.deserialize(data)));
 
@@ -1549,9 +1549,9 @@ module.exports = function(OBJY) {
 
                     OBJY.applyAffects(data, null, instance, client, params)
 
-                    if(!OBJY.checkAuthroisations(returnObject, instance.activeUser, "r", instance.activeApp)) return error({ error: 'Lack of Permissions' })
+                    if(!OBJY.checkAuthroisations(returnObject, instance.activeUser, "r", instance.activeApp, instance)) return error({ error: 'Lack of Permissions' })
 
-                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r')) return error({ error: "Lack of Permissions" })
+                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, data, 'r', false, instance)) return error({ error: "Lack of Permissions" })
 
                     if (dontInherit) {
                         if (success) success(returnObject);
@@ -1580,7 +1580,7 @@ module.exports = function(OBJY) {
                                     counter++;
 
                                     if (counter == data.inherits.length) {
-
+                                      
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                         return data;
                                     }
@@ -1592,6 +1592,7 @@ module.exports = function(OBJY) {
                                     var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
                                     if (counter == data.inherits.length) {
+                                       
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                         return data;
                                     }

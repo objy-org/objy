@@ -17,11 +17,11 @@ module.exports = function(OBJY) {
                     }
                 })
 
-                objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp)
+                objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp, instance)
 
                 console.log(4, objs)
 
-                if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp);
+                if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp, instance);
 
                 console.log(5, objs)
 

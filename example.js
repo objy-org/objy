@@ -14,17 +14,18 @@ OBJY.define({
 
 OBJY.app("test");
 
-OBJY.useUser({username: "benjamin", authorisations: {test: [{query: "{\"username\":\"33\"}", perm: "crud", name: "NNtMriLOU"}]}})
+OBJY.ignoreAuthorisations = true;
 
-var o = OBJY.object({id: 124, username:"33", test: 'hello', type: 'pile'})
+OBJY.useUser({username: "benjamin", authorisations: {test: [{query: "{\"$and\":[{\"username\":{\"$regex\":\"(.*?)\",\"$options\":\"i\"}}]}", perm: "", name: "NNtMriLOU"}]}})
+
+var o = OBJY.object({id: 124, username:"33", test: 'hello', type: 'pile'}).add()
 
 //o.setAuthorisation({query: "{\"$and\":[{\"name\":{\"$regex\":\"e\",\"$options\":\"i\"}}]}", perm: "crud"})
 
 //console.log(JSON.stringify(o, null, 4))
 
 
-
-OBJY.object(124).get(ob => {console.log('sing', ob)})
+//OBJY.object(124).get(ob => {console.log('sing', ob)})
 
 //console.log(JSON.stringify(o, null, 4))
 

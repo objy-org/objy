@@ -37,6 +37,9 @@ module.exports = function(OBJY) {
 
         backgroundAffectables: this.staticRules,
 
+        ignorePermissions: false,
+        ignoreAuthorisations: false,
+
         handlerSequence: [],
         permissionSequence: [],
         commandSequence: [],
