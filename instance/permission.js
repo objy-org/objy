@@ -104,6 +104,8 @@ module.exports = function(OBJY) {
 
             if(instance.ignoreAuthorisations == true) return true;
 
+            if (user.spooAdmin) return true;
+
             var authorisations;
             if (!user) return true;
 
@@ -230,6 +232,8 @@ module.exports = function(OBJY) {
         buildAuthroisationQuery: function(obj, user, condition, app, instance) {
 
             if(instance.ignoreAuthorisations == true) return obj;
+
+            if (user.spooAdmin) return obj;
             
             var authorisations;
             if (!user) return obj;
