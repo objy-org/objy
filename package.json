@@ -1,6 +1,6 @@
 {
   "name": "objy",
-  "version": "0.6.976",
+  "version": "0.6.977",
   "description": "A JavaScript framework for building object-driven applications",
   "main": "objy.js",
   "scripts": {
@@ -30,8 +30,8 @@
     "mingo": "^2.4.0",
     "mocha": "^6.2.2",
     "moment": "^2.24.0",
-    "mongoose": "5.8.11",
-    "mongoose-gridfs": "^1.2.26",
+    "mongoose": "6.0.7",
+    "mongoose-gridfs": "1.2.48",
     "multer": "*",
     "multer-gridfs-storage": "^4.0.2",
     "shortid": "^2.2.15",
