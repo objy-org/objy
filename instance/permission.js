@@ -309,7 +309,7 @@ module.exports = function(OBJY) {
                 if (Object.keys(obj.permissions).length > 0) {
                     if (!instance.permissionSequence[obj._id]) instance.permissionSequence[obj._id] = [];
 
-                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, code, true))
+                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, code, true, instance))
                         instance.permissionSequence[obj._id].push({
                             name: name,
                             key: key
@@ -323,7 +323,6 @@ module.exports = function(OBJY) {
             else if (!element.permissions) return {};
             else return element.permissions;
         },
-
 
     }
 }

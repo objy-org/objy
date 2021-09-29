@@ -574,7 +574,7 @@ module.exports = function(OBJY) {
             }
 
 
-            OBJY.chainPermission(obj, instance, 'p', 'addProperty', propertyKey);
+            if(reallyAdd) OBJY.chainPermission(obj, instance, 'p', 'addProperty', propertyKey);
 
             /*if(obj.permissions) {
                 if(Object.keys(obj.permissions).length > 0)  {
