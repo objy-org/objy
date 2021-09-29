@@ -104,10 +104,10 @@ module.exports = function(OBJY) {
 
             if(instance.ignoreAuthorisations == true) return true;
 
-            if (user.spooAdmin) return true;
-
             var authorisations;
             if (!user) return true;
+
+            if (user.spooAdmin) return true;
 
             if (Object.keys(user.authorisations || {}).length == 0) return true; //throwError();
 
@@ -233,10 +233,10 @@ module.exports = function(OBJY) {
 
             if(instance.ignoreAuthorisations == true) return obj;
 
-            if (user.spooAdmin) return obj;
-            
             var authorisations;
             if (!user) return obj;
+
+            if (user.spooAdmin) return obj;
 
             function throwError() {
                 throw new Error("Lack of permissions")
