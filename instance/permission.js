@@ -166,8 +166,9 @@ module.exports = function(OBJY) {
                 delete query.$query;
             }
 
-
             if (!user.spooAdmin) {
+
+                if(query.$sum || query.$count || query.$avg) return query;
 
                 if (!user.privileges) return query;
 
@@ -239,6 +240,8 @@ module.exports = function(OBJY) {
             if (!user) return obj;
 
             if (user.spooAdmin) return obj;
+
+            if(obj.$sum || obj.$count || obj.$avg) return obj;
 
             function throwError() {
                 throw new Error("Lack of permissions")
