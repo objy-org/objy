@@ -555,7 +555,7 @@ module.exports = function(OBJY) {
                     }
 
                     propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(obj.properties[propertyKey]);
+                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 default:
