@@ -242,6 +242,7 @@ module.exports = function(OBJY) {
             if (user.spooAdmin) return obj;
 
             if(obj.$sum || obj.$count || obj.$avg) return obj;
+            
 
             function throwError() {
                 throw new Error("Lack of permissions")
