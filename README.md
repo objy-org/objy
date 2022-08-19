@@ -7,7 +7,7 @@
 
 An object-driven programming framework, that uses behaviour-driven objects for building use cases.
 
-![OBJY LOGO](https://objy.io/assets/img/OBJY-object-code.png "OBJY")
+![OBJY LOGO](https://objy.xyz/assets/img/OBJY-object-code.png "OBJY")
 
 ## Installing
 
@@ -227,5 +227,5 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Connect
 
-* [objy.io](https://objy.io) - OBJY's official website
+* [objy.io](https://objy.xyz) - OBJY's official website
 
