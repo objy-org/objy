@@ -86,28 +86,33 @@ module.exports = function(OBJY) {
                 this.setUsername = function(username) {
                     this.username = username;
                     OBJY.chainPermission(this, instance, 'o', 'setUsername', username);
+                    instance.alterSequence.push({setUsername: arguments})
                     return this;
                 }
 
                 this.setEmail = function(email) {
                     this.email = email;
                     OBJY.chainPermission(this, instance, 'h', 'setEmail', email);
+                    instance.alterSequence.push({setEmail: arguments})
                     return this;
                 }
 
                 this.setPassword = function(password) {
                     // should be encrypted at this point
                     this.password = password;
+                    instance.alterSequence.push({setPassword: arguments})
                     return this;
                 }
 
                 this.setAuthorisation = function(authorisationObj) {
                     new OBJY.ObjectAuthorisationSetWrapper(this, authorisationObj, instance);
+                    instance.alterSequence.push({setAuthorisation: arguments})
                     return this;
                 }
 
                 this.removeAuthorisation = function(authorisationId) {
                     new OBJY.ObjectAuthorisationRemoveWrapper(this, authorisationId, instance);
+                    instance.alterSequence.push({removeAuthorisation: arguments})
                     return this;
                 }
 
@@ -125,6 +130,7 @@ module.exports = function(OBJY) {
                         var tmpPriv = {};
                         tmpPriv[instance.activeApp] = { name: privilege }
                         new OBJY.PrivilegeChecker(this, tmpPriv);
+                        instance.alterSequence.push({addPrivilege: arguments})
                         return this;
                     } else throw new Error('Invalid app id');
 
@@ -133,18 +139,21 @@ module.exports = function(OBJY) {
 
                 this.removePrivilege = function(privilege) {
                     new OBJY.PrivilegeRemover(this, privilege, instance);
+                    instance.alterSequence.push({removePrivilege: arguments})
                     return this;
                 };
 
                 this.addClient = function(client) {
                     if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
                     this._clients.push(client);
+                    instance.alterSequence.push({addClient: arguments})
                     return this;
                 };
 
                 this.removeClient = function(client) {
                     if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
                     this._clients.splice(this._clients.indexOf(client), 1);
+                    instance.alterSequence.push({removeClient: arguments})
                     return this;
                 };
 
@@ -158,6 +167,9 @@ module.exports = function(OBJY) {
 
             Object.getPrototypeOf(this).addInherit = function(templateId) {
                 OBJY.addTemplateToObject(this, templateId, instance);
+
+                instance.alterSequence.push({addInherit: arguments})
+
                 return this;
             };
 
@@ -168,16 +180,25 @@ module.exports = function(OBJY) {
                     function(err) {
                         if (error) error(err);
                     }, instance);
+
+                instance.alterSequence.push({removeInherit: arguments})
+
                 return this;
             };
 
             Object.getPrototypeOf(this).addApplication = function(application) {
                 OBJY.addApplicationToObject(this, application, instance);
+
+                instance.alterSequence.push({addApplication: arguments})
+
                 return this;
             };
 
             Object.getPrototypeOf(this).removeApplication = function(application) {
                 OBJY.removeApplicationFromObject(this, application, instance);
+
+                instance.alterSequence.push({removeApplication: arguments})
+
                 return this;
             };
 
@@ -238,6 +259,7 @@ module.exports = function(OBJY) {
 
                 new OBJY.PropertyCreateWrapper(this, property, false, instance, params, true);
 
+                instance.alterSequence.push({addProperty: arguments})
                 return this;
             };
 
@@ -247,6 +269,9 @@ module.exports = function(OBJY) {
                 var key = name;
 
                 new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
+                
+                instance.alterSequence.push({setOnChange: arguments})
+
                 return this;
             };
 
@@ -256,6 +281,9 @@ module.exports = function(OBJY) {
                 var key = name;
 
                 new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
+
+                instance.alterSequence.push({setOnDelete: arguments})
+
                 return this;
             };
 
@@ -265,24 +293,30 @@ module.exports = function(OBJY) {
                 var key = name;
 
                 new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
+
+                instance.alterSequence.push({setOnCreate: arguments})
+
                 return this;
             };
 
             Object.getPrototypeOf(this).removeOnChange = function(name) {
                 if (!this.onChange[name]) throw new exceptions.HandlerNotFoundException(name);
                 else delete this.onChange[name];
+                instance.alterSequence.push({removeOnChange: arguments})
                 return this;
             };
 
             Object.getPrototypeOf(this).removeOnDelete = function(name) {
                 if (!this.onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
                 else delete this.onDelete[name];
+                instance.alterSequence.push({removeOnDelete: arguments})
                 return this;
             };
 
             Object.getPrototypeOf(this).removeOnCreate = function(name) {
                 if (!this.onCreate[name]) throw new exceptions.HandlerNotFoundException(name);
                 else delete this.onCreate[name];
+                instance.alterSequence.push({removeOnCreate: arguments})
                 return this;
             };
 
@@ -293,18 +327,20 @@ module.exports = function(OBJY) {
                 permission = perm;
 
                 new OBJY.ObjectPermissionSetWrapper(this, permission, instance);
+                instance.alterSequence.push({setPermission: arguments})
                 return this;
             };
 
             Object.getPrototypeOf(this).removePermission = function(permission) {
                 new OBJY.ObjectPermissionRemoveWrapper(this, permission, instance);
+                instance.alterSequence.push({removePermission: arguments})
                 return this;
             };
 
             Object.getPrototypeOf(this).setPropertyValue = function(property, value, client) {
 
                 new OBJY.PropertySetWrapper(this, property, value, instance, params);
-
+                instance.alterSequence.push({setPropertyValue: arguments})
 
                 return this;
             };
@@ -312,14 +348,14 @@ module.exports = function(OBJY) {
             Object.getPrototypeOf(this).setProperty = function(property, value, client) {
 
                 new OBJY.PropertySetFullWrapper(this, property, value, instance, false, params);
-
+                instance.alterSequence.push({setProperty: arguments})
                 return this;
             };
 
             Object.getPrototypeOf(this).makeProperty = function(property, value, client) {
 
                 new OBJY.PropertySetFullWrapper(this, property, value, instance, true, params);
-
+                instance.alterSequence.push({makeProperty: arguments})
                 return this;
             };
 
@@ -336,6 +372,7 @@ module.exports = function(OBJY) {
                 }
 
                 new OBJY.EventDateSetWrapper(this, property, value, client, instance, params);
+                instance.alterSequence.push({setEventDate: arguments})
                 return this;
             };
 
@@ -352,6 +389,7 @@ module.exports = function(OBJY) {
                 }
 
                 new OBJY.EventActionSetWrapper(this, property, value, client, instance, params);
+                instance.alterSequence.push({setEventAction: arguments})
                 return this;
             };
 
@@ -368,6 +406,7 @@ module.exports = function(OBJY) {
                 }
 
                 new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance, params);
+                instance.alterSequence.push({setEventTriggered: arguments})
                 return this;
             };
 
@@ -385,6 +424,7 @@ module.exports = function(OBJY) {
 
 
                 new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, params);
+                instance.alterSequence.push({setEventLastOccurence: arguments})
                 return this;
             };
 
@@ -401,6 +441,7 @@ module.exports = function(OBJY) {
                 }
 
                 new OBJY.EventIntervalSetWrapper(this, property, value, client, instance, params);
+                instance.alterSequence.push({setEventInterval: arguments})
                 return this;
             };
 
@@ -414,6 +455,7 @@ module.exports = function(OBJY) {
                 tmpProp[tmpName] = value[propKey];
 
                 this.addPropertyToBag(array, tmpProp);
+                instance.alterSequence.push({pushToArray: arguments})
             };
 
             Object.getPrototypeOf(this).setPropertyPermission = function(property, name, permission) {
@@ -423,6 +465,7 @@ module.exports = function(OBJY) {
                 permission = perm;
 
                 new OBJY.PropertyPermissionSetWrapper(this, property, permission, instance, params);
+                instance.alterSequence.push({setPropertyPermission: arguments})
                 return this;
             };
 
@@ -432,6 +475,7 @@ module.exports = function(OBJY) {
                 var key = name;
 
                 new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance, params);
+                instance.alterSequence.push({setPropertyOnCreate: arguments})
                 return this;
             };
 
@@ -447,6 +491,8 @@ module.exports = function(OBJY) {
                     delete this[propertyName].onCreate[propertyName];
                 }
 
+                instance.alterSequence.push({removePropertyOnCreate: arguments})
+
                 return this;
             };
 
@@ -456,11 +502,13 @@ module.exports = function(OBJY) {
 
                 }
                 new OBJY.PropertyBagItemOnCreateRemover(this, property, handlerName);
+                instance.alterSequence.push({removePropertyOnCreateFromBag: arguments})
                 return this;
             };
 
             Object.getPrototypeOf(this).setPropertyMeta = function(property, meta) {
                 new OBJY.PropertyMetaSetWrapper(this, property, meta, params);
+                instance.alterSequence.push({setPropertyMeta: arguments})
                 return this;
             };
 
@@ -470,6 +518,7 @@ module.exports = function(OBJY) {
 
                 }
                 new OBJY.PropertyBagItemMetaRemover(this, property);
+
                 return this;
             };
 
@@ -483,6 +532,7 @@ module.exports = function(OBJY) {
                     delete this[propertyName].meta;
                 }
 
+                instance.alterSequence.push({removePropertyMeta: arguments})
                 return this;
             };
 
@@ -493,6 +543,7 @@ module.exports = function(OBJY) {
                 var key = name; //Object.keys(onChangeObj)[0];
 
                 new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance, params);
+                instance.alterSequence.push({setPropertyOnChange: arguments})
                 return this;
             };
 
@@ -506,6 +557,7 @@ module.exports = function(OBJY) {
                     delete this[propertyName][name];
                 }
 
+                instance.alterSequence.push({removePropertyOnChange: arguments})
                 return this;
             };
 
@@ -513,6 +565,7 @@ module.exports = function(OBJY) {
                 var bag = this.getProperty(property);
 
                 new OBJY.PropertyBagItemOnChangeRemover(this, property, name);
+
                 return this;
             };
 
@@ -522,6 +575,7 @@ module.exports = function(OBJY) {
                 var key = name;
 
                 new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance, params);
+                instance.alterSequence.push({setPropertyOnDelete: arguments})
                 return this;
             };
 
@@ -535,6 +589,7 @@ module.exports = function(OBJY) {
                     delete this[propertyName].onDelete[name]
                 }
 
+                instance.alterSequence.push({removePropertyOnDelete: arguments})
                 return this;
             };
 
@@ -542,6 +597,7 @@ module.exports = function(OBJY) {
                 var bag = this.getProperty(property);
 
                 new OBJY.PropertyBagItemOnDeleteRemover(this, property, name);
+               
                 return this;
             };
 
@@ -556,6 +612,7 @@ module.exports = function(OBJY) {
                     return;
                 }
                 new OBJY.PropertyConditionsSetWrapper(this, property, conditions, params);
+                instance.alterSequence.push({setPropertyConditions: arguments})
                 return this;
             };
 
@@ -581,6 +638,7 @@ module.exports = function(OBJY) {
                     return;
                 }
                 new OBJY.PropertyQuerySetWrapper(this, property, options, params);
+                instance.alterSequence.push({setPropertyQuery: arguments})
                 return this;
             };
 
@@ -608,6 +666,8 @@ module.exports = function(OBJY) {
                     if (!this[propertyName].query) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
                     delete this[propertyName].query;
                 }
+
+                instance.alterSequence.push({removePropertyQuery: arguments})
 
                 return this;
             };
@@ -656,6 +716,8 @@ module.exports = function(OBJY) {
                     if (!this[propertyName].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
                     OBJY.chainPermission(this, instance, 'x', 'removePropertyPermission', permissionKey);
+
+                    instance.alterSequence.push({removePropertyPermission: arguments})
 
                     delete this[propertyName].permissions[permissionKey];
                 }
@@ -744,6 +806,8 @@ module.exports = function(OBJY) {
 
                     OBJY.chainPermission(thisRef[propertyName], instance, 'd', 'removeProperty', propertyName);
 
+                    instance.alterSequence.push({removeProperty: arguments})
+                    
                     /*if (this[propertyName].type == 'date') instance.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: this,
@@ -773,12 +837,15 @@ module.exports = function(OBJY) {
 
                 OBJY.chainPermission(this, instance, 'n', 'setName', name);
 
+                instance.alterSequence.push({setName: arguments})
+
                 return this;
             };
 
             Object.getPrototypeOf(this).setType = function(type) {
                 this.type = type;
                 OBJY.chainPermission(this, instance, 't', 'setType', type);
+                instance.alterSequence.push({setType: arguments})
                 return this;
             };
 
