@@ -1142,6 +1142,8 @@ module.exports = function(OBJY) {
 
                             OBJY.deSerializePropsObject(data, params)
 
+                            instance.alterSequence = [];
+
                             if (success) success(OBJY.deserialize(data));
 
                         },
@@ -1325,6 +1327,7 @@ module.exports = function(OBJY) {
 
                             OBJY.Logger.log("Updated Object: " + data);
                             OBJY.deSerializePropsObject(data, params)
+                            instance.alterSequence = [];
                             if (success) success(OBJY.deserialize(data));
 
                         },
