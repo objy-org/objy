@@ -1,25 +1,20 @@
-# OBJY - JavaScript objects with behaviour
-
-![Node.js Package](https://github.com/objy-org/objy/workflows/Node.js%20Package/badge.svg)
-[![MIT License](https://img.shields.io/apm/l/atomic-design-ui.svg?)](LICENSE.md)
-[![Gitter](https://badges.gitter.im/objy-dev/community.svg)](https://gitter.im/objy-dev/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
-
+# OBJY - Abstract, powerful JavaScript objects for building real use cases
 
 An object-driven programming framework, that uses behaviour-driven objects for building use cases.
 
-![OBJY LOGO](https://objy.xyz/assets/img/OBJY-object-code.png "OBJY")
+![OBJY LOGO](https://objy.xyz/assets/img/objy-arch-objects-slim.png "OBJY")
 
 ## Installing
 
 OBJY can be used in Node and the Browser.
 
-### Node
+***Node***
 
 ```shell
 npm install objy
 ```
 
-### Browser
+***Browser***
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/objy/dist/browser.js">
@@ -69,7 +64,7 @@ Objects are handled using an OBJY wrapper: OBJY.object().
 // Create an object (onCreate handlers will trigger)
 var myObj = OBJY.object({
    name: "Hello"
-});
+}).add();
 
 // Update an object (onChange handlers will trigger)
 myObj.name = "Hello World";
@@ -103,7 +98,7 @@ OBJY.object({
 })
 ```
 
-### Triggers
+### Handlers
 
 Use onCreate, onChange or onDelete to capture these events and OBJY runs a custom action.
 
@@ -165,35 +160,6 @@ OBJY.objects({json query}).get(objects => {
 ```
 
 
-### Persistence
-
-OBJY objects either live in your JS instance or can come from other sources, like databases, file systems, or third-party systems. These sources are be defined when defining custom object wrappers.
-
-> Important: When using persistence, the built-in CRUD operations `.add()`, `.get()`, `.update()` and `.delete()` must be used to commit changes to the persistence.
-
-```javascript
-// Define you own object wrapper with a storage mapper
-OBJY.define({
-   name: "item",
-   pluralName: "items",
-   storage: new mongoDB(...)
-})
-
-// Add an object to persistence:
-OBJY.item({}).add(obj => {})
-
-// Query objects
-OBJY.items({query}).get(objy => {})
-
-// Update an object
-OBJY.item({...})
-   .setProperty('name', 'test')
-   .update(objy => {})
-
-// Delete an object
-OBJY.item({...}).delete(objy => {})
-```
-
 ### Customization
 
 ```javascript
@@ -216,16 +182,3 @@ OBJY.define({
    })
 })
 ```
-
-## Authors
-
-* **Marco Boelling** - *Initial author* - [Twitter](https://twitter.com/marcoboelling)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
-
-## Connect
-
-* [objy.io](https://objy.xyz) - OBJY's official website
-
