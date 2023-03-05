@@ -4,7 +4,7 @@ An object-driven programming framework, that uses behaviour-driven objects for b
 
 ![OBJY LOGO](https://objy.xyz/assets/img/objy-arch-objects-slim.png "OBJY")
 
-## Installing
+# Installing
 
 OBJY can be used in Node and the Browser.
 
@@ -21,7 +21,7 @@ npm install objy
 ```
 
 
-## Programming with OBJY
+# Programming with OBJY
 
 Programming on OBJY is done in two simple steps:
 
@@ -29,7 +29,7 @@ Programming on OBJY is done in two simple steps:
 2. Build and handle objects and tell them what to do.
 
 
-### Quick example
+## Quick example
 
 ```javascript
 //Define Object Family
@@ -56,7 +56,7 @@ OBJY.object({
 ```
 
 
-### Handling objects
+## Handling objects
 
 Objects are handled using an OBJY wrapper: OBJY.object().
 
@@ -76,7 +76,7 @@ myObj.addProperty('color', 'blue');
 myObj.remove();
 ```
 
-### Date or interval-based events:
+## Date or interval-based events:
 
 Events can either have a date or an interval. OBJY takes care of running the associated action.
 
@@ -98,7 +98,7 @@ OBJY.object({
 })
 ```
 
-### Handlers
+## Handlers
 
 Use onCreate, onChange or onDelete to capture these events and OBJY runs a custom action.
 
@@ -114,7 +114,7 @@ OBJY.object({
 })
 ```
 
-### Custom actions
+## Custom actions
 
 ```javascript
 OBJY.object({
@@ -131,7 +131,7 @@ OBJY.object({
 OBJY.object({...}).getProperty('openMe').call()
 ```
 
-### Inheritance
+## Inheritance
 
 ```javascript
 // first object
@@ -148,7 +148,7 @@ OBJY.object({
 })
 ``` 
 
-### Querying your objects
+## Querying your objects
 
 Every object you create lives inside the OBJY instance. For accessing and working with all your objects, OBJY offers the following built-in query API:
 
@@ -160,7 +160,7 @@ OBJY.objects({json query}).get(objects => {
 ```
 
 
-### Customization
+## Customization
 
 ```javascript
 OBJY.define({
