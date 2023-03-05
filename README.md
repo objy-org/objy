@@ -2,7 +2,10 @@
 
 An object-driven programming framework, that uses behaviour-driven objects for building use cases.
 
-[FULL DOCUMENTATION](https://objy.xyz/#/DOCUMENTATION.md)
+<a href="https://objy.xyz/#/DOCUMENTATION.md" style="border: 1px solid #AAAAAA;
+    padding: 5px 10px;
+    border-radius: 100px;
+    text-decoration: none;">FULL DOCUMENTATION</a>
 
 ![OBJY LOGO](https://objy.xyz/assets/img/objy-arch-objects-slim.png "OBJY")
 
