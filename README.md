@@ -1,4 +1,4 @@
-# OBJY - Abstract, powerful JavaScript objects for building real use cases
+# OBJY - Abstract, powerful JavaScript objects
 
 An object-driven programming framework, that uses behaviour-driven objects for building use cases.
 
