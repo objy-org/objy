@@ -1,6 +1,6 @@
 # OBJY - Abstract, powerful JavaScript objects
 
-An object-driven programming framework, that uses behaviour-driven objects for building use cases.
+An object-driven programming framework, that uses behaviour-driven objects for building use cases. 
 
 <a href="https://objy.xyz/#/DOCUMENTATION.md" style="border: 1px solid #AAAAAA;
     padding: 5px 10px;
@@ -8,6 +8,14 @@ An object-driven programming framework, that uses behaviour-driven objects for b
     text-decoration: none;">FULL DOCUMENTATION</a>
 
 ![OBJY LOGO](https://objy.xyz/assets/img/objy-arch-objects-slim.png "OBJY")
+
+OBJY Objects:
+
+* are plain JavaScript objects
+* have dynamic origins
+* have behaviour
+* and more...
+
 
 # Installing
 
@@ -32,12 +40,13 @@ Programming on OBJY is done in two simple steps:
 
 
 ```javascript
-//Define Object Family
+// 1. Define Object Family
 OBJY.define({
    name: "object", // singular constructor name
    pluralName: "objects" // plural constructor name
 })
 
+// 2. Use objects
 OBJY.object({
    expired: false,
    expiration_date: {
