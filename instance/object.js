@@ -190,6 +190,8 @@ module.exports = function(OBJY) {
 
         getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource, params, instance) {
 
+            if(params.templateFamily === null) return success(obj);
+
             var self = this;
 
 
@@ -430,7 +432,6 @@ module.exports = function(OBJY) {
                         template.inherits.forEach(function(i) {
 
 
-
                             OBJY.getTemplateFieldsForObject(template, i, function() {
 
                                     counter++;
@@ -447,7 +448,6 @@ module.exports = function(OBJY) {
 
 
                                 }, client, templateRole || obj.role, templateSource || OBJY.activeTenant, params)
-
 
                         })
 
@@ -477,6 +477,7 @@ module.exports = function(OBJY) {
 
         removeTemplateFieldsForObject: function(obj, templateId, success, error, client, params, instance) {
 
+            if(params.templateFamily === null) return success(obj);
 
             if (!templateId) {
                 error('template not found');
