@@ -21,8 +21,6 @@ Mapper = function(OBJY) {
 
                 data.forEach(function(tenant) {
 
-                    OBJY.Logger.log("Running ovserver " + date.toISOString() + " " + tenant)
-
                     OBJY.getPersistence(self.objectFamily).getByCriteria({
                         _aggregatedEvents: {
                             $elemMatch: {
@@ -44,9 +42,6 @@ Mapper = function(OBJY) {
                                 OBJY.execProcessorAction(prop.action, obj, prop, null, function() {
 
                                     obj.setEventTriggered(aE.propName, true, tenant).update(function(d) {
-
-                                        OBJY.Logger.log('d._aggregatedEvents')
-                                        OBJY.Logger.log(d._aggregatedEvents)
 
                                     }, function(err) {
                                         console.log(err);

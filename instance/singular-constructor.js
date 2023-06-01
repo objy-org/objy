@@ -925,9 +925,12 @@ module.exports = function(OBJY) {
 
                 thisRef._aggregatedEvents = [];
 
+                
+
                 function aggregateAllEvents(props, prePropsString) {
 
                     Object.keys(props).forEach(function(p) {
+
 
                         if (!isObject(props[p])) return;
 
@@ -936,10 +939,12 @@ module.exports = function(OBJY) {
                                 aggregateAllEvents(props[p], prePropsString + "." + p)
                             }
                         else {
-                            aggregateAllEvents(props[p], p)
+                            //aggregateAllEvents(props[p], p)
                         }
 
                         if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
+
+
 
                             var date = null;
 
@@ -990,7 +995,6 @@ module.exports = function(OBJY) {
                                 })
 
                                 if (!found && props[p].triggered != true)
-
 
                                     thisRef._aggregatedEvents.push({
                                         propName: p,
