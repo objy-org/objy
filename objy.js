@@ -56,5 +56,10 @@ Object.assign(OBJY, {
 
 objy = OBJY;
 
-if (_nodejs) module.exports = OBJY;
-else if (window) window.OBJY = OBJY;
+
+if(_nodejs) module.exports = OBJY; 
+else if(typeof window !== 'undefined') {
+    window.OBJY = OBJY;
+}
+
+if(0)typeof await/2//2; export default OBJY
