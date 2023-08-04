@@ -907,6 +907,11 @@ module.exports = function(OBJY) {
                         function(err) {
                             console.warn('err', err, error)
                             if (error) error(err);
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         }, app, client, params);
 
                     return OBJY.deserialize(this);
@@ -1092,6 +1097,11 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             if (error) error(err);
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         }, app, client, params, instance);
                 }
 
@@ -1116,6 +1126,11 @@ module.exports = function(OBJY) {
                                 function(err) {
 
                                     if (error) error(thisRef);
+                                    else {
+                                        return new Promise((resolve, reject) => {
+                                            reject(thisRef);
+                                        });
+                                    }
                                     return this;
                                 }, client, params.templateFamily, params.templateSource, params)
                         }
@@ -1168,6 +1183,11 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             if (error) error(err);
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         }, app, client, params, instance);
 
                     return OBJY.deserialize(this);
@@ -1357,6 +1377,11 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
                             if (error) error(err);
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         }, app, client, params, instance);
 
                 }
@@ -1390,6 +1415,11 @@ module.exports = function(OBJY) {
                                 },
                                 function(err) {
                                     if (error) error(thisRef);
+                                    else {
+                                        return new Promise((resolve, reject) => {
+                                            reject(thisRef);
+                                        });
+                                    }
                                     return thisRef;
                                 }, client, params.templateFamily, params.templateSource, params, instance)
                         }
@@ -1405,6 +1435,11 @@ module.exports = function(OBJY) {
                                 },
                                 function(err) {
                                     if (error) error(thisRef);
+                                    else {
+                                        return new Promise((resolve, reject) => {
+                                            reject(thisRef);
+                                        });
+                                    }
                                     return thisRef;
                                 }, client, params, instance)
                         }
@@ -1446,11 +1481,21 @@ module.exports = function(OBJY) {
 
                         }, function(err) {
                             if (error) error(err)
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         }, app, client);
 
 
                     }, function(err) {
                         if (error) error(err)
+                        else {
+                            return new Promise((resolve, reject) => {
+                                reject(err);
+                            });
+                        }
                     }, app, client, instance, params, instance);
 
                     return OBJY.deserialize(this);
@@ -1588,11 +1633,21 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         if (error) error(err)
+                        else {
+                            return new Promise((resolve, reject) => {
+                                reject(err);
+                            });
+                        }
                     }, app, client);
 
 
                 }, function(err) {
                     if (error) error(err)
+                    else {
+                        return new Promise((resolve, reject) => {
+                            reject(err);
+                        });
+                    }
                 }, app, client, instance, params, instance);
 
                 return OBJY.deserialize(this);
@@ -1620,6 +1675,11 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         if (error) error(err)
+                        else {
+                            return new Promise((resolve, reject) => {
+                                reject(err);
+                            });
+                        }
                     }, app, client, instance, params, instance);
 
                     return OBJY.deserialize(this);
@@ -1739,7 +1799,7 @@ module.exports = function(OBJY) {
                                 if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                 else {
                                     return new Promise((resolve) => {
-                                        resolve(OBJY.deSerializePropsObject(returnObject, params);
+                                        resolve(OBJY.deSerializePropsObject(returnObject, params));
                                     });
                                 }
                                 return data;
@@ -1766,6 +1826,11 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         if (error) error(err)
+                        else {
+                            return new Promise((resolve, reject) => {
+                                reject(err);
+                            });
+                        }
                     }, app, client, instance, params, instance);
                 }
 
