@@ -895,6 +895,11 @@ module.exports = function(OBJY) {
                             OBJY.deSerializePropsObject(data, params)
 
                             if (success) success(OBJY.deserialize(data));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deserialize(data));
+                                });
+                            }
 
                             delete thisRef.instance;
 
@@ -1076,6 +1081,11 @@ module.exports = function(OBJY) {
                             OBJY.deSerializePropsObject(data, params)
 
                             if (success) success(OBJY.deserialize(data));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deserialize(data));
+                                });
+                            }
 
                             delete thisRef.instance;
 
@@ -1149,6 +1159,11 @@ module.exports = function(OBJY) {
                             instance.alterSequence = [];
 
                             if (success) success(OBJY.deserialize(data));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deserialize(data));
+                                });
+                            }
 
                         },
                         function(err) {
@@ -1333,6 +1348,11 @@ module.exports = function(OBJY) {
                             OBJY.deSerializePropsObject(data, params)
                             instance.alterSequence = [];
                             if (success) success(OBJY.deserialize(data));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deserialize(data));
+                                });
+                            }
 
                         },
                         function(err) {
@@ -1416,7 +1436,13 @@ module.exports = function(OBJY) {
                         return OBJY.remove(thisRef, function(_data) {
 
                             OBJY.deSerializePropsObject(data, params)
-                            success(OBJY.deserialize(data));
+                            
+                            if(success) success(OBJY.deserialize(data));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deserialize(data));
+                                });
+                            }
 
                         }, function(err) {
                             if (error) error(err)
@@ -1553,6 +1579,11 @@ module.exports = function(OBJY) {
 
                         OBJY.deSerializePropsObject(data, params)
                         if (success) success(OBJY.deserialize(data));
+                        else {
+                            return new Promise((resolve) => {
+                                resolve(OBJY.deserialize(data));
+                            });
+                        }
 
 
                     }, function(err) {
@@ -1581,6 +1612,11 @@ module.exports = function(OBJY) {
                         if(!OBJY.checkAuthroisations(data, instance.activeUser, "r", instance.activeApp, instance)) return error({ error: 'Lack of Permissions' })
 
                         if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                        else {
+                            return new Promise((resolve) => {
+                                resolve(OBJY[data.role](OBJY.deserialize(data)));
+                            });
+                        }
 
                     }, function(err) {
                         if (error) error(err)
@@ -1627,16 +1663,31 @@ module.exports = function(OBJY) {
 
                     if (dontInherit) {
                         if (success) success(returnObject);
+                        else {
+                            return new Promise((resolve) => {
+                                resolve(returnObject);
+                            });
+                        }
                         return data;
                     }
 
                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                         if (success) success(returnObject);
+                        else {
+                            return new Promise((resolve) => {
+                                resolve(returnObject);
+                            });
+                        }
                         return data;
                     }
 
                     if ((data.inherits || []).length == 0) {
                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                        else {
+                            return new Promise((resolve) => {
+                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                            });
+                        }
                         return data;
                     }
 
@@ -1654,6 +1705,11 @@ module.exports = function(OBJY) {
                                     if (counter == data.inherits.length) {
                                       
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                        else {
+                                            return new Promise((resolve) => {
+                                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                            });
+                                        }
                                         return data;
                                     }
                                 },
@@ -1666,6 +1722,11 @@ module.exports = function(OBJY) {
                                     if (counter == data.inherits.length) {
                                        
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                        else {
+                                            return new Promise((resolve) => {
+                                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                            });
+                                        }
                                         return data;
                                     }
                                 }, client, params.templateFamily, params.templateSource, params, instance)
@@ -1676,6 +1737,11 @@ module.exports = function(OBJY) {
                             if (thisRef.inherits.length == 1) {
 
                                 if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                else {
+                                    return new Promise((resolve) => {
+                                        resolve(OBJY.deSerializePropsObject(returnObject, params);
+                                    });
+                                }
                                 return data;
                             } else {
                                 counter++;
