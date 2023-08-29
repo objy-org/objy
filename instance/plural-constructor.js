@@ -42,14 +42,24 @@ module.exports = function(OBJY) {
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
-                            success(OBJY.deSerializePropsObjectMulti(data, params));
+                            if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                });
+                            }
                             return;
                         }
 
                         if (data.length == 0) {
                             //console.info(data)
 
-                            success(OBJY.deSerializePropsObjectMulti(data, params));
+                            if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                });
+                            }
                             return;
                         }
 
@@ -73,7 +83,12 @@ module.exports = function(OBJY) {
 
                                 if (allCounter == data.length) {
 
-                                    success(OBJY.deSerializePropsObjectMulti(data, params));
+                                    if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                    else {
+                                        return new Promise((resolve) => {
+                                            resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                        });
+                                    }
                                     return d;
                                 }
                             }
@@ -92,7 +107,12 @@ module.exports = function(OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                else {
+                                                    return new Promise((resolve) => {
+                                                        resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                    });
+                                                }
                                                 return d;
                                             }
                                         },
@@ -104,7 +124,12 @@ module.exports = function(OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                else {
+                                                    return new Promise((resolve) => {
+                                                        resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                    });
+                                                }
                                                 return d;
                                             }
 
@@ -113,7 +138,12 @@ module.exports = function(OBJY) {
 
                                     if (d.inherits.length == 1) {
 
-                                        success(OBJY.deSerializePropsObjectMulti(data, params));
+                                        if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                        else {
+                                            return new Promise((resolve) => {
+                                                resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                            });
+                                        }
                                         return d;
                                     } else {
                                         counter++;
@@ -126,8 +156,12 @@ module.exports = function(OBJY) {
                         })
 
                     }, function(err) {
-                        console.log('err', err);
-                        error(err)
+                        if(error) error(err);
+                        else {
+                            return new Promise((resolve, reject) => {
+                                reject(err);
+                            });
+                        }
                     }, app, client, flags || {}, params, instance);
 
                 }
@@ -142,10 +176,20 @@ module.exports = function(OBJY) {
 
 
                     OBJY.countObjects(objs, role, function(data) {
-                        success(data);
+                        if(success) success(data);
+                        else {
+                            return new Promise((resolve) => {
+                                resolve(data);
+                            });
+                        }
 
                     }, function(err) {
-                        error(err)
+                        if(error) error(err);
+                        else {
+                            return new Promise((resolve, reject) => {
+                                reject(err);
+                            });
+                        }
                     }, app, client, flags || {}, params, instance);
 
                     return;
@@ -175,7 +219,12 @@ module.exports = function(OBJY) {
 
                                     allCounter++;
                                     if (allCounter == objs.length) {
-                                        success(objs);
+                                        if(success) success(objs);
+                                        else {
+                                            return new Promise((resolve) => {
+                                                resolve(objs);
+                                            });
+                                        }
                                         return data;
                                     }
                                 }
@@ -193,18 +242,33 @@ module.exports = function(OBJY) {
                                                 if (counter == data.inherits.length) allCounter++;
 
                                                 if (allCounter == objs.length) {
-                                                    success(objs);
+                                                    if(success) success(objs);
+                                                    else {
+                                                        return new Promise((resolve) => {
+                                                            resolve(objs);
+                                                        });
+                                                    }
                                                     return data;
                                                 }
                                             },
                                             function(err) {
-                                                error(err);
+                                                if(error) error(err);
+                                                else {
+                                                    return new Promise((resolve, reject) => {
+                                                        reject(err);
+                                                    });
+                                                }
                                                 return data;
                                             }, client, params.templateFamily, params.templateSource, params, instance)
                                     } else {
 
                                         if (data.inherits.length == 1) {
-                                            success(objs);
+                                            if(success) success(objs);
+                                            else {
+                                                return new Promise((resolve) => {
+                                                    resolve(objs);
+                                                });
+                                            }
                                             return data;
                                         } else {
                                             counter++;
@@ -216,7 +280,12 @@ module.exports = function(OBJY) {
                             } else {
                                 allCounter++;
                                 if (allCounter == objs.length) {
-                                    success(objs);
+                                    if(success) success(objs);
+                                    else {
+                                        return new Promise((resolve) => {
+                                            resolve(objs);
+                                        });
+                                    }
                                     return data;
                                 }
                             }
@@ -224,7 +293,12 @@ module.exports = function(OBJY) {
                         }, function(err) {
                             //counter++;
                             /*if (objs.length == counter)*/
-                            error(err);
+                            if(error) error(err);
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         });
                     }
                 }
@@ -250,10 +324,21 @@ module.exports = function(OBJY) {
 
                         instance[params.pluralName](query).get(function(data) {
                             if (data.length == 0) error("User not found");
-                            callback(data[0])
+                            
+                            if(callback) callback(data[0]);
+                            else {
+                                return new Promise((resolve) => {
+                                    resolve(data[0]);
+                                });
+                            }
 
                         }, function(err) {
-                            error(err);
+                            if(error) error(err);
+                            else {
+                                return new Promise((resolve, reject) => {
+                                    reject(err);
+                                });
+                            }
                         })
                     };
 

@@ -42,6 +42,7 @@ module.exports = function(OBJY) {
 
         handlerSequence: [],
         permissionSequence: [],
+        alterSequence: [],
         commandSequence: [],
         eventAlterationSequence: [],
 
