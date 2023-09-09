@@ -867,7 +867,7 @@ module.exports = function(OBJY) {
             };
 
             Object.getPrototypeOf(this).add = function(success, error, client) {
-
+            return new Promise((resolve, reject) => {
                 var client = client || instance.activeTenant;
                 var app = instance.activeApp;
 
@@ -896,9 +896,7 @@ module.exports = function(OBJY) {
 
                             if (success) success(OBJY.deserialize(data));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deserialize(data));
-                                });
                             }
 
                             delete thisRef.instance;
@@ -908,9 +906,7 @@ module.exports = function(OBJY) {
                             console.warn('err', err, error)
                             if (error) error(err);
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         }, app, client, params);
 
@@ -1087,9 +1083,7 @@ module.exports = function(OBJY) {
 
                             if (success) success(OBJY.deserialize(data));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deserialize(data));
-                                });
                             }
 
                             delete thisRef.instance;
@@ -1098,9 +1092,7 @@ module.exports = function(OBJY) {
                         function(err) {
                             if (error) error(err);
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         }, app, client, params, instance);
                 }
@@ -1127,9 +1119,7 @@ module.exports = function(OBJY) {
 
                                     if (error) error(thisRef);
                                     else {
-                                        return new Promise((resolve, reject) => {
                                             reject(thisRef);
-                                        });
                                     }
                                     return this;
                                 }, client, params.templateFamily, params.templateSource, params)
@@ -1141,10 +1131,11 @@ module.exports = function(OBJY) {
                     addFn(thisRef);
                 }
                 return OBJY.deserialize(this);
+            });
             };
 
             Object.getPrototypeOf(this).update = function(success, error, client) {
-
+            return new Promise((resolve, reject) => {
                 var client = client || instance.activeTenant;
                 var app = instance.activeApp;
 
@@ -1175,18 +1166,14 @@ module.exports = function(OBJY) {
 
                             if (success) success(OBJY.deserialize(data));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deserialize(data));
-                                });
                             }
 
                         },
                         function(err) {
                             if (error) error(err);
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         }, app, client, params, instance);
 
@@ -1369,18 +1356,14 @@ module.exports = function(OBJY) {
                             instance.alterSequence = [];
                             if (success) success(OBJY.deserialize(data));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deserialize(data));
-                                });
                             }
 
                         },
                         function(err) {
                             if (error) error(err);
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         }, app, client, params, instance);
 
@@ -1416,9 +1399,7 @@ module.exports = function(OBJY) {
                                 function(err) {
                                     if (error) error(thisRef);
                                     else {
-                                        return new Promise((resolve, reject) => {
                                             reject(thisRef);
-                                        });
                                     }
                                     return thisRef;
                                 }, client, params.templateFamily, params.templateSource, params, instance)
@@ -1436,9 +1417,7 @@ module.exports = function(OBJY) {
                                 function(err) {
                                     if (error) error(thisRef);
                                     else {
-                                        return new Promise((resolve, reject) => {
                                             reject(thisRef);
-                                        });
                                     }
                                     return thisRef;
                                 }, client, params, instance)
@@ -1450,9 +1429,12 @@ module.exports = function(OBJY) {
                 instance.commandSequence = [];
 
                 return OBJY.deserialize(this);
+
+            });
             };
 
             Object.getPrototypeOf(this).remove = function(success, error, client) {
+            return new Promise((resolve, reject) => {
 
                 var client = client || instance.activeTenant;
                 var app = instance.activeApp;
@@ -1474,17 +1456,13 @@ module.exports = function(OBJY) {
                             
                             if(success) success(OBJY.deserialize(data));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deserialize(data));
-                                });
                             }
 
                         }, function(err) {
                             if (error) error(err)
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         }, app, client);
 
@@ -1492,9 +1470,7 @@ module.exports = function(OBJY) {
                     }, function(err) {
                         if (error) error(err)
                         else {
-                            return new Promise((resolve, reject) => {
                                 reject(err);
-                            });
                         }
                     }, app, client, instance, params, instance);
 
@@ -1625,18 +1601,14 @@ module.exports = function(OBJY) {
                         OBJY.deSerializePropsObject(data, params)
                         if (success) success(OBJY.deserialize(data));
                         else {
-                            return new Promise((resolve) => {
                                 resolve(OBJY.deserialize(data));
-                            });
                         }
 
 
                     }, function(err) {
                         if (error) error(err)
                         else {
-                            return new Promise((resolve, reject) => {
                                 reject(err);
-                            });
                         }
                     }, app, client);
 
@@ -1644,16 +1616,17 @@ module.exports = function(OBJY) {
                 }, function(err) {
                     if (error) error(err)
                     else {
-                        return new Promise((resolve, reject) => {
                             reject(err);
-                        });
                     }
                 }, app, client, instance, params, instance);
 
                 return OBJY.deserialize(this);
+
+            });
             };
 
             Object.getPrototypeOf(this).get = function(success, error, dontInherit) {
+            return new Promise((resolve, reject) => {
 
                 var client = instance.activeTenant;
                 var app = instance.activeApp;
@@ -1668,17 +1641,15 @@ module.exports = function(OBJY) {
 
                         if (success) success(OBJY[data.role](OBJY.deserialize(data)));
                         else {
-                            return new Promise((resolve) => {
                                 resolve(OBJY[data.role](OBJY.deserialize(data)));
-                            });
                         }
 
                     }, function(err) {
                         if (error) error(err)
                         else {
-                            return new Promise((resolve, reject) => {
+                            
                                 reject(err);
-                            });
+                           
                         }
                     }, app, client, instance, params, instance);
 
@@ -1724,9 +1695,7 @@ module.exports = function(OBJY) {
                     if (dontInherit) {
                         if (success) success(returnObject);
                         else {
-                            return new Promise((resolve) => {
                                 resolve(returnObject);
-                            });
                         }
                         return data;
                     }
@@ -1734,9 +1703,7 @@ module.exports = function(OBJY) {
                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                         if (success) success(returnObject);
                         else {
-                            return new Promise((resolve) => {
                                 resolve(returnObject);
-                            });
                         }
                         return data;
                     }
@@ -1744,9 +1711,7 @@ module.exports = function(OBJY) {
                     if ((data.inherits || []).length == 0) {
                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                         else {
-                            return new Promise((resolve) => {
                                 resolve(OBJY.deSerializePropsObject(returnObject, params));
-                            });
                         }
                         return data;
                     }
@@ -1766,9 +1731,7 @@ module.exports = function(OBJY) {
                                       
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                         else {
-                                            return new Promise((resolve) => {
                                                 resolve(OBJY.deSerializePropsObject(returnObject, params));
-                                            });
                                         }
                                         return data;
                                     }
@@ -1783,9 +1746,7 @@ module.exports = function(OBJY) {
                                        
                                         if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                         else {
-                                            return new Promise((resolve) => {
                                                 resolve(OBJY.deSerializePropsObject(returnObject, params));
-                                            });
                                         }
                                         return data;
                                     }
@@ -1798,9 +1759,7 @@ module.exports = function(OBJY) {
 
                                 if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                 else {
-                                    return new Promise((resolve) => {
                                         resolve(OBJY.deSerializePropsObject(returnObject, params));
-                                    });
                                 }
                                 return data;
                             } else {
@@ -1827,14 +1786,14 @@ module.exports = function(OBJY) {
                     }, function(err) {
                         if (error) error(err)
                         else {
-                            return new Promise((resolve, reject) => {
                                 reject(err);
-                            });
                         }
                     }, app, client, instance, params, instance);
                 }
 
                 return OBJY.deserialize(this);
+
+            });
             }
 
             const validator = {
