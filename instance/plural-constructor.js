@@ -22,6 +22,7 @@ module.exports = function(OBJY) {
                 if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp, instance);
 
                 Object.getPrototypeOf(this).get = function(success, error) {
+                return new Promise((resolve, reject) => {
 
                     var client = instance.activeTenant;
                     var app = instance.activeApp;
@@ -44,9 +45,7 @@ module.exports = function(OBJY) {
 
                             if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deSerializePropsObjectMulti(data, params));
-                                });
                             }
                             return;
                         }
@@ -56,9 +55,7 @@ module.exports = function(OBJY) {
 
                             if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
                             else {
-                                return new Promise((resolve) => {
                                     resolve(OBJY.deSerializePropsObjectMulti(data, params));
-                                });
                             }
                             return;
                         }
@@ -85,9 +82,7 @@ module.exports = function(OBJY) {
 
                                     if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
                                     else {
-                                        return new Promise((resolve) => {
                                             resolve(OBJY.deSerializePropsObjectMulti(data, params));
-                                        });
                                     }
                                     return d;
                                 }
@@ -109,9 +104,7 @@ module.exports = function(OBJY) {
 
                                                 if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
                                                 else {
-                                                    return new Promise((resolve) => {
                                                         resolve(OBJY.deSerializePropsObjectMulti(data, params));
-                                                    });
                                                 }
                                                 return d;
                                             }
@@ -126,9 +119,7 @@ module.exports = function(OBJY) {
 
                                                 if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
                                                 else {
-                                                    return new Promise((resolve) => {
                                                         resolve(OBJY.deSerializePropsObjectMulti(data, params));
-                                                    });
                                                 }
                                                 return d;
                                             }
@@ -140,9 +131,7 @@ module.exports = function(OBJY) {
 
                                         if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
                                         else {
-                                            return new Promise((resolve) => {
                                                 resolve(OBJY.deSerializePropsObjectMulti(data, params));
-                                            });
                                         }
                                         return d;
                                     } else {
@@ -158,15 +147,16 @@ module.exports = function(OBJY) {
                     }, function(err) {
                         if(error) error(err);
                         else {
-                            return new Promise((resolve, reject) => {
                                 reject(err);
-                            });
                         }
                     }, app, client, flags || {}, params, instance);
+
+                });
 
                 }
 
                 Object.getPrototypeOf(this).count = function(success, error) {
+                return new Promise((resolve, reject) => {
 
                     var client = instance.activeTenant;
                     var app = instance.activeApp;
@@ -178,27 +168,26 @@ module.exports = function(OBJY) {
                     OBJY.countObjects(objs, role, function(data) {
                         if(success) success(data);
                         else {
-                            return new Promise((resolve) => {
                                 resolve(data);
-                            });
                         }
 
                     }, function(err) {
                         if(error) error(err);
                         else {
-                            return new Promise((resolve, reject) => {
                                 reject(err);
-                            });
                         }
                     }, app, client, flags || {}, params, instance);
 
                     return;
+
+                });
                 }
 
 
             } else if (Array.isArray(objs)) {
 
                 Object.getPrototypeOf(this).add = function(success, error) {
+                return new Promise((resolve, reject) => {
 
                     var client = instance.activeTenant;
                     var app = instance.activeApp;
@@ -221,9 +210,7 @@ module.exports = function(OBJY) {
                                     if (allCounter == objs.length) {
                                         if(success) success(objs);
                                         else {
-                                            return new Promise((resolve) => {
                                                 resolve(objs);
-                                            });
                                         }
                                         return data;
                                     }
@@ -244,9 +231,7 @@ module.exports = function(OBJY) {
                                                 if (allCounter == objs.length) {
                                                     if(success) success(objs);
                                                     else {
-                                                        return new Promise((resolve) => {
                                                             resolve(objs);
-                                                        });
                                                     }
                                                     return data;
                                                 }
@@ -254,9 +239,7 @@ module.exports = function(OBJY) {
                                             function(err) {
                                                 if(error) error(err);
                                                 else {
-                                                    return new Promise((resolve, reject) => {
                                                         reject(err);
-                                                    });
                                                 }
                                                 return data;
                                             }, client, params.templateFamily, params.templateSource, params, instance)
@@ -265,9 +248,7 @@ module.exports = function(OBJY) {
                                         if (data.inherits.length == 1) {
                                             if(success) success(objs);
                                             else {
-                                                return new Promise((resolve) => {
                                                     resolve(objs);
-                                                });
                                             }
                                             return data;
                                         } else {
@@ -282,9 +263,7 @@ module.exports = function(OBJY) {
                                 if (allCounter == objs.length) {
                                     if(success) success(objs);
                                     else {
-                                        return new Promise((resolve) => {
                                             resolve(objs);
-                                        });
                                     }
                                     return data;
                                 }
@@ -295,12 +274,11 @@ module.exports = function(OBJY) {
                             /*if (objs.length == counter)*/
                             if(error) error(err);
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         });
                     }
+                });
                 }
 
                 return this;
@@ -309,7 +287,7 @@ module.exports = function(OBJY) {
                 if (params.authMethod) Object.getPrototypeOf(this).auth = params.authMethod;
                 else {
                     Object.getPrototypeOf(this).auth = function(userObj, callback, error, client, app) {
-
+                    return new Promise((resolve, reject) => {
                         var query = { username: userObj.username };
 
                         if (instance.authableFields) {
@@ -327,19 +305,17 @@ module.exports = function(OBJY) {
                             
                             if(callback) callback(data[0]);
                             else {
-                                return new Promise((resolve) => {
                                     resolve(data[0]);
-                                });
                             }
 
                         }, function(err) {
                             if(error) error(err);
                             else {
-                                return new Promise((resolve, reject) => {
                                     reject(err);
-                                });
                             }
                         })
+
+                    });
                     };
 
                 }

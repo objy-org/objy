@@ -1,5 +1,10 @@
 var OBJY = require('./objy.js');
 
+OBJY.define({
+    name: 'object',
+    pluralName: 'objects'
+})
+
 OBJY.object({
     name: "hello",
     interval: {
@@ -11,6 +16,6 @@ OBJY.object({
     }
 })
 
-OBJY.objects({}).get(d => {
-    console.log(d)
+OBJY.objects({}).get().then(d => {
+    console.log('pdata:', d)
 })
