@@ -54,7 +54,7 @@ Object.assign(OBJY, {
     }
 })
 
-objy = OBJY;
+var objy = OBJY;
 
 
 if(_nodejs) module.exports = OBJY; 

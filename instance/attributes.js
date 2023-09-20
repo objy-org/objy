@@ -35,8 +35,6 @@ module.exports = function(OBJY) {
 
         caches: {},
 
-        backgroundAffectables: this.staticRules,
-
         ignorePermissions: false,
         ignoreAuthorisations: false,
 

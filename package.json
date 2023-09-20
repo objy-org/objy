@@ -1,6 +1,6 @@
 {
   "name": "objy",
-  "version": "0.6.988",
+  "version": "0.6.989",
   "description": "A JavaScript framework for building object-driven applications",
   "main": "objy.js",
   "scripts": {
@@ -21,17 +21,10 @@
   "bugs": {
     "url": "https://github.com/objy-org/objy/issues"
   },
-  "homepage": "https://objy.io",
+  "homepage": "https://objy.xyz",
   "dependencies": {
-    "bcrypt": "^3.0.8",
-    "bull": "^3.13.0",
-    "fs": "0.0.1-security",
-    "gridfs-stream": "^1.1.1",
-    "mingo": "^2.4.0",
-    "mocha": "^6.2.2",
     "moment": "^2.24.0",
-    "shortid": "^2.2.15",
-    "vm2": "^3.8.4"
+    "shortid": "^2.2.15"
   },
   "devDependencies": {
     "jest": "^25.1.0",

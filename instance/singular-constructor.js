@@ -1472,7 +1472,7 @@ module.exports = function(OBJY) {
                         else {
                                 reject(err);
                         }
-                    }, app, client, instance, params, instance);
+                    }, app, client, instance, params);
 
                     return OBJY.deserialize(this);
 
@@ -1610,7 +1610,7 @@ module.exports = function(OBJY) {
                         else {
                                 reject(err);
                         }
-                    }, app, client);
+                    }, app, client, instance);
 
 
                 }, function(err) {
@@ -1618,7 +1618,7 @@ module.exports = function(OBJY) {
                     else {
                             reject(err);
                     }
-                }, app, client, instance, params, instance);
+                }, app, client, instance, params);
 
                 return OBJY.deserialize(this);
 
@@ -1651,7 +1651,7 @@ module.exports = function(OBJY) {
                                 reject(err);
                            
                         }
-                    }, app, client, instance, params, instance);
+                    }, app, client, instance, params);
 
                     return OBJY.deserialize(this);
                 }
@@ -1788,7 +1788,7 @@ module.exports = function(OBJY) {
                         else {
                                 reject(err);
                         }
-                    }, app, client, instance, params, instance);
+                    }, app, client, instance, params);
                 }
 
                 return OBJY.deserialize(this);
