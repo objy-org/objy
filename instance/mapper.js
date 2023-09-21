@@ -236,7 +236,7 @@ module.exports = function(OBJY) {
             }, app, client, params, instance);
         },
 
-        getObjectById: function(role, id, success, error, app, client, instance, params, instance) {
+        getObjectById: function(role, id, success, error, app, client, instance, params) {
 
             this.mappers[role].getById(id, function(data) {
 
