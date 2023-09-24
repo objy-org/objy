@@ -1,4 +1,7 @@
 var moment = require("moment");
+if(typeof moment == 'object'){
+    moment = moment.default
+}
 
 Mapper = function(OBJY) {
     return Object.assign(new OBJY.ObserverTemplate(OBJY), {

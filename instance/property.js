@@ -1,5 +1,8 @@
 var CONSTANTS = require('../lib/dependencies/constants.js')
 var moment = require('moment');
+if(typeof moment == 'object'){
+    moment = moment.default
+}
 var exceptions = require('../lib/dependencies/exceptions.js')
 
 var isObject = function(a) {

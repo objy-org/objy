@@ -16,6 +16,7 @@ OBJY.object({
     }
 })
 
+async () => {
 OBJY.objects({}).get().then(d => {
     console.log('pdata:', d)
-})
+})}
