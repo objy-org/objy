@@ -1,6 +1,9 @@
 // SCHEDULED MAPPER
 
 var moment = require('moment');
+if(typeof moment == 'object'){
+    moment = moment.default
+}
 
 var CONSTANTS = {
     MULTITENANCY: {
