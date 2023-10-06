@@ -1,4 +1,4 @@
-ProcessorMapperTemplate = function(OBJY) {
+const ProcessorMapperTemplate = function(OBJY) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",

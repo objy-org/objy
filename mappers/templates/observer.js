@@ -1,4 +1,4 @@
-ObserverMapperTemplate = function(OBJY, options, content) {
+const ObserverMapperTemplate = function(OBJY, options, content) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
