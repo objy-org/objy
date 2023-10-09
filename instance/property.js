@@ -562,7 +562,7 @@ module.exports = function(OBJY) {
                     break;
 
                 default:
-                    throw new exceptions.InvalidTypeException(property[propertyKey].type);
+                    break;
             }
 
             if ((property[propertyKey] || {}).onCreate) {

@@ -1,4 +1,4 @@
-StorageMapperTemplate = function(OBJY, options) {
+const StorageMapperTemplate = function(OBJY, options) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
