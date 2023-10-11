@@ -1,47 +1,40 @@
-var CONSTANTS = require('../lib/dependencies/constants.js')
+var CONSTANTS = require('../lib/dependencies/constants.js');
 var moment = require('moment');
-if(typeof moment == 'object'){
-    moment = moment.default
+if (typeof moment == 'object') {
+    moment = moment.default;
 }
-var exceptions = require('../lib/dependencies/exceptions.js')
+var exceptions = require('../lib/dependencies/exceptions.js');
 
-var isObject = function(a) {
-    return (!!a) && (a.constructor === Object);
+var isObject = function (a) {
+    return !!a && a.constructor === Object;
 };
 
-module.exports = function(OBJY) {
+module.exports = function (OBJY) {
     return {
-
-        PropertyRefParser: function(obj, propertyName, success, error) {
+        PropertyRefParser: function (obj, propertyName, success, error) {
             var allProperties = obj.getProperties();
 
             try {
                 propertyToReturn = allProperties[propertyName];
-            } catch (e) {
-
-            }
+            } catch (e) {}
 
             if (!propertyToReturn) throw new exceptions.PropertyNotFoundException(propertyName);
 
             if (!propertyToReturn.type == 'objectRef') throw new exceptions.PropertyNotFoundException(propertyName);
 
-
             return OBJY.getObjectByIdSyn(propertyToReturn.value);
-
         },
 
-        EventParser: function(obj, eventName) {
-
+        EventParser: function (obj, eventName) {
             var eventToReturn;
 
             function getValue(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     getValue(obj.events[access.shift()], access);
                 } else {
-
                     try {
                         var t = obj.events[access[0]].type;
                     } catch (e) {
@@ -55,20 +48,16 @@ module.exports = function(OBJY) {
             getValue(obj, eventName);
 
             return eventToReturn;
-
         },
 
-
-        PropertyBagItemQueryRemover: function(obj, propertyName) {
-
+        PropertyBagItemQueryRemover: function (obj, propertyName) {
             function removeQuery(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removeQuery(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].query) throw new exceptions.NoSuchPermissionException(permissionKey);
@@ -79,24 +68,19 @@ module.exports = function(OBJY) {
             }
 
             removeQuery(obj, propertyName);
-
         },
 
-
-        PropertyBagItemConditionsRemover: function(obj, propertyName) {
-
+        PropertyBagItemConditionsRemover: function (obj, propertyName) {
             function removeConditions(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removeConditions(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].conditions) throw new exceptions.NoSuchPermissionException(permissionKey);
-
 
                     delete obj[access[0]].conditions;
                     return;
@@ -104,20 +88,16 @@ module.exports = function(OBJY) {
             }
 
             removeConditions(obj, propertyName);
-
         },
 
-
-        PropertyBagItemOnChangeRemover: function(obj, propertyName, name) {
-
+        PropertyBagItemOnChangeRemover: function (obj, propertyName, name) {
             function removeOnChange(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removeOnChange(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].onChange[name]) throw new exceptions.HandlerNotFoundException(name);
@@ -128,23 +108,20 @@ module.exports = function(OBJY) {
             }
 
             removeOnChange(obj, propertyName);
-
         },
 
-        PropertyBagItemMetaRemover: function(obj, propertyName) {
-
+        PropertyBagItemMetaRemover: function (obj, propertyName) {
             var thisRef = this;
 
             var propertyToReturn;
 
             function removeOnChange(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removeOnChange(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].meta) throw new exceptions.NoSuchPermissionException(permissionKey);
@@ -155,19 +132,16 @@ module.exports = function(OBJY) {
             }
 
             removeOnChange(obj, propertyName);
-
         },
 
-        PropertyBagItemOnCreateRemover: function(obj, propertyName, handlerName) {
-
+        PropertyBagItemOnCreateRemover: function (obj, propertyName, handlerName) {
             function removeOnCreate(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removeOnCreate(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].onCreate) throw new exceptions.HandlerNotFoundException();
@@ -179,19 +153,16 @@ module.exports = function(OBJY) {
             }
 
             removeOnCreate(obj, propertyName);
-
         },
 
-        PropertyBagItemOnDeleteRemover: function(obj, propertyName, name) {
-
+        PropertyBagItemOnDeleteRemover: function (obj, propertyName, name) {
             function removeOnDelete(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removeOnDelete(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
@@ -202,25 +173,22 @@ module.exports = function(OBJY) {
             }
 
             removeOnDelete(obj, propertyName);
-
         },
 
-        PropertyBagItemPermissionRemover: function(obj, propertyName, permissionKey, instance) {
-
+        PropertyBagItemPermissionRemover: function (obj, propertyName, permissionKey, instance) {
             function removePermission(obj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     removePermission(obj[access.shift()], access);
                 } else {
-
                     if (!obj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (!obj[access[0]].permissions) throw new exceptions.NoSuchPermissionException(permissionKey);
                     if (!obj[access[0]].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
-                    OBJY.chainPermission(obj, instance, 'x', 'removePropertyPermission', propertyName)
+                    OBJY.chainPermission(obj, instance, 'x', 'removePropertyPermission', propertyName);
 
                     delete obj[access[0]].permissions[permissionKey];
                     return;
@@ -228,21 +196,18 @@ module.exports = function(OBJY) {
             }
 
             removePermission(obj, propertyName);
-
         },
 
-        PropertyBagItemRemover: function(obj, propertyName, params, instance) {
-
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyBagItemRemover: function (obj, propertyName, params, instance) {
+            var propsObj = obj;
 
             function getValue(propsObj, access) {
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     getValue(propsObj[access.shift()], access);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     if (propsObj[access[0]].onDelete) {
@@ -253,7 +218,6 @@ module.exports = function(OBJY) {
                         }
                     }
 
-
                     OBJY.chainPermission(propsObj[access[0]], instance, 'd', 'removeProperty', propertyName);
 
                     delete propsObj[access[0]];
@@ -263,27 +227,24 @@ module.exports = function(OBJY) {
             }
 
             getValue(propsObj, propertyName);
-
         },
 
-        PropertyParser: function(obj, propertyName, instance, params) {
+        PropertyParser: function (obj, propertyName, instance, params) {
             var thisRef = this;
 
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var propertyToReturn;
 
             function getValue(obj, access) {
-
                 var propsObj = obj;
 
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     getValue(propsObj[access.shift()], access);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyName);
 
                     propertyToReturn = propsObj[access[0]];
@@ -292,32 +253,26 @@ module.exports = function(OBJY) {
 
             getValue(propsObj, propertyName);
 
-
-            if (propertyToReturn.type == "action") {
-                propertyToReturn.call = function(callback, client) {
-                    OBJY.checkAuthroisations(obj, instance.activeUser, "x", instance.activeApp);
+            if (propertyToReturn.type == 'action') {
+                propertyToReturn.call = function (callback, client) {
+                    OBJY.checkAuthroisations(obj, instance.activeUser, 'x', instance.activeApp);
                     thisRef.execProcessorAction(propertyToReturn.value || propertyToReturn.action, obj, propertyToReturn, {}, callback, client, {});
-                }
+                };
             }
 
             return propertyToReturn;
-
         },
 
-
-        ValuePropertyMetaSubstituter: function(property) {
-            if (typeof property !== 'undefined')
-                if (typeof property.value === 'undefined') property.value = null;
+        ValuePropertyMetaSubstituter: function (property) {
+            if (typeof property !== 'undefined') if (typeof property.value === 'undefined') property.value = null;
         },
 
-
-        PropertyCreateWrapper: function(obj, property, isBag, instance, params, reallyAdd) {
-
-            if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
+        PropertyCreateWrapper: function (obj, property, isBag, instance, params, reallyAdd) {
+            //if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
 
             property = Object.assign({}, property);
 
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var propertyKey = Object.keys(property)[0];
             var existing = null;
@@ -337,7 +292,8 @@ module.exports = function(OBJY) {
                 else property[propertyKey].type = CONSTANTS.PROPERTY.TYPE_SHORTTEXT;
             }*/
 
-            if (reallyAdd && propsObj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey)) throw new exceptions.DuplicatePropertyException(propertyKey);
+            if (reallyAdd && propsObj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey))
+                throw new exceptions.DuplicatePropertyException(propertyKey);
 
             switch ((property[propertyKey] || {}).type) {
                 case undefined:
@@ -368,7 +324,6 @@ module.exports = function(OBJY) {
                                 //throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_JSON);
                             }
                         } else {
-
                         }
                     }
                     propsObj[propertyKey] = property[propertyKey];
@@ -378,7 +333,8 @@ module.exports = function(OBJY) {
                 case CONSTANTS.PROPERTY.TYPE_NUMBER:
                     if (property[propertyKey].value != '') {
                         if (property[propertyKey].value != null)
-                            if (isNaN(property[propertyKey].value)) throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
+                            if (isNaN(property[propertyKey].value))
+                                throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
                     }
                     property[propertyKey].value = +property[propertyKey].value;
                     propsObj[propertyKey] = property[propertyKey];
@@ -386,7 +342,6 @@ module.exports = function(OBJY) {
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_EVENT:
-
                     OBJY.chainPermission(obj, instance, 'evt', 'addProperty (Event)', propertyKey);
 
                     var _event = {};
@@ -397,52 +352,45 @@ module.exports = function(OBJY) {
 
                     if (!_event[eventKey].reminders) _event[eventKey].reminders = {};
 
-
                     if (_event[eventKey].interval !== undefined) {
-
                         if (_event[eventKey].lastOccurence == undefined) _event[eventKey].lastOccurence = null;
                         else if (!moment(_event[eventKey].lastOccurence).isValid()) throw new exceptions.InvalidDateException(_event[eventKey].lastOccurence);
                         else _event[eventKey].lastOccurence = moment(_event[eventKey].lastOccurence).utc().format();
 
-
-                        if (_event[eventKey].nextOccurence == undefined)
-                            _event[eventKey].nextOccurence = moment().toISOString();
+                        if (_event[eventKey].nextOccurence == undefined) _event[eventKey].nextOccurence = moment().toISOString();
 
                         if (_event[eventKey].action === undefined) _event[eventKey].action = '';
 
-
                         if (_event[eventKey].interval === undefined) throw new exceptions.MissingAttributeException('interval');
 
-                        _event[eventKey].nextOccurence = moment(_event[eventKey].lastOccurence || moment().utc()).utc().add(_event[eventKey].interval).toISOString();
+                        _event[eventKey].nextOccurence = moment(_event[eventKey].lastOccurence || moment().utc())
+                            .utc()
+                            .add(_event[eventKey].interval)
+                            .toISOString();
 
                         instance.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
                             property: property,
-                            date: _event[eventKey].nextOccurence
-                        })
-
-
+                            date: _event[eventKey].nextOccurence,
+                        });
                     } else if (_event[eventKey].date !== undefined) {
-
                         if (_event[eventKey].date == null) _event[eventKey].date = moment().utc().toISOString();
 
                         if (!_event[eventKey].date) throw new exceptions.MissingAttributeException('date');
 
                         try {
                             _event[eventKey].date = moment(_event[eventKey].date).utc().format();
-                        } catch (e) {
-
-                        }
+                        } catch (e) {}
 
                         instance.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
                             property: property,
-                            date: _event[eventKey].date
-                        })
+                            date: _event[eventKey].date,
+                        });
 
                         if (!_event[eventKey].action) _event[eventKey].action = '';
                     } else {
@@ -459,7 +407,6 @@ module.exports = function(OBJY) {
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
-
                 case CONSTANTS.PROPERTY.TYPE_SHORTID:
                     if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = OBJY.RANDOM();
                     if (obj.role == 'template') property[propertyKey].value = null;
@@ -468,33 +415,24 @@ module.exports = function(OBJY) {
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_REF_OBJ:
-
-
                     // FOR NOW: no checking for existing object, since callback!!!
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_REF_USR:
-
-
-
                     // FOR NOW: no checking for existing object, since callback!!!
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_REF_FILE:
-
-
-
                     // FOR NOW: no checking for existing object, since callback!!!
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG:
-
                     if (!property[propertyKey].properties) property[propertyKey].properties = {};
 
                     var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
@@ -507,54 +445,53 @@ module.exports = function(OBJY) {
                     propsObj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
                     propsObj[propertyKey].properties = {};
 
-                    propertyKeys.forEach(function(property) {
-                        tmpProp = {};
+                    propertyKeys.forEach(function (property) {
+                        var tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
                         new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
-                    })
+                    });
 
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_ARRAY:
-
                     if (!property[propertyKey].properties) property[propertyKey].properties = {};
 
                     var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
 
                     var propertyKeys = Object.keys(innerProperties);
 
-                    parentProp = property;
+                    var parentProp = property;
 
                     propsObj[propertyKey] = {
                         type: CONSTANTS.PROPERTY.TYPE_ARRAY,
                         properties: {},
                         query: property[propertyKey].query,
-                        meta: property[propertyKey].meta
+                        meta: property[propertyKey].meta,
                     };
 
-
-                    propertyKeys.forEach(function(property) {
-                        tmpProp = {};
+                    propertyKeys.forEach(function (property) {
+                        var tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
                         new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
-                    })
+                    });
 
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_BOOLEAN:
-                    if (!typeof property[propertyKey].value === 'boolean') throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
+                    if (!typeof property[propertyKey].value === 'boolean')
+                        throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_ACTION:
-
                     OBJY.chainPermission(obj, instance, 'act', 'addProperty (Action)', propertyKey);
 
                     if (property[propertyKey].value) {
-                        if (typeof property[propertyKey].value !== 'string') throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
+                        if (typeof property[propertyKey].value !== 'string')
+                            throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
                     }
 
                     propsObj[propertyKey] = property[propertyKey];
@@ -571,13 +508,12 @@ module.exports = function(OBJY) {
                     if (!instance.handlerSequence[obj._id].onCreate) instance.handlerSequence[obj._id].onCreate = [];
                     instance.handlerSequence[obj._id].onCreate.push({
                         handler: property[propertyKey].onCreate,
-                        prop: property[propertyKey]
+                        prop: property[propertyKey],
                     });
                 }
             }
 
-
-            if(reallyAdd) OBJY.chainPermission(obj, instance, 'p', 'addProperty', propertyKey);
+            if (reallyAdd) OBJY.chainPermission(obj, instance, 'p', 'addProperty', propertyKey);
 
             /*if(obj.permissions) {
                 if(Object.keys(obj.permissions).length > 0)  {
@@ -586,18 +522,15 @@ module.exports = function(OBJY) {
                             instance.permissionSequence[obj._id].push({name:'addProperty', key: propertyKey});
                 }
             */
-
         },
 
-
-
-        PropertyQuerySetWrapper: function(obj, propertyKey, query, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyQuerySetWrapper: function (obj, propertyKey, query, params) {
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
 
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
@@ -615,20 +548,17 @@ module.exports = function(OBJY) {
             setValue(propsObj, propertyKey, query);
         },
 
-
-
-        PropertyMetaSetWrapper: function(obj, propertyKey, meta, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyMetaSetWrapper: function (obj, propertyKey, meta, params) {
+            var propsObj = obj;
 
             function setMeta(obj, access, meta) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     setMeta(propsObj[access.shift()], access, meta);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     //if (!obj[access[0]].on) obj[access[0]].on = {};
@@ -641,26 +571,24 @@ module.exports = function(OBJY) {
             setMeta(propsObj, propertyKey, meta);
         },
 
-
-        PropertyOnChangeSetWrapper: function(obj, propertyKey, name, onChange, trigger, type, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyOnChangeSetWrapper: function (obj, propertyKey, name, onChange, trigger, type, instance, params) {
+            var propsObj = obj;
 
             function setOnChange(obj, access, onChange) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     setOnChange(propsObj[access.shift()], access, onChange);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     //if (!obj[access[0]].on) obj[access[0]].on = {};
 
-                    if (!propsObj[access[0]].onChange) propsObj[access[0]].onChange = {}
+                    if (!propsObj[access[0]].onChange) propsObj[access[0]].onChange = {};
 
-                    if (!propsObj[access[0]].onChange[name]) propsObj[access[0]].onChange[name] = {}
+                    if (!propsObj[access[0]].onChange[name]) propsObj[access[0]].onChange[name] = {};
 
                     if (propsObj[access[0]].onChange[name].template) propsObj[access[0]].onChange[name].overwritten = true;
                     propsObj[access[0]].onChange[name].value = onChange;
@@ -674,12 +602,12 @@ module.exports = function(OBJY) {
             setOnChange(propsObj, propertyKey, onChange);
         },
 
-        PropertyOnCreateSetWrapper: function(obj, propertyKey, name, onCreate, trigger, type, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyOnCreateSetWrapper: function (obj, propertyKey, name, onCreate, trigger, type, instance, params) {
+            var propsObj = obj;
 
             function setOnCreate(obj, access, onCreate) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
@@ -702,30 +630,27 @@ module.exports = function(OBJY) {
                     propsObj[access[0]].onCreate[name].type = type || 'async';
 
                     OBJY.chainPermission(propsObj[access[0]], instance, 'v', 'setPropertyOnCreateHandler', name);
-
                 }
             }
 
             setOnCreate(propsObj, propertyKey, onCreate);
         },
 
-        PropertyOnDeleteSetWrapper: function(obj, propertyKey, name, onDelete, trigger, type, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyOnDeleteSetWrapper: function (obj, propertyKey, name, onDelete, trigger, type, instance, params) {
+            var propsObj = obj;
 
             function setOnDelete(obj, access, onDelete) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     setOnDelete(propsObj[access.shift()], access, onDelete);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (!propsObj[access[0]].onDelete) propsObj[access[0]].onDelete = {};
                     if (!propsObj[access[0]].onDelete[name]) propsObj[access[0]].onDelete[name] = {};
-
 
                     if (propsObj[access[0]].onDelete[name].template) propsObj[access[0]].onDelete[name].overwritten = true;
                     propsObj[access[0]].onDelete[name].value = onDelete;
@@ -739,18 +664,17 @@ module.exports = function(OBJY) {
             setOnDelete(propsObj, propertyKey, onDelete);
         },
 
-        PropertyConditionsSetWrapper: function(obj, propertyKey, conditions, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyConditionsSetWrapper: function (obj, propertyKey, conditions, params) {
+            var propsObj = obj;
 
             function setConditions(obj, access, conditions) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     setConditions(propsObj[access.shift()], access, conditions);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     propsObj[access[0]].conditions = conditions;
@@ -760,18 +684,17 @@ module.exports = function(OBJY) {
             setConditions(propsObj, propertyKey, conditions);
         },
 
-        PropertyPermissionSetWrapper: function(obj, propertyKey, permission, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        PropertyPermissionSetWrapper: function (obj, propertyKey, permission, instance, params) {
+            var propsObj = obj;
 
             function setPermission(obj, access, permission) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
                     setPermission(propsObj[access.shift()], access, permission);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     var permissionKey = Object.keys(permission)[0];
@@ -784,53 +707,43 @@ module.exports = function(OBJY) {
             }
 
             setPermission(propsObj, propertyKey, permission);
-
         },
 
-
-        PropertySetWrapper: function(obj, propertyKey, newValue, instance, params) {
-
-            var propsObj = obj[params.propsObject] || obj;
+        PropertySetWrapper: function (obj, propertyKey, newValue, instance, params) {
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
+                var propsObj = obj;
 
-                var propsObj = obj
-
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (propsObj[access[0]].type == 'boolean') {
-                        if (typeof(newValue) != 'boolean') throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
+                        if (typeof newValue != 'boolean') throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
                     }
                     if (propsObj[access[0]].type == 'number') {
                         if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
                     }
 
-
                     if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
                     propsObj[access[0]].value = newValue;
-
 
                     if (propsObj[access[0]].onChange) {
                         if (Object.keys(propsObj[access[0]].onChange).length > 0) {
@@ -838,65 +751,53 @@ module.exports = function(OBJY) {
                             if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
                             instance.handlerSequence[propsObj._id].onChange.push({
                                 handler: propsObj[access[0]].onChange,
-                                prop: propsObj[access[0]]
+                                prop: propsObj[access[0]],
                             });
                         }
                     }
 
                     OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
-
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
-
-
         },
 
-
-        PropertySetFullWrapper: function(obj, propertyKey, newValue, instance, force, params) {
-
-            var propsObj = obj[params.propsObject] || obj;
+        PropertySetFullWrapper: function (obj, propertyKey, newValue, instance, force, params) {
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
+                var propsObj = obj;
 
-                var propsObj = obj
-
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     //if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if ((propsObj[access[0]] || {}).type == 'boolean') {
-                        if (typeof(newValue) != 'boolean') throw new exceptions.InvalidValueException(newValue, (propsObj[access[0]] || {}).type);
+                        if (typeof newValue != 'boolean') throw new exceptions.InvalidValueException(newValue, (propsObj[access[0]] || {}).type);
                     }
                     if ((propsObj[access[0]] || {}).type == 'number') {
                         if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, (propsObj[access[0]] || {}).type);
                     }
 
-
                     if ((propsObj[access[0]] || {}).template) propsObj[access[0]].overwritten = true;
                     propsObj[access[0]] = newValue;
-
 
                     if (propsObj[access[0]].onChange) {
                         if (Object.keys(propsObj[access[0]].onChange).length > 0) {
@@ -904,23 +805,20 @@ module.exports = function(OBJY) {
                             if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
                             instance.handlerSequence[propsObj._id].onChange.push({
                                 handler: propsObj[access[0]].onChange,
-                                prop: propsObj[access[0]]
+                                prop: propsObj[access[0]],
                             });
                         }
                     }
 
                     OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setProperty', propertyKey);
-
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
-
         },
 
-        EventIntervalSetWrapper: function(obj, propertyKey, newValue, client, instance, params) {
-
-            var propsObj = obj[params.propsObject] || obj;
+        EventIntervalSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
+            var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
 
@@ -928,28 +826,24 @@ module.exports = function(OBJY) {
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
@@ -958,36 +852,32 @@ module.exports = function(OBJY) {
                     propsObj[access[0]].interval = newValue;
 
                     if (propsObj[access[0]].lastOccurence) {
-
                         var nextOccurence = moment(propsObj[access[0]].lastOccurence).utc().add(newValue);
                         instance.eventAlterationSequence.push({
                             operation: 'remove',
                             obj: obj,
                             propName: propertyKey,
                             property: propsObj[access[0]],
-                            date: nextOccurence
-                        })
+                            date: nextOccurence,
+                        });
                         instance.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
                             property: propsObj[access[0]],
-                            date: nextOccurence
-                        })
+                            date: nextOccurence,
+                        });
                     }
 
                     OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventInterval', propertyKey);
-
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
-
         },
 
-        EventTriggeredSetWrapper: function(obj, propertyKey, newValue, client, params) {
-
-            var propsObj = obj[params.propsObject] || obj;
+        EventTriggeredSetWrapper: function (obj, propertyKey, newValue, client, params) {
+            var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
 
@@ -995,76 +885,63 @@ module.exports = function(OBJY) {
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
 
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (propsObj[access[0]].interval)
-                        propsObj[access[0]].nextOccurence = moment().utc().add(propsObj[access[0]].interval).toISOString();
+                    if (propsObj[access[0]].interval) propsObj[access[0]].nextOccurence = moment().utc().add(propsObj[access[0]].interval).toISOString();
                     else propsObj[access[0]].triggered = newValue;
                     //obj[access[0]].overwritten = true;
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
-
         },
 
-
-        EventLastOccurenceSetWrapper: function(obj, propertyKey, newValue, client, params) {
-
-            var propsObj = obj[params.propsObject] || obj;
+        EventLastOccurenceSetWrapper: function (obj, propertyKey, newValue, client, params) {
+            var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
 
             if (prop.type != CONSTANTS.PROPERTY.TYPE_EVENT) throw new exceptions.NotAnEventException(propertyKey);
 
-
             function setValue(obj, access, value) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     propsObj[access[0]].lastOccurence = newValue;
@@ -1074,39 +951,32 @@ module.exports = function(OBJY) {
             }
 
             setValue(propsObj, propertyKey, newValue);
-
         },
 
-
-        EventDateSetWrapper: function(obj, propertyKey, newValue, client, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        EventDateSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
-
 
                     if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
                     delete propsObj[access[0]].interval;
@@ -1114,59 +984,52 @@ module.exports = function(OBJY) {
                     delete propsObj[access[0]].nextOccurence;
                     propsObj[access[0]].date = newValue;
 
-
                     instance.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: obj,
                         propName: propertyKey,
                         property: propsObj[access[0]],
-                        date: newValue
-                    })
+                        date: newValue,
+                    });
                     instance.eventAlterationSequence.push({
                         operation: 'add',
                         obj: obj,
                         propName: propertyKey,
                         property: propsObj[access[0]],
-                        date: newValue
-                    })
+                        date: newValue,
+                    });
 
                     OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventDate', propertyKey);
-
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
-
         },
 
-        EventActionSetWrapper: function(obj, propertyKey, newValue, client, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+        EventActionSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
 
-                if (typeof(access) == 'string') {
+                if (typeof access == 'string') {
                     access = access.split('.');
                 }
                 if (access.length > 1) {
-
                     var shift = access.shift();
                     try {
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_ARRAY) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
-
                             }
                         }
                     } catch (e) {}
 
                     setValue(propsObj[shift], access, value);
                 } else {
-
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                     if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
@@ -1181,9 +1044,6 @@ module.exports = function(OBJY) {
             }
 
             setValue(propsObj, propertyKey, newValue);
-
         },
-
-
-    }
-}
+    };
+};

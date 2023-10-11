@@ -13,10 +13,17 @@ OBJY.object({
         action: () => {
             console.log('hello')
         }
+    },
+    properties: {
+        age: 3
     }
 })
 
-async () => {
+
 OBJY.objects({}).get().then(d => {
     console.log('pdata:', d)
-})}
+
+    d[0].addProperty('propertiefs.asfsfasf', 111);
+
+    console.log(d)
+})
