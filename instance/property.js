@@ -199,7 +199,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyBagItemRemover: function (obj, propertyName, params, instance) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function getValue(propsObj, access) {
                 if (typeof access == 'string') {
@@ -232,7 +232,7 @@ module.exports = function (OBJY) {
         PropertyParser: function (obj, propertyName, instance, params) {
             var thisRef = this;
 
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var propertyToReturn;
 
@@ -268,11 +268,11 @@ module.exports = function (OBJY) {
         },
 
         PropertyCreateWrapper: function (obj, property, isBag, instance, params, reallyAdd) {
-            if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
+            //if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
 
             property = Object.assign({}, property);
 
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var propertyKey = Object.keys(property)[0];
             var existing = null;
@@ -525,7 +525,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyQuerySetWrapper: function (obj, propertyKey, query, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
@@ -549,7 +549,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyMetaSetWrapper: function (obj, propertyKey, meta, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setMeta(obj, access, meta) {
                 var propsObj = obj;
@@ -572,7 +572,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyOnChangeSetWrapper: function (obj, propertyKey, name, onChange, trigger, type, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setOnChange(obj, access, onChange) {
                 var propsObj = obj;
@@ -603,7 +603,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyOnCreateSetWrapper: function (obj, propertyKey, name, onCreate, trigger, type, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setOnCreate(obj, access, onCreate) {
                 var propsObj = obj;
@@ -637,7 +637,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyOnDeleteSetWrapper: function (obj, propertyKey, name, onDelete, trigger, type, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setOnDelete(obj, access, onDelete) {
                 var propsObj = obj;
@@ -665,7 +665,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyConditionsSetWrapper: function (obj, propertyKey, conditions, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setConditions(obj, access, conditions) {
                 var propsObj = obj;
@@ -685,7 +685,7 @@ module.exports = function (OBJY) {
         },
 
         PropertyPermissionSetWrapper: function (obj, propertyKey, permission, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setPermission(obj, access, permission) {
                 var propsObj = obj;
@@ -710,7 +710,7 @@ module.exports = function (OBJY) {
         },
 
         PropertySetWrapper: function (obj, propertyKey, newValue, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
@@ -764,7 +764,7 @@ module.exports = function (OBJY) {
         },
 
         PropertySetFullWrapper: function (obj, propertyKey, newValue, instance, force, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
@@ -818,7 +818,7 @@ module.exports = function (OBJY) {
         },
 
         EventIntervalSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
 
@@ -877,7 +877,7 @@ module.exports = function (OBJY) {
         },
 
         EventTriggeredSetWrapper: function (obj, propertyKey, newValue, client, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
 
@@ -916,7 +916,7 @@ module.exports = function (OBJY) {
         },
 
         EventLastOccurenceSetWrapper: function (obj, propertyKey, newValue, client, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
 
@@ -954,7 +954,7 @@ module.exports = function (OBJY) {
         },
 
         EventDateSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;
@@ -1007,7 +1007,7 @@ module.exports = function (OBJY) {
         },
 
         EventActionSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
-            var propsObj = obj[params.propsObject] || obj;
+            var propsObj = obj;
 
             function setValue(obj, access, value) {
                 var propsObj = obj;

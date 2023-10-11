@@ -79,7 +79,7 @@ module.exports = function(OBJY) {
             // Properties
             function doTheProps(newObj) {
 
-                var propsObj = obj[params.propsObject] || obj;
+                var propsObj = obj;
 
                 Object.keys(propsObj).forEach(function(p) {
 
@@ -239,10 +239,10 @@ module.exports = function(OBJY) {
 
                     if (!template) template = {};
 
-                    if (params.propsObject && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
+                    //if (params.propsObject && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
-                    var propsObj = obj[params.propsObject] || obj;
-                    var propsTmpl = template[params.propsObject] || template;
+                    var propsObj = obj;
+                    var propsTmpl = template;
 
                     Object.keys(propsTmpl).forEach(function(p) {
 
@@ -503,7 +503,7 @@ module.exports = function(OBJY) {
 
             function doTheProps(obj) {
 
-                var propsObj = obj[params.propsObject] || obj;
+                var propsObj = obj;
 
                 if (propsObj) {
 
@@ -949,7 +949,7 @@ module.exports = function(OBJY) {
 
             //obj.properties = {};
 
-            if (params.propsObject) obj[params.propsObject] = {};
+            //if (params.propsObject) obj[params.propsObject] = {};
 
             var propertyKeys = Object.keys(properties);
             propertyKeys.forEach(function(property) {
@@ -958,7 +958,7 @@ module.exports = function(OBJY) {
                 var newProp = propKey;
                 new OBJY.PropertyCreateWrapper(obj, newProp, false, instance, params);
             })
-            return obj[params.propsObject] || obj;
+            return obj;
         },
 
         ApplicationsChecker: function(obj, applications) {

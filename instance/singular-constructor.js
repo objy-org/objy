@@ -34,11 +34,8 @@ module.exports = function(OBJY) {
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
                     if (params.extendedStructure[prop] === null) this[prop] = obj[prop];
-                    else if (params.extendedStructure[prop] === '$useForProps') {
-                        params.propsObject = prop;
-                        //this[params.propsObject] = obj[params.propsObject]//
-                        OBJY.PropertiesChecker(this, obj[params.propsObject], instance, params);
-                    } else this[prop] = params.extendedStructure[prop];
+                    else this[prop] = params.extendedStructure[prop];
+
                     if (!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
                 }
             }
@@ -68,7 +65,7 @@ module.exports = function(OBJY) {
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
             //this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
-            if (!params.propsObject) OBJY.PropertiesChecker(this, obj, instance, params);
+            OBJY.PropertiesChecker(this, obj, instance, params);
 
             this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
 
@@ -786,7 +783,6 @@ module.exports = function(OBJY) {
 
                 var thisRef = this;
 
-                if (params.propsObject) thisRef = this[params.propsObject];
 
                 if (propertyName.indexOf('.') != -1) {
                     this.removePropertyFromBag(propertyName, client);
@@ -866,7 +862,7 @@ module.exports = function(OBJY) {
             };
 
             Object.getPrototypeOf(this).getProperties = function() {
-                return this[params.propsObject] || this;
+                return this;
             };
 
             Object.getPrototypeOf(this).add = function(success, error, client) {

@@ -68,12 +68,8 @@ module.exports = function(OBJY) {
         },
 
         getPropsObject: function(obj, params) {
-            if (obj.hasOwnProperty('role'))
-                if (params.hasOwnProperty('propsObject'))
-                    if (!obj.hasOwnProperty(params.propsObject))
-                        obj[params.propsObject] = {};
-
-            return obj[params.propsObject] || obj;
+            
+            return obj;
         },
 
         serializePropsObject: function(realObj, obj, propsObject, instance, params) {
@@ -91,16 +87,6 @@ module.exports = function(OBJY) {
         },
 
         deSerializePropsObject: function(obj, params) {
-            return obj;
-
-            if (!params.propsObject) return obj;
-            if (!obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
-            Object.keys(obj).forEach(p => {
-                if (!OBJY.predefinedProperties.includes(p) && typeof obj[p] !== 'function') {
-                    obj[params.propsObject][p] = obj[p];
-                    delete obj[p];
-                }
-            })
             return obj;
         },
 

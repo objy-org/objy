@@ -47,9 +47,9 @@ module.exports = function(OBJY) {
                     // Properties
                     function doTheProps(template, obj) {
 
-                        var propsObj = obj[params.propsObject] || obj;
-                        if(!template[params.propsObject]) return;
-                        var propsTmpl = template[params.propsObject] || template;
+                        var propsObj = obj;
+                        if(!template) return;
+                        var propsTmpl = template;
 
                         if (!propsObj) propsObj = {}
 
