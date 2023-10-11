@@ -254,6 +254,8 @@ module.exports = function(OBJY) {
 
                     this.addPropertyToBag(bag, newProp);
 
+                    instance.alterSequence.push({addProperty: arguments})
+
                     return;
                 }
 
