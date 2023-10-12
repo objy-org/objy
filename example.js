@@ -15,7 +15,7 @@ OBJY.object({
         }
     },
     properties: {
-        age: 3
+        age:1111
     }
 })
 
@@ -23,7 +23,14 @@ OBJY.object({
 OBJY.objects({}).get().then(d => {
     console.log('pdata:', d)
 
-    d[0].addProperty('propertiefs.asfsfasf', 111);
+    d[0].addProperty('properties.innerBag', {type: "bag", properties: {
+        size: {
+            value: 14124 ,
+            type: 'number'
+        }
+    }});
 
-    console.log(d)
+    console.log('final:',   JSON.stringify(d, false, 4))
+}).catch(e => {
+    console.log(e)
 })

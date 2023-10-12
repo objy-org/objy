@@ -281,6 +281,7 @@ module.exports = function (OBJY) {
                 throw new exceptions.InvalidFormatException();
             }
 
+           
             /*if (!property[propertyKey].type) {
                 obj.properties[propertyKey] = property[propertyKey];
                
@@ -439,17 +440,19 @@ module.exports = function (OBJY) {
 
                     var propertyKeys = Object.keys(innerProperties);
 
-                    parentProp = property;
+                    //parentProp = property;
 
-                    propsObj[propertyKey] = property[propertyKey];
-                    propsObj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
-                    propsObj[propertyKey].properties = {};
+                    obj[propertyKey] = property[propertyKey];
+                    obj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
+                    //obj[propertyKey].properties = {};
+
+                   
 
                     propertyKeys.forEach(function (property) {
                         var tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
-                        new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
+                        new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                     });
 
                     break;

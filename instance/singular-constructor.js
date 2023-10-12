@@ -244,7 +244,7 @@ module.exports = function(OBJY) {
                 prop[name] = property;
                 property = prop;
 
-                var propertyKey = Object.keys(property)[0];
+                var propertyKey = name; Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf(".");
                     var bag = propertyKey.substring(0, lastDot);
@@ -253,6 +253,9 @@ module.exports = function(OBJY) {
                     newProp[newProKey] = property[propertyKey];
 
                     this.addPropertyToBag(bag, newProp);
+                    //new OBJY.PropertyCreateWrapper(this[bag], prop, false, instance, params, true);
+
+                    instance.alterSequence.push({addProperty: prop})
 
                     instance.alterSequence.push({addProperty: arguments})
 
