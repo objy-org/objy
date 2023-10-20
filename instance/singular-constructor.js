@@ -255,7 +255,7 @@ module.exports = function(OBJY) {
                     this.addPropertyToBag(bag, newProp);
                     //new OBJY.PropertyCreateWrapper(this[bag], prop, false, instance, params, true);
 
-                    instance.alterSequence.push({addProperty: prop})
+                    instance.alterSequence.push({addProperty: arguments})
 
                     instance.alterSequence.push({addProperty: arguments})
 
