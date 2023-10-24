@@ -231,6 +231,8 @@ module.exports = function (OBJY) {
 
         PropertyParser: function (obj, propertyName, instance, params) {
             var thisRef = this;
+            var app = isntance.activeApp;
+            var user = isntance.activeUser;
 
             var propsObj = obj;
 
@@ -255,7 +257,7 @@ module.exports = function (OBJY) {
 
             if (propertyToReturn.type == 'action') {
                 propertyToReturn.call = function (callback, client) {
-                    OBJY.checkAuthroisations(obj, instance.activeUser, 'x', instance.activeApp);
+                    OBJY.checkAuthroisations(obj, user, 'x', app);
                     thisRef.execProcessorAction(propertyToReturn.value || propertyToReturn.action, obj, propertyToReturn, {}, callback, client, {});
                 };
             }
@@ -281,7 +283,6 @@ module.exports = function (OBJY) {
                 throw new exceptions.InvalidFormatException();
             }
 
-           
             /*if (!property[propertyKey].type) {
                 obj.properties[propertyKey] = property[propertyKey];
                
@@ -445,8 +446,6 @@ module.exports = function (OBJY) {
                     obj[propertyKey] = property[propertyKey];
                     obj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
                     //obj[propertyKey].properties = {};
-
-                   
 
                     propertyKeys.forEach(function (property) {
                         var tmpProp = {};
