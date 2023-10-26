@@ -245,8 +245,6 @@ module.exports = function (OBJY) {
 
                     instance.alterSequence.push({ addProperty: arguments });
 
-                    instance.alterSequence.push({addProperty: arguments})
-
                     return;
                 }
 
