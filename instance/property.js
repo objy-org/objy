@@ -231,8 +231,8 @@ module.exports = function (OBJY) {
 
         PropertyParser: function (obj, propertyName, instance, params) {
             var thisRef = this;
-            var app = isntance.activeApp;
-            var user = isntance.activeUser;
+            var app = instance.activeApp;
+            var user = instance.activeUser;
 
             var propsObj = obj;
 
