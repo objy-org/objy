@@ -28,7 +28,7 @@ module.exports = function (OBJY) {
 
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
-                    if (params.extendedStructure[prop] === null) this[prop] = obj[prop];
+                    if (obj[prop] || params.extendedStructure[prop] === null) this[prop] = obj[prop];
                     else this[prop] = params.extendedStructure[prop];
 
                     if (!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
