@@ -79,70 +79,68 @@ module.exports = function(OBJY) {
             // Properties
             function doTheProps(newObj) {
 
-                var propsObj = obj;
+                Object.keys(obj).forEach(function(p) {
 
-                Object.keys(propsObj).forEach(function(p) {
-
-                    if (propsObj[p].type == 'bag') {
-                        doTheProps(propsObj[p]);
+                    if (obj[p].type == 'bag') {
+                        doTheProps(obj[p]);
                     }
 
-                    if (propsObj[p]) {
-                        if (propsObj[p].template && oldObj[p]) {
+                    if (obj[p]) {
+                        if (obj[p].template && oldObj[p]) {
 
-                            if (propsObj[p].value != oldObj[p].value) {
+                            if (obj[p].value != oldObj[p].value) {
 
-                                oldObj[p].value = propsObj[p].value;
+                                oldObj[p].value = obj[p].value;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (propsObj[p].action != oldObj[p].action) {
+                            if (obj[p].action != oldObj[p].action) {
 
-                                oldObj[p].action = propsObj[p].action;
+                                oldObj[p].action = obj[p].action;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (propsObj[p].date != oldObj[p].date) {
+                            if (obj[p].date != oldObj[p].date) {
 
-                                oldObj[p].date = propsObj[p].date;
+                                oldObj[p].date = obj[p].date;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (propsObj[p].interval != oldObj[p].interval) {
+                            if (obj[p].interval != oldObj[p].interval) {
 
-                                oldObj[p].interval = propsObj[p].interval;
+                                oldObj[p].interval = obj[p].interval;
                                 oldObj[p].overwritten = true;
                             }
 
-                            if (JSON.stringify(propsObj[p].meta) != JSON.stringify(oldObj[p].interval)) {
+                            if (JSON.stringify(obj[p].meta) != JSON.stringify(oldObj[p].interval)) {
 
-                                oldObj[p].meta = propsObj[p].meta;
+                                oldObj[p].meta = obj[p].meta;
                                 oldObj[p].overwritten = true;
                             }
                         }
 
                     }
 
-                    if (!oldObj[p]) oldObj[p] = propsObj[p];
+                    if (!oldObj[p]) oldObj[p] = obj[p];
 
 
-                    if (propsObj.permissions) {
-                        Object.keys(propsObj.permissions).forEach(function(p) {
-                            if (propsObj.permissions[p]) {
-                                if (JSON.stringify(propsObj.permissions[p]) != JSON.stringify(oldObj.permissions[p]))
-                                    oldObj.permissions[p] = propsObj.permissions[p]
+                    if (obj.permissions) {
+                        Object.keys(obj.permissions).forEach(function(p) {
+                            if (obj.permissions[p]) {
+                                if (JSON.stringify(obj.permissions[p]) != JSON.stringify(oldObj.permissions[p]))
+                                    oldObj.permissions[p] = obj.permissions[p]
                                 oldObj.permissions[p].overwritten = true;
                             }
                         })
                     }
 
-                    if (propsObj[p]) {
+                    if (obj[p]) {
                         handlers.forEach(function(h) {
-                            if (propsObj[p][h]) {
-                                Object.keys(propsObj[p][h]).forEach(function(oC) {
-                                    if (propsObj[p][h][oC]) {
-                                        if (propsObj[p][h][oC].value != oldObj[p][h][oC].value)
-                                            oldObj[p][h][oC].value = propsObj[p][h][oC].value;
+                            if (obj[p][h]) {
+                                Object.keys(obj[p][h]).forEach(function(oC) {
+                                    if (obj[p][h][oC]) {
+                                        if (obj[p][h][oC].value != oldObj[p][h][oC].value)
+                                            oldObj[p][h][oC].value = obj[p][h][oC].value;
                                         oldObj[p][h][oC].overwritten = true;
                                     }
                                 })
@@ -239,75 +237,72 @@ module.exports = function(OBJY) {
 
                     if (!template) template = {};
 
-                    //if (params.propsObject && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
+                    //if (params.object && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
-                    var propsObj = obj;
-                    var propsTmpl = template;
+                    Object.keys(template).forEach(function(p) {
 
-                    Object.keys(propsTmpl).forEach(function(p) {
+                        if ((OBJY.predefinedProperties.includes(p) || (isObject(template[p]) || Array.isArray(template[p])))) return;
 
-                        if (!params.propsObject && (OBJY.predefinedProperties.includes(p) || (isObject(propsTmpl[p]) || Array.isArray(propsTmpl[p])))) return;
+                        if (!template[p]) return;
 
-                        if (!propsTmpl[p]) return;
+                        var cloned = JSON.parse(JSON.stringify(template[p]));
 
-                        var cloned = JSON.parse(JSON.stringify(propsTmpl[p]));
-
-                        if (!propsObj[p]) {
-                            propsObj[p] = cloned;
-                            propsObj[p].template = templateId;
-                            delete propsObj[p].overwritten;
+                        if (!obj[p]) {
+                            obj[p] = cloned;
+                            obj[p].template = templateId;
+                            delete obj[p].overwritten;
                         } else {
 
 
                             if (cloned.meta) {
-                                if (!propsObj[p].meta) {
-                                    propsObj[p].meta = cloned.meta;
-                                    propsObj[p].meta.overwritten = true;
+                                if (!obj[p].meta) {
+                                    obj[p].meta = cloned.meta;
+                                    obj[p].meta.overwritten = true;
                                 } else {
-                                    if (!propsObj[p].meta.overwritten) {
-                                        propsObj[p].meta = cloned.meta;
-                                        propsObj[p].meta.overwritten = true;
+                                    if (!obj[p].meta.overwritten) {
+                                        obj[p].meta = cloned.meta;
+                                        obj[p].meta.overwritten = true;
                                     }
                                 }
                             }
-                            if (!propsObj[p].type) propsObj[p].type = cloned.type;
+                            if (!obj[p].type) obj[p].type = cloned.type;
 
-                            propsObj[p].template = templateId;
-                            propsObj[p].overwritten = true;
+                            obj[p].template = templateId;
+                            obj[p].overwritten = true;
 
                         }
 
-                        if (propsTmpl.permissions) {
-                            if (!propsObj.permissions) propsObj.permissions = {};
-                            Object.keys(propsTmpl.permissions).forEach(function(p) {
-                                if (!propsObj.permissions[p]) {
-                                    propsObj.permissions[p] = propsTmpl.permissions[p];
-                                    propsObj.permissions[p].template = templateId;
+                        if (template.permissions) {
+                            if (!obj.permissions) obj.permissions = {};
+                            Object.keys(template.permissions).forEach(function(p) {
+                                if (!obj.permissions[p]) {
+                                    obj.permissions[p] = template.permissions[p];
+                                    obj.permissions[p].template = templateId;
                                 } else {
-                                    propsObj.permissions[p].template = templateId;
-                                    propsObj.permissions[p].overwritten = true;
+                                    obj.permissions[p].template = templateId;
+                                    obj.permissions[p].overwritten = true;
                                 }
                             })
                         }
 
                         ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                            if (propsTmpl[p][h]) {
-                                if (!propsObj[p][h]) propsObj[p][h] = {};
+                            if (template[p][h]) {
+                                if (!obj[p][h]) obj[p][h] = {};
 
-                                Object.keys(propsTmpl[p][h]).forEach(function(oC) {
+                                Object.keys(template[p][h]).forEach(function(oC) {
 
-                                    if (!propsObj[p][h][oC]) {
-                                        propsObj[p][h][oC] = propsTmpl[p][h][oC];
-                                        if (propsObj[p][h][oC]) propsObj[p][h][oC].template = templateId;
+                                    if (!obj[p][h][oC]) {
+                                        obj[p][h][oC] = template[p][h][oC];
+                                        if (obj[p][h][oC]) obj[p][h][oC].template = templateId;
                                     }
                                 })
                             }
                         })
 
-                        if (propsTmpl[p].type == 'bag') {
+                        if (template[p].type == 'bag') {
 
 
-                            doTheProps(cloned, propsObj[p]);
+                            doTheProps(cloned, obj[p]);
                         }
 
                     })
@@ -503,13 +498,11 @@ module.exports = function(OBJY) {
 
             function doTheProps(obj) {
 
-                var propsObj = obj;
+                if (obj) {
 
-                if (propsObj) {
+                    Object.keys(obj).forEach(function(p) {
 
-                    Object.keys(propsObj).forEach(function(p) {
-
-                        if (!isObject(propsObj[p])) return;
+                        if (!isObject(obj[p])) return;
 
                         /*if (obj.permissions) {
                             Object.keys(obj.permissions).forEach(function(p) {
@@ -520,29 +513,29 @@ module.exports = function(OBJY) {
                             })
                         }*/
 
-                        if (propsObj[p]) {
+                        if (obj[p]) {
                             ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                                if (propsObj[p][h]) {
+                                if (obj[p][h]) {
 
-                                    propsObject.keys(propsObj[p][h]).forEach(function(oC) {
+                                    object.keys(obj[p][h]).forEach(function(oC) {
 
-                                        if (propsObj[p][h][oC]) {
-                                            if (propsObj[p][h][oC].template == templateId && !propsObj[p][h][oC].overwritten)
-                                                delete propsObj[p][h][oC];
+                                        if (obj[p][h][oC]) {
+                                            if (obj[p][h][oC].template == templateId && !obj[p][h][oC].overwritten)
+                                                delete obj[p][h][oC];
                                         }
                                     })
                                 }
                             })
                         }
 
-                        if (propsObj[p].type == 'bag') {
-                            return doTheProps(propsObj[p]);
+                        if (obj[p].type == 'bag') {
+                            return doTheProps(obj[p]);
                         }
 
-                        if (propsObj[p]) {
-                            if (propsObj[p].value != null) propsObj[p].overwritten = true;
-                            if (propsObj[p].template == templateId && !propsObj[p].overwritten) {
-                                delete propsObj[p];
+                        if (obj[p]) {
+                            if (obj[p].value != null) obj[p].overwritten = true;
+                            if (obj[p].template == templateId && !obj[p].overwritten) {
+                                delete obj[p];
                             }
                         }
 
@@ -949,7 +942,7 @@ module.exports = function(OBJY) {
 
             //obj.properties = {};
 
-            //if (params.propsObject) obj[params.propsObject] = {};
+            //if (params.object) obj[params.propsObject] = {};
 
             var propertyKeys = Object.keys(properties);
             propertyKeys.forEach(function(property) {
