@@ -1,9 +1,51 @@
 var OBJY = require('./objy.js');
 
+OBJY.Logger.enabled = ['none']
+
+OBJY.define({
+    name: 'template',
+    pluralName: 'templates',
+    
+})
+
 OBJY.define({
     name: 'object',
-    pluralName: 'objects'
+    pluralName: 'objects',
+    templateFamily: 'template',
+    
 })
+
+OBJY.template({
+    name: "template123",
+    nested: {
+        inner: {
+            type: "number",
+            value: 123
+        }
+    },
+    properties: {
+        lastnam: "sgsg",
+        supername: {
+            value: "benjamin",
+            type: 'shortText'
+        }
+    }
+});
+
+OBJY.templates({}).get(templates => {
+    templates.forEach(templ => {
+        console.log('t', templ)
+        var o = OBJY.object({inherits: [templ._id], marco: 'nicole'});
+        o.setPropertyValue('properties.supername', 456).addProperty('nested.whatever', 'sgsga').removeProperty('marco').update();
+
+        OBJY.objects({}).get(objs => {
+    console.log('all objs', JSON.stringify(objs, null, 4))
+})
+    })
+})
+
+
+/*
 
 OBJY.object({
     name: "hello",
@@ -34,3 +76,4 @@ OBJY.objects({}).get().then(d => {
 }).catch(e => {
     console.log(e)
 })
+*/

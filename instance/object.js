@@ -239,36 +239,53 @@ module.exports = function(OBJY) {
 
                     //if (params.object && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
+                    if(params.extendedStructure){
+                            Object.keys(params.extendedStructure).forEach(k => {
+                                if(isObject(params.extendedStructure[k]) && template[k]){
+                                    doTheProps(template[k], obj[k]);
+                                }
+                            })
+                    } else {
+                        /*console.log(Object.keys(template))
+                        Object.keys(template).forEach(function(p) {
+                            if(!OBJY.predefinedProperties.includes(p) && isObject(template[p])){
+                                console.log('predef', p)
+                                doTheProps(template[p], obj[p]);
+                            }
+                        })*/
+                    }
+
                     Object.keys(template).forEach(function(p) {
 
-                        if ((OBJY.predefinedProperties.includes(p) || (isObject(template[p]) || Array.isArray(template[p])))) return;
+                        if ((OBJY.predefinedProperties.includes(p)/* || (isObject(template[p]) || Array.isArray(template[p]))*/)) return;
 
                         if (!template[p]) return;
+
+                        if(isObject(template[p]))  doTheProps(template[p], obj[p]);
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
 
                         if (!obj[p]) {
                             obj[p] = cloned;
                             obj[p].template = templateId;
-                            delete obj[p].overwritten;
+                            //delete obj[p].overwritten;
                         } else {
-
 
                             if (cloned.meta) {
                                 if (!obj[p].meta) {
                                     obj[p].meta = cloned.meta;
-                                    obj[p].meta.overwritten = true;
+                                    //obj[p].meta.overwritten = true;
                                 } else {
                                     if (!obj[p].meta.overwritten) {
                                         obj[p].meta = cloned.meta;
-                                        obj[p].meta.overwritten = true;
+                                        //obj[p].meta.overwritten = true;
                                     }
                                 }
                             }
                             if (!obj[p].type) obj[p].type = cloned.type;
 
                             obj[p].template = templateId;
-                            obj[p].overwritten = true;
+                            //obj[p].overwritten = true;
 
                         }
 
@@ -301,9 +318,10 @@ module.exports = function(OBJY) {
 
                         if (template[p].type == 'bag') {
 
-
                             doTheProps(cloned, obj[p]);
                         }
+
+                        
 
                     })
                 }
@@ -532,11 +550,19 @@ module.exports = function(OBJY) {
                             return doTheProps(obj[p]);
                         }
 
+                        if(params.extendedStructure){
+                            Object.keys(params.extendedStructure).forEach(k => {
+                                if(isObject(params.extendedStructure[k]) && k == p){
+                                    doTheProps(obj[p]);
+                                }
+                            })
+                        }
+
                         if (obj[p]) {
-                            if (obj[p].value != null) obj[p].overwritten = true;
-                            if (obj[p].template == templateId && !obj[p].overwritten) {
-                                delete obj[p];
-                            }
+                           // if (obj[p].value != null) obj[p].overwritten = true;
+                            /*if (obj[p].template == templateId && !obj[p].overwritten) {
+                                //delete obj[p];
+                            }*/
                         }
 
                     })
