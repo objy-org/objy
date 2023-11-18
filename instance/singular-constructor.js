@@ -245,7 +245,7 @@ module.exports = function (OBJY) {
 
                     instance.alterSequence.push({ addProperty: arguments });
 
-                    return;
+                    return this;
                 }
 
                 new OBJY.PropertyCreateWrapper(this, property, false, instance, params, true);
@@ -747,7 +747,8 @@ module.exports = function (OBJY) {
 
                 if (propertyName.indexOf('.') != -1) {
                     this.removePropertyFromBag(propertyName, client);
-                    return;
+                    instance.alterSequence.push({ removeProperty: arguments });
+                    return this;
                 } else {
                     if (!thisRef[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
 
@@ -1095,6 +1096,8 @@ module.exports = function (OBJY) {
                     var client = client || instance.activeTenant;
                     var app = instance.activeApp;
                     var user = instance.activeUser;
+
+                    console.log('ins', instance.alterSequence)
 
                     OBJY.applyAffects(this, 'onChange', instance, client, params);
 

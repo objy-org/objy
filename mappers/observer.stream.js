@@ -118,15 +118,12 @@ const Mapper = function (OBJY, options) {
 
         var db = this.getDBByMultitenancy(client);
 
-        console.log(this.index[client]);
-
         if (this.index[client][objId + ':' + propName] === 'undefined') return error('object not found: ' + objId + ':' + propName);
 
         /*if(this.multitenancy == CONSTANTS.MULTITENANCY.ISOLATED)
             if(this.index[client][objId + ':'+propName].tenantId != client) 
                 return error('object not found: ' + objId + ':'+propName);*/
-        console.log(this.index[client][objId + ':' + propName], db[this.index[client][objId + ':' + propName]]);
-
+       
         try {
             clearInterval(db[this.index[client][objId + ':' + propName]]);
             clearTimeout(db[this.index[client][objId + ':' + propName]]);

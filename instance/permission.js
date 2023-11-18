@@ -141,9 +141,7 @@ module.exports = function(OBJY) {
 
                 if (a.perm.indexOf(condition) != -1 || a.perm.indexOf("*") != -1) query.$or.push(a.query)
             })
-
-            console.log('auth query post', query, permCheck, Query.query(permCheck, query, Query.undot).length);
-            
+  
             if (query.$or.length == 0) return false;
 
             if (Query.query(permCheck, query, Query.undot).length == 0) return false;

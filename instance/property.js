@@ -744,7 +744,8 @@ module.exports = function (OBJY) {
                         if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
                     }
 
-                    if (propsObj[access[0]].template) propsObj[access[0]].overwritten = true;
+                    if (propsObj[access[0]].template || obj.template) propsObj[access[0]].overwritten = true;
+
                     propsObj[access[0]].value = newValue;
 
                     if (propsObj[access[0]].onChange) {
