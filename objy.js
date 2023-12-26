@@ -6,28 +6,28 @@ if (_nodejs) {
     };
 }
 
-var OBJY = {};
+var _OBJY = {};
 
 var isObject = function(a) {
     return (!!a) && (a.constructor === Object);
 };
 
 
-var generalAttributes = require('./instance/attributes.js')(OBJY)
-var generalFunctions = require('./instance/general.js')(OBJY)
-var applyFunctions = require('./instance/apply.js')(OBJY)
-var permissionFunctions = require('./instance/permission.js')(OBJY)
-var objectFunctions = require('./instance/object.js')(OBJY)
-var mapperFunctions = require('./instance/mapper.js')(OBJY)
-var wrapperFunctions = require('./instance/wrapper.js')(OBJY)
-var propertyFunctions = require('./instance/property.js')(OBJY)
-var pluralConstructorFunctions = require('./instance/plural-constructor.js')(OBJY)
-var singularConstructorFunctions = require('./instance/singular-constructor.js')(OBJY)
+var generalAttributes = require('./instance/attributes.js')(_OBJY)
+var generalFunctions = require('./instance/general.js')(_OBJY)
+var applyFunctions = require('./instance/apply.js')(_OBJY)
+var permissionFunctions = require('./instance/permission.js')(_OBJY)
+var objectFunctions = require('./instance/object.js')(_OBJY)
+var mapperFunctions = require('./instance/mapper.js')(_OBJY)
+var wrapperFunctions = require('./instance/wrapper.js')(_OBJY)
+var propertyFunctions = require('./instance/property.js')(_OBJY)
+var pluralConstructorFunctions = require('./instance/plural-constructor.js')(_OBJY)
+var singularConstructorFunctions = require('./instance/singular-constructor.js')(_OBJY)
 
 /**
- * Main OBJY Instance
+ * Main _OBJY Object
  */
-Object.assign(OBJY, {
+Object.assign(_OBJY, {
 
     ...generalAttributes,
 
@@ -54,8 +54,13 @@ Object.assign(OBJY, {
     }
 })
 
-var objy = OBJY;
 
+
+var OBJY = function(){
+    return Object.assign({}, _OBJY);
+}
+
+var objy = OBJY;
 
 if(_nodejs) module.exports = OBJY; 
 else if(typeof window !== 'undefined') {
