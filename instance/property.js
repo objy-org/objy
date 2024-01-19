@@ -723,6 +723,9 @@ module.exports = function (OBJY) {
                 if (access.length > 1) {
                     var shift = access.shift();
                     try {
+
+                        if (!propsObj.hasOwnProperty(shift)) throw new exceptions.NoSuchPropertyException(propertyKey);
+
                         if (propsObj[shift].type) {
                             if (propsObj[shift].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG) {
                                 if (propsObj[shift].template) propsObj[shift].overwritten = true;
@@ -737,11 +740,13 @@ module.exports = function (OBJY) {
                 } else {
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                    if (propsObj[access[0]].type == 'boolean') {
-                        if (typeof newValue != 'boolean') throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
-                    }
-                    if (propsObj[access[0]].type == 'number') {
-                        if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
+                     if (propsObj[shift].type) {
+                        if (propsObj[access[0]].type == 'boolean') {
+                            if (typeof newValue != 'boolean') throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
+                        }
+                        if (propsObj[access[0]].type == 'number') {
+                            if (isNaN(newValue)) throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
+                        }
                     }
 
                     if (propsObj[access[0]].template || obj.template) propsObj[access[0]].overwritten = true;
