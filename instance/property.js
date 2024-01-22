@@ -723,7 +723,6 @@ module.exports = function (OBJY) {
                 if (access.length > 1) {
                     var shift = access.shift();
                     try {
-
                         if (!propsObj.hasOwnProperty(shift)) throw new exceptions.NoSuchPropertyException(propertyKey);
 
                         if (propsObj[shift].type) {
@@ -740,7 +739,7 @@ module.exports = function (OBJY) {
                 } else {
                     if (!propsObj.hasOwnProperty(access[0])) throw new exceptions.NoSuchPropertyException(propertyKey);
 
-                     if (propsObj[shift].type) {
+                    if (propsObj[access[0]].type) {
                         if (propsObj[access[0]].type == 'boolean') {
                             if (typeof newValue != 'boolean') throw new exceptions.InvalidValueException(newValue, propsObj[access[0]].type);
                         }
