@@ -50,7 +50,7 @@ var OBJY = function(){
         ...singularConstructorFunctions(_OBJY),
     
         hello: function() {
-            OBJY.Logger.log("Hello from OBJY!");
+            _OBJY.Logger.log("Hello from OBJY!");
         }
     })
 
