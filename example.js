@@ -1,4 +1,6 @@
-var OBJY = require('./objy.js');
+var _OBJY = require('./objy.js');
+
+var OBJY = new _OBJY();
 
 OBJY.Logger.enabled = ['none']
 
@@ -19,8 +21,8 @@ OBJY.template({
     name: "template123",
     nested: {
         inner: {
-            type: "number",
-            value: 123
+            type: "boolean",
+            value: true
         }
     },
     properties: {
@@ -36,7 +38,7 @@ OBJY.templates({}).get(templates => {
     templates.forEach(templ => {
         console.log('t', templ)
         var o = OBJY.object({inherits: [templ._id], marco: 'nicole'});
-        o.setPropertyValue('properties.supername', 456).addProperty('nested.whatever', 'sgsga').removeProperty('marco').update();
+        o.setPropertyValue('properties.supername', 456).setPropertyValue('nested.inner', false).addProperty('nested.whatever', 'sgsga').removeProperty('marco').update();
 
         OBJY.objects({}).get(objs => {
     console.log('all objs', JSON.stringify(objs, null, 4))
