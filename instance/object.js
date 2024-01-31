@@ -265,10 +265,12 @@ module.exports = function(OBJY) {
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
 
-                        if (!obj[p]) {
+                        if (!obj.hasOwnProperty(p)) {
+
                             obj[p] = cloned;
                             obj[p].template = templateId;
                             //delete obj[p].overwritten;
+
                         } else {
 
                             if (cloned.meta) {

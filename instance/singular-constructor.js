@@ -1097,8 +1097,6 @@ module.exports = function (OBJY) {
                     var app = instance.activeApp;
                     var user = instance.activeUser;
 
-                    console.log('ins', instance.alterSequence)
-
                     OBJY.applyAffects(this, 'onChange', instance, client, params);
 
                     if (!OBJY.checkAuthroisations(this, user, 'u', app, instance)) return error({ error: 'Lack of Permissions' });
