@@ -26,6 +26,8 @@ module.exports = function (OBJY) {
 
             this.role = role || 'object';
 
+            obj.role = role;
+
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
                     if (obj[prop] || params.extendedStructure[prop] === null) this[prop] = obj[prop];
