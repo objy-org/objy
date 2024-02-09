@@ -1,3 +1,5 @@
+var exceptions = require('../lib/dependencies/exceptions.js');
+
 var isObject = function(a) {
     return (!!a) && (a.constructor === Object);
 };
@@ -23,7 +25,7 @@ module.exports = function(OBJY) {
          */
         getPersistenceMapper: function(family) {
 
-            if (!this.mappers[family]) throw new Error("No such Object Family");
+            if (!this.mappers[family]) throw new exceptions.General("No such Object Family");
             return this.mappers[family];
         },
 
@@ -32,7 +34,7 @@ module.exports = function(OBJY) {
          * @returns {mapper} the mapper instance
          */
         getPersistence: function(family) {
-            if (!this.mappers[family]) throw new Error("No such Object Family: " + family);
+            if (!this.mappers[family]) throw new exceptions.General("No such Object Family: " + family);
             return this.mappers[family];
         },
 
@@ -40,7 +42,7 @@ module.exports = function(OBJY) {
          * Attaches a persistence mapper to an object family
          */
         plugInPersistenceMapper: function(name, mapper) {
-            if (!name) throw new Error("No mapper name provided");
+            if (!name) throw new exceptions.General("No mapper name provided");
             this.mappers[name] = mapper;
 
             if (Array.isArray(this.mappers[name])) {
@@ -67,7 +69,7 @@ module.exports = function(OBJY) {
          * @returns {mapper} the mapper instance
          */
         getProcessor: function(family) {
-            if (!this.processors[family]) throw new Error("No such Object Family");
+            if (!this.processors[family]) throw new exceptions.General("No such Object Family");
             return this.processors[family];
         },
 
@@ -76,18 +78,18 @@ module.exports = function(OBJY) {
          * Attaches a processor mapper to an object family
          */
         plugInProcessor: function(name, processor) {
-            if (!name) throw new Error("No mapper name provided");
+            if (!name) throw new exceptions.General("No mapper name provided");
             this.processors[name] = processor;
             this.processors[name].setObjectFamily(name);
         },
 
         getObserver: function(family) {
-            if (!this.observers[family]) throw new Error("No such Object Family");
+            if (!this.observers[family]) throw new exceptions.General("No such Object Family");
             return this.observers[family];
         },
 
         plugInObserver: function(name, observer) {
-            if (!name) throw new Error("No mapper name provided");
+            if (!name) throw new exceptions.General("No mapper name provided");
             this.observers[name] = observer;
             this.observers[name].setObjectFamily(name);
         },
