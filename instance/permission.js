@@ -1,4 +1,5 @@
 var Query = require('../lib/dependencies/query.js');
+var exceptions = require('../lib/dependencies/exceptions.js');
 
 module.exports = function(OBJY) {
     return {
@@ -243,7 +244,7 @@ module.exports = function(OBJY) {
             
 
             function throwError() {
-                throw new Error("Lack of permissions")
+                throw new exceptions.LackOfPermissionsException("Lack of permissions")
             }
 
             if (Object.keys(user.authorisations || {}).length == 0) return obj; //throwError();
@@ -288,7 +289,7 @@ module.exports = function(OBJY) {
                 }
             })
   
-            if (query.length == 0 && !wildcard) throw new Error("Lack of permissions")
+            if (query.length == 0 && !wildcard) throw new exceptions.LackOfPermissionsException("Lack of permissions")
 
             query = { $or: query };
 

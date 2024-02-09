@@ -125,7 +125,7 @@ module.exports = function (OBJY) {
                         new OBJY.PrivilegeChecker(this, tmpPriv);
                         instance.alterSequence.push({ addPrivilege: arguments });
                         return this;
-                    } else throw new Error('Invalid app id');
+                    } else throw new exceptions.General('Invalid app id');
 
                     return this;
                 };
@@ -137,14 +137,14 @@ module.exports = function (OBJY) {
                 };
 
                 this.addClient = function (client) {
-                    if (this._clients.indexOf(client) != -1) throw new Error('Client ' + client + ' already exists');
+                    if (this._clients.indexOf(client) != -1) throw new exceptions.General('Client ' + client + ' already exists');
                     this._clients.push(client);
                     instance.alterSequence.push({ addClient: arguments });
                     return this;
                 };
 
                 this.removeClient = function (client) {
-                    if (this._clients.indexOf(client) == -1) throw new Error('Client ' + client + ' does not exist');
+                    if (this._clients.indexOf(client) == -1) throw new exceptions.General('Client ' + client + ' does not exist');
                     this._clients.splice(this._clients.indexOf(client), 1);
                     instance.alterSequence.push({ removeClient: arguments });
                     return this;
@@ -203,7 +203,7 @@ module.exports = function (OBJY) {
 
                 var self = this;
 
-                if (self.role != newObj.role) throw new Error('cannot alter role');
+                if (self.role != newObj.role) throw new exceptions.General('cannot alter role');
 
                 Object.keys(this).forEach(function (k) {
                     if (self[k] instanceof Function || k == '_id') return;

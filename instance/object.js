@@ -1,4 +1,4 @@
-var exceptions = require('../lib/dependencies/exceptions.js')
+var exceptions = require('../lib/dependencies/exceptions.js');
 
 module.exports = function(OBJY) {
     return {
@@ -832,9 +832,9 @@ module.exports = function(OBJY) {
 
             var app = instance.activeApp || '*';
 
-            if (!obj.authorisations) throw new Error('No authorisations present')
+            if (!obj.authorisations) throw new exceptions.General('No authorisations present')
 
-            if (!obj.authorisations[app]) throw new Error('No authorisations for this app present')
+            if (!obj.authorisations[app]) throw new exceptions.General('No authorisations for this app present')
 
             obj.authorisations[app].forEach((au, i) => {
                 if (au.name == authorisationId) obj.authorisations[app].splice(i, 1)
@@ -1043,7 +1043,7 @@ module.exports = function(OBJY) {
             })
 
             if (!contains) obj.privileges[privilegeKey].push({ name: privilege[privilegeKey].name });
-            else throw new Error('Privilege already exists')
+            else throw new exceptions.General('Privilege already exists')
 
             return privilege;
         },

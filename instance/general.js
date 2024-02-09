@@ -1,4 +1,5 @@
 var shortid = require('shortid');
+var exceptions = require('../lib/dependencies/exceptions.js');
 
 module.exports = function(OBJY) {
     return {
@@ -40,7 +41,7 @@ module.exports = function(OBJY) {
          * @returns {this}
          */
         client: function(client) {
-            if (!client) throw new Error("No client specified");
+            if (!client) throw new exceptions.General("No client specified");
             this.activeTenant = client;
             return this;
         },
