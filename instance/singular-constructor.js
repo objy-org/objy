@@ -835,7 +835,7 @@ module.exports = function (OBJY) {
 
                     var thisRef = this;
 
-                    OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
+                    //OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
 
                     if (!OBJY.checkAuthroisations(this, user, 'c', app, instance)) return error({ error: 'Lack of Permissions' });
 
@@ -989,7 +989,7 @@ module.exports = function (OBJY) {
                         OBJY.add(
                             obj,
                             function (data) {
-                                OBJY.applyAffects(data, 'onCreate', instance, client, params);
+                                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
 
                                 obj._id = data._id;
 
