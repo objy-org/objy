@@ -769,8 +769,8 @@ module.exports = function(OBJY) {
             if (!onCreate) return;
 
             Object.keys(onCreate).forEach(function(oC) {
-                if (!onCreate[oC].trigger) oC.trigger = 'after';
-                if (!onCreate[oC].trigger) oC.type = 'async';
+                if (!onCreate[oC].trigger) onCreate[oC].trigger = 'after';
+                if (!onCreate[oC].type) onCreate[oC].type = 'async';
 
             })
 
@@ -797,8 +797,8 @@ module.exports = function(OBJY) {
             if (!onChange) return;
 
             Object.keys(onChange).forEach(function(oC) {
-                if (!onChange[oC].trigger) oC.trigger = 'after';
-                if (!onChange[oC].trigger) oC.type = 'async';
+                if (!onChange[oC].trigger) onChange[oC].trigger = 'after';
+                if (!onChange[oC].type) onChange[oC].type = 'async';
 
             })
 
@@ -851,8 +851,8 @@ module.exports = function(OBJY) {
             if (!onDelete) return;
 
             Object.keys(onDelete).forEach(function(oC) {
-                if (!onDelete[oC].trigger) oC.trigger = 'after';
-                if (!onDelete[oC].trigger) oC.type = 'async';
+                if (!onDelete[oC].trigger) onDelete[oC].trigger = 'after';
+                if (!onDelete[oC].type) onDelete[oC].type = 'async';
 
             })
 

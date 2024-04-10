@@ -33,15 +33,15 @@ module.exports = function(OBJY) {
             }
 
             if (params.storage) this.plugInPersistenceMapper(params.name, params.storage);
-            else this.plugInPersistenceMapper(params.name, thisRef.storage || new DefaultStorageMapper(thisRef));
+            else if(params.storage === undefined) this.plugInPersistenceMapper(params.name, thisRef.storage || new DefaultStorageMapper(thisRef));
 
             if (params.processor) this.plugInProcessor(params.name, params.processor);
-            else this.plugInProcessor(params.name, thisRef.processor || new DefaultProcessorMapper(thisRef));
+            else if(params.processor === undefined) this.plugInProcessor(params.name, thisRef.processor || new DefaultProcessorMapper(thisRef));
 
             if (params.observer) {
                 this.plugInObserver(params.name, params.observer);
                 if (params.observer.initialize) params.observer.initialize();
-            } else {
+            } else if (params.observer === undefined) {
                 this.plugInObserver(params.name, thisRef.observer || new DefaultObserverMapper(thisRef));
                 if (this.observers[params.name].initialize) this.observers[params.name].initialize();
             }

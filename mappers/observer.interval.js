@@ -8,9 +8,9 @@ const Mapper = function (OBJY) {
         initialize: function (millis) {
             var self = this;
 
-            this.interval = setInterval(function () {
+            this.interval_ = setInterval(function () {
                 self.run(moment().utc());
-            }, this.interval);
+            }, this.interval || 60000);
         },
 
         run: function (date) {
