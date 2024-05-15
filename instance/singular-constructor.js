@@ -903,12 +903,15 @@ module.exports = function (OBJY) {
                         Object.keys(props).forEach(function (p) {
                             if (!isObject(props[p])) return;
 
-                            if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
+                            //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
                                 if (prePropsString) {
                                     aggregateAllEvents(props[p], prePropsString + '.' + p);
                                 } else {
-                                    //aggregateAllEvents(props[p], p)
+                                    aggregateAllEvents(props[p], p)
+
                                 }
+                            //}
+
 
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
                                 var date = null;
@@ -917,6 +920,7 @@ module.exports = function (OBJY) {
                                     if (!props[p].triggered) date = props[p].date;
                                     else date = null;
                                 } else if (props[p].interval) {
+
                                     if (props[p].nextOccurence) {
                                         date = props[p].nextOccurence;
                                     } else date = moment().utc().toISOString();
@@ -942,6 +946,7 @@ module.exports = function (OBJY) {
                                             date: date,
                                         });
                                 } else {
+
                                     instance.eventAlterationSequence.push({
                                         operation: 'add',
                                         obj: thisRef,
@@ -955,11 +960,14 @@ module.exports = function (OBJY) {
                                         if (aE.propName == p) found = true;
                                     });
 
-                                    if (!found && props[p].triggered != true)
+                                    
+                                    if (!found && props[p].triggered != true){
+
                                         thisRef._aggregatedEvents.push({
                                             propName: p,
                                             date: date,
                                         });
+                                    }
                                 }
                             }
                         });
@@ -1200,12 +1208,13 @@ module.exports = function (OBJY) {
                         Object.keys(props).forEach(function (p) {
                             if (!isObject(props[p])) return;
 
-                            if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
+                            //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
                                 if (prePropsString) {
                                     aggregateAllEvents(props[p], prePropsString + '.' + p);
                                 } else {
                                     aggregateAllEvents(props[p], p);
                                 }
+                            //}
 
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
                                 var date = null;
@@ -1522,12 +1531,13 @@ module.exports = function (OBJY) {
                                         Object.keys(props || {}).forEach(function (p) {
                                             if (!isObject(props[p])) return;
 
-                                            if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG)
+                                            //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
                                                 if (prePropsString) {
                                                     aggregateAllEvents(props[p], prePropsString + '.' + p);
                                                 } else {
-                                                    if (props[p]) aggregateAllEvents(props[p], p);
+                                                    aggregateAllEvents(props[p], p);
                                                 }
+                                            //}
 
                                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
                                                 var date = null;

@@ -25,6 +25,11 @@ OBJY.template({
             value: true
         }
     },
+    evt: {
+        type: "event",
+        interval: 1000,
+        action: "console.log(1)"
+    },
     properties: {
         lastnam: "sgsg",
         supername: {
@@ -38,18 +43,21 @@ OBJY.template({
 OBJY.templates({}).get(templates => {
     templates.forEach(templ => {
         console.log('t', templ)
-        var o = OBJY.object({inherits: [templ._id], marco: 'nicole', properties: {
+        OBJY.object({inherits: [templ._id], marco: 'nicole', properties: {
             evt: {
                 type: "event",
-                interval: '',
+                interval: 10000,
                 action: 'hello'
             }
-        }});
-        o.setEventTriggered('properties.evt', true, 'tenant').setPropertyValue('properties.supername', 456).setPropertyValue('nested.inner', false).addProperty('nested.whatever', 'sgsga').removeProperty('marco').update();
-
-        OBJY.objects({}).get(objs => {
+        }}).add(done => {
+            console.log('DONE')
+                    OBJY.objects({}).get(objs => {
     console.log('all objs', JSON.stringify(objs, null, 4))
 })
+        });
+        //o.setEventTriggered('properties.evt', true, 'tenant').setPropertyValue('properties.supername', 456).setPropertyValue('nested.inner', false).addProperty('nested.whatever', 'sgsga').removeProperty('marco').update();
+
+
     })
 })
 
