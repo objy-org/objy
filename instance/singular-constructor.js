@@ -920,7 +920,6 @@ module.exports = function (OBJY) {
                                     if (!props[p].triggered) date = props[p].date;
                                     else date = null;
                                 } else if (props[p].interval) {
-
                                     if (props[p].nextOccurence) {
                                         date = props[p].nextOccurence;
                                     } else date = moment().utc().toISOString();

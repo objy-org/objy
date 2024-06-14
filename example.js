@@ -27,14 +27,14 @@ OBJY.template({
     },
     evt: {
         type: "event",
-        interval: 1000,
+        interval: "P1Y",
         action: "console.log(1)"
     },
     properties: {
         lastnam: "sgsg",
         supername: {
             type: "event",
-            date: '',
+            date: '2024-05-15T13:49:01.704Z',
             action: 'hello'
         }
     }
