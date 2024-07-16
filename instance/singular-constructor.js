@@ -920,7 +920,6 @@ module.exports = function (OBJY) {
                                     if (!props[p].triggered) date = props[p].date;
                                     else date = null;
                                 } else if (props[p].interval) {
-
                                     if (props[p].nextOccurence) {
                                         date = props[p].nextOccurence;
                                     } else date = moment().utc().toISOString();
@@ -997,10 +996,10 @@ module.exports = function (OBJY) {
                         OBJY.add(
                             obj,
                             function (data) {
-                                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
-
                                 obj._id = data._id;
 
+                                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
+                                
                                 if (data.onCreate) {
                                     Object.keys(data.onCreate).forEach(function (key) {
                                         if (data.onCreate[key].trigger == 'after') {
