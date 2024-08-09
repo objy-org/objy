@@ -996,10 +996,10 @@ module.exports = function (OBJY) {
                         OBJY.add(
                             obj,
                             function (data) {
-                                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
-
                                 obj._id = data._id;
 
+                                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
+                                
                                 if (data.onCreate) {
                                     Object.keys(data.onCreate).forEach(function (key) {
                                         if (data.onCreate[key].trigger == 'after') {

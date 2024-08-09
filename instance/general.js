@@ -125,8 +125,9 @@ module.exports = function(OBJY) {
         },
 
         execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
-            OBJY.Logger.log("triggering dsl")
-            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, this.instance.activeUser, options);
+            let processorApp = this.instance.activeApp || (obj.applications || {})[0]
+            OBJY.Logger.log('triggering dsl');
+            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, processorApp, this.instance.activeUser, options);
         },
 
 
