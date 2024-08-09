@@ -140,7 +140,7 @@ module.exports = function(OBJY) {
 
                     sequence.push(data);
                     ++idx;
-                    if (chainOperation == 'return' || idx == len) return success(data);
+                    if (chainOperation == 'break' || idx == len) return success(data);
                     else if(!chainOperation) commit(idx, data)
 
                 }, function(err) {
@@ -203,7 +203,7 @@ module.exports = function(OBJY) {
                     self.mappers[obj.role][idx].add(obj, function(data, chainOperation) {
                         sequence.push(data);
                         ++idx;
-                        if (chainOperation == 'return' || idx == len) return success(data);
+                        if (chainOperation == 'break' || idx == len) return success(data);
                         else if(!chainOperation) commit(idx)
 
                     }, function(err) {
@@ -284,7 +284,7 @@ module.exports = function(OBJY) {
 
                         sequence.push(data);
                         ++idx;
-                        if (chainOperation == 'return' || idx == len) return success(data);
+                        if (chainOperation == 'break' || idx == len) return success(data);
                         else if(!chainOperation) commit(idx)
 
                     }, function(err) {
@@ -320,8 +320,6 @@ module.exports = function(OBJY) {
 
                     self.mappers[role][idx].getById(id, function(data, chainOperation) {
 
-                        console.log('i', id, chainOperation, data)
-
                         /*if (data == null) {
                             error('Error - object not found: ' + id);
                             return;
@@ -329,7 +327,7 @@ module.exports = function(OBJY) {
 
                         sequence.push(data);
                         ++idx;
-                        if (chainOperation == 'return' || idx == len) return success(data);
+                        if (chainOperation == 'break' || idx == len) return success(data);
                         else if(!chainOperation) commit(idx)
 
 
@@ -379,7 +377,7 @@ module.exports = function(OBJY) {
 
                         sequence.push(data);
                         ++idx;
-                        if (chainOperation == 'return' || idx == len) return success(data);
+                        if (chainOperation == 'break' || idx == len) return success(data);
                         else if(!chainOperation) commit(idx)
 
                     }, function(err) {
