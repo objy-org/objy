@@ -7,43 +7,7 @@ OBJY.Logger.enabled = ['none']
 var s1 = [];
 var s2 = [{secondo:'piano'}];
 
-OBJY.define({
-    name: 'object',
-    pluralName: 'objects',
-    storage: [OBJY.customStorage({
-
-      getById: function(id, success, error, app, client, chain) {
-
-        s1[0].getbyid = 1;
-
-        success(s1[0]);
-
-       },
-
-      getByCriteria: function(criteria, success, error, app, client, flags) {
-
-      success(s1)
-
-       },
-
-      count: function(criteria, success, error, app, client, flags) { },
-
-      update: function(spooElement, success, error, app, client) {  },
-
-      add: function(spooElement, success, error, chain, app, client) { 
-
-        spooElement.hello = 'sagasgd';
-        spooElement.getbyid = 1;
-
-        s1.push(spooElement);
-
-        success(spooElement)
-
-      },
-
-      remove: function(spooElement, success, error, app, client) { }
-   }),
-    OBJY.customStorage({
+var cache = OBJY.customStorage({
 
       createClient: function(client, success, error) { },
 
@@ -80,7 +44,46 @@ OBJY.define({
        },
 
       remove: function(spooElement, success, error, app, client) { }
-   })]
+   });
+
+var db = OBJY.customStorage({
+
+      getById: function(id, success, error, app, client, chain) {
+
+        s1[0].getbyid = 1;
+
+        success(s1[0]);
+
+       },
+
+      getByCriteria: function(criteria, success, error, app, client, flags) {
+
+      success(s1)
+
+       },
+
+      count: function(criteria, success, error, app, client, flags) { },
+
+      update: function(spooElement, success, error, app, client) {  },
+
+      add: function(spooElement, success, error, chain, app, client) { 
+
+        spooElement.hello = 'sagasgd';
+        spooElement.getbyid = 1;
+
+        s1.push(spooElement);
+
+        success(spooElement)
+
+      },
+
+      remove: function(spooElement, success, error, app, client) { }
+   });
+
+OBJY.define({
+    name: 'object',
+    pluralName: 'objects',
+    storage: [cache, db]
 });
 
 console.log(OBJY.mappers)
