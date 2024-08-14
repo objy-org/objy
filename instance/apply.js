@@ -10,7 +10,7 @@ module.exports = function(OBJY) {
          * @param {insstance} - the current objy instance
          * @param {client} - the active client
          */
-        applyAffects: function(obj, operation, instance, client, params) {
+        applyAffects: function(obj, operation, instance, client, trigger) {
             this.affectables.forEach(function(a) {
                 if (Query.query([obj], a.affects, Query.undot).length != 0) {
 
@@ -254,7 +254,7 @@ module.exports = function(OBJY) {
                 }
             })
 
-            this.applyRules(obj, operation, instance, client);
+            this.applyRules(obj, operation, instance, client, trigger);
         },
 
         /**
@@ -265,7 +265,7 @@ module.exports = function(OBJY) {
          * @param {client} - the active client
          */
 
-        applyRules: function(obj, operation, instance, client) {
+        applyRules: function(obj, operation, instance, client, trigger) {
             var self = this;
             self.staticRules.forEach(function(a) {
                 if (Query.query([obj], a.affects, Query.undot).length != 0) {
@@ -277,7 +277,7 @@ module.exports = function(OBJY) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
 
-                                if (operation != h) return;
+                                if (operation != h || (trigger && trigger != template[h][oC]?.trigger)) return;
 
                                 instance.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
 

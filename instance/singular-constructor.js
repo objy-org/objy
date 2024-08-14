@@ -835,7 +835,7 @@ module.exports = function (OBJY) {
 
                     var thisRef = this;
 
-                    //OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
+                    //OBJY.applyAffects(thisRef, 'onCreate', instance, client);
 
                     if (!OBJY.checkAuthroisations(this, user, 'c', app, instance)) return error({ error: 'Lack of Permissions' });
 
@@ -998,7 +998,7 @@ module.exports = function (OBJY) {
                             function (data) {
                                 obj._id = data._id;
 
-                                OBJY.applyAffects(thisRef, 'onCreate', instance, client, params);
+                                OBJY.applyAffects(thisRef, 'onCreate', instance, client);
                                 
                                 if (data.onCreate) {
                                     Object.keys(data.onCreate).forEach(function (key) {
@@ -1108,7 +1108,7 @@ module.exports = function (OBJY) {
                     var app = instance.activeApp;
                     var user = instance.activeUser;
 
-                    OBJY.applyAffects(this, 'onChange', instance, client, params);
+                    OBJY.applyAffects(this, 'onChange', instance, client, 'before');
 
                     if (!OBJY.checkAuthroisations(this, user, 'u', app, instance)) return error({ error: 'Lack of Permissions' });
 
@@ -1270,7 +1270,7 @@ module.exports = function (OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-                                OBJY.applyAffects(data, 'onChange', instance, client, params);
+                                OBJY.applyAffects(data, 'onChange', instance, client, 'after');
 
                                 if (data.onChange) {
                                     Object.keys(data.onChange).forEach(function (key) {
@@ -1439,7 +1439,7 @@ module.exports = function (OBJY) {
 
                     var thisRef = JSON.parse(JSON.stringify(this));
 
-                    OBJY.applyAffects(thisRef, 'onDelete', instance, client, params);
+                    OBJY.applyAffects(thisRef, 'onDelete', instance, client);
 
                     if (params.dirty) {
                         OBJY.getObjectById(
@@ -1508,7 +1508,7 @@ module.exports = function (OBJY) {
                             return OBJY.remove(
                                 thisRef,
                                 function (_data) {
-                                    OBJY.applyAffects(data, 'onDelete', instance, client, params);
+                                    OBJY.applyAffects(data, 'onDelete', instance, client);
 
                                     if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
@@ -1709,7 +1709,7 @@ module.exports = function (OBJY) {
                     function prepareObj(data) {
                         var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
-                        OBJY.applyAffects(data, null, instance, client, params);
+                        OBJY.applyAffects(data, null, instance, client);
 
                         if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, instance))
                             return error({ error: 'Lack of Permissions', source: 'authorisations' });
