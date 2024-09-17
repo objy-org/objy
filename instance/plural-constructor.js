@@ -21,11 +21,11 @@ module.exports = function(OBJY) {
 
                 if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp, instance);
 
-                Object.getPrototypeOf(this).get = function(success, error) {
+                Object.getPrototypeOf(this).get = function(success, error, _client, _app) {
                 return new Promise((resolve, reject) => {
 
-                    var client = instance.activeTenant;
-                    var app = instance.activeApp;
+                    var client = _client || instance.activeTenant;
+                    var app = _app || instance.activeApp;
 
                     var thisRef = this;
 
@@ -300,6 +300,8 @@ module.exports = function(OBJY) {
                             if (Object.keys(query.$or).length == 0) query = { username: userObj.username }
                         }
 
+
+
                         instance[params.pluralName](query).get(function(data) {
                             if (data.length == 0) error("User not found");
                             
@@ -313,7 +315,7 @@ module.exports = function(OBJY) {
                             else {
                                     reject(err);
                             }
-                        })
+                        }, client, app)
 
                     });
                     };

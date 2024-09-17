@@ -348,58 +348,62 @@ module.exports = function (OBJY) {
 
                     var _event = {};
                     var eventKey = propertyKey;
-                    _event[eventKey] = property[propertyKey];
+                    propsObj[propertyKey] = property[propertyKey];
 
-                    if (!_event[eventKey].eventId) _event[eventKey].eventId = OBJY.ID();
+                    if (!propsObj[propertyKey].eventId) propsObj[propertyKey].eventId = OBJY.ID();
 
-                    if (!_event[eventKey].reminders) _event[eventKey].reminders = {};
+                    if (propsObj[propertyKey].interval !== undefined) {
+                        if (propsObj[propertyKey].lastOccurence == undefined) propsObj[propertyKey].lastOccurence = null;
+                        else if (!moment(propsObj[propertyKey].lastOccurence).isValid()) throw new exceptions.InvalidDateException(propsObj[propertyKey].lastOccurence);
+                        else propsObj[propertyKey].lastOccurence = moment(propsObj[propertyKey].lastOccurence).utc().format();
 
-                    if (_event[eventKey].interval !== undefined) {
-                        if (_event[eventKey].lastOccurence == undefined) _event[eventKey].lastOccurence = null;
-                        else if (!moment(_event[eventKey].lastOccurence).isValid()) throw new exceptions.InvalidDateException(_event[eventKey].lastOccurence);
-                        else _event[eventKey].lastOccurence = moment(_event[eventKey].lastOccurence).utc().format();
+                        if (propsObj[propertyKey].nextOccurence == undefined) propsObj[propertyKey].nextOccurence = moment().toISOString();
 
-                        if (_event[eventKey].nextOccurence == undefined) _event[eventKey].nextOccurence = moment().toISOString();
+                        if (propsObj[propertyKey].action === undefined) propsObj[propertyKey].action = '';
 
-                        if (_event[eventKey].action === undefined) _event[eventKey].action = '';
+                        if (propsObj[propertyKey].interval === undefined) throw new exceptions.MissingAttributeException('interval');
 
-                        if (_event[eventKey].interval === undefined) throw new exceptions.MissingAttributeException('interval');
-
-                        _event[eventKey].nextOccurence = moment(_event[eventKey].lastOccurence || moment().utc())
+                        propsObj[propertyKey].nextOccurence = moment(propsObj[propertyKey].lastOccurence || moment().utc())
                             .utc()
-                            .add(_event[eventKey].interval)
+                            .add(propsObj[propertyKey].interval)
                             .toISOString();
 
+                        
+
                         instance.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
                             property: property,
-                            date: _event[eventKey].nextOccurence,
+                            date: propsObj[propertyKey].nextOccurence,
                         });
-                    } else if (_event[eventKey].date !== undefined) {
-                        if (_event[eventKey].date == null) _event[eventKey].date = moment().utc().toISOString();
+                    } else if (propsObj[propertyKey].date !== undefined) {
+                        console.log('EVENTE');
+                        if (propsObj[propertyKey].date == null) propsObj[propertyKey].date = moment().utc().toISOString();
 
-                        if (!_event[eventKey].date) throw new exceptions.MissingAttributeException('date');
+                        if (!propsObj[propertyKey].date) throw new exceptions.MissingAttributeException('date');
 
                         try {
-                            _event[eventKey].date = moment(_event[eventKey].date).utc().format();
+                            propsObj[propertyKey].date = moment(propsObj[propertyKey].date).utc().format();
+
                         } catch (e) {}
+
+                        console.log('AFSFAASF')
+                        propsObj[propertyKey].nextOccurence = propsObj[propertyKey].date;
 
                         instance.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
                             property: property,
-                            date: _event[eventKey].date,
+                            date: propsObj[propertyKey].date,
                         });
 
-                        if (!_event[eventKey].action) _event[eventKey].action = '';
+                        if (!propsObj[propertyKey].action) propsObj[propertyKey].action = '';
                     } else {
                         //throw new exceptions.InvalidTypeException("No interval or date provided");
                     }
 
-                    propsObj[propertyKey] = _event[eventKey];
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_DATE:
