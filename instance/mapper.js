@@ -47,6 +47,7 @@ module.exports = function(OBJY) {
 
             if (Array.isArray(this.mappers[name])) {
                 this.mappers[name].forEach(mapper => {
+                    console.log(mapper);
                     mapper.setObjectFamily(name);
                 })
             } else this.mappers[name].setObjectFamily(name);
@@ -271,15 +272,17 @@ module.exports = function(OBJY) {
 
         updateObject: function(obj, success, error, app, client, params, instance) {
 
-            if (Array.isArray(self.mappers[role])) {
+            var self = this;
+
+            if (Array.isArray(self.mappers[obj.role])) {
 
                 var idx = 0;
-                var len = self.mappers[role].length;
+                var len = self.mappers[obj.role].length;
                 var sequence = [];
 
                 function commit(idx) {
 
-                    this.mappers[obj.role][idx].update(obj, function(data, chainOperation) {
+                    self.mappers[obj.role][idx].update(obj, function(data, chainOperation) {
 
 
                         sequence.push(data);
@@ -297,7 +300,7 @@ module.exports = function(OBJY) {
 
             } else {
 
-                this.mappers[obj.role].update(obj, function(data) {
+                self.mappers[obj.role].update(obj, function(data) {
                     success(data);
                 }, function(err) {
                     error(err);
@@ -307,7 +310,6 @@ module.exports = function(OBJY) {
 
         getObjectById: function(role, id, success, error, app, client, instance, params) {
             var self = this;
-
 
             if (Array.isArray(self.mappers[role])) {
 
