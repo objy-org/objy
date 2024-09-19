@@ -47,7 +47,6 @@ module.exports = function(OBJY) {
 
             if (Array.isArray(this.mappers[name])) {
                 this.mappers[name].forEach(mapper => {
-                    console.log(mapper);
                     mapper.setObjectFamily(name);
                 })
             } else this.mappers[name].setObjectFamily(name);
@@ -81,12 +80,7 @@ module.exports = function(OBJY) {
         plugInProcessor: function(name, processor) {
             if (!name) throw new exceptions.General("No mapper name provided");
             this.processors[name] = processor;
-
-            if (Array.isArray(this.processors[name])) {
-                this.processors[name].forEach(mapper => {
-                    mapper.setObjectFamily(name);
-                })
-            } else this.processors[name].setObjectFamily(name);
+            this.processors[name].setObjectFamily(name);
         },
 
         getObserver: function(family) {
@@ -97,12 +91,7 @@ module.exports = function(OBJY) {
         plugInObserver: function(name, observer) {
             if (!name) throw new exceptions.General("No mapper name provided");
             this.observers[name] = observer;
-            
-            if (Array.isArray(this.observers[name])) {
-                this.observers[name].forEach(mapper => {
-                    mapper.setObjectFamily(name);
-                })
-            } else this.observers[name].setObjectFamily(name);
+            this.observers[name].setObjectFamily(name);
         },
 
         instantStorage: function(obj) {
@@ -128,42 +117,13 @@ module.exports = function(OBJY) {
 
             var self = this;
 
+            this.mappers[obj.role].remove(obj, function(data) {
 
-            if (Array.isArray(self.mappers[role])) {
+                success(data);
 
-                var idx = 0;
-                var len = self.mappers[role].length;
-                var sequence = [];
-
-                function commit(idx) {
-
-                    this.mappers[obj.role][idx].remove(obj, function(data) {
-
-                    sequence.push(data);
-                    ++idx;
-                    if (chainOperation == 'break' || idx == len) return success(data);
-                    else if(!chainOperation) commit(idx, data)
-
-                }, function(err) {
-                    error(err);
-                }, app, client, params, instance);
-
-                   
-                }
-
-                commit(idx);
-
-            } else {
-
-                this.mappers[obj.role].remove(obj, function(data) {
-
-                    success(data);
-
-                }, function(err) {
-                    error(err);
-                }, app, client, params, instance);
-
-            }
+            }, function(err) {
+                error(err);
+            }, app, client, params, instance);
         },
 
         add: function(obj, success, error, app, client, params, instance) {
@@ -191,21 +151,21 @@ module.exports = function(OBJY) {
         },
 
         addObject: function(obj, success, error, app, client, params, instance) {
-            var self = this;
+
             // OBJY.deSerializePropsObject(obj, params)
 
-            if (Array.isArray(self.mappers[obj.role])) {
+            if (Array.isArray(this.mappers[obj.role])) {
 
                 var idx = 0;
-                var len = self.mappers[obj.role].length;
+                var len = this.mappers[obj.role].length;
                 var sequence = [];
 
                 function commit(idx) {
-                    self.mappers[obj.role][idx].add(obj, function(data, chainOperation) {
-                        sequence.push(data);
+                    this.mappers[obj.role][idx].add(obj, function(data) {
+                        sequence.push(obj);
                         ++idx;
-                        if (chainOperation == 'break' || idx == len) return success(data);
-                        else if(!chainOperation) commit(idx)
+                        if (idx == len) return success(data);
+                        commit(idx)
 
                     }, function(err) {
                         error(err);
@@ -214,12 +174,11 @@ module.exports = function(OBJY) {
 
                 commit(idx);
 
-                /*this.mappers[obj.role].forEach(mapper => {
+                this.mappers[obj.role].forEach(mapper => {
 
-                })*/
+                })
             } else {
-                self.mappers[obj.role].add(obj, function(data, chainOperation) {
-
+                this.mappers[obj.role].add(obj, function(data) {
                     success(data);
 
                 }, function(err) {
@@ -272,137 +231,67 @@ module.exports = function(OBJY) {
 
         updateObject: function(obj, success, error, app, client, params, instance) {
 
-            var self = this;
-
-            if (Array.isArray(self.mappers[obj.role])) {
-
-                var idx = 0;
-                var len = self.mappers[obj.role].length;
-                var sequence = [];
-
-                function commit(idx) {
-
-                    self.mappers[obj.role][idx].update(obj, function(data, chainOperation) {
-
-
-                        sequence.push(data);
-                        ++idx;
-                        if (chainOperation == 'break' || idx == len) return success(data);
-                        else if(!chainOperation) commit(idx)
-
-                    }, function(err) {
-                        error(err);
-                    }, app, client, params, instance);
-
-                }
-
-                commit(idx);
-
-            } else {
-
-                self.mappers[obj.role].update(obj, function(data) {
-                    success(data);
-                }, function(err) {
-                    error(err);
-                }, app, client, params, instance);
-            }
+            this.mappers[obj.role].update(obj, function(data) {
+                success(data);
+            }, function(err) {
+                error(err);
+            }, app, client, params, instance);
         },
 
         getObjectById: function(role, id, success, error, app, client, instance, params) {
-            var self = this;
 
-            if (Array.isArray(self.mappers[role])) {
+            this.mappers[role].getById(id, function(data) {
 
-                var idx = 0;
-                var len = self.mappers[role].length;
-                var sequence = [];
-
-                function commit(idx) {
-
-
-                    self.mappers[role][idx].getById(id, function(data, chainOperation) {
-
-                        /*if (data == null) {
-                            error('Error - object not found: ' + id);
-                            return;
-                        }*/
-
-                        sequence.push(data);
-                        ++idx;
-                        if (chainOperation == 'break' || idx == len) return success(data);
-                        else if(!chainOperation) commit(idx)
-
-
-                    }, function(err) {
-                        error('Error - Could get object: ' + err);
-                    }, app, client, params, instance);
-
-
+                if (data == null) {
+                    error('Error - object not found: ' + id);
+                    return;
                 }
 
-                commit(idx);
 
-            } else {
-                self.mappers[role].getById(id, function(data) {
+                success(data);
 
-                    if (data == null) {
-                        error('Error - object not found: ' + id);
-                        return;
-                    }
+                /*OBJY[data.role](data).get(function(ob){
+                    success(ob);
+                }, function(err){
 
-                    success(data);
+                },client)*/
 
-                }, function(err) {
-                    error('Error - Could get object: ' + err);
-                }, app, client, params, instance);
-            }
 
-            
+            }, function(err) {
+                error('Error - Could get object: ' + err);
+            }, app, client, params, instance);
         },
 
         findObjects: function(criteria, role, success, error, app, client, flags, params, instance) {
 
-            var self = this;
+            var templatesCache = [];
+            var objectsCache = [];
 
-            if (Array.isArray(self.mappers[role])) {
+            this.mappers[role].getByCriteria(criteria, function(data) {
+                var counter = 0;
+                var num = data.length;
+                if (num == 0) return success([]);
 
-                var idx = 0;
-                var len = self.mappers[role].length;
-                var sequence = [];
+                success(data);
 
-                function commit(idx) {
 
-                    self.mappers[role][idx].getByCriteria(criteria, function(data, chainOperation) {
-                        var counter = 0;
-                        var num = data.length;
-                        if (num == 0) return success([]);
+                /* data.forEach(function(obj, i) {
+                     counter++;
+                     if (counter == data.length) success(data);
+                     OBJY[obj.role](obj).get(function(ob) {
+                             counter++;
+                             data[i] = ob
+                             if (counter == data.length) success(data);
+                         },
+                         function(err) {
+                             error(err);
+                         }, client);
+                 })*/
 
-                        sequence.push(data);
-                        ++idx;
-                        if (chainOperation == 'break' || idx == len) return success(data);
-                        else if(!chainOperation) commit(idx)
 
-                    }, function(err) {
-                        error('Error - Could get object: ' + err);
-                    }, app, client, flags, params, instance);
-
-                }
-
-                commit(idx);
-
-            } else {
-
-                self.mappers[role].getByCriteria(criteria, function(data) {
-                    var counter = 0;
-                    var num = data.length;
-                    if (num == 0) return success([]);
-
-                    success(data);
-
-                }, function(err) {
-                    error('Error - Could get object: ' + err);
-                }, app, client, flags, params, instance);
-            }
+            }, function(err) {
+                error('Error - Could get object: ' + err);
+            }, app, client, flags, params, instance);
         },
 
         countObjects: function(criteria, role, success, error, app, client, flags, params, instance) {
