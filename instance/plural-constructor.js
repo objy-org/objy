@@ -301,7 +301,6 @@ module.exports = function(OBJY) {
                         }
 
 
-
                         instance[params.pluralName](query).get(function(data) {
                             if (data.length == 0) error("User not found");
                             
