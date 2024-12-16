@@ -303,12 +303,22 @@ module.exports = function (OBJY) {
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_SHORTTEXT:
-                    propsObj[propertyKey] = property[propertyKey] + '';
+                    propsObj[propertyKey] = property[propertyKey];
+
+                    if (propsObj[propertyKey]?.value){
+                        propsObj[propertyKey].value = propsObj[propertyKey]  + '';
+                    }
+                    
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_LONGTEXT:
-                    propsObj[propertyKey] = property[propertyKey]  + '';
+                    propsObj[propertyKey] = property[propertyKey];
+
+                    if (propsObj[propertyKey]?.value){
+                        propsObj[propertyKey].value = propsObj[propertyKey]  + '';
+                    }
+
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
 
