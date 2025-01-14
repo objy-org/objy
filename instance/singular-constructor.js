@@ -1002,17 +1002,22 @@ module.exports = function (OBJY) {
                                 
                                 if (data.onCreate) {
                                     Object.keys(data.onCreate).forEach(function (key) {
-                                        if (data.onCreate[key].trigger == 'after') {
-                                            instance.execProcessorAction(
-                                                data.onCreate[key].value || data.onCreate[key].action,
-                                                data,
-                                                null,
-                                                null,
-                                                function (data) {},
-                                                client,
-                                                null
-                                            );
+                                        try {
+                                            if (data.onCreate[key].trigger == 'after') {
+                                                instance.execProcessorAction(
+                                                    data.onCreate[key].value || data.onCreate[key].action,
+                                                    data,
+                                                    null,
+                                                    null,
+                                                    function (data) {},
+                                                    client,
+                                                    null
+                                                );
+                                            }
+                                        } catch(e){
+                                            console.log(e)
                                         }
+
                                     });
                                 }
 
