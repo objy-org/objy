@@ -306,7 +306,7 @@ module.exports = function (OBJY) {
                     propsObj[propertyKey] = property[propertyKey];
 
                     if (propsObj[propertyKey]?.value){
-                        propsObj[propertyKey].value = propsObj[propertyKey]  + '';
+                        propsObj[propertyKey].value = propsObj[propertyKey].value  + '';
                     }
                     
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
@@ -316,7 +316,7 @@ module.exports = function (OBJY) {
                     propsObj[propertyKey] = property[propertyKey];
 
                     if (propsObj[propertyKey]?.value){
-                        propsObj[propertyKey].value = propsObj[propertyKey]  + '';
+                        propsObj[propertyKey].value = propsObj[propertyKey].value  + '';
                     }
 
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
