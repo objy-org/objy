@@ -989,7 +989,7 @@ module.exports = function(OBJY) {
             applications.forEach(function(application) {
                 obj.applications.push(application);
             })
-
+ 
             return obj.applications;
         },
 

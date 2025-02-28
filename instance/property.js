@@ -272,11 +272,26 @@ module.exports = function (OBJY) {
         PropertyCreateWrapper: function (obj, property, isBag, instance, params, reallyAdd) {
             //if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
 
+           var propertyKey = Object.keys(property)[0];
+           
+
+            if(isObject(property[propertyKey]))
+            {
+                Object.keys(property[propertyKey]).forEach(innerO => {
+                    var nProp = {};
+                    nProp[innerO] = property[propertyKey][innerO]
+                    new OBJY.PropertyCreateWrapper(property[propertyKey], nProp, false, instance, params, reallyAdd)
+                })
+            }
+
+          
+
+
             property = Object.assign({}, property);
 
             var propsObj = obj;
 
-            var propertyKey = Object.keys(property)[0];
+            
             var existing = null;
 
             if (typeof property !== 'object') {
@@ -470,7 +485,7 @@ module.exports = function (OBJY) {
 
                     break;
 
-                case CONSTANTS.PROPERTY.TYPE_ARRAY:
+                /*case CONSTANTS.PROPERTY.TYPE_ARRAY:
                     if (!property[propertyKey].properties) property[propertyKey].properties = {};
 
                     var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
@@ -493,10 +508,11 @@ module.exports = function (OBJY) {
                         new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                     });
 
-                    break;
+                    break;*/
 
                 case CONSTANTS.PROPERTY.TYPE_BOOLEAN:
-                    if (!typeof property[propertyKey].value === 'boolean')
+                    
+                    if (typeof property[propertyKey].value !== 'boolean')
                         throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
