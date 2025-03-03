@@ -1,0 +1,88 @@
+<html>
+
+<head>
+    <script src="dist/browser.js"></script>
+    <script src="dist/mappers/storage.local.js"></script>
+    <script>
+    //console.log(OBJY)
+    var mapper = new LocalMapper(OBJY);
+
+    mapper.createClient('default', () => {})
+    OBJY.client('local');
+
+    OBJY.activeApp = "testapp"
+
+    OBJY.staticRules.push({
+        _id: 123,
+        affects: {},
+        apply: {
+            onCreate: {
+                perms: {
+                    trigger: 'after',
+                    value: `
+                    OBJY.objects({}).get(data => {
+                        data.forEach(d => {
+                                Object.keys(obj.permissions || {}).forEach(p => {
+                                    if(!d.permissions[p] || d.permissions[p].value != obj.permissions[p].value) d.setPermission(p, obj.permissions[p]).update()
+                                })
+                            })
+                    })
+                `
+                }
+            }
+        }
+    })
+
+    OBJY.define({
+        name: "object",
+        pluralName: "objects",
+        storage: new LocalMapper(OBJY).useConnection(mapper.getConnection())
+    })
+
+    OBJY.define({
+        name: "user",
+        authable: true,
+        pluralName: "users",
+        storage: new LocalMapper(OBJY).useConnection(mapper.getConnection())
+    })
+
+    OBJY.object({ name: "otest", inherits: ["5f087f3e12f29a0012b346be"] }).add(obj => {
+        console.log('obj', obj);
+    }, (err) => {
+        console.log(err)
+    });
+
+    OBJY.user({
+        name: "utest",
+        permissions: {
+            admin: {
+                value: "*"
+            }
+        },
+        privileges: {
+            testapp: [
+                { name: "admin" }
+            ]
+        }
+    }).add(obj => {
+        console.log('obj', obj);
+        var obj = OBJY.user(obj);
+        obj.removePrivilege("admin")
+        console.log('after', obj);
+    }, (err) => {
+        console.log(err)
+    });
+
+
+    OBJY.objects({ "inherits": { "$in": ["5f087f3e12f29a0012b346be"] } }).get(function(data) {
+        console.log('got data:', data)
+    }, function(err) {
+        console.log('err:', err)
+    })
+    </script>
+</head>
+
+<body>
+</body>
+
+</html>

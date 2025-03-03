@@ -1,0 +1,19 @@
+import OBJY from '../objy.js';
+import assert from 'assert';
+
+OBJY.Logger.enabled = ['error'];
+
+describe('Permissions', function () {
+    OBJY.define({
+        name: 'Object',
+        pluralName: 'Objects',
+    });
+
+    var userName = 'peter';
+
+    test('should set user', function (done) {
+        OBJY.useUser(userName);
+        expect(OBJY.activeUser).toBe(userName);
+        done();
+    });
+});

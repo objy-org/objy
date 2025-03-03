@@ -1,0 +1,40 @@
+{
+    "name": "objy",
+    "version": "0.7.228",
+    "description": "A JavaScript framework for building object-driven applications",
+    "main": "objy.js",
+    "scripts": {
+        "test": "jest",
+        "build": "ncc build objy.js -m -o dist && browserify -p tinyify objy.js -o dist/browser.js"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/objy-org/objy.git"
+    },
+    "keywords": [
+        "platform",
+        "javascript",
+        "objects"
+    ],
+    "author": "Marco Boelling",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/objy-org/objy/issues"
+    },
+    "homepage": "https://objy.xyz",
+    "dependencies": {
+        "moment": "^2.30.1"
+    },
+    "devDependencies": {
+        "jest": "^25.1.0",
+        "jsdoc-to-markdown": "^5.0.3",
+        "tinyify": "^2.5.2"
+    },
+    "exports": {
+        ".": {
+            "require": "./dist/index.cjs",
+            "import": "./dist/index.js"
+        }
+    },
+    "type": "module"
+}
