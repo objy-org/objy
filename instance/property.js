@@ -273,7 +273,7 @@ module.exports = function (OBJY) {
             //if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
 
            var propertyKey = Object.keys(property)[0];
-           
+
 
             if(isObject(property[propertyKey]))
             {
@@ -312,226 +312,230 @@ module.exports = function (OBJY) {
             if (reallyAdd && propsObj.hasOwnProperty(propertyKey) && !OBJY.predefinedProperties.includes(propertyKey))
                 throw new exceptions.DuplicatePropertyException(propertyKey);
 
-            switch ((property[propertyKey] || {}).type) {
-                case undefined:
-                    propsObj[propertyKey] = property[propertyKey];
-                    break;
+            if(propsObj[propertyKey]?.value == null || propsObj[propertyKey]?.value == undefined){
 
-                case CONSTANTS.PROPERTY.TYPE_SHORTTEXT:
-                    propsObj[propertyKey] = property[propertyKey];
+            } else {
+                switch ((property[propertyKey] || {}).type) {
+                    case undefined:
+                        propsObj[propertyKey] = property[propertyKey];
+                        break;
 
-                    if (propsObj[propertyKey]?.value){
-                        propsObj[propertyKey].value = propsObj[propertyKey].value  + '';
-                    }
-                    
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
+                    case CONSTANTS.PROPERTY.TYPE_SHORTTEXT:
+                        propsObj[propertyKey] = property[propertyKey];
 
-                case CONSTANTS.PROPERTY.TYPE_LONGTEXT:
-                    propsObj[propertyKey] = property[propertyKey];
-
-                    if (propsObj[propertyKey]?.value){
-                        propsObj[propertyKey].value = propsObj[propertyKey].value  + '';
-                    }
-
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_INDEXEDTEXT:
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_JSON:
-                    if (property[propertyKey].value) {
-                        if (typeof property[propertyKey].value === 'string') {
-                            try {
-                                propsObj[propertyKey].value = JSON.parse(propsObj[propertyKey].value);
-                            } catch (e) {
-                                //throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_JSON);
-                            }
-                        } else {
+                        if (propsObj[propertyKey]?.value){
+                            propsObj[propertyKey].value = propsObj[propertyKey].value  + '';
                         }
-                    }
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_NUMBER:
-                    if (property[propertyKey].value != '') {
-                        if (property[propertyKey].value != null)
-                            if (isNaN(property[propertyKey].value))
-                                throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
-                    }
-                    property[propertyKey].value = +property[propertyKey].value;
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_EVENT:
-                    OBJY.chainPermission(obj, instance, 'evt', 'addProperty (Event)', propertyKey);
-
-                    var _event = {};
-                    var eventKey = propertyKey;
-                    propsObj[propertyKey] = property[propertyKey];
-
-                    if (!propsObj[propertyKey].eventId) propsObj[propertyKey].eventId = OBJY.ID();
-
-                    if (propsObj[propertyKey].interval !== undefined) {
-                        if (propsObj[propertyKey].lastOccurence == undefined) propsObj[propertyKey].lastOccurence = null;
-                        else if (!moment(propsObj[propertyKey].lastOccurence).isValid()) throw new exceptions.InvalidDateException(propsObj[propertyKey].lastOccurence);
-                        else propsObj[propertyKey].lastOccurence = moment(propsObj[propertyKey].lastOccurence).utc().format();
-
-                        if (propsObj[propertyKey].nextOccurence == undefined) propsObj[propertyKey].nextOccurence = moment().toISOString();
-
-                        if (propsObj[propertyKey].action === undefined) propsObj[propertyKey].action = '';
-
-                        if (propsObj[propertyKey].interval === undefined) throw new exceptions.MissingAttributeException('interval');
-
-                        propsObj[propertyKey].nextOccurence = moment(propsObj[propertyKey].lastOccurence || moment().utc())
-                            .utc()
-                            .add(propsObj[propertyKey].interval)
-                            .toISOString();
-
                         
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
 
-                        instance.eventAlterationSequence.push({
-                            operation: 'add',
-                            obj: obj,
-                            propName: propertyKey,
-                            property: property,
-                            date: propsObj[propertyKey].nextOccurence,
+                    case CONSTANTS.PROPERTY.TYPE_LONGTEXT:
+                        propsObj[propertyKey] = property[propertyKey];
+
+                        if (propsObj[propertyKey]?.value){
+                            propsObj[propertyKey].value = propsObj[propertyKey].value  + '';
+                        }
+
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_INDEXEDTEXT:
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_JSON:
+                        if (property[propertyKey].value) {
+                            if (typeof property[propertyKey].value === 'string') {
+                                try {
+                                    propsObj[propertyKey].value = JSON.parse(propsObj[propertyKey].value);
+                                } catch (e) {
+                                    //throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_JSON);
+                                }
+                            } else {
+                            }
+                        }
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_NUMBER:
+                        if (property[propertyKey].value != '') {
+                            if (property[propertyKey].value != null)
+                                if (isNaN(property[propertyKey].value))
+                                    throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
+                        }
+                        property[propertyKey].value = +property[propertyKey].value;
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_EVENT:
+                        OBJY.chainPermission(obj, instance, 'evt', 'addProperty (Event)', propertyKey);
+
+                        var _event = {};
+                        var eventKey = propertyKey;
+                        propsObj[propertyKey] = property[propertyKey];
+
+                        if (!propsObj[propertyKey].eventId) propsObj[propertyKey].eventId = OBJY.ID();
+
+                        if (propsObj[propertyKey].interval !== undefined) {
+                            if (propsObj[propertyKey].lastOccurence == undefined) propsObj[propertyKey].lastOccurence = null;
+                            else if (!moment(propsObj[propertyKey].lastOccurence).isValid()) throw new exceptions.InvalidDateException(propsObj[propertyKey].lastOccurence);
+                            else propsObj[propertyKey].lastOccurence = moment(propsObj[propertyKey].lastOccurence).utc().format();
+
+                            if (propsObj[propertyKey].nextOccurence == undefined) propsObj[propertyKey].nextOccurence = moment().toISOString();
+
+                            if (propsObj[propertyKey].action === undefined) propsObj[propertyKey].action = '';
+
+                            if (propsObj[propertyKey].interval === undefined) throw new exceptions.MissingAttributeException('interval');
+
+                            propsObj[propertyKey].nextOccurence = moment(propsObj[propertyKey].lastOccurence || moment().utc())
+                                .utc()
+                                .add(propsObj[propertyKey].interval)
+                                .toISOString();
+
+                            
+
+                            instance.eventAlterationSequence.push({
+                                operation: 'add',
+                                obj: obj,
+                                propName: propertyKey,
+                                property: property,
+                                date: propsObj[propertyKey].nextOccurence,
+                            });
+                        } else if (propsObj[propertyKey].date !== undefined) {
+                            console.log('EVENTE');
+                            if (propsObj[propertyKey].date == null) propsObj[propertyKey].date = moment().utc().toISOString();
+
+                            if (!propsObj[propertyKey].date) throw new exceptions.MissingAttributeException('date');
+
+                            try {
+                                propsObj[propertyKey].date = moment(propsObj[propertyKey].date).utc().format();
+
+                            } catch (e) {}
+
+                            console.log('AFSFAASF')
+                            propsObj[propertyKey].nextOccurence = propsObj[propertyKey].date;
+
+                            instance.eventAlterationSequence.push({
+                                operation: 'add',
+                                obj: obj,
+                                propName: propertyKey,
+                                property: property,
+                                date: propsObj[propertyKey].date,
+                            });
+
+                            if (!propsObj[propertyKey].action) propsObj[propertyKey].action = '';
+                        } else {
+                            //throw new exceptions.InvalidTypeException("No interval or date provided");
+                        }
+
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_DATE:
+                        if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = null;
+                        //else property[propertyKey].value = property[propertyKey];
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_SHORTID:
+                        if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = OBJY.RANDOM();
+                        if (obj.role == 'template') property[propertyKey].value = null;
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_REF_OBJ:
+                        // FOR NOW: no checking for existing object, since callback!!!
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_REF_USR:
+                        // FOR NOW: no checking for existing object, since callback!!!
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_REF_FILE:
+                        // FOR NOW: no checking for existing object, since callback!!!
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
+
+                    case CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG:
+                        if (!property[propertyKey].properties) property[propertyKey].properties = {};
+
+                        var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
+
+                        var propertyKeys = Object.keys(innerProperties);
+
+                        //parentProp = property;
+
+                        obj[propertyKey] = property[propertyKey];
+                        obj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
+                        //obj[propertyKey].properties = {};
+
+                        propertyKeys.forEach(function (property) {
+                            var tmpProp = {};
+                            tmpProp[property] = innerProperties[property];
+
+                            new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                         });
-                    } else if (propsObj[propertyKey].date !== undefined) {
-                        console.log('EVENTE');
-                        if (propsObj[propertyKey].date == null) propsObj[propertyKey].date = moment().utc().toISOString();
 
-                        if (!propsObj[propertyKey].date) throw new exceptions.MissingAttributeException('date');
+                        break;
 
-                        try {
-                            propsObj[propertyKey].date = moment(propsObj[propertyKey].date).utc().format();
+                    /*case CONSTANTS.PROPERTY.TYPE_ARRAY:
+                        if (!property[propertyKey].properties) property[propertyKey].properties = {};
 
-                        } catch (e) {}
+                        var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
 
-                        console.log('AFSFAASF')
-                        propsObj[propertyKey].nextOccurence = propsObj[propertyKey].date;
+                        var propertyKeys = Object.keys(innerProperties);
 
-                        instance.eventAlterationSequence.push({
-                            operation: 'add',
-                            obj: obj,
-                            propName: propertyKey,
-                            property: property,
-                            date: propsObj[propertyKey].date,
+                        var parentProp = property;
+
+                        propsObj[propertyKey] = {
+                            type: CONSTANTS.PROPERTY.TYPE_ARRAY,
+                            properties: {},
+                            query: property[propertyKey].query,
+                            meta: property[propertyKey].meta,
+                        };
+
+                        propertyKeys.forEach(function (property) {
+                            var tmpProp = {};
+                            tmpProp[property] = innerProperties[property];
+
+                            new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
                         });
 
-                        if (!propsObj[propertyKey].action) propsObj[propertyKey].action = '';
-                    } else {
-                        //throw new exceptions.InvalidTypeException("No interval or date provided");
-                    }
+                        break;*/
 
-                    break;
+                    case CONSTANTS.PROPERTY.TYPE_BOOLEAN:
+                        
+                        if (typeof property[propertyKey].value !== 'boolean')
+                            throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
 
-                case CONSTANTS.PROPERTY.TYPE_DATE:
-                    if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = null;
-                    //else property[propertyKey].value = property[propertyKey];
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
+                    case CONSTANTS.PROPERTY.TYPE_ACTION:
+                        OBJY.chainPermission(obj, instance, 'act', 'addProperty (Action)', propertyKey);
 
-                case CONSTANTS.PROPERTY.TYPE_SHORTID:
-                    if (!property[propertyKey].value || property[propertyKey].value == '') property[propertyKey].value = OBJY.RANDOM();
-                    if (obj.role == 'template') property[propertyKey].value = null;
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
+                        if (property[propertyKey].value) {
+                            if (typeof property[propertyKey].value !== 'string')
+                                throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
+                        }
 
-                case CONSTANTS.PROPERTY.TYPE_REF_OBJ:
-                    // FOR NOW: no checking for existing object, since callback!!!
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
+                        propsObj[propertyKey] = property[propertyKey];
+                        OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
+                        break;
 
-                case CONSTANTS.PROPERTY.TYPE_REF_USR:
-                    // FOR NOW: no checking for existing object, since callback!!!
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_REF_FILE:
-                    // FOR NOW: no checking for existing object, since callback!!!
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG:
-                    if (!property[propertyKey].properties) property[propertyKey].properties = {};
-
-                    var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
-
-                    var propertyKeys = Object.keys(innerProperties);
-
-                    //parentProp = property;
-
-                    obj[propertyKey] = property[propertyKey];
-                    obj[propertyKey].type = CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG;
-                    //obj[propertyKey].properties = {};
-
-                    propertyKeys.forEach(function (property) {
-                        var tmpProp = {};
-                        tmpProp[property] = innerProperties[property];
-
-                        new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
-                    });
-
-                    break;
-
-                /*case CONSTANTS.PROPERTY.TYPE_ARRAY:
-                    if (!property[propertyKey].properties) property[propertyKey].properties = {};
-
-                    var innerProperties = property[propertyKey][params.propsObject] || property[propertyKey];
-
-                    var propertyKeys = Object.keys(innerProperties);
-
-                    var parentProp = property;
-
-                    propsObj[propertyKey] = {
-                        type: CONSTANTS.PROPERTY.TYPE_ARRAY,
-                        properties: {},
-                        query: property[propertyKey].query,
-                        meta: property[propertyKey].meta,
-                    };
-
-                    propertyKeys.forEach(function (property) {
-                        var tmpProp = {};
-                        tmpProp[property] = innerProperties[property];
-
-                        new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
-                    });
-
-                    break;*/
-
-                case CONSTANTS.PROPERTY.TYPE_BOOLEAN:
-                    
-                    if (typeof property[propertyKey].value !== 'boolean')
-                        throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_BOOLEAN);
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                case CONSTANTS.PROPERTY.TYPE_ACTION:
-                    OBJY.chainPermission(obj, instance, 'act', 'addProperty (Action)', propertyKey);
-
-                    if (property[propertyKey].value) {
-                        if (typeof property[propertyKey].value !== 'string')
-                            throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_ACTION);
-                    }
-
-                    propsObj[propertyKey] = property[propertyKey];
-                    OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
-                    break;
-
-                default:
-                    break;
+                    default:
+                        break;
+                }
             }
 
             if ((property[propertyKey] || {}).onCreate) {
