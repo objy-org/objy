@@ -1,135 +1,141 @@
-import generalAttributes from './instance/attributes.js';
-import generalFunctions from './instance/general.js';
-import applyFunctions from './instance/apply.js';
-import permissionFunctions from './instance/permission.js';
-import objectFunctions from './instance/object.js';
-import mapperFunctions from './instance/mapper.js';
-import wrapperFunctions from './instance/wrapper.js';
-import propertyFunctions from './instance/property.js';
-import pluralConstructorFunctions from './instance/plural-constructor.js';
-import singularConstructorFunctions from './instance/singular-constructor.js';
-import StorageMapperTemplate from './mappers/templates/storage.js';
-import ProcessorMapperTemplate from './mappers/templates/processor.js';
-import ObserverMapperTemplate from './mappers/templates/observer.js';
-import Logger from './lib/dependencies/logger.js';
+import _general from './general.js';
+import _family from './family.js';
 
-const StorageTemplate = StorageMapperTemplate;
-const ProcessorTemplate = ProcessorMapperTemplate;
-const ObserverTemplate = ObserverMapperTemplate;
+let OBJY = null;
+let listOfGeneralFunc = ['test1', 'test2', 'test3'];
+//let listOfGeneralFunc = Object.keys(_general);
+let listOfFamilyFunc = ['setPropertyValue', 'update'];
+//let listOfFamilyFunc = Object.keys(_family);
+let attributes = [
+    'Logger',
+    'predefinedProperties',
+    'metaPropPrefix',
+    'activeTenant',
+    'activeUser',
+    'activeApp',
+    'objectFamilies',
+    'affectables',
+    'staticRules',
+    'mappers',
+    'caches',
+    'ignorePermissions',
+    'ignoreAuthorisations',
+    'handlerSequence',
+    'permissionSequence',
+    'alterSequence',
+    'commandSequence',
+    'eventAlterationSequence',
+    'storage',
+    'processor',
+    'observer',
+    'StorageTemplate',
+    'ProcessorTemplate',
+    'ObserverTemplate',
+    'processors',
+    'observers',
+];
 
-const clone = (orgOBJY) => {
-    let clonedOBJY = {};
-    let clonedAttributesMap = [
-        'Logger',
-        'predefinedProperties',
-        'metaPropPrefix',
-        //'instance',
-        'activeTenant',
-        'activeUser',
-        'activeApp',
-        'objectFamilies',
-        'affectables',
-        'staticRules',
-        'mappers',
-        'caches',
-        'ignorePermissions',
-        'ignoreAuthorisations',
-        'handlerSequence',
-        'permissionSequence',
-        'alterSequence',
-        'commandSequence',
-        'eventAlterationSequence',
-        'storage',
-        'processor',
-        'observer',
-        'StorageTemplate',
-        'ProcessorTemplate',
-        'ObserverTemplate',
-        'processors',
-        'observers',
-    ];
-
-    Object.assign(clonedOBJY, {
-        ...generalFunctions(clonedOBJY),
-
-        ...applyFunctions(clonedOBJY),
-
-        ...permissionFunctions(clonedOBJY),
-
-        ...objectFunctions(clonedOBJY),
-
-        ...mapperFunctions(clonedOBJY),
-
-        ...wrapperFunctions(clonedOBJY),
-
-        ...propertyFunctions(clonedOBJY),
-
-        ...pluralConstructorFunctions(clonedOBJY),
-
-        ...singularConstructorFunctions(clonedOBJY),
-
-        hello: function () {
-            clonedOBJY.Logger.log('Hello from OBJY!');
+function familyBuild(params, _family, _instance) {
+    let family = {
+        singular: null,
+        plural: null,
+        instance: {
+            calls: [],
         },
-
-        clone: () => {
-            return clone(clonedOBJY);
-        },
-
-        Logger: Logger,
-        StorageTemplate: StorageTemplate,
-        ProcessorTemplate: ProcessorTemplate,
-        ObserverTemplate: ObserverTemplate,
-    });
-
-    clonedOBJY.instance = orgOBJY.instance;
-
-    return clonedOBJY;
-};
-
-/**
- * OBJY Instance
- */
-const OBJY = function () {
-    let _OBJY = {
-        Logger: Logger,
-        StorageTemplate: StorageTemplate,
-        ProcessorTemplate: ProcessorTemplate,
-        ObserverTemplate: ObserverTemplate,
     };
-    let instance = Object.assign({}, generalAttributes());
 
-    _OBJY = Object.assign(_OBJY, {
-        ...generalFunctions(_OBJY, instance),
+    family.instance = Object.assign(family.instance, _instance);
 
-        ...applyFunctions(_OBJY, instance),
+    family.singular = _family.singular;
+    family.plural = _family.plural;
 
-        ...permissionFunctions(_OBJY, instance),
+    family.instance.calls.push({ funcName: _family.singular, params });
 
-        ...objectFunctions(_OBJY, instance),
+    listOfFamilyFunc.forEach((funcName) => {
+        family[funcName] = (...params) => {
+            family.instance.calls.push({ funcName, params });
 
-        ...mapperFunctions(_OBJY, instance),
+            console.log(family.instance.calls);
 
-        ...wrapperFunctions(_OBJY, instance),
+            // OBJY method calls here,,,
 
-        ...propertyFunctions(_OBJY, instance),
+            /*
+                let promise = new Promise(async (resolve, reject) => {
+                    try {
+                        res = await _family[funcName](params)
 
-        ...pluralConstructorFunctions(_OBJY, instance),
+                        resolve(res)
+                    } catch(err){
+                        console.log(err)
+                        return reject()
+                    }
+                })
+            */
 
-        ...singularConstructorFunctions(_OBJY, instance),
+            // Either return family or return promise for methods like OBJY.object(obj).update()
 
-        hello: function () {
-            _OBJY.Logger.log('Hello from OBJY!');
-        },
-
-        clone: () => {
-            return clone(_OBJY);
-        },
-
-        instance: instance,
+            return family;
+        };
     });
 
-    return _OBJY;
-};
+    return family;
+}
 
-export default OBJY;
+function build() {
+    let build = {
+        instance: {
+            families: [{ singular: 'object', plural: 'objects' }],
+        },
+    };
+
+    listOfGeneralFunc.forEach((funcName) => {
+        build[funcName] = (...params) => {
+            // OBJY method calls here,,,
+
+            /*
+                let promise = new Promise(async (resolve, reject) => {
+                    try {
+                        res = await _general[funcName](params)
+
+                        resolve(res)
+                    } catch(err){
+                        console.log(err)
+                        return reject()
+                    }
+                })
+            */
+
+            return build;
+        };
+    });
+
+    build.instance.families.forEach((family) => {
+        build[family.singular] = (...params) => {
+            return familyBuild(params, family, build.instance);
+        };
+
+        build[family.plural] = (...params) => {
+            return familyBuild(params, family, build.instance);
+        };
+    });
+
+    return build;
+}
+
+function test() {
+    OBJY = build();
+
+    let updatable = OBJY.object({ _id: '123' });
+
+    OBJY.test1(1, 2, 3).test2(4, 5, 6);
+
+    updatable.setPropertyValue('properties.prop1', 42);
+
+    OBJY.test3(3);
+
+    updatable.update();
+}
+
+test();
+
+export default build;
