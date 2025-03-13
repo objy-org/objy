@@ -1,11 +1,11 @@
 import _general from './general.js';
 import _family from './family.js';
+import _helpers from './helpers.js';
 
 let OBJY = null;
-//let listOfGeneralFunc = ['test1', 'test2', 'test3'];
-let listOfGeneralFunc = Object.keys(_general.prototype || {});
-//let listOfFamilyFunc = ['setPropertyValue', 'update'];
-let listOfFamilyFunc = Object.keys(_family.prototype || {});
+let listOfGeneralFunc = _helpers.getAllMethods(_general)
+let listOfFamilyFunc = _helpers.getAllMethods(_family);
+
 let attributes = [
     'predefinedProperties',
     'activeTenant',
@@ -29,30 +29,40 @@ let attributes = [
     'observers',
 ];
 
-function familyBuild(params, _family, _instance) {
-    let family = {
+function familyBuild(obj, _family, context) {
+    let family = { 
         singular: null,
         plural: null,
-        instance: {
+        context: {
             calls: [],
         },
     };
 
-    family.instance = Object.assign(family.instance, _instance);
+    let content = {
+        _id: null,
+        name: null,
+        type: null,
+        role: _family.singular
+    }
+
+    console.log('content', obj)
+
+    family.context = Object.assign(family.context, context);
 
     family.singular = _family.singular;
     family.plural = _family.plural;
 
-    family.instance.calls.push({ funcName: _family.singular, params });
+    //family.instance.calls.push({ funcName: _family.singular, params });
 
     listOfFamilyFunc.forEach((funcName) => {
         family[funcName] = (...params) => {
-            family.instance.calls.push({ funcName, params });
+            family.context.calls.push({ funcName, params });
 
-            console.log(family.instance.calls);
+            console.log(family.context.calls);
 
             let promise = new Promise(async (resolve, reject) => {
                 try {
+                    console.log(_family)
                     res = await _family[funcName](params);
 
                     resolve(res);
@@ -96,12 +106,12 @@ function build() {
     });
 
     build.context.families.forEach((family) => {
-        build[family.singular] = (...params) => {
-            return familyBuild(params, family, build.context);
+        build[family.singular] = (obj) => {
+            return familyBuild(obj, family, build.context);
         };
 
-        build[family.plural] = (...params) => {
-            return familyBuild(params, family, build.context);
+        build[family.plural] = (obj) => {
+            return familyBuild(obj, family, build.context);
         };
     });
 
@@ -113,15 +123,13 @@ function test() {
 
     let updatable = OBJY.object({ _id: '123' });
 
-    OBJY.test1(1, 2, 3).test2(4, 5, 6);
 
     updatable.setPropertyValue('properties.prop1', 42);
 
-    OBJY.test3(3);
 
     updatable.update();
 }
 
-//test();
+test();
 
 export default build;
