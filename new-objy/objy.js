@@ -1,135 +1,72 @@
-import _general from './general.js';
+//import _general from './general.js';
 import _family from './family.js';
-import _helpers from './helpers.js';
+//import _helpers from './helpers.js';
 
-let OBJY = null;
-let listOfGeneralFunc = _helpers.getAllMethods(_general)
-let listOfFamilyFunc = _helpers.getAllMethods(_family);
+let contextTemplate = {
+    activeTenant: null,
+    activeUser: null,
+    activeApp: null
+}
 
-let attributes = [
-    'predefinedProperties',
-    'activeTenant',
-    'activeUser',
-    'activeApp',
-    'objectFamilies',
-    'affectables',
-    'staticRules',
-    'storages',
-    'ignorePermissions',
-    'ignoreAuthorisations',
-    'handlerSequence',
-    'permissionSequence',
-    'alterSequence',
-    'commandSequence',
-    'eventAlterationSequence',
-    'StorageTemplate',
-    'ProcessorTemplate',
-    'ObserverTemplate',
-    'processors',
-    'observers',
-];
+let OBJY = {
 
-function familyBuild(obj, _family, context) {
-    let family = { 
-        singular: null,
-        plural: null,
-        context: {
-            calls: [],
-        },
-    };
+    families: {
 
-    let content = {
-        _id: null,
-        name: null,
-        type: null,
-        role: _family.singular
+    },
+
+    globalCtx: Object.assign({}, contextTemplate),
+
+    useUser: (user) => {
+        OBJY.globalCtx.activeUser = user
+    },
+
+    define: (params) => {
+        
+        if (typeof params == 'string') params = { name: params, pluralName: params + 's' };
+        
+        if (!params.name || !params.pluralName) {
+            throw new Error("Invalid arguments");
+        }
+
+        OBJY[params.name] = (obj) => {
+
+            // copy current context globally
+            let ctx = Object.assign({}, OBJY.globalCtx);
+
+            // return new singular object with it's own context
+            return Object.assign({}, _family(obj, params, ctx))
+        }
     }
-
-    console.log('content', obj)
-
-    family.context = Object.assign(family.context, context);
-
-    family.singular = _family.singular;
-    family.plural = _family.plural;
-
-    //family.instance.calls.push({ funcName: _family.singular, params });
-
-    listOfFamilyFunc.forEach((funcName) => {
-        family[funcName] = (...params) => {
-            family.context.calls.push({ funcName, params });
-
-            console.log(family.context.calls);
-
-            let promise = new Promise(async (resolve, reject) => {
-                try {
-                    console.log(_family)
-                    res = await _family[funcName](params);
-
-                    resolve(res);
-                } catch (err) {
-                    console.log(err);
-                    return reject();
-                }
-            });
-
-            // Either return family or return promise for methods like OBJY.object(obj).update()
-
-            return family;
-        };
-    });
-
-    return family;
-}
-
-function build() {
-    let build = {
-        context: {
-            families: [{ singular: 'object', plural: 'objects' }],
-        },
-    };
-
-    listOfGeneralFunc.forEach((funcName) => {
-        build[funcName] = (...params) => {
-            let promise = new Promise(async (resolve, reject) => {
-                try {
-                    res = await _general[funcName](params);
-
-                    resolve(res);
-                } catch (err) {
-                    console.log(err);
-                    return reject();
-                }
-            });
-
-            return build;
-        };
-    });
-
-    build.context.families.forEach((family) => {
-        build[family.singular] = (obj) => {
-            return familyBuild(obj, family, build.context);
-        };
-
-        build[family.plural] = (obj) => {
-            return familyBuild(obj, family, build.context);
-        };
-    });
-
-    return build;
-}
-
-function test() {
-    OBJY = build();
-
-    let updatable = OBJY.object({ _id: '123' });
+}; 
 
 
-    updatable.setPropertyValue('properties.prop1', 42);
+
+//////////// TESTING SECTION ///////////
+
+OBJY.define({
+    name: "object",
+    pluralName: "objects"
+})
+
+OBJY.define({
+    name: "user",
+    pluralName: "users",
+    authable: true
+})
 
 
-    updatable.update();
-}
+console.log(OBJY.user({username: "admin"}))
 
-test();
+OBJY.useUser('benjamin') 
 
-export default build;
+let o1 = OBJY.object({name: "one"})
+
+OBJY.useUser('admin')
+
+let o2 = OBJY.object({name: "two"})
+
+console.log(o1, o2)
+
+OBJY.useUser('marco')
+
+console.log(o1,o2)
