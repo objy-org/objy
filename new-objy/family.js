@@ -1,8 +1,8 @@
 // This is for building a singular object and validating it's format
 import moment from 'moment';
+import helpers from './helpers.js';
 
 export default (obj, params, ctx) => {
-
 
 	// object skelleton
 	let skelleton = {
@@ -14,10 +14,9 @@ export default (obj, params, ctx) => {
 	}
 
 
+
 	// Checking dynamic properties
 	// TODO
-
-
 
 
 
@@ -115,10 +114,9 @@ export default (obj, params, ctx) => {
 
   	////// OBJECT FUNCTIONS /////
 
-    let funcs = {
-    	setName: (name) => {
-    		skelleton.name = name
-    	}
+    skelleton.setName = (name) => {
+    	skelleton.name = name
+        console.log('skel name', skelleton.name)
     }
 
 
@@ -135,35 +133,35 @@ export default (obj, params, ctx) => {
 
         delete skelleton.name;
 
-        funcs.setUsername = (username) => {
+        skelleton.setUsername = (username) => {
             skelleton.username = username;
-            //OBJY.chainPermission(this, instance, 'o', 'setUsername', username);
+            ctx.chainPermission(this, 'o', 'setUsername', username);
             ctx.alterSequence.push({ setUsername: arguments });
             return this;
         };
 
-        funcs.setEmail = function (email) {
+        skelleton.setEmail = function (email) {
             skelleton.email = email;
-            //OBJY.chainPermission(this, instance, 'h', 'setEmail', email);
+            ctx.chainPermission(this, 'h', 'setEmail', email);
             ctx.alterSequence.push({ setEmail: arguments });
             return this;
         };
 
-        funcs.setPassword = function (password) {
-            // should be encrypted at this point
+        skelleton.setPassword = function (password) {
+            // is encrypted at this point by predecessing logic
             skelleton.password = password;
             ctx.alterSequence.push({ setPassword: arguments });
             return this;
         };
 
-        funcs.setAuthorisation = function (authorisationObj) {
-            //new OBJY.ObjectAuthorisationSetWrapper(this, authorisationObj, instance);
+        skelleton.setAuthorisation = function (authorisationObj) {
+            helpers.ObjectAuthorisationSetWrapper(this, authorisationObj, ctx);
             ctx.alterSequence.push({ setAuthorisation: arguments });
             return this;
         };
 
-        funcs.removeAuthorisation = function (authorisationId) {
-            //new OBJY.ObjectAuthorisationRemoveWrapper(this, authorisationId, instance);
+        skelleton.removeAuthorisation = function (authorisationId) {
+            helpers.ObjectAuthorisationRemoveWrapper(this, authorisationId, instance);
             ctx.alterSequence.push({ removeAuthorisation: arguments });
             return this;
         };
@@ -174,11 +172,11 @@ export default (obj, params, ctx) => {
         skelleton.privileges = obj.privileges
         skelleton._clients = obj._clients;
 
-        funcs.addPrivilege = function (privilege) {
+        skelleton.addPrivilege = function (privilege) {
             if (ctx.activeApp) {
                 var tmpPriv = {};
                 tmpPriv[ctx.activeApp] = { name: privilege };
-                new OBJY.PrivilegeChecker(this, tmpPriv);
+                helpers.PrivilegeChecker(this, tmpPriv);
                 ctx.alterSequence.push({ addPrivilege: arguments });
                 return this;
             } else throw new exceptions.General('Invalid app id');
@@ -186,30 +184,26 @@ export default (obj, params, ctx) => {
             return this;
         };
 
-        funcs.removePrivilege = function (privilege) {
-            new OBJY.PrivilegeRemover(this, privilege, ctx);
+        skelleton.removePrivilege = function (privilege) {
+            helpers.PrivilegeRemover(this, privilege, ctx);
             ctx.alterSequence.push({ removePrivilege: arguments });
             return this;
         };
 
-        funcs.addClient = function (client) {
+        skelleton.addClient = function (client) {
             if (this._clients.indexOf(client) != -1) throw new exceptions.General('Client ' + client + ' already exists');
             this._clients.push(client);
             ctx.alterSequence.push({ addClient: arguments });
             return this;
         };
 
-        funcs.removeClient = function (client) {
+        skelleton.removeClient = function (client) {
             if (this._clients.indexOf(client) == -1) throw new exceptions.General('Client ' + client + ' does not exist');
             this._clients.splice(this._clients.indexOf(client), 1);
             ctx.alterSequence.push({ removeClient: arguments });
             return this;
         };
-    }
+    }  
 
-
-
-    
-
-	return Object.assign(skelleton, funcs);
+	return skelleton;//Object.assign(skelleton, funcs);
 }

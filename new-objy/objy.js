@@ -5,7 +5,29 @@ import _family from './family.js';
 let contextTemplate = {
     activeTenant: null,
     activeUser: null,
-    activeApp: null
+    activeApp: null,
+
+    alterSequence: [],
+    permissionSequence: {},
+
+    chainPermission: (obj, code, name, key) => {
+
+        if (['c', 'r', 'u', 'd', 'x'].includes(code)) {
+
+        } else code = 'u';
+
+        if (obj.permissions) {
+            if (Object.keys(obj.permissions).length > 0) {
+                if (!this.permissionSequence[obj._id]) this.permissionSequence[obj._id] = [];
+
+                if (!OBJY.checkPermissions(this.activeUser, this.activeApp, obj, code, true, this))
+                    this.permissionSequence[obj._id].push({
+                        name: name,
+                        key: key
+                    });
+            }
+        }
+    }
 }
 
 let OBJY = {
@@ -66,6 +88,12 @@ OBJY.useUser('admin')
 let o2 = OBJY.object({name: "two"})
 
 console.log(o1, o2)
+
+o1.setName('mirco1')
+
+//o1.name = "mirco"
+
+console.log('with new name', o1)
 
 OBJY.useUser('marco')
 
