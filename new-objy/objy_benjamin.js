@@ -1,11 +1,11 @@
-import _general from './general.js';
-import _family from './family.js';
-import _helpers from './helpers.js';
+//import _general from './general.js';
+//import _family from './family.js';
 
 let OBJY = null;
-let listOfGeneralFunc = _helpers.getAllMethods(_general)
-let listOfFamilyFunc = _helpers.getAllMethods(_family);
-
+let listOfGeneralFunc = ['test1', 'test2', 'test3'];
+//let listOfGeneralFunc = Object.keys(_general.prototype || {});
+let listOfFamilyFunc = ['setName', 'setPropertyValue', 'update'];
+//let listOfFamilyFunc = Object.keys(_family.prototype || {});
 let attributes = [
     'predefinedProperties',
     'activeTenant',
@@ -29,43 +29,43 @@ let attributes = [
     'observers',
 ];
 
-function familyBuild(obj, _family, context) {
-    let family = { 
+function familyBuild(params, _family, _instance) {
+    let family = {
         singular: null,
         plural: null,
-        context: {
+        instance: {
             calls: [],
         },
+        lastFuncName: null,
     };
 
-    let content = {
-        _id: null,
-        name: null,
-        type: null,
-        role: _family.singular
-    }
-
-    console.log('content', obj)
-
-    family.context = Object.assign(family.context, context);
+    family.instance = Object.assign(family.instance, _instance);
 
     family.singular = _family.singular;
     family.plural = _family.plural;
 
-    //family.instance.calls.push({ funcName: _family.singular, params });
+    family.instance.calls.push({ funcName: _family.singular, params });
 
     listOfFamilyFunc.forEach((funcName) => {
         family[funcName] = (...params) => {
-            family.context.calls.push({ funcName, params });
+            family.lastFuncName = funcName;
 
-            console.log(family.context.calls);
+            family.instance.calls.push({ funcName, params });
+
+            //console.log(family.instance.calls);
 
             let promise = new Promise(async (resolve, reject) => {
                 try {
-                    console.log(_family)
-                    res = await _family[funcName](params);
+                    if (funcName == 'setName') {
+                        const setName = (_name) => {
+                            family.name = _name;
+                        };
 
-                    resolve(res);
+                        setName(params[0]);
+                    }
+                    //res = await _family[funcName](params);
+
+                    resolve();
                 } catch (err) {
                     console.log(err);
                     return reject();
@@ -92,9 +92,9 @@ function build() {
         build[funcName] = (...params) => {
             let promise = new Promise(async (resolve, reject) => {
                 try {
-                    res = await _general[funcName](params);
+                    //res = await _general[funcName](params);
 
-                    resolve(res);
+                    resolve();
                 } catch (err) {
                     console.log(err);
                     return reject();
@@ -106,12 +106,12 @@ function build() {
     });
 
     build.context.families.forEach((family) => {
-        build[family.singular] = (obj) => {
-            return familyBuild(obj, family, build.context);
+        build[family.singular] = (...params) => {
+            return familyBuild(params, family, build.context);
         };
 
-        build[family.plural] = (obj) => {
-            return familyBuild(obj, family, build.context);
+        build[family.plural] = (...params) => {
+            return familyBuild(params, family, build.context);
         };
     });
 
@@ -123,11 +123,23 @@ function test() {
 
     let updatable = OBJY.object({ _id: '123' });
 
+    OBJY.test1(1, 2, 3).test2(4, 5, 6);
 
     updatable.setPropertyValue('properties.prop1', 42);
+    updatable.setName('benjamin');
 
+    console.log(updatable.name);
+
+    OBJY.test3(3);
+
+    updatable.setName('marco');
+
+    console.log(updatable.name);
 
     updatable.update();
+
+    console.log(updatable.calls);
+    console.log(updatable.lastFuncName);
 }
 
 test();

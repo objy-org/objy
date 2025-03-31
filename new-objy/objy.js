@@ -56,7 +56,7 @@ let OBJY = {
             let ctx = Object.assign({}, OBJY.globalCtx);
 
             // return new singular object with it's own context
-            return Object.assign({}, _family(obj, params, ctx))
+            return _family(obj, params, ctx)
         }
     }
 }; 
