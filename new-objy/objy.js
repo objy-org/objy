@@ -8,6 +8,7 @@ let contextTemplate = {
     activeApp: null,
 
     alterSequence: [],
+    commandSequence: [],
     permissionSequence: {},
 
     chainPermission: (obj, code, name, key) => {
@@ -27,7 +28,14 @@ let contextTemplate = {
                     });
             }
         }
-    }
+    },
+
+    chainCommand: (obj, key, value) => {
+        this.commandSequence.push({
+            name: key,
+            value: value
+        });
+    },
 }
 
 let OBJY = {
@@ -77,11 +85,28 @@ OBJY.define({
 })
 
 
-console.log(OBJY.user({username: "admin"}))
-
 OBJY.useUser('benjamin') 
 
-let o1 = OBJY.object({name: "one"})
+let o1 = OBJY.object({name: "one", ac: {
+    type: "action",
+    value: "console.log(4711)"
+},
+    prp: {
+    type: "shortText",
+    value: "hello fresh"
+}})
+let usr1 = OBJY.user({username: "peter"})
+
+
+console.log('got:', o1.getProperty('prp'))
+
+o1.getProperty('ac').call()
+
+usr1.setUsername('peter1')
+
+o1.addApplication('asklfsdjlhfjsdhf').removeApplication('asklfsdjlhfjsdhf')
+
+o1.setOnChange('myfirstOnChange', {value: "console.log('i have been changed')"})
 
 OBJY.useUser('admin')
 
@@ -89,12 +114,8 @@ let o2 = OBJY.object({name: "two"})
 
 console.log(o1, o2)
 
-o1.setName('mirco1')
+o1.setName('mirco1').setType('test123')
 
 //o1.name = "mirco"
 
 console.log('with new name', o1)
-
-OBJY.useUser('marco')
-
-console.log(o1,o2)
