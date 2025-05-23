@@ -259,7 +259,7 @@ export default (obj, params, ctx) => {
         else delete skelleton[handlerType][name];
 
         var alterO = {}
-        alterO['remove'+handlerType] = arguments
+        alterO['remove'+handlerType] = [name, handlerType]
         ctx.alterSequence.push(alterO);
 
         return skelleton;
@@ -275,6 +275,32 @@ export default (obj, params, ctx) => {
 
     skelleton.removeOnDelete = (name) => {
         return skelleton.removeHandler(name, 'onDelete')
+    };
+
+
+    skelleton.setPermission = (name, permission) => {
+        var perm = {};
+        perm[name] = permission;
+        permission = perm;
+
+        
+        if (!skelleton.permissions) skelleton.permissions = {};
+        if (!typeof permission == 'object') throw Error('Invalid permission format');
+
+        if (!permission) throw Error('no permission provided')
+
+        var permissionKey = Object.keys(permission)[0];
+
+        if (!skelleton.permissions[permissionKey]) skelleton.permissions[permissionKey] = permission[permissionKey];
+        else {
+            skelleton.permissions[permissionKey] = permission[permissionKey];
+        }
+
+        ctx.chainPermission(skelleton, 'x', 'setPermission', permissionKey);
+
+
+        ctx.alterSequence.push({ setPermission: [name, permission] });
+        return skelleton;
     };
 
 
