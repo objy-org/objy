@@ -296,7 +296,7 @@ export default (obj, params, ctx) => {
             skelleton.permissions[permissionKey] = permission[permissionKey];
         }
 
-        ctx.chainPermission(skelleton, 'x', 'setPermission', permissionKey);
+        ctx.chainPermission(skelleton, instance, 'x', 'setPermission', permissionKey);
 
 
         ctx.alterSequence.push({ setPermission: [name, permission] });

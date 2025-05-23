@@ -145,5 +145,4 @@ else if (typeof window !== 'undefined') {
     window.OBJY = OBJY;
 }
 
-if (0) typeof (await /2/) / 2;
-export default OBJY;
+if(0)typeof await/2//2; export default OBJY

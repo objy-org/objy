@@ -12,174 +12,163 @@ var isObject = function (a) {
 module.exports = function (OBJY) {
     return {
         Obj: function (obj, role, context, params) {
-
-            if (!obj) obj = {};
-
             if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
+
+            if (!obj) obj = {}; //throw new Error("Invalid param");
+
+            if (obj._id) this._id = obj._id;
+
+            if (typeof obj === 'string') {
+                this._id = obj;
+            }
+
+            if (obj === undefined) obj = {};
+
+            this.role = role || 'object';
 
             if (typeof obj === 'object') {
                 obj.role = role;
             }
 
-            let skelleton = {
-                __ctx: context,
-                _id: obj._id,
-                _clients: [],
-                name: obj.name,
-                created: obj.created || moment().utc().toDate().toISOString(),
-                lastModified: obj.lastModified || moment().utc().toDate().toISOString()
-            }
-
-
-            if (obj._id) skelleton._id = obj._id;
-
-            if (typeof obj === 'string') {
-                skelleton._id = obj;
-            }
-
-            
-            skelleton.role = role || 'object';
-
-
             if (params.extendedStructure) {
                 for (var prop in params.extendedStructure) {
-                    if (obj[prop] || params.extendedStructure[prop] === null) skelleton[prop] = obj[prop];
-                    else skelleton[prop] = params.extendedStructure[prop];
+                    if (obj[prop] || params.extendedStructure[prop] === null) this[prop] = obj[prop];
+                    else this[prop] = params.extendedStructure[prop];
 
                     if (!OBJY.predefinedProperties.includes(prop)) OBJY.predefinedProperties.push(prop);
                 }
             }
 
             if (params.hasAffects) {
-                skelleton.affects = OBJY.AffectsCreateWrapper(skelleton, obj.affects, context);
-                skelleton.apply = OBJY.ApplyCreateWrapper(skelleton, obj.apply, context);
+                this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, context);
+                this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, context);
             }
 
-            skelleton._constraints = obj._constraints;
+            this._constraints = obj._constraints;
 
-            //@TODO: DEPRECATE skelleton!
-            // skelleton.type = obj.type;
+            //@TODO: DEPRECATE THIS!
+            // this.type = obj.type;
 
-            skelleton.applications = OBJY.ApplicationsChecker(skelleton, obj.applications); // || [];
+            this.applications = OBJY.ApplicationsChecker(this, obj.applications); // || [];
 
-            skelleton.inherits = OBJY.InheritsChecker(skelleton, obj.inherits); // || [];
+            this.inherits = OBJY.InheritsChecker(this, obj.inherits); // || [];
 
-            //@TODO: DEPRECATE skelleton!
-            // skelleton.name = obj.name; // || null;
+            //@TODO: DEPRECATE THIS!
+            // this.name = obj.name; // || null;
 
-            skelleton.onCreate = OBJY.ObjectOnCreateCreateWrapper(skelleton, obj.onCreate, context);
-            skelleton.onChange = OBJY.ObjectOnChangeCreateWrapper(skelleton, obj.onChange, context);
-            skelleton.onDelete = OBJY.ObjectOnDeleteCreateWrapper(skelleton, obj.onDelete, context);
+            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, context);
+            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, context);
+            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, context);
 
-            skelleton.created = obj.created || moment().utc().toDate().toISOString();
-            skelleton.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
+            this.created = obj.created || moment().utc().toDate().toISOString();
+            this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
-            //skelleton.properties = OBJY.PropertiesChecker(skelleton, obj.properties, context); // || {};
-            OBJY.PropertiesChecker(skelleton, obj, context, params);
+            //this.properties = OBJY.PropertiesChecker(this, obj.properties, context); // || {};
+            OBJY.PropertiesChecker(this, obj, context, params);
 
-            skelleton.permissions = OBJY.ObjectPermissionsCreateWrapper(skelleton, obj.permissions); // || {};
+            this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
 
-            skelleton._aggregatedEvents = obj._aggregatedEvents;
+            this._aggregatedEvents = obj._aggregatedEvents;
 
-            skelleton.authorisations = obj.authorisations || undefined;
+            this.authorisations = obj.authorisations || undefined;
 
             if (params.authable) {
-                skelleton.username = obj.username || null;
-                skelleton.email = obj.email || null;
-                skelleton.password = obj.password || null;
+                this.username = obj.username || null;
+                this.email = obj.email || null;
+                this.password = obj.password || null;
 
-                skelleton.spooAdmin = obj.spooAdmin;
+                this.spooAdmin = obj.spooAdmin;
 
-                delete skelleton.name;
+                delete this.name;
 
-                skelleton.setUsername = function (username) {
-                    skelleton.username = username;
-                    OBJY.chainPermission(skelleton, context, 'o', 'setUsername', username);
+                this.setUsername = function (username) {
+                    this.username = username;
+                    OBJY.chainPermission(this, context, 'o', 'setUsername', username);
                     context.alterSequence.push({ setUsername: arguments });
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.setEmail = function (email) {
-                    skelleton.email = email;
-                    OBJY.chainPermission(skelleton, context, 'h', 'setEmail', email);
+                this.setEmail = function (email) {
+                    this.email = email;
+                    OBJY.chainPermission(this, context, 'h', 'setEmail', email);
                     context.alterSequence.push({ setEmail: arguments });
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.setPassword = function (password) {
-                    // should be encrypted at skelleton point
-                    skelleton.password = password;
+                this.setPassword = function (password) {
+                    // should be encrypted at this point
+                    this.password = password;
                     context.alterSequence.push({ setPassword: arguments });
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.setAuthorisation = function (authorisationObj) {
-                    new OBJY.ObjectAuthorisationSetWrapper(skelleton, authorisationObj, context);
+                this.setAuthorisation = function (authorisationObj) {
+                    new OBJY.ObjectAuthorisationSetWrapper(this, authorisationObj, context);
                     context.alterSequence.push({ setAuthorisation: arguments });
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.removeAuthorisation = function (authorisationId) {
-                    new OBJY.ObjectAuthorisationRemoveWrapper(skelleton, authorisationId, context);
+                this.removeAuthorisation = function (authorisationId) {
+                    new OBJY.ObjectAuthorisationRemoveWrapper(this, authorisationId, context);
                     context.alterSequence.push({ removeAuthorisation: arguments });
-                    return skelleton;
+                    return this;
                 };
             }
 
-            // TODO: explain skelleton!
+            // TODO: explain this!
             if (params.authable || params.authableTemplate) {
-                skelleton.privileges = OBJY.PrivilegesChecker(obj) || {};
-                skelleton._clients = obj._clients;
+                this.privileges = OBJY.PrivilegesChecker(obj) || {};
+                this._clients = obj._clients;
 
-                skelleton.addPrivilege = function (privilege) {
+                this.addPrivilege = function (privilege) {
                     if (context.activeApp) {
                         var tmpPriv = {};
                         tmpPriv[context.activeApp] = { name: privilege };
-                        new OBJY.PrivilegeChecker(skelleton, tmpPriv);
+                        new OBJY.PrivilegeChecker(this, tmpPriv);
                         context.alterSequence.push({ addPrivilege: arguments });
-                        return skelleton;
+                        return this;
                     } else throw new exceptions.General('Invalid app id');
 
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.removePrivilege = function (privilege) {
-                    new OBJY.PrivilegeRemover(skelleton, privilege, context);
+                this.removePrivilege = function (privilege) {
+                    new OBJY.PrivilegeRemover(this, privilege, context);
                     context.alterSequence.push({ removePrivilege: arguments });
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.addClient = function (client) {
-                    if (skelleton._clients.indexOf(client) != -1) throw new exceptions.General('Client ' + client + ' already exists');
-                    skelleton._clients.push(client);
+                this.addClient = function (client) {
+                    if (this._clients.indexOf(client) != -1) throw new exceptions.General('Client ' + client + ' already exists');
+                    this._clients.push(client);
                     context.alterSequence.push({ addClient: arguments });
-                    return skelleton;
+                    return this;
                 };
 
-                skelleton.removeClient = function (client) {
-                    if (skelleton._clients.indexOf(client) == -1) throw new exceptions.General('Client ' + client + ' does not exist');
-                    skelleton._clients.splice(skelleton._clients.indexOf(client), 1);
+                this.removeClient = function (client) {
+                    if (this._clients.indexOf(client) == -1) throw new exceptions.General('Client ' + client + ' does not exist');
+                    this._clients.splice(this._clients.indexOf(client), 1);
                     context.alterSequence.push({ removeClient: arguments });
-                    return skelleton;
+                    return this;
                 };
             }
 
-            /* skelleton.props = function(properties) {
-                 skelleton.properties = OBJY.PropertiesChecker(skelleton, properties, context) || {};
-                 return skelleton;
+            /* this.props = function(properties) {
+                 this.properties = OBJY.PropertiesChecker(this, properties, context) || {};
+                 return this;
              };*/
 
-            skelleton.addInherit = function (templateId) {
-                OBJY.addTemplateToObject(skelleton, templateId, context);
+            Object.getPrototypeOf(this).addInherit = function (templateId) {
+                OBJY.addTemplateToObject(this, templateId, context);
 
                 context.alterSequence.push({ addInherit: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removeInherit = function (templateId, success, error) {
+            Object.getPrototypeOf(this).removeInherit = function (templateId, success, error) {
                 OBJY.removeTemplateFromObject(
-                    skelleton,
+                    this,
                     templateId,
                     function (data) {
                         if (success) success(templateId);
@@ -192,54 +181,56 @@ module.exports = function (OBJY) {
 
                 context.alterSequence.push({ removeInherit: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.addApplication = function (application) {
-                OBJY.addApplicationToObject(skelleton, application, context);
+            Object.getPrototypeOf(this).addApplication = function (application) {
+                OBJY.addApplicationToObject(this, application, context);
 
                 context.alterSequence.push({ addApplication: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removeApplication = function (application) {
-                OBJY.removeApplicationFromObject(skelleton, application, context);
+            Object.getPrototypeOf(this).removeApplication = function (application) {
+                OBJY.removeApplicationFromObject(this, application, context);
 
                 context.alterSequence.push({ removeApplication: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.replace = function (newObj) {
-                newObj = OBJY[skelleton.role](newObj);
+            Object.getPrototypeOf(this).replace = function (newObj) {
+                newObj = OBJY[this.role](newObj);
 
-                if (skelleton.role != newObj.role) throw new exceptions.General('cannot alter role');
+                var self = this;
 
-                Object.keys(skelleton).forEach(function (k) {
-                    if (skelleton[k] contextof Function || k == '_id') return;
-                    delete skelleton[k];
+                if (self.role != newObj.role) throw new exceptions.General('cannot alter role');
+
+                Object.keys(this).forEach(function (k) {
+                    if (self[k] instanceof Function || k == '_id') return;
+                    delete self[k];
                 });
 
-                function doTheProps(skelleton, o) {
+                function doTheProps(self, o) {
                     Object.keys(o).forEach(function (k) {
                         if (o[k] == null || o[k] === undefined) return;
 
-                        skelleton[k] = o[k];
+                        self[k] = o[k];
                         if (typeof o[k] === 'object') {
-                            doTheProps(skelleton[k], o[k]);
+                            doTheProps(self[k], o[k]);
                         }
                     });
                 }
 
-                doTheProps(skelleton, newObj);
+                doTheProps(self, newObj);
 
-                return skelleton;
+                return self;
 
-                //OBJY.prepareObjectDelta(skelleton, newObj);
+                //OBJY.prepareObjectDelta(this, newObj);
             };
 
-            skelleton.addProperty = function (name, property) {
+            Object.getPrototypeOf(this).addProperty = function (name, property) {
                 var prop = {};
                 prop[name] = property;
                 property = prop;
@@ -253,190 +244,190 @@ module.exports = function (OBJY) {
                     var newProp = {};
                     newProp[newProKey] = property[propertyKey];
 
-                    skelleton.addPropertyToBag(bag, newProp);
-                    //new OBJY.PropertyCreateWrapper(skelleton[bag], prop, false, context, params, true);
+                    this.addPropertyToBag(bag, newProp);
+                    //new OBJY.PropertyCreateWrapper(this[bag], prop, false, context, params, true);
 
                     context.alterSequence.push({ addProperty: arguments });
 
-                    return skelleton;
+                    return this;
                 }
 
-                new OBJY.PropertyCreateWrapper(skelleton, property, false, context, params, true);
+                new OBJY.PropertyCreateWrapper(this, property, false, context, params, true);
 
                 context.alterSequence.push({ addProperty: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setOnChange = function (name, onChangeObj) {
+            Object.getPrototypeOf(this).setOnChange = function (name, onChangeObj) {
                 if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.ObjectOnChangeSetWrapper(skelleton, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, context);
+                new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, context);
 
                 context.alterSequence.push({ setOnChange: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setOnDelete = function (name, onDeleteObj) {
+            Object.getPrototypeOf(this).setOnDelete = function (name, onDeleteObj) {
                 if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.ObjectOnDeleteSetWrapper(skelleton, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, context);
+                new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, context);
 
                 context.alterSequence.push({ setOnDelete: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setOnCreate = function (name, onCreateObj) {
+            Object.getPrototypeOf(this).setOnCreate = function (name, onCreateObj) {
                 if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.ObjectOnCreateSetWrapper(skelleton, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, context);
+                new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, context);
 
                 context.alterSequence.push({ setOnCreate: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removeOnChange = function (name) {
-                if (!skelleton.onChange[name]) throw new exceptions.HandlerNotFoundException(name);
-                else delete skelleton.onChange[name];
+            Object.getPrototypeOf(this).removeOnChange = function (name) {
+                if (!this.onChange[name]) throw new exceptions.HandlerNotFoundException(name);
+                else delete this.onChange[name];
                 context.alterSequence.push({ removeOnChange: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removeOnDelete = function (name) {
-                if (!skelleton.onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
-                else delete skelleton.onDelete[name];
+            Object.getPrototypeOf(this).removeOnDelete = function (name) {
+                if (!this.onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
+                else delete this.onDelete[name];
                 context.alterSequence.push({ removeOnDelete: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removeOnCreate = function (name) {
-                if (!skelleton.onCreate[name]) throw new exceptions.HandlerNotFoundException(name);
-                else delete skelleton.onCreate[name];
+            Object.getPrototypeOf(this).removeOnCreate = function (name) {
+                if (!this.onCreate[name]) throw new exceptions.HandlerNotFoundException(name);
+                else delete this.onCreate[name];
                 context.alterSequence.push({ removeOnCreate: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPermission = function (name, permission) {
+            Object.getPrototypeOf(this).setPermission = function (name, permission) {
                 var perm = {};
                 perm[name] = permission;
                 permission = perm;
 
-                new OBJY.ObjectPermissionSetWrapper(skelleton, permission, context);
+                new OBJY.ObjectPermissionSetWrapper(this, permission, context);
                 context.alterSequence.push({ setPermission: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePermission = function (permission) {
-                new OBJY.ObjectPermissionRemoveWrapper(skelleton, permission, context);
+            Object.getPrototypeOf(this).removePermission = function (permission) {
+                new OBJY.ObjectPermissionRemoveWrapper(this, permission, context);
                 context.alterSequence.push({ removePermission: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPropertyValue = function (property, value, client) {
-                new OBJY.PropertySetWrapper(skelleton, property, value, context, params);
+            Object.getPrototypeOf(this).setPropertyValue = function (property, value, client) {
+                new OBJY.PropertySetWrapper(this, property, value, context, params);
                 context.alterSequence.push({ setPropertyValue: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setProperty = function (property, value, client) {
-                new OBJY.PropertySetFullWrapper(skelleton, property, value, context, false, params);
+            Object.getPrototypeOf(this).setProperty = function (property, value, client) {
+                new OBJY.PropertySetFullWrapper(this, property, value, context, false, params);
                 context.alterSequence.push({ setProperty: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.makeProperty = function (property, value, client) {
-                new OBJY.PropertySetFullWrapper(skelleton, property, value, context, true, params);
+            Object.getPrototypeOf(this).makeProperty = function (property, value, client) {
+                new OBJY.PropertySetFullWrapper(this, property, value, context, true, params);
                 context.alterSequence.push({ makeProperty: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setEventDate = function (property, value, client) {
+            Object.getPrototypeOf(this).setEventDate = function (property, value, client) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagEventDate(bag, newProKey, value, client);
+                    this.setBagEventDate(bag, newProKey, value, client);
                     return;
                 }
 
-                new OBJY.EventDateSetWrapper(skelleton, property, value, client, context, params);
+                new OBJY.EventDateSetWrapper(this, property, value, client, context, params);
                 context.alterSequence.push({ setEventDate: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setEventAction = function (property, value, client) {
+            Object.getPrototypeOf(this).setEventAction = function (property, value, client) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagEventAction(bag, newProKey, value, client);
+                    this.setBagEventAction(bag, newProKey, value, client);
                     return;
                 }
 
-                new OBJY.EventActionSetWrapper(skelleton, property, value, client, context, params);
+                new OBJY.EventActionSetWrapper(this, property, value, client, context, params);
                 context.alterSequence.push({ setEventAction: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setEventTriggered = function (property, value, client) {
+            Object.getPrototypeOf(this).setEventTriggered = function (property, value, client) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagEventTriggered(bag, newProKey, value, client);
+                    this.setBagEventTriggered(bag, newProKey, value, client);
                     return;
                 }
 
-                new OBJY.EventTriggeredSetWrapper(skelleton, property, value, client, context, params);
+                new OBJY.EventTriggeredSetWrapper(this, property, value, client, context, params);
                 context.alterSequence.push({ setEventTriggered: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setEventLastOccurence = function (property, value, client) {
+            Object.getPrototypeOf(this).setEventLastOccurence = function (property, value, client) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagEventLastOccurence(bag, newProKey, value, client);
+                    this.setBagEventLastOccurence(bag, newProKey, value, client);
                     return;
                 }
 
-                new OBJY.EventLastOccurenceSetWrapper(skelleton, property, value, client, params);
+                new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, params);
                 context.alterSequence.push({ setEventLastOccurence: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setEventInterval = function (property, value, client) {
+            Object.getPrototypeOf(this).setEventInterval = function (property, value, client) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagEventInterval(bag, newProKey, value, client);
+                    this.setBagEventInterval(bag, newProKey, value, client);
                     return;
                 }
 
-                new OBJY.EventIntervalSetWrapper(skelleton, property, value, client, context, params);
+                new OBJY.EventIntervalSetWrapper(this, property, value, client, context, params);
                 context.alterSequence.push({ setEventInterval: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.pushToArray = function (array, value) {
+            Object.getPrototypeOf(this).pushToArray = function (array, value) {
                 var propKey = Object.keys(value)[0];
                 var tmpProp = {};
                 var tmpName;
@@ -444,411 +435,411 @@ module.exports = function (OBJY) {
 
                 tmpProp[tmpName] = value[propKey];
 
-                skelleton.addPropertyToBag(array, tmpProp);
+                this.addPropertyToBag(array, tmpProp);
                 context.alterSequence.push({ pushToArray: arguments });
             };
 
-            skelleton.setPropertyPermission = function (property, name, permission) {
+            Object.getPrototypeOf(this).setPropertyPermission = function (property, name, permission) {
                 var perm = {};
                 perm[name] = permission;
                 permission = perm;
 
-                new OBJY.PropertyPermissionSetWrapper(skelleton, property, permission, context, params);
+                new OBJY.PropertyPermissionSetWrapper(this, property, permission, context, params);
                 context.alterSequence.push({ setPropertyPermission: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPropertyOnCreate = function (property, name, onCreateObj) {
+            Object.getPrototypeOf(this).setPropertyOnCreate = function (property, name, onCreateObj) {
                 if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.PropertyOnCreateSetWrapper(skelleton, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, context, params);
+                new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, context, params);
                 context.alterSequence.push({ setPropertyOnCreate: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyOnCreate = function (propertyName, handlerName) {
+            Object.getPrototypeOf(this).removePropertyOnCreate = function (propertyName, handlerName) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyOnCreateFromBag(propertyName, handlerName);
+                    this.removePropertyOnCreateFromBag(propertyName, handlerName);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].onCreate) throw new exceptions.NoOnCreateException(); // CHANGE!!!
-                    if (!skelleton[propertyName].onCreate[handlerName]) throw new exceptions.NoOnCreateException(); // CHANGE!!!
-                    delete skelleton[propertyName].onCreate[propertyName];
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].onCreate) throw new exceptions.NoOnCreateException(); // CHANGE!!!
+                    if (!this[propertyName].onCreate[handlerName]) throw new exceptions.NoOnCreateException(); // CHANGE!!!
+                    delete this[propertyName].onCreate[propertyName];
                 }
 
                 context.alterSequence.push({ removePropertyOnCreate: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyOnCreateFromBag = function (property, handlerName) {
-                var bag = skelleton.getProperty(property);
-                if (skelleton.role == 'template') {
+            Object.getPrototypeOf(this).removePropertyOnCreateFromBag = function (property, handlerName) {
+                var bag = this.getProperty(property);
+                if (this.role == 'template') {
                 }
-                new OBJY.PropertyBagItemOnCreateRemover(skelleton, property, handlerName);
+                new OBJY.PropertyBagItemOnCreateRemover(this, property, handlerName);
                 context.alterSequence.push({ removePropertyOnCreateFromBag: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPropertyMeta = function (property, meta) {
-                new OBJY.PropertyMetaSetWrapper(skelleton, property, meta, params);
+            Object.getPrototypeOf(this).setPropertyMeta = function (property, meta) {
+                new OBJY.PropertyMetaSetWrapper(this, property, meta, params);
                 context.alterSequence.push({ setPropertyMeta: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyMetaFromBag = function (property) {
-                var bag = skelleton.getProperty(property);
-                if (skelleton.role == 'template') {
+            Object.getPrototypeOf(this).removePropertyMetaFromBag = function (property) {
+                var bag = this.getProperty(property);
+                if (this.role == 'template') {
                 }
-                new OBJY.PropertyBagItemMetaRemover(skelleton, property);
+                new OBJY.PropertyBagItemMetaRemover(this, property);
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyMeta = function (propertyName) {
+            Object.getPrototypeOf(this).removePropertyMeta = function (propertyName) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyMetaFromBag(propertyName);
+                    this.removePropertyMetaFromBag(propertyName);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].meta) throw new exceptions.NoMetaException(); // CHANGE!!!
-                    delete skelleton[propertyName].meta;
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].meta) throw new exceptions.NoMetaException(); // CHANGE!!!
+                    delete this[propertyName].meta;
                 }
 
                 context.alterSequence.push({ removePropertyMeta: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPropertyOnChange = function (property, name, onChangeObj) {
+            Object.getPrototypeOf(this).setPropertyOnChange = function (property, name, onChangeObj) {
                 if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name; //Object.keys(onChangeObj)[0];
 
-                new OBJY.PropertyOnChangeSetWrapper(skelleton, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, context, params);
+                new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, context, params);
                 context.alterSequence.push({ setPropertyOnChange: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyOnChange = function (propertyName, name) {
+            Object.getPrototypeOf(this).removePropertyOnChange = function (propertyName, name) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyOnChangeFromBag(propertyName, name);
+                    this.removePropertyOnChangeFromBag(propertyName, name);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].onDelete[name]) throw new exceptions.HandlerNotFoundException(name); // CHANGE!!!
-                    delete skelleton[propertyName][name];
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].onDelete[name]) throw new exceptions.HandlerNotFoundException(name); // CHANGE!!!
+                    delete this[propertyName][name];
                 }
 
                 context.alterSequence.push({ removePropertyOnChange: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyOnChangeFromBag = function (property, name) {
-                var bag = skelleton.getProperty(property);
+            Object.getPrototypeOf(this).removePropertyOnChangeFromBag = function (property, name) {
+                var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemOnChangeRemover(skelleton, property, name);
+                new OBJY.PropertyBagItemOnChangeRemover(this, property, name);
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPropertyOnDelete = function (property, name, onDeleteObj) {
+            Object.getPrototypeOf(this).setPropertyOnDelete = function (property, name, onDeleteObj) {
                 if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.PropertyOnDeleteSetWrapper(skelleton, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, context, params);
+                new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, context, params);
                 context.alterSequence.push({ setPropertyOnDelete: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyOnDelete = function (propertyName, name) {
+            Object.getPrototypeOf(this).removePropertyOnDelete = function (propertyName, name) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyOnDeleteFromBag(propertyName, name);
+                    this.removePropertyOnDeleteFromBag(propertyName, name);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].onDelete[name]) throw new exceptions.HandlerNotFoundException(name); // CHANGE!!!
-                    delete skelleton[propertyName].onDelete[name];
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].onDelete[name]) throw new exceptions.HandlerNotFoundException(name); // CHANGE!!!
+                    delete this[propertyName].onDelete[name];
                 }
 
                 context.alterSequence.push({ removePropertyOnDelete: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyOnDeleteFromBag = function (property, name) {
-                var bag = skelleton.getProperty(property);
+            Object.getPrototypeOf(this).removePropertyOnDeleteFromBag = function (property, name) {
+                var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemOnDeleteRemover(skelleton, property, name);
+                new OBJY.PropertyBagItemOnDeleteRemover(this, property, name);
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setPropertyConditions = function (property, conditions) {
+            Object.getPrototypeOf(this).setPropertyConditions = function (property, conditions) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagPropertyConditions(bag, newProKey, conditions);
+                    this.setBagPropertyConditions(bag, newProKey, conditions);
                     return;
                 }
-                new OBJY.PropertyConditionsSetWrapper(skelleton, property, conditions, params);
+                new OBJY.PropertyConditionsSetWrapper(this, property, conditions, params);
                 context.alterSequence.push({ setPropertyConditions: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.setBagPropertyConditions = function (bag, property, conditions) {
-                new OBJY.PropertyConditionsSetWrapper(skelleton.getProperty(bag), property, conditions, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagPropertyConditions = function (bag, property, conditions) {
+                new OBJY.PropertyConditionsSetWrapper(this.getProperty(bag), property, conditions, params);
+                return this;
             };
 
-            skelleton.setBagPropertyPermission = function (bag, property, permission) {
-                new OBJY.PropertyPermissionSetWrapper(skelleton.getProperty(bag), property, permission, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagPropertyPermission = function (bag, property, permission) {
+                new OBJY.PropertyPermissionSetWrapper(this.getProperty(bag), property, permission, params);
+                return this;
             };
 
-            skelleton.setPropertyQuery = function (property, options) {
+            Object.getPrototypeOf(this).setPropertyQuery = function (property, options) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf('.');
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagPropertyQuery(bag, newProKey, value);
+                    this.setBagPropertyQuery(bag, newProKey, value);
                     return;
                 }
-                new OBJY.PropertyQuerySetWrapper(skelleton, property, options, params);
+                new OBJY.PropertyQuerySetWrapper(this, property, options, params);
                 context.alterSequence.push({ setPropertyQuery: arguments });
-                return skelleton;
+                return this;
             };
 
-            /*skelleton.setPropertyEventInterval = function(property, interval) {
+            /*this.setPropertyEventInterval = function(property, interval) {
                 var propertyKey = Object.keys(property)[0];
                 if (propertyKey.indexOf('.') != -1) {
                     var lastDot = propertyKey.lastIndexOf(".");
                     var bag = propertyKey.substring(0, lastDot);
                     var newProKey = propertyKey.substring(lastDot + 1, propertyKey.length);
                     var newProp = {};
-                    skelleton.setBagPropertyEventInterval(bag, newProKey, value);
+                    this.setBagPropertyEventInterval(bag, newProKey, value);
                     return;
                 }
-                new OBJY.PropertyEventIntervalSetWrapper(skelleton, property, interval, context);
-                return skelleton;
+                new OBJY.PropertyEventIntervalSetWrapper(this, property, interval, context);
+                return this;
             };*/
 
-            skelleton.removePropertyQuery = function (propertyName) {
+            Object.getPrototypeOf(this).removePropertyQuery = function (propertyName) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyQueryFromBag(propertyName);
+                    this.removePropertyQueryFromBag(propertyName);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].query) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
-                    delete skelleton[propertyName].query;
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].query) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
+                    delete this[propertyName].query;
                 }
 
                 context.alterSequence.push({ removePropertyQuery: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyQueryFromBag = function (property) {
-                var bag = skelleton.getProperty(property);
+            Object.getPrototypeOf(this).removePropertyQueryFromBag = function (property) {
+                var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemQueryRemover(skelleton, property);
-                return skelleton;
+                new OBJY.PropertyBagItemQueryRemover(this, property);
+                return this;
             };
 
-            skelleton.removePropertyConditions = function (propertyName) {
+            Object.getPrototypeOf(this).removePropertyConditions = function (propertyName) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyConditionsFromBag(propertyName);
+                    this.removePropertyConditionsFromBag(propertyName);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].conditions) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
-                    delete skelleton[propertyName].conditions;
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].conditions) throw new exceptions.NoSuchPermissionException(permissionKey); // CHANGE!!!
+                    delete this[propertyName].conditions;
                 }
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyConditionsFromBag = function (property) {
-                var bag = skelleton.getProperty(property);
+            Object.getPrototypeOf(this).removePropertyConditionsFromBag = function (property) {
+                var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemConditionsRemover(skelleton, property);
-                return skelleton;
+                new OBJY.PropertyBagItemConditionsRemover(this, property);
+                return this;
             };
 
-            skelleton.setBagPropertyQuery = function (bag, property, options) {
+            Object.getPrototypeOf(this).setBagPropertyQuery = function (bag, property, options) {
                 // @TODO ...
-                //new OBJY.setBagPropertyQuery(skelleton.getProperty(bag), property, permoptionsission);
-                return skelleton;
+                //new OBJY.setBagPropertyQuery(this.getProperty(bag), property, permoptionsission);
+                return this;
             };
 
-            skelleton.removePropertyPermission = function (propertyName, permissionKey) {
+            Object.getPrototypeOf(this).removePropertyPermission = function (propertyName, permissionKey) {
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyPermissionFromBag(propertyName, permissionKey);
+                    this.removePropertyPermissionFromBag(propertyName, permissionKey);
                     return;
                 } else {
-                    if (!skelleton[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
-                    if (!skelleton[propertyName].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
+                    if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!this[propertyName].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
-                    OBJY.chainPermission(skelleton, context, 'x', 'removePropertyPermission', permissionKey);
+                    OBJY.chainPermission(this, context, 'x', 'removePropertyPermission', permissionKey);
 
                     context.alterSequence.push({ removePropertyPermission: arguments });
 
-                    delete skelleton[propertyName].permissions[permissionKey];
+                    delete this[propertyName].permissions[permissionKey];
                 }
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setBagPropertyValue = function (bag, property, value, client) {
-                new OBJY.PropertySetWrapper(skelleton.getProperty(bag), property, value, context, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagPropertyValue = function (bag, property, value, client) {
+                new OBJY.PropertySetWrapper(this.getProperty(bag), property, value, context, params);
+                return this;
             };
 
-            skelleton.setBagEventDate = function (bag, property, value, client) {
-                new OBJY.EventDateSetWrapper(skelleton.getProperty(bag), property, value, context, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagEventDate = function (bag, property, value, client) {
+                new OBJY.EventDateSetWrapper(this.getProperty(bag), property, value, context, params);
+                return this;
             };
 
-            skelleton.setBagEventAction = function (bag, property, value, client) {
-                new OBJY.EventActionSetWrapper(skelleton.getProperty(bag), property, value, context, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagEventAction = function (bag, property, value, client) {
+                new OBJY.EventActionSetWrapper(this.getProperty(bag), property, value, context, params);
+                return this;
             };
 
-            skelleton.setBagEventInterval = function (bag, property, value, client) {
-                new OBJY.EventIntervalSetWrapper(skelleton.getProperty(bag), property, value, context, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagEventInterval = function (bag, property, value, client) {
+                new OBJY.EventIntervalSetWrapper(this.getProperty(bag), property, value, context, params);
+                return this;
             };
 
-            skelleton.setBagEventTriggered = function (bag, property, value, client) {
-                new OBJY.EventTriggeredSetWrapper(skelleton, property, value, client, context, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagEventTriggered = function (bag, property, value, client) {
+                new OBJY.EventTriggeredSetWrapper(this, property, value, client, context, params);
+                return this;
             };
 
-            skelleton.setBagEventLastOccurence = function (bag, property, value, client) {
-                new OBJY.EventLastOccurenceSetWrapper(skelleton.getProperty(bag), property, value, client, params);
-                return skelleton;
+            Object.getPrototypeOf(this).setBagEventLastOccurence = function (bag, property, value, client) {
+                new OBJY.EventLastOccurenceSetWrapper(this.getProperty(bag), property, value, client, params);
+                return this;
             };
 
-            skelleton.addPropertyToBag = function (bag, property) {
-                var tmpBag = skelleton.getProperty(bag);
+            Object.getPrototypeOf(this).addPropertyToBag = function (bag, property) {
+                var tmpBag = this.getProperty(bag);
 
                 new OBJY.PropertyCreateWrapper(tmpBag, property, true, context, params, true);
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.removePropertyFromBag = function (property, client) {
-                var bag = skelleton.getProperty(property);
+            Object.getPrototypeOf(this).removePropertyFromBag = function (property, client) {
+                var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemRemover(skelleton, property, params, context);
-                return skelleton;
+                new OBJY.PropertyBagItemRemover(this, property, params, context);
+                return this;
             };
 
-            skelleton.removePropertyPermissionFromBag = function (property, permissionKey) {
-                var bag = skelleton.getProperty(property);
+            Object.getPrototypeOf(this).removePropertyPermissionFromBag = function (property, permissionKey) {
+                var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemPermissionRemover(skelleton, property, permissionKey, context);
-                return skelleton;
+                new OBJY.PropertyBagItemPermissionRemover(this, property, permissionKey, context);
+                return this;
             };
 
-            skelleton.removeProperty = function (propertyName, client) {
-                var skelletonRef = skelleton;
+            Object.getPrototypeOf(this).removeProperty = function (propertyName, client) {
+                var thisRef = this;
 
                 if (propertyName.indexOf('.') != -1) {
-                    skelleton.removePropertyFromBag(propertyName, client);
+                    this.removePropertyFromBag(propertyName, client);
                     context.alterSequence.push({ removeProperty: arguments });
-                    return skelleton;
+                    return this;
                 } else {
-                    if (!skelletonRef[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
+                    if (!thisRef[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
 
-                    var tmpProp = Object.assign({}, skelletonRef[propertyName]);
+                    var tmpProp = Object.assign({}, thisRef[propertyName]);
 
                     if (tmpProp.onDelete) {
                         if (Object.keys(tmpProp.onDelete).length > 0) {
-                            if (!context.handlerSequence[skelleton._id]) context.handlerSequence[skelleton._id] = {};
-                            if (!context.handlerSequence[skelleton._id].onDelete) context.handlerSequence[skelleton._id].onDelete = [];
-                            context.handlerSequence[skelleton._id].onDelete.push({
+                            if (!context.handlerSequence[this._id]) context.handlerSequence[this._id] = {};
+                            if (!context.handlerSequence[this._id].onDelete) context.handlerSequence[this._id].onDelete = [];
+                            context.handlerSequence[this._id].onDelete.push({
                                 handler: tmpProp.onDelete,
                                 prop: tmpProp,
                             });
                         }
                     }
 
-                    OBJY.chainPermission(skelletonRef[propertyName], context, 'd', 'removeProperty', propertyName);
+                    OBJY.chainPermission(thisRef[propertyName], context, 'd', 'removeProperty', propertyName);
 
                     context.alterSequence.push({ removeProperty: arguments });
 
-                    /*if (skelleton[propertyName].type == 'date') context.eventAlterationSequence.push({
+                    /*if (this[propertyName].type == 'date') context.eventAlterationSequence.push({
                         operation: 'remove',
-                        obj: skelleton,
+                        obj: this,
                         propName: propertyName,
                         date: date
                     })*/
 
-                    delete skelletonRef[propertyName];
+                    delete thisRef[propertyName];
                 }
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.getId = function () {
-                return skelleton._id;
+            Object.getPrototypeOf(this).getId = function () {
+                return this._id;
             };
 
-            skelleton.getName = function () {
-                return skelleton.name;
+            Object.getPrototypeOf(this).getName = function () {
+                return this.name;
             };
 
-            skelleton.setName = function (name) {
-                skelleton.name = name;
+            Object.getPrototypeOf(this).setName = function (name) {
+                this.name = name;
 
-                OBJY.chainPermission(skelleton, context, 'n', 'setName', name);
+                OBJY.chainPermission(this, context, 'n', 'setName', name);
 
                 context.alterSequence.push({ setName: arguments });
 
-                return skelleton;
+                return this;
             };
 
-            skelleton.setType = function (type) {
-                skelleton.type = type;
-                OBJY.chainPermission(skelleton, context, 't', 'setType', type);
+            Object.getPrototypeOf(this).setType = function (type) {
+                this.type = type;
+                OBJY.chainPermission(this, context, 't', 'setType', type);
                 context.alterSequence.push({ setType: arguments });
-                return skelleton;
+                return this;
             };
 
-            skelleton.getType = function () {
-                return skelleton.type;
+            Object.getPrototypeOf(this).getType = function () {
+                return this.type;
             };
 
-            skelleton.getRef = function (propertyName) {
-                return new OBJY.PropertyRefParser(skelleton, propertyName);
+            Object.getPrototypeOf(this).getRef = function (propertyName) {
+                return new OBJY.PropertyRefParser(this, propertyName);
             };
 
-            skelleton.getProperty = function (propertyName) {
-                return OBJY.PropertyParser(skelleton, propertyName, context, params);
+            Object.getPrototypeOf(this).getProperty = function (propertyName) {
+                return OBJY.PropertyParser(this, propertyName, context, params);
             };
 
-            skelleton.getProperties = function () {
-                return skelleton;
+            Object.getPrototypeOf(this).getProperties = function () {
+                return this;
             };
 
-            skelleton.add = function (success, error, client) {
+            Object.getPrototypeOf(this).add = function (success, error, client) {
                 return new Promise((resolve, reject) => {
                     var client = client || context.activeTenant;
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    var skelletonRef = skelleton;
+                    var thisRef = this;
 
-                    //OBJY.applyAffects(skelletonRef, 'onCreate', context, client);
+                    //OBJY.applyAffects(thisRef, 'onCreate', context, client);
 
-                    if (!OBJY.checkAuthroisations(skelleton, user, 'c', app, context)) return error({ error: 'Lack of Permissions' });
+                    if (!OBJY.checkAuthroisations(this, user, 'c', app, context)) return error({ error: 'Lack of Permissions' });
 
-                    if (!skelleton._id) skelleton._id = OBJY.ID();
+                    if (!this._id) this._id = OBJY.ID();
 
                     if (params.dirty) {
                         var constraints = OBJY.checkConstraints(obj);
@@ -859,9 +850,9 @@ module.exports = function (OBJY) {
                         }
 
                         OBJY.add(
-                            skelletonRef,
+                            thisRef,
                             function (data) {
-                                skelletonRef._id = data._id;
+                                thisRef._id = data._id;
 
                                 OBJY.deSerializePropsObject(data, params);
 
@@ -870,7 +861,7 @@ module.exports = function (OBJY) {
                                     resolve(OBJY.deserialize(data));
                                 }
 
-                                delete skelletonRef.context;
+                                delete thisRef.context;
                             },
                             function (err) {
                                 console.warn('err', err, error);
@@ -884,15 +875,15 @@ module.exports = function (OBJY) {
                             params
                         );
 
-                        return OBJY.deserialize(skelleton);
+                        return OBJY.deserialize(this);
                     }
 
-                    if (skelletonRef.onCreate) {
-                        Object.keys(skelletonRef.onCreate).forEach(function (key) {
-                            if (skelletonRef.onCreate[key].trigger == 'before' || !skelletonRef.onCreate[key].trigger) {
+                    if (thisRef.onCreate) {
+                        Object.keys(thisRef.onCreate).forEach(function (key) {
+                            if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
                                 context.execProcessorAction(
-                                    skelletonRef.onCreate[key].value || skelletonRef.onCreate[key].action,
-                                    skelletonRef,
+                                    thisRef.onCreate[key].value || thisRef.onCreate[key].action,
+                                    thisRef,
                                     null,
                                     null,
                                     function (data) {},
@@ -903,10 +894,10 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    skelleton.created = moment().utc().toDate().toISOString();
-                    skelleton.lastModified = moment().utc().toDate().toISOString();
+                    this.created = moment().utc().toDate().toISOString();
+                    this.lastModified = moment().utc().toDate().toISOString();
 
-                    skelletonRef._aggregatedEvents = [];
+                    thisRef._aggregatedEvents = [];
 
                     function aggregateAllEvents(props, prePropsString) {
                         Object.keys(props).forEach(function (p) {
@@ -937,19 +928,19 @@ module.exports = function (OBJY) {
                                 if (prePropsString) {
                                     context.eventAlterationSequence.push({
                                         operation: 'add',
-                                        obj: skelletonRef,
+                                        obj: thisRef,
                                         propName: prePropsString + '.' + p,
                                         property: props[p],
                                         date: date,
                                     });
 
                                     var found = false;
-                                    skelletonRef._aggregatedEvents.forEach(function (aE) {
+                                    thisRef._aggregatedEvents.forEach(function (aE) {
                                         if (aE.propName == prePropsString + '.' + p) found = true;
                                     });
 
                                     if (!found && props[p].triggered != true)
-                                        skelletonRef._aggregatedEvents.push({
+                                        thisRef._aggregatedEvents.push({
                                             propName: prePropsString + '.' + p,
                                             date: date,
                                         });
@@ -957,21 +948,21 @@ module.exports = function (OBJY) {
 
                                     context.eventAlterationSequence.push({
                                         operation: 'add',
-                                        obj: skelletonRef,
+                                        obj: thisRef,
                                         propName: p,
                                         property: props[p],
                                         date: date,
                                     });
 
                                     var found = false;
-                                    skelletonRef._aggregatedEvents.forEach(function (aE) {
+                                    thisRef._aggregatedEvents.forEach(function (aE) {
                                         if (aE.propName == p) found = true;
                                     });
 
                                     
                                     if (!found && props[p].triggered != true){
 
-                                        skelletonRef._aggregatedEvents.push({
+                                        thisRef._aggregatedEvents.push({
                                             propName: p,
                                             date: date,
                                         });
@@ -981,15 +972,15 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    var mapper = context.observers[skelletonRef.role];
+                    var mapper = context.observers[thisRef.role];
 
-                    //if (skelleton) aggregateAllEvents(skelleton.properties);
+                    //if (this) aggregateAllEvents(this.properties);
 
-                    aggregateAllEvents(skelletonRef);
+                    aggregateAllEvents(thisRef);
 
                     if (app) {
-                        if (!skelleton.applications) skelleton.applications = [];
-                        if (skelleton.applications) if (skelleton.applications.indexOf(app) == -1) skelleton.applications.push(app);
+                        if (!this.applications) this.applications = [];
+                        if (this.applications) if (this.applications.indexOf(app) == -1) this.applications.push(app);
                     }
 
                     var addFn = function (obj) {
@@ -1007,7 +998,7 @@ module.exports = function (OBJY) {
                             function (data) {
                                 obj._id = data._id;
 
-                                OBJY.applyAffects(skelletonRef, 'onCreate', context, client);
+                                OBJY.applyAffects(thisRef, 'onCreate', context, client);
                                 
                                 if (data.onCreate) {
                                     Object.keys(data.onCreate).forEach(function (key) {
@@ -1064,7 +1055,7 @@ module.exports = function (OBJY) {
                                     resolve(OBJY.deserialize(data));
                                 }
 
-                                delete skelletonRef.context;
+                                delete thisRef.context;
                             },
                             function (err) {
                                 if (error) error(err);
@@ -1080,27 +1071,27 @@ module.exports = function (OBJY) {
                     };
 
                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
-                        if (skelleton.inherits.length == 0) addFn(skelletonRef);
+                        if (this.inherits.length == 0) addFn(thisRef);
 
                         var counter = 0;
-                        skelleton.inherits.forEach(function (template) {
-                            if (skelletonRef._id != template) {
+                        this.inherits.forEach(function (template) {
+                            if (thisRef._id != template) {
                                 OBJY.getTemplateFieldsForObject(
-                                    skelletonRef,
+                                    thisRef,
                                     template,
                                     function () {
                                         counter++;
-                                        if (counter == skelletonRef.inherits.length) {
-                                            addFn(skelletonRef);
-                                            return skelleton;
+                                        if (counter == thisRef.inherits.length) {
+                                            addFn(thisRef);
+                                            return this;
                                         }
                                     },
                                     function (err) {
-                                        if (error) error(skelletonRef);
+                                        if (error) error(thisRef);
                                         else {
-                                            reject(skelletonRef);
+                                            reject(thisRef);
                                         }
-                                        return skelleton;
+                                        return this;
                                     },
                                     client,
                                     params.templateFamily,
@@ -1110,26 +1101,26 @@ module.exports = function (OBJY) {
                             }
                         });
                     } else {
-                        addFn(skelletonRef);
+                        addFn(thisRef);
                     }
-                    return OBJY.deserialize(skelleton);
+                    return OBJY.deserialize(this);
                 });
             };
 
-            skelleton.update = function (success, error, client) {
+            Object.getPrototypeOf(this).update = function (success, error, client) {
                 return new Promise((resolve, reject) => {
                     var client = client || context.activeTenant;
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    OBJY.applyAffects(skelleton, 'onChange', context, client, 'before');
+                    OBJY.applyAffects(this, 'onChange', context, client, 'before');
 
-                    if (!OBJY.checkAuthroisations(skelleton, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
+                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
 
-                    var skelletonRef = skelleton;
+                    var thisRef = this;
 
                     if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(skelleton);
+                        var constraints = OBJY.checkConstraints(this);
                         if (Array.isArray(constraints) && error) {
                             return error({
                                 message: 'constraints error: ' + constraints.join(','),
@@ -1137,9 +1128,9 @@ module.exports = function (OBJY) {
                         }
 
                         OBJY.updateO(
-                            skelletonRef,
+                            thisRef,
                             function (data) {
-                                delete context.handlerSequence[skelleton._id];
+                                delete context.handlerSequence[this._id];
 
                                 context.eventAlterationSequence = [];
 
@@ -1164,21 +1155,21 @@ module.exports = function (OBJY) {
                             context
                         );
 
-                        return OBJY.deserialize(skelleton);
+                        return OBJY.deserialize(this);
                     }
 
-                    if (!OBJY.checkPermissions(user, app, skelletonRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
+                    if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
 
-                    if ((context.permissionSequence[skelletonRef._id] || []).length > 0) {
-                        throw new exceptions.LackOfPermissionsException(context.permissionSequence[skelletonRef._id]);
+                    if ((context.permissionSequence[thisRef._id] || []).length > 0) {
+                        throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
 
-                    if (skelletonRef.onChange) {
-                        Object.keys(skelletonRef.onChange).forEach(function (key) {
-                            if (skelletonRef.onChange[key].trigger == 'before') {
+                    if (thisRef.onChange) {
+                        Object.keys(thisRef.onChange).forEach(function (key) {
+                            if (thisRef.onChange[key].trigger == 'before') {
                                 context.execProcessorAction(
-                                    skelletonRef.onChange[key].value || skelletonRef.onChange[key].action,
-                                    skelletonRef,
+                                    thisRef.onChange[key].value || thisRef.onChange[key].action,
+                                    thisRef,
                                     null,
                                     null,
                                     function (data) {},
@@ -1189,16 +1180,16 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    if (context.handlerSequence[skelleton._id]) {
-                        for (var type in context.handlerSequence[skelleton._id]) {
-                            for (var item in context.handlerSequence[skelleton._id][type]) {
-                                var handlerObj = context.handlerSequence[skelleton._id][type][item];
+                    if (context.handlerSequence[this._id]) {
+                        for (var type in context.handlerSequence[this._id]) {
+                            for (var item in context.handlerSequence[this._id][type]) {
+                                var handlerObj = context.handlerSequence[this._id][type][item];
 
                                 for (var handlerItem in handlerObj.handler) {
                                     if (handlerObj.handler[handlerItem].trigger == 'before') {
                                         context.execProcessorAction(
                                             handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                            skelletonRef,
+                                            thisRef,
                                             handlerObj.prop,
                                             null,
                                             function (data) {},
@@ -1211,11 +1202,11 @@ module.exports = function (OBJY) {
                         }
                     }
 
-                    skelleton.lastModified = moment().toDate().toISOString();
+                    this.lastModified = moment().toDate().toISOString();
 
-                    var skelletonRef = skelleton;
+                    var thisRef = this;
 
-                    skelletonRef._aggregatedEvents = [];
+                    thisRef._aggregatedEvents = [];
 
                     function aggregateAllEvents(props, prePropsString) {
                         Object.keys(props).forEach(function (p) {
@@ -1243,23 +1234,23 @@ module.exports = function (OBJY) {
 
                                 if (prePropsString) {
                                     var found = false;
-                                    skelletonRef._aggregatedEvents.forEach(function (aE) {
+                                    thisRef._aggregatedEvents.forEach(function (aE) {
                                         if (aE.propName == prePropsString + '.' + p) found = true;
                                     });
 
                                     if (!found && props[p].triggered != true)
-                                        skelletonRef._aggregatedEvents.push({
+                                        thisRef._aggregatedEvents.push({
                                             propName: prePropsString + '.' + p,
                                             date: date,
                                         });
                                 } else {
                                     var found = false;
-                                    skelletonRef._aggregatedEvents.forEach(function (aE) {
+                                    thisRef._aggregatedEvents.forEach(function (aE) {
                                         if (aE.propName == p) found = true;
                                     });
 
                                     if (!found && props[p].triggered != true)
-                                        skelletonRef._aggregatedEvents.push({
+                                        thisRef._aggregatedEvents.push({
                                             propName: p,
                                             date: date,
                                         });
@@ -1268,13 +1259,13 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    var mapper = context.observers[skelletonRef.role];
+                    var mapper = context.observers[thisRef.role];
 
-                    //if (mapper.type != 'scheduled' && skelleton) aggregateAllEvents(skelleton.properties);
-                    if (mapper.type != 'scheduled') aggregateAllEvents(skelleton);
+                    //if (mapper.type != 'scheduled' && this) aggregateAllEvents(this.properties);
+                    if (mapper.type != 'scheduled') aggregateAllEvents(this);
 
                     function updateFn() {
-                        var constraints = OBJY.checkConstraints(skelletonRef);
+                        var constraints = OBJY.checkConstraints(thisRef);
                         if (Array.isArray(constraints) && error) {
                             return error({
                                 message: 'constraints error: ' + constraints.join(','),
@@ -1282,7 +1273,7 @@ module.exports = function (OBJY) {
                         }
 
                         OBJY.updateO(
-                            skelletonRef,
+                            thisRef,
                             function (data) {
                                 OBJY.applyAffects(data, 'onChange', context, client, 'after');
 
@@ -1302,15 +1293,15 @@ module.exports = function (OBJY) {
                                     });
                                 }
 
-                                if (context.handlerSequence[skelletonRef._id]) {
-                                    for (var type in context.handlerSequence[skelletonRef._id]) {
-                                        for (var item in context.handlerSequence[skelletonRef._id][type]) {
-                                            var handlerObj = context.handlerSequence[skelletonRef._id][type][item];
+                                if (context.handlerSequence[thisRef._id]) {
+                                    for (var type in context.handlerSequence[thisRef._id]) {
+                                        for (var item in context.handlerSequence[thisRef._id][type]) {
+                                            var handlerObj = context.handlerSequence[thisRef._id][type][item];
                                             for (var handlerItem in handlerObj.handler) {
                                                 if (handlerObj.handler[handlerItem].trigger == 'after' || !handlerObj.handler[handlerItem].trigger) {
                                                     context.execProcessorAction(
                                                         handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                                        skelletonRef,
+                                                        thisRef,
                                                         handlerObj.prop,
                                                         null,
                                                         function (data) {},
@@ -1323,13 +1314,13 @@ module.exports = function (OBJY) {
                                     }
                                 }
 
-                                delete context.handlerSequence[skelletonRef._id];
+                                delete context.handlerSequence[thisRef._id];
 
                                 if (mapper.type == 'scheduled') {
                                     context.eventAlterationSequence.forEach(function (evt) {
                                         if (evt.type == 'add') {
                                             mapper.addEvent(
-                                                skelletonRef._id,
+                                                thisRef._id,
                                                 evt.propName,
                                                 evt.property,
                                                 function (evtData) {},
@@ -1344,7 +1335,7 @@ module.exports = function (OBJY) {
 
                                 if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                                     OBJY.updateInheritedObjs(
-                                        skelletonRef,
+                                        thisRef,
                                         params.pluralName,
                                         function (data) {},
                                         function (err) {},
@@ -1384,27 +1375,27 @@ module.exports = function (OBJY) {
                             }
                         });
 
-                        if (foundCounter == 0) updateFn(skelletonRef);
+                        if (foundCounter == 0) updateFn(thisRef);
 
                         var execCounter = 0;
                         context.commandSequence.forEach(function (i) {
-                            if (i.name == 'addInherit' && skelletonRef.inherits.indexOf(i.value) != -1) {
+                            if (i.name == 'addInherit' && thisRef.inherits.indexOf(i.value) != -1) {
                                 execCounter++;
 
                                 OBJY.getTemplateFieldsForObject(
-                                    skelletonRef,
+                                    thisRef,
                                     i.value,
                                     function () {
                                         if (execCounter == foundCounter) {
-                                            updateFn(skelletonRef);
+                                            updateFn(thisRef);
                                         }
                                     },
                                     function (err) {
-                                        if (error) error(skelletonRef);
+                                        if (error) error(thisRef);
                                         else {
-                                            reject(skelletonRef);
+                                            reject(thisRef);
                                         }
-                                        return skelletonRef;
+                                        return thisRef;
                                     },
                                     client,
                                     params.templateFamily,
@@ -1414,22 +1405,22 @@ module.exports = function (OBJY) {
                                 );
                             }
 
-                            if (i.name == 'removeInherit' && skelletonRef.inherits.indexOf(i.value) == -1) {
+                            if (i.name == 'removeInherit' && thisRef.inherits.indexOf(i.value) == -1) {
                                 execCounter++;
                                 OBJY.removeTemplateFieldsForObject(
-                                    skelletonRef,
+                                    thisRef,
                                     i.value,
                                     function () {
                                         if (execCounter == foundCounter) {
-                                            updateFn(skelletonRef);
+                                            updateFn(thisRef);
                                         }
                                     },
                                     function (err) {
-                                        if (error) error(skelletonRef);
+                                        if (error) error(thisRef);
                                         else {
-                                            reject(skelletonRef);
+                                            reject(thisRef);
                                         }
-                                        return skelletonRef;
+                                        return thisRef;
                                     },
                                     client,
                                     params,
@@ -1437,33 +1428,33 @@ module.exports = function (OBJY) {
                                 );
                             }
                         });
-                    } else updateFn(skelletonRef);
+                    } else updateFn(thisRef);
 
                     context.commandSequence = [];
 
-                    return OBJY.deserialize(skelleton);
+                    return OBJY.deserialize(this);
                 });
             };
 
-            skelleton.remove = function (success, error, client) {
+            Object.getPrototypeOf(this).remove = function (success, error, client) {
                 return new Promise((resolve, reject) => {
                     var client = client || context.activeTenant;
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    var skelletonRef = JSON.parse(JSON.stringify(skelleton));
+                    var thisRef = JSON.parse(JSON.stringify(this));
 
-                    OBJY.applyAffects(skelletonRef, 'onDelete', context, client);
+                    OBJY.applyAffects(thisRef, 'onDelete', context, client);
 
                     if (params.dirty) {
                         OBJY.getObjectById(
-                            skelleton.role,
-                            skelleton._id,
+                            this.role,
+                            this._id,
                             function (data) {
                                 if (!OBJY.checkAuthroisations(data, user, 'd', app, context)) return error({ error: 'Lack of Permissions' });
 
                                 return OBJY.remove(
-                                    skelletonRef,
+                                    thisRef,
                                     function (_data) {
                                         OBJY.deSerializePropsObject(data, params);
 
@@ -1494,17 +1485,17 @@ module.exports = function (OBJY) {
                             params
                         );
 
-                        return OBJY.deserialize(skelleton);
+                        return OBJY.deserialize(this);
                     }
 
-                    if (!OBJY.checkPermissions(user, app, skelletonRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
+                    if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
-                    if (skelletonRef.onDelete) {
-                        Object.keys(skelletonRef.onDelete).forEach(function (key) {
-                            if (skelletonRef.onDelete[key].trigger == 'before') {
+                    if (thisRef.onDelete) {
+                        Object.keys(thisRef.onDelete).forEach(function (key) {
+                            if (thisRef.onDelete[key].trigger == 'before') {
                                 context.execProcessorAction(
-                                    skelletonRef.onDelete[key].value || skelletonRef.onDelete[key].action,
-                                    skelletonRef,
+                                    thisRef.onDelete[key].value || thisRef.onDelete[key].action,
+                                    thisRef,
                                     null,
                                     null,
                                     function (data) {},
@@ -1516,20 +1507,20 @@ module.exports = function (OBJY) {
                     }
 
                     OBJY.getObjectById(
-                        skelleton.role,
-                        skelleton._id,
+                        this.role,
+                        this._id,
                         function (data) {
                             return OBJY.remove(
-                                skelletonRef,
+                                thisRef,
                                 function (_data) {
                                     OBJY.applyAffects(data, 'onDelete', context, client);
 
-                                    if (skelletonRef.onDelete) {
-                                        Object.keys(skelletonRef.onDelete).forEach(function (key) {
-                                            if (skelletonRef.onDelete[key].trigger == 'after') {
+                                    if (thisRef.onDelete) {
+                                        Object.keys(thisRef.onDelete).forEach(function (key) {
+                                            if (thisRef.onDelete[key].trigger == 'after') {
                                                 context.execProcessorAction(
-                                                    skelletonRef.onDelete[key].value || skelletonRef.onDelete[key].action,
-                                                    skelletonRef,
+                                                    thisRef.onDelete[key].value || thisRef.onDelete[key].action,
+                                                    thisRef,
                                                     null,
                                                     null,
                                                     function (data) {},
@@ -1567,7 +1558,7 @@ module.exports = function (OBJY) {
                                                 if (prePropsString) {
                                                     context.eventAlterationSequence.push({
                                                         operation: 'remove',
-                                                        obj: skelletonRef,
+                                                        obj: thisRef,
                                                         propName: prePropsString + '.' + p,
                                                         date: date,
                                                     });
@@ -1576,7 +1567,7 @@ module.exports = function (OBJY) {
                                                 } else {
                                                     context.eventAlterationSequence.push({
                                                         operation: 'remove',
-                                                        obj: skelletonRef,
+                                                        obj: thisRef,
                                                         propName: p,
                                                         date: date,
                                                     });
@@ -1585,7 +1576,7 @@ module.exports = function (OBJY) {
                                         });
                                     }
 
-                                    var mapper = context.observers[skelletonRef.role];
+                                    var mapper = context.observers[thisRef.role];
 
                                     aggregateAllEvents(data || {});
 
@@ -1616,7 +1607,7 @@ module.exports = function (OBJY) {
 
                                     if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                                         OBJY.removeInheritedObjs(
-                                            skelletonRef,
+                                            thisRef,
                                             params.pluralName,
                                             function (data) {},
                                             function (err) {},
@@ -1656,22 +1647,22 @@ module.exports = function (OBJY) {
                         params
                     );
 
-                    return OBJY.deserialize(skelleton);
+                    return OBJY.deserialize(this);
                 });
             };
 
-            skelleton.get = function (success, error, dontInherit) {
+            Object.getPrototypeOf(this).get = function (success, error, dontInherit) {
                 return new Promise((resolve, reject) => {
                     var client = context.activeTenant;
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    var skelletonRef = skelleton;
+                    var thisRef = this;
 
                     if (params.dirty) {
                         OBJY.getObjectById(
-                            skelletonRef.role,
-                            skelletonRef._id,
+                            thisRef.role,
+                            thisRef._id,
                             function (data) {
                                 OBJY.deSerializePropsObject(data, params);
                                 if (!OBJY.checkAuthroisations(data, user, 'r', app, context)) return error({ error: 'Lack of Permissions' });
@@ -1693,7 +1684,7 @@ module.exports = function (OBJY) {
                             params
                         );
 
-                        return OBJY.deserialize(skelleton);
+                        return OBJY.deserialize(this);
                     }
 
                     var counter = 0;
@@ -1795,7 +1786,7 @@ module.exports = function (OBJY) {
                             } else {
                                 var returnObject = OBJY[data.role](OBJY.deserialize(data));
 
-                                if (skelletonRef.inherits.length == 1) {
+                                if (thisRef.inherits.length == 1) {
                                     if (success) success(OBJY.deSerializePropsObject(returnObject, params));
                                     else {
                                         resolve(OBJY.deSerializePropsObject(returnObject, params));
@@ -1809,17 +1800,17 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    if (context.caches[skelletonRef.role].data[skelletonRef._id]) {
-                        prepareObj(context.caches[skelletonRef.role].data[skelletonRef._id]);
+                    if (context.caches[thisRef.role].data[thisRef._id]) {
+                        prepareObj(context.caches[thisRef.role].data[thisRef._id]);
                     } else {
                         OBJY.getObjectById(
-                            skelletonRef.role,
-                            skelletonRef._id,
+                            thisRef.role,
+                            thisRef._id,
                             function (data) {
                                 prepareObj(data);
 
-                                if (!context.caches[skelletonRef.role].data[skelletonRef._id]) {
-                                    //context.caches[skelletonRef.role].add(skelletonRef._id, data);
+                                if (!context.caches[thisRef.role].data[thisRef._id]) {
+                                    //context.caches[thisRef.role].add(thisRef._id, data);
                                 }
                             },
                             function (err) {
@@ -1835,7 +1826,7 @@ module.exports = function (OBJY) {
                         );
                     }
 
-                    return OBJY.deserialize(skelleton);
+                    return OBJY.deserialize(this);
                 });
             };
 
@@ -1850,23 +1841,23 @@ module.exports = function (OBJY) {
                 set: (obj, prop, value) => {
                     if (Array.isArray(obj) && prop == 'length') return true;
                     obj[prop] = value;
-                    skelleton.update();
+                    this.update();
                     return true;
                 },
 
                 deleteProperty: (obj, prop, value) => {
                     delete obj[prop];
-                    skelleton.update();
+                    this.update();
                     return true;
                 },
             };
 
             if (!params.storage) {
-                skelleton.add();
-                var skelletonRef = skelleton;
-                (skelleton.inherits || []).forEach(function (template) {
+                this.add();
+                var thisRef = this;
+                (this.inherits || []).forEach(function (template) {
                     OBJY.getTemplateFieldsForObject(
-                        skelletonRef,
+                        thisRef,
                         template,
                         function () {},
                         function (err) {
@@ -1880,9 +1871,9 @@ module.exports = function (OBJY) {
                     );
                 });
 
-                return new Proxy(skelleton, validator);
+                return new Proxy(this, validator);
             }
-            return OBJY.deserialize(skelleton);
+            return OBJY.deserialize(this);
         },
     };
 };
