@@ -21,6 +21,17 @@ var propertyFunctions = require('./instance/property.js')
 var pluralConstructorFunctions = require('./instance/plural-constructor.js')
 var singularConstructorFunctions = require('./instance/singular-constructor.js')
 
+let contextTemplate = {
+    activeTenant: null,
+    activeUser: null,
+    activeApp: null,
+
+    alterSequence: [],
+    commandSequence: [],
+    permissionSequence: {},
+    eventAlterationSequence: []
+}
+
 /**
  * OBJY Instance
  */
@@ -28,6 +39,8 @@ var OBJY = function(){
     var _OBJY = {};
 
     Object.assign(_OBJY, {
+
+        globalContext: Object.assign({}, contextTemplate),
 
         ...generalAttributes(_OBJY),
     

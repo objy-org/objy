@@ -42,7 +42,7 @@ module.exports = function(OBJY) {
          */
         client: function(client) {
             if (!client) throw new exceptions.General("No client specified");
-            this.activeTenant = client;
+            OBJY.globalCtx.activeTenant = client
             return this;
         },
 
@@ -52,7 +52,7 @@ module.exports = function(OBJY) {
          * @returns {this}
          */
         useUser: function(user) {
-            this.activeUser = user;
+            OBJY.globalCtx.activeUser = user
             return this;
         },
 
@@ -63,7 +63,7 @@ module.exports = function(OBJY) {
          */
         app: function(app) {
             //if (!app) throw new Error("No app specified");
-            this.activeApp = app;
+            OBJY.globalCtx.activeApp = app
 
             return this;
         },

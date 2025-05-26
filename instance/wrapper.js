@@ -23,13 +23,17 @@ module.exports = function(OBJY) {
 
             this[params.name] = function(obj) {
                 //return OBJY.SingleProxy(obj, params.name, this, params);
-                return new OBJY.Obj(obj, params.name, this, params);
+                
+                let ctx = Object.assign({}, OBJY.globalContext);
+
+                return new OBJY.Obj(obj, params.name, ctx, params);
             }
 
             if (this.objectFamilies.indexOf(params.name) == -1) this.objectFamilies.push(params.name);
 
             this[params.pluralName] = function(objs, flags) {
-                return new OBJY.Objs(objs, params.name, this, params, flags);
+                let ctx = Object.assign({}, OBJY.globalContext);
+                return new OBJY.Objs(objs, params.name, ctx, params, flags);
             }
 
             if (params.storage) this.plugInPersistenceMapper(params.name, params.storage);
