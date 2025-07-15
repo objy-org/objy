@@ -7,10 +7,10 @@ module.exports = function(OBJY) {
          * Applies affect rules
          * @param {obj} - the object
          * @param {operation} - the operation (onChange, onCreate and onDelete)
-         * @param {insstance} - the current objy instance
+         * @param {insstance} - the current objy context
          * @param {client} - the active client
          */
-        applyAffects: function(obj, operation, instance, client, trigger) {
+        applyAffects: function(obj, operation, context, client, trigger) {
             this.affectables.forEach(function(a) {
                 if (Query.query([obj], a.affects, Query.undot).length != 0) {
 
@@ -254,18 +254,18 @@ module.exports = function(OBJY) {
                 }
             })
 
-            this.applyRules(obj, operation, instance, client, trigger);
+            this.applyRules(obj, operation, context, client, trigger);
         },
 
         /**
          * Applies static rules
          * @param {obj} - the object
          * @param {operation} - the operation (onChange, onCreate and onDelete)
-         * @param {insstance} - the current objy instance
+         * @param {insstance} - the current objy context
          * @param {client} - the active client
          */
 
-        applyRules: function(obj, operation, instance, client, trigger) {
+        applyRules: function(obj, operation, context, client, trigger) {
             var self = this;
             self.staticRules.forEach(function(a) {
                 if (Query.query([obj], a.affects, Query.undot).length != 0) {
@@ -279,7 +279,7 @@ module.exports = function(OBJY) {
 
                                 if (operation != h || (trigger && trigger != template[h][oC]?.trigger)) return;
 
-                                instance.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
+                                context.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
 
                                 }, client, null);
 

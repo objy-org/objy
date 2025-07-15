@@ -73,7 +73,7 @@ module.exports = function(OBJY) {
             return obj;
         },
 
-        serializePropsObject: function(realObj, obj, propsObject, instance, params) {
+        serializePropsObject: function(realObj, obj, propsObject, context, params) {
             /*
             if (!obj.hasOwnProperty(propsObject)) return;
             Object.keys(obj[propsObject]).forEach(p => {
@@ -81,7 +81,7 @@ module.exports = function(OBJY) {
                     var prop = {};
                     prop[p] = obj[propsObject][p]
                     realObj[p] =  obj[propsObject][p]
-                    //new OBJY.PropertyCreateWrapper(realObj, prop, false, instance, params);
+                    //new OBJY.PropertyCreateWrapper(realObj, prop, false, context, params);
                 }
             })
             delete obj[propsObject];*/
@@ -104,12 +104,12 @@ module.exports = function(OBJY) {
         /**
          * Chains command information, when performing multiple operations
          * @param {obj} - the object
-         * @param {instance} - the OBJY instance
+         * @param {context} - the OBJY context
          * @param {key} - the command name
          * @param {value} - the command value (parameter)
          */
-        chainCommand: function(obj, instance, key, value) {
-            instance.commandSequence.push({
+        chainCommand: function(obj, context, key, value) {
+            context.commandSequence.push({
                 name: key,
                 value: value
             });
@@ -125,9 +125,9 @@ module.exports = function(OBJY) {
         },
 
         execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
-            let processorApp = this.instance?.activeApp || (obj.applications || {})[0]
+            let processorApp = this.context?.activeApp || (obj.applications || {})[0]
             OBJY.Logger.log('triggering dsl');
-            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, processorApp, this.instance?.activeUser, options);
+            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, processorApp, this.context?.activeUser, options);
         },
 
 
