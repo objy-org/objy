@@ -4,6 +4,8 @@ var OBJY = new _OBJY();
 
 OBJY.Logger.enabled = ['none']
 
+OBJY.useUser({username: "hejh"})
+
 OBJY.define({
     name: 'template',
     pluralName: 'templates',

@@ -379,7 +379,6 @@ module.exports = function (OBJY) {
                             .toISOString();
 
                         
-
                         context.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,

@@ -32,6 +32,7 @@ let contextTemplate = {
     eventAlterationSequence: []
 }
 
+
 /**
  * OBJY Instance
  */
@@ -40,7 +41,7 @@ var OBJY = function(){
 
     Object.assign(_OBJY, {
 
-        globalContext: Object.assign({}, contextTemplate),
+        globalCtx: Object.assign({}, contextTemplate),
 
         ...generalAttributes(_OBJY),
     
@@ -69,6 +70,25 @@ var OBJY = function(){
 
     return _OBJY
 }
+
+/**
+ * Transaction instance
+ */ 
+/*
+var Transaction = function(OBJY) {
+    OBJY.globalContext = Object.assign({}, contextTemplate)
+
+    var T = {};
+
+    Object.assign(T, {
+        ...singularConstructorFunctions(OBJY),
+        ...pluralConstructorFunctions(OBJY),
+        ...wrapperFunctions(OBJY)
+    })
+
+    return T
+}
+*/
 
 var objy = OBJY;
 

@@ -24,7 +24,7 @@ module.exports = function(OBJY) {
             this[params.name] = function(obj) {
                 //return OBJY.SingleProxy(obj, params.name, this, params);
                 
-                let ctx = Object.assign({}, OBJY.globalContext);
+                let ctx = Object.assign({}, OBJY.globalCtx);
 
                 return new OBJY.Obj(obj, params.name, ctx, params);
             }
@@ -32,7 +32,7 @@ module.exports = function(OBJY) {
             if (this.objectFamilies.indexOf(params.name) == -1) this.objectFamilies.push(params.name);
 
             this[params.pluralName] = function(objs, flags) {
-                let ctx = Object.assign({}, OBJY.globalContext);
+                let ctx = Object.assign({}, OBJY.globalCtx);
                 return new OBJY.Objs(objs, params.name, ctx, params, flags);
             }
 

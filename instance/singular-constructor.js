@@ -12,6 +12,7 @@ var isObject = function (a) {
 module.exports = function (OBJY) {
     return {
         Obj: function (obj, role, context, params) {
+
             if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
 
             if (!obj) obj = {}; //throw new Error("Invalid param");
