@@ -76,34 +76,6 @@ export default function(OBJY) {
             return obj;
         },
 
-        serializePropsObject: function(realObj, obj, propsObject, context, params) {
-            /*
-            if (!obj.hasOwnProperty(propsObject)) return;
-            Object.keys(obj[propsObject]).forEach(p => {
-                if (!OBJY.predefinedProperties.includes(p) && realObj.hasOwnProperty('role')) {
-                    var prop = {};
-                    prop[p] = obj[propsObject][p]
-                    realObj[p] =  obj[propsObject][p]
-                    //new OBJY.PropertyCreateWrapper(realObj, prop, false, context, params);
-                }
-            })
-            delete obj[propsObject];*/
-        },
-
-        deSerializePropsObject: function(obj, params) {
-            return obj;
-        },
-
-        deSerializePropsObjectMulti: function(objs, params) {
-            /*if (!params.propsObject) return objs;
-            
-            objs.forEach(obj => {
-                OBJY.deSerializePropsObject(obj, params)
-            })*/
-
-            return objs;
-        },
-
         /**
          * Chains command information, when performing multiple operations
          * @param {obj} - the object

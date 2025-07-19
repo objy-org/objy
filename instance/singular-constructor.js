@@ -18,7 +18,7 @@ export default function(OBJY) {
     return {
         Obj: function (obj, role, context, params) {
 
-            if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
+            //if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
 
             if (!obj) obj = {}; //throw new Error("Invalid param");
 
@@ -860,11 +860,11 @@ export default function(OBJY) {
                             function (data) {
                                 thisRef._id = data._id;
 
-                                OBJY.deSerializePropsObject(data, params);
+                                //OBJY.deSerializePropsObject(data, params);
 
-                                if (success) success(OBJY.deserialize(data));
+                                if (success) success(data);
                                 else {
-                                    resolve(OBJY.deserialize(data));
+                                    resolve(data);
                                 }
 
                                 delete thisRef.context;
@@ -881,7 +881,7 @@ export default function(OBJY) {
                             params
                         );
 
-                        return OBJY.deserialize(this);
+                        return this;
                     }
 
                     if (thisRef.onCreate) {
@@ -1055,11 +1055,11 @@ export default function(OBJY) {
 
                                 OBJY.Logger.log('Added Object: ' + JSON.stringify(data, null, 2));
 
-                                OBJY.deSerializePropsObject(data, params);
+                                //OBJY.deSerializePropsObject(data, params);
 
-                                if (success) success(OBJY.deserialize(data));
+                                if (success) success(data);
                                 else {
-                                    resolve(OBJY.deserialize(data));
+                                    resolve(data);
                                 }
 
                                 delete thisRef.context;
@@ -1110,7 +1110,7 @@ export default function(OBJY) {
                     } else {
                         addFn(thisRef);
                     }
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
@@ -1141,13 +1141,13 @@ export default function(OBJY) {
 
                                 context.eventAlterationSequence = [];
 
-                                OBJY.deSerializePropsObject(data, params);
+                                //OBJY.deSerializePropsObject(data, params);
 
                                 context.alterSequence = [];
 
-                                if (success) success(OBJY.deserialize(data));
+                                if (success) success(data);
                                 else {
-                                    resolve(OBJY.deserialize(data));
+                                    resolve(data);
                                 }
                             },
                             function (err) {
@@ -1162,7 +1162,7 @@ export default function(OBJY) {
                             context
                         );
 
-                        return OBJY.deserialize(this);
+                        return this;
                     }
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
@@ -1352,11 +1352,11 @@ export default function(OBJY) {
                                 }
 
                                 OBJY.Logger.log('Updated Object: ' + data);
-                                OBJY.deSerializePropsObject(data, params);
+                                //OBJY.deSerializePropsObject(data, params);
                                 context.alterSequence = [];
-                                if (success) success(OBJY.deserialize(data));
+                                if (success) success(data);
                                 else {
-                                    resolve(OBJY.deserialize(data));
+                                    resolve(data);
                                 }
                             },
                             function (err) {
@@ -1439,7 +1439,7 @@ export default function(OBJY) {
 
                     context.commandSequence = [];
 
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
@@ -1463,11 +1463,11 @@ export default function(OBJY) {
                                 return OBJY.remove(
                                     thisRef,
                                     function (_data) {
-                                        OBJY.deSerializePropsObject(data, params);
+                                        //OBJY.deSerializePropsObject(data, params);
 
-                                        if (success) success(OBJY.deserialize(data));
+                                        if (success) success(data);
                                         else {
-                                            resolve(OBJY.deserialize(data));
+                                            resolve(data);
                                         }
                                     },
                                     function (err) {
@@ -1492,7 +1492,7 @@ export default function(OBJY) {
                             params
                         );
 
-                        return OBJY.deserialize(this);
+                        return this;
                     }
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
@@ -1625,10 +1625,10 @@ export default function(OBJY) {
 
                                     OBJY.Logger.log('Removed Object: ' + data);
 
-                                    OBJY.deSerializePropsObject(data, params);
-                                    if (success) success(OBJY.deserialize(data));
+                                    //OBJY.deSerializePropsObject(data, params);
+                                    if (success) success(data);
                                     else {
-                                        resolve(OBJY.deserialize(data));
+                                        resolve(data);
                                     }
                                 },
                                 function (err) {
@@ -1654,7 +1654,7 @@ export default function(OBJY) {
                         params
                     );
 
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
@@ -1671,12 +1671,12 @@ export default function(OBJY) {
                             thisRef.role,
                             thisRef._id,
                             function (data) {
-                                OBJY.deSerializePropsObject(data, params);
+                                //OBJY.deSerializePropsObject(data, params);
                                 if (!OBJY.checkAuthroisations(data, user, 'r', app, context)) return error({ error: 'Lack of Permissions' });
 
-                                if (success) success(OBJY[data.role](OBJY.deserialize(data)));
+                                if (success) success(OBJY[data.role](data));
                                 else {
-                                    resolve(OBJY[data.role](OBJY.deserialize(data)));
+                                    resolve(OBJY[data.role](data));
                                 }
                             },
                             function (err) {
@@ -1691,7 +1691,7 @@ export default function(OBJY) {
                             params
                         );
 
-                        return OBJY.deserialize(this);
+                        return this;
                     }
 
                     var counter = 0;
@@ -1719,7 +1719,7 @@ export default function(OBJY) {
                 }*/
 
                     function prepareObj(data) {
-                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                        var returnObject = OBJY[data.role](data);
 
                         OBJY.applyAffects(data, null, context, client);
 
@@ -1746,9 +1746,9 @@ export default function(OBJY) {
                         }
 
                         if ((data.inherits || []).length == 0) {
-                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                            if (success) success(returnObject);
                             else {
-                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                resolve(returnObject);
                             }
                             return data;
                         }
@@ -1759,14 +1759,14 @@ export default function(OBJY) {
                                     data,
                                     template,
                                     function () {
-                                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                                        var returnObject = OBJY[data.role](data);
 
                                         counter++;
 
                                         if (counter == data.inherits.length) {
-                                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                            if (success) success(returnObject);
                                             else {
-                                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                                resolve(returnObject);
                                             }
                                             return data;
                                         }
@@ -1774,12 +1774,12 @@ export default function(OBJY) {
                                     function (err) {
                                         counter++;
 
-                                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                                        var returnObject = OBJY[data.role](data);
 
                                         if (counter == data.inherits.length) {
-                                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                            if (success) success(returnObject);
                                             else {
-                                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                                resolve(returnObject);
                                             }
                                             return data;
                                         }
@@ -1791,12 +1791,12 @@ export default function(OBJY) {
                                     context
                                 );
                             } else {
-                                var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                                var returnObject = OBJY[data.role](data);
 
                                 if (thisRef.inherits.length == 1) {
-                                    if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                    if (success) success(returnObject);
                                     else {
-                                        resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                        resolve(returnObject);
                                     }
                                     return data;
                                 } else {
@@ -1833,7 +1833,7 @@ export default function(OBJY) {
                         );
                     }
 
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
@@ -1880,7 +1880,7 @@ export default function(OBJY) {
 
                 return new Proxy(this, validator);
             }*/
-            return OBJY.deserialize(this);
+            return this;
         },
     };
 };

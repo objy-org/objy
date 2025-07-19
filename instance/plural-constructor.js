@@ -35,7 +35,7 @@ export default function (OBJY) {
 
                         var i;
                         for (i = 0; i < data.length; i++) {
-                            if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](OBJY.deserialize(data[i]))
+                            if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](data[i])
                         }
 
 
@@ -43,9 +43,9 @@ export default function (OBJY) {
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
-                            if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                            if(success) success(data);
                             else {
-                                    resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                    resolve(data);
                             }
                             return;
                         }
@@ -53,9 +53,9 @@ export default function (OBJY) {
                         if (data.length == 0) {
                             //console.info(data)
 
-                            if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                            if(success) success(data);
                             else {
-                                    resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                    resolve(data);
                             }
                             return;
                         }
@@ -80,9 +80,9 @@ export default function (OBJY) {
 
                                 if (allCounter == data.length) {
 
-                                    if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                    if(success) success(data);
                                     else {
-                                            resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                            resolve(data);
                                     }
                                     return d;
                                 }
@@ -102,9 +102,9 @@ export default function (OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                if(success) success(data);
                                                 else {
-                                                        resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                        resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -117,9 +117,9 @@ export default function (OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                if(success) success(data);
                                                 else {
-                                                        resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                        resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -129,9 +129,9 @@ export default function (OBJY) {
 
                                     if (d.inherits.length == 1) {
 
-                                        if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                        if(success) success(data);
                                         else {
-                                                resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                resolve(data);
                                         }
                                         return d;
                                     } else {
