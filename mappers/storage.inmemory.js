@@ -1,5 +1,6 @@
-var Query = require('../lib/dependencies/query.js')
-var Mapper = function(OBJY, options) {
+import Query from '../lib/dependencies/query.js'
+
+export default function(OBJY, options) {
 
     return Object.assign(new OBJY.StorageTemplate(OBJY, options), {
 
@@ -153,7 +154,3 @@ var Mapper = function(OBJY, options) {
 
     })
 }
-
-
-
-module.exports = Mapper;

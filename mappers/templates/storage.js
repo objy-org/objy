@@ -1,4 +1,4 @@
-const StorageMapperTemplate = function(OBJY, options) {
+export default function(OBJY, options) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
@@ -64,5 +64,3 @@ const StorageMapperTemplate = function(OBJY, options) {
 
     };
 };
-
-module.exports = StorageMapperTemplate;

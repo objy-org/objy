@@ -1,6 +1,6 @@
-var CONSTANTS = require('../lib/dependencies/constants.js')
+import CONSTANTS from '../lib/dependencies/constants.js'
 
-module.exports = function(OBJY) {
+export default function (OBJY) {
     return {
 
         Objs: function(objs, role, context, params, flags) {

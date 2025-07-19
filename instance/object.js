@@ -1,6 +1,8 @@
-var exceptions = require('../lib/dependencies/exceptions.js');
+//var exceptions = require('../lib/dependencies/exceptions.js');
 
-module.exports = function(OBJY) {
+import exceptions from '../lib/dependencies/exceptions.js';
+
+export default function(OBJY) {
     return {
 
         updateInheritedObjs: function(templ, pluralName, success, error, client, params, context) {

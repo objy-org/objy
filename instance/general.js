@@ -1,7 +1,10 @@
-var shortid = require('shortid');
-var exceptions = require('../lib/dependencies/exceptions.js');
+/*var shortid = require('shortid');
+var exceptions = require('../lib/dependencies/exceptions.js');*/
 
-module.exports = function(OBJY) {
+import shortid from 'shortid';
+import exceptions from '../lib/dependencies/exceptions.js';
+
+export default function(OBJY) {
     return {
         /**
          * Serialises an object into the objy structure (comming soon)

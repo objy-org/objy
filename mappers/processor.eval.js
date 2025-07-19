@@ -1,4 +1,4 @@
-const Mapper = function (OBJY, mapperOptions) {
+export default function (OBJY, mapperOptions) {
     return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
         execute: function (dsl, obj, prop, data, callback, client, app, user, options) {
             OBJY.Logger.log('Executing dsl in mapper');
@@ -32,4 +32,3 @@ const Mapper = function (OBJY, mapperOptions) {
     });
 };
 
-module.exports = Mapper;
