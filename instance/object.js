@@ -464,7 +464,7 @@ export default function(OBJY) {
                                     if (counter == template.inherits.length) run(template);
 
 
-                                }, client, templateRole || obj.role, templateSource || OBJY.activeTenant, params)
+                                }, client, templateRole || obj.role, templateSource || context.activeTenant, params)
 
                         })
 
@@ -475,7 +475,7 @@ export default function(OBJY) {
 
                 }, function(err) {
                     error(err);
-                }, OBJY.activeApp, templateSource || OBJY.activeTenant)
+                }, context.activeApp, templateSource || context.activeTenant)
 
 
                 /*OBJY[templateRole || obj.role](templateId).get(function(template) {
