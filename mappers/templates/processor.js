@@ -1,4 +1,4 @@
-const ProcessorMapperTemplate = function(OBJY) {
+export default function(OBJY) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
@@ -27,5 +27,3 @@ const ProcessorMapperTemplate = function(OBJY) {
     };
 
 };
-
-module.exports = ProcessorMapperTemplate;

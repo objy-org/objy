@@ -1,10 +1,10 @@
-var exceptions = require('../lib/dependencies/exceptions.js');
+import exceptions from '../lib/dependencies/exceptions.js';
 
 var isObject = function(a) {
     return (!!a) && (a.constructor === Object);
 };
 
-module.exports = function(OBJY) {
+export default function(OBJY) {
     return {
 
         customStorage: function(data, options) {

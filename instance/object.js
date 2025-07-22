@@ -1,6 +1,6 @@
-var exceptions = require('../lib/dependencies/exceptions.js');
+import exceptions from '../lib/dependencies/exceptions.js';
 
-module.exports = function(OBJY) {
+export default function(OBJY) {
     return {
 
         updateInheritedObjs: function(templ, pluralName, success, error, client, params, context) {
@@ -257,13 +257,18 @@ module.exports = function(OBJY) {
 
                     Object.keys(template).forEach(function(p) {
 
+                        if(!isObject(template[p])) return
+
                         if ((OBJY.predefinedProperties.includes(p)/* || (isObject(template[p]) || Array.isArray(template[p]))*/)) return;
 
                         if (!template[p]) return;
 
-                        if(isObject(template[p]))  doTheProps(template[p], obj[p]);
+                        if(isObject(template[p])) doTheProps(template[p], obj[p]);
+
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
+
+                        
 
                         if (!obj.hasOwnProperty(p)) {
 
@@ -272,6 +277,8 @@ module.exports = function(OBJY) {
                             //delete obj[p].overwritten;
 
                         } else {
+
+                            console.log('it has p', p, '\n objy', obj, '\n cloded', cloned, 'p', template)
 
                             if (cloned.meta) {
                                 if (!obj[p].meta) {
@@ -322,8 +329,6 @@ module.exports = function(OBJY) {
 
                             doTheProps(cloned, obj[p]);
                         }
-
-                        
 
                     })
                 }

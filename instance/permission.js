@@ -1,7 +1,7 @@
-var Query = require('../lib/dependencies/query.js');
-var exceptions = require('../lib/dependencies/exceptions.js');
+import Query from '../lib/dependencies/query.js';
+import exceptions from '../lib/dependencies/exceptions.js';
 
-module.exports = function(OBJY) {
+export default function(OBJY) {
     return {
         /**
          * Check the permissions for an object or object part

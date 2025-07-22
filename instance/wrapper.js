@@ -1,8 +1,8 @@
-var DefaultStorageMapper = require('../mappers/storage.inmemory.js')
-var DefaultProcessorMapper = require('../mappers/processor.eval.js')
-var DefaultObserverMapper = require('../mappers/observer.interval.js')
+import DefaultStorageMapper from '../mappers/storage.inmemory.js'
+import DefaultProcessorMapper from '../mappers/processor.eval.js'
+import DefaultObserverMapper from '../mappers/observer.interval.js'
 
-module.exports = function(OBJY) {
+export default function(OBJY) {
     return {
 
 

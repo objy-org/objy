@@ -1,6 +1,7 @@
 {
     "name": "objy",
     "version": "0.7.228",
+    "type": "module",
     "description": "A JavaScript framework for building object-driven applications",
     "main": "objy.js",
     "scripts": {

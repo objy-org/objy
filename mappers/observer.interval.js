@@ -1,9 +1,10 @@
-var moment = require('moment');
+import moment from 'moment';
+
 if (typeof moment == 'object') {
     moment = moment.default;
 }
 
-const Mapper = function (OBJY) {
+export default function (OBJY) {
     return Object.assign(new OBJY.ObserverTemplate(OBJY), {
         initialize: function (millis) {
             var self = this;
@@ -69,4 +70,3 @@ const Mapper = function (OBJY) {
     });
 };
 
-module.exports = Mapper;

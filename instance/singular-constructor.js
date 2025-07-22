@@ -1,15 +1,17 @@
-var moment = require('moment');
+import moment from 'moment';
+
 if (typeof moment == 'object') {
     moment = moment.default;
 }
-var CONSTANTS = require('../lib/dependencies/constants.js');
-var exceptions = require('../lib/dependencies/exceptions.js');
+
+import CONSTANTS from '../lib/dependencies/constants.js';
+import exceptions from '../lib/dependencies/exceptions.js';
 
 var isObject = function (a) {
     return !!a && a.constructor === Object;
 };
 
-module.exports = function (OBJY) {
+export default function(OBJY) {
     return {
         Obj: function (obj, role, context, params) {
             if (OBJY.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
@@ -1838,7 +1840,7 @@ module.exports = function (OBJY) {
                 });
             };
 
-            const validator = {
+            /*const validator = {
                 get: (obj, prop) => {
                     if (typeof obj[prop] === 'object' && obj[prop] !== null) {
                         return new Proxy(obj[prop], validator);
@@ -1880,7 +1882,8 @@ module.exports = function (OBJY) {
                 });
 
                 return new Proxy(this, validator);
-            }
+            }*/
+
             return OBJY.deserialize(this);
         },
     };

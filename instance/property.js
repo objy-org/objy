@@ -1,15 +1,17 @@
-var CONSTANTS = require('../lib/dependencies/constants.js');
-var moment = require('moment');
+import CONSTANTS from '../lib/dependencies/constants.js';
+import moment from 'moment';
+
 if (typeof moment == 'object') {
     moment = moment.default;
 }
-var exceptions = require('../lib/dependencies/exceptions.js');
+
+import exceptions from '../lib/dependencies/exceptions.js';
 
 var isObject = function (a) {
     return !!a && a.constructor === Object;
 };
 
-module.exports = function (OBJY) {
+export default function(OBJY) {
     return {
         PropertyRefParser: function (obj, propertyName, success, error) {
             var allProperties = obj.getProperties();

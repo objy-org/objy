@@ -1,8 +1,10 @@
-var _OBJY = require('./objy.js');
+import _OBJY from './objy.js'
 
 var OBJY = new _OBJY();
 
 OBJY.Logger.enabled = ['none']
+
+OBJY.useUser({username: "hejh"})
 
 OBJY.define({
     name: 'template',
@@ -38,59 +40,16 @@ OBJY.template({
             action: 'hello'
         }
     }
-});
+}).add(data => {
+    console.log('added', data)
 
-OBJY.templates({}).get(templates => {
-    templates.forEach(templ => {
-        console.log('t', templ)
-        OBJY.object({inherits: [templ._id], marco: 'nicole', properties: {
-            evt: {
-                type: "event",
-                interval: 10000,
-                action: 'hello'
-            }
-        }}).add(done => {
-            console.log('DONE')
-                    OBJY.objects({}).get(objs => {
-    console.log('all objs', JSON.stringify(objs, null, 4))
-})
-        });
-        //o.setEventTriggered('properties.evt', true, 'tenant').setPropertyValue('properties.supername', 456).setPropertyValue('nested.inner', false).addProperty('nested.whatever', 'sgsga').removeProperty('marco').update();
-
-
+    data.addProperty('properties.hello', {type: "number", value: "1"}).update(d => {
+        console.log('updated', d)
     })
-})
 
-
-/*
-
-OBJY.object({
-    name: "hello",
-    interval: {
-        type: 'event',
-        interval: 1000,
-        action: () => {
-            console.log('hello')
-        }
-    },
-    properties: {
-        age:1111
-    }
-})
-
-
-OBJY.objects({}).get().then(d => {
-    console.log('pdata:', d)
-
-    d[0].addProperty('properties.innerBag', {type: "bag", properties: {
-        size: {
-            value: 14124 ,
-            type: 'number'
-        }
-    }});
-
-    console.log('final:',   JSON.stringify(d, false, 4))
-}).catch(e => {
-    console.log(e)
-})
-*/
+    OBJY.object({inherits: [data._id]}).add((o) => {
+        OBJY.object(o._id).get(o2 => {
+            console.log('o2', o2)
+        })
+    })
+});
