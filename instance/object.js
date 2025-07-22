@@ -3,7 +3,7 @@ var exceptions = require('../lib/dependencies/exceptions.js');
 module.exports = function(OBJY) {
     return {
 
-        updateInheritedObjs: function(templ, pluralName, success, error, client, params, instance) {
+        updateInheritedObjs: function(templ, pluralName, success, error, client, params, context) {
             // TODO
 
             /*var templateFamily;
@@ -55,7 +55,7 @@ module.exports = function(OBJY) {
         },
 
 
-        prepareObjectDelta: function(oldObj, newObj, params, instance) {
+        prepareObjectDelta: function(oldObj, newObj, params, context) {
 
             var meta = ['name', 'type'];
             meta.forEach(function(p) {
@@ -186,7 +186,7 @@ module.exports = function(OBJY) {
 
         },
 
-        getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource, params, instance) {
+        getTemplateFieldsForObject: function(obj, templateId, success, error, client, templateRole, templateSource, params, context) {
 
             if(params.templateFamily === null) return success(obj);
 
@@ -490,7 +490,7 @@ module.exports = function(OBJY) {
 
         },
 
-        removeTemplateFieldsForObject: function(obj, templateId, success, error, client, params, instance) {
+        removeTemplateFieldsForObject: function(obj, templateId, success, error, client, params, context) {
 
             if(params.templateFamily === null) return success(obj);
 
@@ -632,7 +632,7 @@ module.exports = function(OBJY) {
                 })
         },
 
-        addTemplateToObject: function(obj, templateId, instance) {
+        addTemplateToObject: function(obj, templateId, context) {
             var contains = false;
             obj.inherits.forEach(function(templ) {
                 if (templ == templateId) contains = true;
@@ -641,13 +641,13 @@ module.exports = function(OBJY) {
 
             if (!contains) {
                 obj.inherits.push(templateId);
-                OBJY.chainPermission(obj, instance, 'i', 'addInherit', templateId);
-                OBJY.chainCommand(obj, instance, 'addInherit', templateId);
+                OBJY.chainPermission(obj, context, 'i', 'addInherit', templateId);
+                OBJY.chainCommand(obj, context, 'addInherit', templateId);
             }
 
         },
 
-        addApplicationToObject: function(obj, application, instance) {
+        addApplicationToObject: function(obj, application, context) {
             var contains = false;
 
             if (!obj.applications) obj.applications = [];
@@ -657,13 +657,13 @@ module.exports = function(OBJY) {
             });
             if (!contains) {
                 obj.applications.push(application);
-                OBJY.chainPermission(obj, instance, 'a', 'addApplication', application);
+                OBJY.chainPermission(obj, context, 'a', 'addApplication', application);
 
             } else throw new exceptions.DuplicateApplicationException(application);
 
         },
 
-        removeApplicationFromObject: function(obj, application, instance) {
+        removeApplicationFromObject: function(obj, application, context) {
             var contains = false;
             obj.applications.forEach(function(app, i) {
                 if (app == application) {
@@ -672,14 +672,14 @@ module.exports = function(OBJY) {
                 }
             });
 
-            OBJY.chainPermission(obj, instance, 'a', 'removeApplication', application);
+            OBJY.chainPermission(obj, context, 'a', 'removeApplication', application);
 
             if (!contains) {
                 throw new exceptions.NoSuchApplicationException(application);
             }
         },
 
-        removeTemplateFromObject: function(obj, templateId, success, error, instance) {
+        removeTemplateFromObject: function(obj, templateId, success, error, context) {
             var contains = false;
 
             obj.inherits.forEach(function(templ) {
@@ -690,8 +690,8 @@ module.exports = function(OBJY) {
 
                 obj.inherits.splice(obj.inherits.indexOf(templateId), 1);
 
-                OBJY.chainPermission(obj, instance, 'i', 'removeInherit', templateId);
-                OBJY.chainCommand(obj, instance, 'removeInherit', templateId);
+                OBJY.chainPermission(obj, context, 'i', 'removeInherit', templateId);
+                OBJY.chainCommand(obj, context, 'removeInherit', templateId);
 
                 success(obj);
 
@@ -738,7 +738,7 @@ module.exports = function(OBJY) {
             return permissions;
         },
 
-        ObjectOnCreateSetWrapper: function(obj, name, onCreate, trigger, type, instance) {
+        ObjectOnCreateSetWrapper: function(obj, name, onCreate, trigger, type, context) {
             //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
             if (!onCreate) throw new exceptions.InvalidHandlerException();
@@ -757,12 +757,12 @@ module.exports = function(OBJY) {
 
             if (obj.onCreate[name].templateId) obj.onCreate[name].overwritten = true;
 
-            OBJY.chainPermission(obj, instance, 'v', 'setOnCreateHandler', name);
+            OBJY.chainPermission(obj, context, 'v', 'setOnCreateHandler', name);
 
             return onCreate;
         },
 
-        ObjectOnCreateCreateWrapper: function(obj, onCreate, instance) {
+        ObjectOnCreateCreateWrapper: function(obj, onCreate, context) {
             //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
 
@@ -791,7 +791,7 @@ module.exports = function(OBJY) {
             return apply;
         },
 
-        ObjectOnChangeCreateWrapper: function(obj, onChange, instance) {
+        ObjectOnChangeCreateWrapper: function(obj, onChange, context) {
             //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
             if (!onChange) return;
@@ -805,9 +805,9 @@ module.exports = function(OBJY) {
             return onChange;
         },
 
-        ObjectAuthorisationSetWrapper: function(obj, authorisationObj, instance) {
+        ObjectAuthorisationSetWrapper: function(obj, authorisationObj, context) {
 
-            var app = instance.activeApp || '*';
+            var app = context.activeApp || '*';
 
             if (!obj.authorisations) obj.authorisations = {};
 
@@ -828,9 +828,9 @@ module.exports = function(OBJY) {
             return authorisationObj;
         },
 
-        ObjectAuthorisationRemoveWrapper: function(obj, authorisationId, instance) {
+        ObjectAuthorisationRemoveWrapper: function(obj, authorisationId, context) {
 
-            var app = instance.activeApp || '*';
+            var app = context.activeApp || '*';
 
             if (!obj.authorisations) throw new exceptions.General('No authorisations present')
 
@@ -845,7 +845,7 @@ module.exports = function(OBJY) {
             return authorisationId;
         },
 
-        ObjectOnDeleteCreateWrapper: function(obj, onDelete, instance) {
+        ObjectOnDeleteCreateWrapper: function(obj, onDelete, context) {
             //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
             if (!onDelete) return;
@@ -859,7 +859,7 @@ module.exports = function(OBJY) {
             return onDelete;
         },
 
-        ObjectOnChangeSetWrapper: function(obj, name, onChange, trigger, type, instance) {
+        ObjectOnChangeSetWrapper: function(obj, name, onChange, trigger, type, context) {
             //if (!typeof onchange == 'object') throw new exceptions.InvalidPermissionException();
 
             if (!onChange) throw new exceptions.InvalidHandlerException();
@@ -878,12 +878,12 @@ module.exports = function(OBJY) {
 
             if (obj.onChange[name].templateId) obj.onChange[name].overwritten = true;
 
-            OBJY.chainPermission(obj, instance, 'w', 'setOnChangeHandler', name);
+            OBJY.chainPermission(obj, context, 'w', 'setOnChangeHandler', name);
 
             return onChange;
         },
 
-        ObjectOnDeleteSetWrapper: function(obj, name, onDelete, trigger, type, instance) {
+        ObjectOnDeleteSetWrapper: function(obj, name, onDelete, trigger, type, context) {
             //if (!typeof onchange == 'object') throw new InvalidPermissionException();
 
             if (!onDelete) throw new exceptions.InvalidHandlerException();
@@ -902,12 +902,12 @@ module.exports = function(OBJY) {
 
             if (obj.onDelete[name].templateId) obj.onDelete[name].overwritten = true;
 
-            OBJY.chainPermission(obj, instance, 'z', 'setOnDeleteHandler', name);
+            OBJY.chainPermission(obj, context, 'z', 'setOnDeleteHandler', name);
 
             return onDelete;
         },
 
-        ObjectPermissionSetWrapper: function(obj, permission, instance) //addTemplateToObject!!!
+        ObjectPermissionSetWrapper: function(obj, permission, context) //addTemplateToObject!!!
         {
             if (!obj.permissions) obj.permissions = {};
             if (!typeof permission == 'object') throw new exceptions.InvalidPermissionException();
@@ -921,12 +921,12 @@ module.exports = function(OBJY) {
                 obj.permissions[permissionKey] = permission[permissionKey];
             }
 
-            OBJY.chainPermission(obj, instance, 'x', 'setPermission', permissionKey);
+            OBJY.chainPermission(obj, context, 'x', 'setPermission', permissionKey);
 
             return permission;
         },
 
-        ObjectPermissionRemoveWrapper: function(obj, permissionName, instance) //addTemplateToObject!!!
+        ObjectPermissionRemoveWrapper: function(obj, permissionName, context) //addTemplateToObject!!!
         {
             if (!permissionName) throw new exceptions.InvalidPermissionException();
 
@@ -934,7 +934,7 @@ module.exports = function(OBJY) {
 
             if (!obj.permissions[permissionName]) throw new exceptions.NoSuchPermissionException(permissionName);
 
-            OBJY.chainPermission(obj, instance, 'x', 'removePermission', permissionName);
+            OBJY.chainPermission(obj, context, 'x', 'removePermission', permissionName);
 
             delete obj.permissions[permissionName];
 
@@ -965,7 +965,7 @@ module.exports = function(OBJY) {
             }
         },
 
-        PropertiesChecker: function(obj, properties, instance, params) {
+        PropertiesChecker: function(obj, properties, context, params) {
             if (properties === undefined) return;
 
             //obj.properties = {};
@@ -977,7 +977,7 @@ module.exports = function(OBJY) {
                 var propKey = {};
                 propKey[property] = properties[property];
                 var newProp = propKey;
-                new OBJY.PropertyCreateWrapper(obj, newProp, false, instance, params);
+                new OBJY.PropertyCreateWrapper(obj, newProp, false, context, params);
             })
             return obj;
         },
@@ -1048,11 +1048,11 @@ module.exports = function(OBJY) {
             return privilege;
         },
 
-        PrivilegeRemover: function(obj, privilege, instance) {
+        PrivilegeRemover: function(obj, privilege, context) {
 
 
             //if (!typeof privilege == 'object') throw new exceptions.InvalidPrivilegeException();
-            var appId = instance.activeApp; //Object.keys(privilege)[0];
+            var appId = context.activeApp; //Object.keys(privilege)[0];
 
             if (!obj.privileges[appId]) {
                 throw new exceptions.NoSuchPrivilegeException();

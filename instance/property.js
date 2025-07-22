@@ -175,7 +175,7 @@ module.exports = function (OBJY) {
             removeOnDelete(obj, propertyName);
         },
 
-        PropertyBagItemPermissionRemover: function (obj, propertyName, permissionKey, instance) {
+        PropertyBagItemPermissionRemover: function (obj, propertyName, permissionKey, context) {
             function removePermission(obj, access) {
                 if (typeof access == 'string') {
                     access = access.split('.');
@@ -188,7 +188,7 @@ module.exports = function (OBJY) {
                     if (!obj[access[0]].permissions) throw new exceptions.NoSuchPermissionException(permissionKey);
                     if (!obj[access[0]].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
-                    OBJY.chainPermission(obj, instance, 'x', 'removePropertyPermission', propertyName);
+                    OBJY.chainPermission(obj, context, 'x', 'removePropertyPermission', propertyName);
 
                     delete obj[access[0]].permissions[permissionKey];
                     return;
@@ -198,7 +198,7 @@ module.exports = function (OBJY) {
             removePermission(obj, propertyName);
         },
 
-        PropertyBagItemRemover: function (obj, propertyName, params, instance) {
+        PropertyBagItemRemover: function (obj, propertyName, params, context) {
             var propsObj = obj;
 
             function getValue(propsObj, access) {
@@ -212,13 +212,13 @@ module.exports = function (OBJY) {
 
                     if (propsObj[access[0]].onDelete) {
                         if (Object.keys(propsObj[access[0]].onDelete).length > 0) {
-                            if (!instance.handlerSequence[propsObj._id]) instance.handlerSequence[obj._id] = {};
-                            if (!instance.handlerSequence[propsObj._id].onDelete) instance.handlerSequence[obj._id].onDelete = [];
-                            instance.handlerSequence[propsObj._id].onDelete.push(propsObj[access[0]].onDelete);
+                            if (!context.handlerSequence[propsObj._id]) context.handlerSequence[obj._id] = {};
+                            if (!context.handlerSequence[propsObj._id].onDelete) context.handlerSequence[obj._id].onDelete = [];
+                            context.handlerSequence[propsObj._id].onDelete.push(propsObj[access[0]].onDelete);
                         }
                     }
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'd', 'removeProperty', propertyName);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'd', 'removeProperty', propertyName);
 
                     delete propsObj[access[0]];
 
@@ -229,10 +229,10 @@ module.exports = function (OBJY) {
             getValue(propsObj, propertyName);
         },
 
-        PropertyParser: function (obj, propertyName, instance, params) {
+        PropertyParser: function (obj, propertyName, context, params) {
             var thisRef = this;
-            var app = instance.activeApp;
-            var user = instance.activeUser;
+            var app = context.activeApp;
+            var user = context.activeUser;
 
             var propsObj = obj;
 
@@ -269,7 +269,7 @@ module.exports = function (OBJY) {
             if (typeof property !== 'undefined') if (typeof property.value === 'undefined') property.value = null;
         },
 
-        PropertyCreateWrapper: function (obj, property, isBag, instance, params, reallyAdd) {
+        PropertyCreateWrapper: function (obj, property, isBag, context, params, reallyAdd) {
             //if (params.propsObject && !obj[params.propsObject] && !isBag) obj[params.propsObject] = {};
 
             property = Object.assign({}, property);
@@ -354,7 +354,7 @@ module.exports = function (OBJY) {
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_EVENT:
-                    OBJY.chainPermission(obj, instance, 'evt', 'addProperty (Event)', propertyKey);
+                    OBJY.chainPermission(obj, context, 'evt', 'addProperty (Event)', propertyKey);
 
                     var _event = {};
                     var eventKey = propertyKey;
@@ -380,7 +380,7 @@ module.exports = function (OBJY) {
 
                         
 
-                        instance.eventAlterationSequence.push({
+                        context.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
@@ -401,7 +401,7 @@ module.exports = function (OBJY) {
                         console.log('AFSFAASF')
                         propsObj[propertyKey].nextOccurence = propsObj[propertyKey].date;
 
-                        instance.eventAlterationSequence.push({
+                        context.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
@@ -465,7 +465,7 @@ module.exports = function (OBJY) {
                         var tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
-                        new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
+                        new OBJY.PropertyCreateWrapper(obj[propertyKey], Object.assign({}, tmpProp), true, context, params);
                     });
 
                     break;
@@ -490,7 +490,7 @@ module.exports = function (OBJY) {
                         var tmpProp = {};
                         tmpProp[property] = innerProperties[property];
 
-                        new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, instance, params);
+                        new OBJY.PropertyCreateWrapper(propsObj[propertyKey], Object.assign({}, tmpProp), true, context, params);
                     });
 
                     break;
@@ -503,7 +503,7 @@ module.exports = function (OBJY) {
                     break;
 
                 case CONSTANTS.PROPERTY.TYPE_ACTION:
-                    OBJY.chainPermission(obj, instance, 'act', 'addProperty (Action)', propertyKey);
+                    OBJY.chainPermission(obj, context, 'act', 'addProperty (Action)', propertyKey);
 
                     if (property[propertyKey].value) {
                         if (typeof property[propertyKey].value !== 'string')
@@ -520,22 +520,22 @@ module.exports = function (OBJY) {
 
             if ((property[propertyKey] || {}).onCreate) {
                 if (Object.keys(property[propertyKey].onCreate).length > 0) {
-                    if (!instance.handlerSequence[obj._id]) instance.handlerSequence[obj._id] = {};
-                    if (!instance.handlerSequence[obj._id].onCreate) instance.handlerSequence[obj._id].onCreate = [];
-                    instance.handlerSequence[obj._id].onCreate.push({
+                    if (!context.handlerSequence[obj._id]) context.handlerSequence[obj._id] = {};
+                    if (!context.handlerSequence[obj._id].onCreate) context.handlerSequence[obj._id].onCreate = [];
+                    context.handlerSequence[obj._id].onCreate.push({
                         handler: property[propertyKey].onCreate,
                         prop: property[propertyKey],
                     });
                 }
             }
 
-            if (reallyAdd) OBJY.chainPermission(obj, instance, 'p', 'addProperty', propertyKey);
+            if (reallyAdd) OBJY.chainPermission(obj, context, 'p', 'addProperty', propertyKey);
 
             /*if(obj.permissions) {
                 if(Object.keys(obj.permissions).length > 0)  {
-                    if(!instance.permissionSequence[obj._id]) instance.permissionSequence[obj._id] = [];
-                        if(!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, 'p', true))
-                            instance.permissionSequence[obj._id].push({name:'addProperty', key: propertyKey});
+                    if(!context.permissionSequence[obj._id]) context.permissionSequence[obj._id] = [];
+                        if(!OBJY.checkPermissions(context.activeUser, context.activeApp, obj, 'p', true))
+                            context.permissionSequence[obj._id].push({name:'addProperty', key: propertyKey});
                 }
             */
         },
@@ -587,7 +587,7 @@ module.exports = function (OBJY) {
             setMeta(propsObj, propertyKey, meta);
         },
 
-        PropertyOnChangeSetWrapper: function (obj, propertyKey, name, onChange, trigger, type, instance, params) {
+        PropertyOnChangeSetWrapper: function (obj, propertyKey, name, onChange, trigger, type, context, params) {
             var propsObj = obj;
 
             function setOnChange(obj, access, onChange) {
@@ -611,14 +611,14 @@ module.exports = function (OBJY) {
                     propsObj[access[0]].onChange[name].trigger = trigger || 'after';
                     propsObj[access[0]].onChange[name].type = type || 'async';
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'w', 'setPropertyOnChangeHandler', name);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'w', 'setPropertyOnChangeHandler', name);
                 }
             }
 
             setOnChange(propsObj, propertyKey, onChange);
         },
 
-        PropertyOnCreateSetWrapper: function (obj, propertyKey, name, onCreate, trigger, type, instance, params) {
+        PropertyOnCreateSetWrapper: function (obj, propertyKey, name, onCreate, trigger, type, context, params) {
             var propsObj = obj;
 
             function setOnCreate(obj, access, onCreate) {
@@ -645,14 +645,14 @@ module.exports = function (OBJY) {
                     propsObj[access[0]].onCreate[name].trigger = trigger || 'after';
                     propsObj[access[0]].onCreate[name].type = type || 'async';
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'v', 'setPropertyOnCreateHandler', name);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'v', 'setPropertyOnCreateHandler', name);
                 }
             }
 
             setOnCreate(propsObj, propertyKey, onCreate);
         },
 
-        PropertyOnDeleteSetWrapper: function (obj, propertyKey, name, onDelete, trigger, type, instance, params) {
+        PropertyOnDeleteSetWrapper: function (obj, propertyKey, name, onDelete, trigger, type, context, params) {
             var propsObj = obj;
 
             function setOnDelete(obj, access, onDelete) {
@@ -673,7 +673,7 @@ module.exports = function (OBJY) {
                     propsObj[access[0]].onDelete[name].trigger = trigger || 'after';
                     propsObj[access[0]].onDelete[name].type = type || 'async';
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'z', 'setPropertyOnDeleteHandler', name);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'z', 'setPropertyOnDeleteHandler', name);
                 }
             }
 
@@ -700,7 +700,7 @@ module.exports = function (OBJY) {
             setConditions(propsObj, propertyKey, conditions);
         },
 
-        PropertyPermissionSetWrapper: function (obj, propertyKey, permission, instance, params) {
+        PropertyPermissionSetWrapper: function (obj, propertyKey, permission, context, params) {
             var propsObj = obj;
 
             function setPermission(obj, access, permission) {
@@ -718,14 +718,14 @@ module.exports = function (OBJY) {
 
                     propsObj[access[0]].permissions[permissionKey] = permission[permissionKey];
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'x', 'setPropertyPermission', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'x', 'setPropertyPermission', propertyKey);
                 }
             }
 
             setPermission(propsObj, propertyKey, permission);
         },
 
-        PropertySetWrapper: function (obj, propertyKey, newValue, instance, params) {
+        PropertySetWrapper: function (obj, propertyKey, newValue, context, params) {
             var propsObj = obj;
 
             function setValue(obj, access, value) {
@@ -768,23 +768,23 @@ module.exports = function (OBJY) {
 
                     if (propsObj[access[0]].onChange) {
                         if (Object.keys(propsObj[access[0]].onChange).length > 0) {
-                            if (!instance.handlerSequence[propsObj._id]) instance.handlerSequence[propsObj._id] = {};
-                            if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
-                            instance.handlerSequence[propsObj._id].onChange.push({
+                            if (!context.handlerSequence[propsObj._id]) context.handlerSequence[propsObj._id] = {};
+                            if (!context.handlerSequence[propsObj._id].onChange) context.handlerSequence[propsObj._id].onChange = [];
+                            context.handlerSequence[propsObj._id].onChange.push({
                                 handler: propsObj[access[0]].onChange,
                                 prop: propsObj[access[0]],
                             });
                         }
                     }
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setPropertyValue', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'u', 'setPropertyValue', propertyKey);
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
         },
 
-        PropertySetFullWrapper: function (obj, propertyKey, newValue, instance, force, params) {
+        PropertySetFullWrapper: function (obj, propertyKey, newValue, context, force, params) {
             var propsObj = obj;
 
             function setValue(obj, access, value) {
@@ -822,23 +822,23 @@ module.exports = function (OBJY) {
 
                     if (propsObj[access[0]].onChange) {
                         if (Object.keys(propsObj[access[0]].onChange).length > 0) {
-                            if (!instance.handlerSequence[propsObj._id]) instance.handlerSequence[propsObj._id] = {};
-                            if (!instance.handlerSequence[propsObj._id].onChange) instance.handlerSequence[propsObj._id].onChange = [];
-                            instance.handlerSequence[propsObj._id].onChange.push({
+                            if (!context.handlerSequence[propsObj._id]) context.handlerSequence[propsObj._id] = {};
+                            if (!context.handlerSequence[propsObj._id].onChange) context.handlerSequence[propsObj._id].onChange = [];
+                            context.handlerSequence[propsObj._id].onChange.push({
                                 handler: propsObj[access[0]].onChange,
                                 prop: propsObj[access[0]],
                             });
                         }
                     }
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setProperty', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'u', 'setProperty', propertyKey);
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
         },
 
-        EventIntervalSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
+        EventIntervalSetWrapper: function (obj, propertyKey, newValue, client, context, params) {
             var propsObj = obj;
 
             var prop = obj.getProperty(propertyKey);
@@ -874,14 +874,14 @@ module.exports = function (OBJY) {
 
                     if (propsObj[access[0]].lastOccurence) {
                         var nextOccurence = moment(propsObj[access[0]].lastOccurence).utc().add(newValue);
-                        instance.eventAlterationSequence.push({
+                        context.eventAlterationSequence.push({
                             operation: 'remove',
                             obj: obj,
                             propName: propertyKey,
                             property: propsObj[access[0]],
                             date: nextOccurence,
                         });
-                        instance.eventAlterationSequence.push({
+                        context.eventAlterationSequence.push({
                             operation: 'add',
                             obj: obj,
                             propName: propertyKey,
@@ -890,7 +890,7 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventInterval', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'u', 'setEventInterval', propertyKey);
                 }
             }
 
@@ -974,7 +974,7 @@ module.exports = function (OBJY) {
             setValue(propsObj, propertyKey, newValue);
         },
 
-        EventDateSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
+        EventDateSetWrapper: function (obj, propertyKey, newValue, client, context, params) {
             var propsObj = obj;
 
             function setValue(obj, access, value) {
@@ -1005,14 +1005,14 @@ module.exports = function (OBJY) {
                     delete propsObj[access[0]].nextOccurence;
                     propsObj[access[0]].date = newValue;
 
-                    instance.eventAlterationSequence.push({
+                    context.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: obj,
                         propName: propertyKey,
                         property: propsObj[access[0]],
                         date: newValue,
                     });
-                    instance.eventAlterationSequence.push({
+                    context.eventAlterationSequence.push({
                         operation: 'add',
                         obj: obj,
                         propName: propertyKey,
@@ -1020,14 +1020,14 @@ module.exports = function (OBJY) {
                         date: newValue,
                     });
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventDate', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'u', 'setEventDate', propertyKey);
                 }
             }
 
             setValue(propsObj, propertyKey, newValue);
         },
 
-        EventActionSetWrapper: function (obj, propertyKey, newValue, client, instance, params) {
+        EventActionSetWrapper: function (obj, propertyKey, newValue, client, context, params) {
             var propsObj = obj;
 
             function setValue(obj, access, value) {
@@ -1057,10 +1057,10 @@ module.exports = function (OBJY) {
 
                     propsObj[access[0]].action = newValue;
 
-                    OBJY.chainPermission(propsObj[access[0]], instance, 'u', 'setEventAction', propertyKey);
+                    OBJY.chainPermission(propsObj[access[0]], context, 'u', 'setEventAction', propertyKey);
 
-                    //instance.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj[access[0]], date: newValue })
-                    //instance.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })
+                    //context.eventAlterationSequence.push({ operation: 'remove', obj: obj, propName: propertyKey, property: obj[access[0]], date: newValue })
+                    //context.eventAlterationSequence.push({ operation: 'add', obj: obj, propName: propertyKey, property: obj.properties[access[0]], date: newValue })
                 }
             }
 

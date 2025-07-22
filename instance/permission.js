@@ -12,9 +12,9 @@ module.exports = function(OBJY) {
          * @param {soft} - ...
          * @returns true or false
          */
-        checkPermissions: function(user, app, obj, permission, soft, instance) {
+        checkPermissions: function(user, app, obj, permission, soft, context) {
 
-            if(instance.ignorePermissions == true) return true;
+            if(OBJY.ignorePermissions == true) return true;
 
             var result = false; 
 
@@ -101,9 +101,9 @@ module.exports = function(OBJY) {
          * @param {app} - the current application
          * @returns true or false
          */
-        checkAuthroisations: function(obj, user, condition, app, instance) {
+        checkAuthroisations: function(obj, user, condition, app, context) {
 
-            if(instance.ignoreAuthorisations == true) return true;
+            if(OBJY.ignoreAuthorisations == true) return true;
 
             var authorisations;
             if (!user) return true;
@@ -156,9 +156,9 @@ module.exports = function(OBJY) {
          * @param {app} - the current application
          * @returns {query} - the final query with permissions
          */
-        buildPermissionQuery: function(query, user, app, instance) {
+        buildPermissionQuery: function(query, user, app, context) {
 
-            if(instance.ignorePermissions == true) return query;
+            if(OBJY.ignorePermissions == true) return query;
 
             if (query.$query) {
                 query = JSON.parse(JSON.stringify(query.$query));
@@ -231,9 +231,9 @@ module.exports = function(OBJY) {
          * @param {app} - the current application
          * @returns {query} - the final query with permissions
          */
-        buildAuthroisationQuery: function(obj, user, condition, app, instance) {
+        buildAuthroisationQuery: function(obj, user, condition, app, context) {
 
-            if(instance.ignoreAuthorisations == true) return obj;
+            if(OBJY.ignoreAuthorisations == true) return obj;
 
             var authorisations;
             if (!user) return obj;
@@ -299,12 +299,12 @@ module.exports = function(OBJY) {
         /**
          * Chains permission information, when performing multiple operations
          * @param {obj} - the object
-         * @param {instance} - the OBJY instance
+         * @param {context} - the OBJY context
          * @param {code} - the permission code
          * @param {name} - the permission name
          * @param {key} - the permission key
          */
-        chainPermission: function(obj, instance, code, name, key) {
+        chainPermission: function(obj, context, code, name, key) {
 
             if (['c', 'r', 'u', 'd', 'x'].includes(code)) {
 
@@ -312,10 +312,10 @@ module.exports = function(OBJY) {
 
             if (obj.permissions) {
                 if (Object.keys(obj.permissions).length > 0) {
-                    if (!instance.permissionSequence[obj._id]) instance.permissionSequence[obj._id] = [];
+                    if (!context.permissionSequence[obj._id]) context.permissionSequence[obj._id] = [];
 
-                    if (!OBJY.checkPermissions(instance.activeUser, instance.activeApp, obj, code, true, instance))
-                        instance.permissionSequence[obj._id].push({
+                    if (!OBJY.checkPermissions(context.activeUser, context.activeApp, obj, code, true, context))
+                        context.permissionSequence[obj._id].push({
                             name: name,
                             key: key
                         });

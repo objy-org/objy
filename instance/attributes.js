@@ -17,8 +17,6 @@ module.exports = function(OBJY) {
 
         metaPropPrefix: '',
 
-        instance: this,
-
         activeTenant: null,
 
         activeUser: null,
