@@ -45,7 +45,13 @@ OBJY.template({
 }).add(data => {
     console.log('added', data)
 
-    data.addProperty('properties.hello', {type: "number", value: "m"}).update(d => {
+    data.addProperty('properties.hello', {type: "number", value: "1"}).update(d => {
         console.log('updated', d)
+    })
+
+    OBJY.object({inherits: [data._id]}).add((o) => {
+        OBJY.object(o._id).get(o2 => {
+            console.log('o2', o2)
+        })
     })
 });
