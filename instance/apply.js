@@ -1,5 +1,5 @@
 //var Query = require('../lib/dependencies/query.js');
-import * as Query from '../lib/dependencies/query.js'
+import Query from '../lib/dependencies/query.js';
 
 export default function (OBJY) {
     return {
