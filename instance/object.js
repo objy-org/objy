@@ -278,8 +278,7 @@ export default function(OBJY) {
 
                         } else {
 
-                            console.log('it has p', p, '\n objy', obj, '\n cloded', cloned, 'p', template)
-
+                            
                             if (cloned.meta) {
                                 if (!obj[p].meta) {
                                     obj[p].meta = cloned.meta;
