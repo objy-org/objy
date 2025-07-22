@@ -11,7 +11,6 @@ var isObject = function(a) {
 };
 
 import generalAttributes from './instance/attributes.js'
-//var generalAttributes = require('./instance/attributes.js')
 import generalFunctions from './instance/general.js'
 import applyFunctions from './instance/apply.js'
 import permissionFunctions from './instance/permission.js'
