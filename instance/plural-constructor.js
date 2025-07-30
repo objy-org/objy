@@ -290,9 +290,9 @@ export default function (OBJY) {
                     return new Promise((resolve, reject) => {
                         var query = { username: userObj.username };
 
-                        if (context.authableFields) {
+                        if (OBJY.authableFields) {
                             query = { $or: [] };
-                            context.authableFields.forEach(function(field) {
+                            OBJY.authableFields.forEach(function(field) {
                                 var f = {};
                                 f[field] = userObj[field];
                                 if (f[field]) query.$or.push(f)
@@ -301,7 +301,7 @@ export default function (OBJY) {
                         }
 
 
-                        context[params.pluralName](query).get(function(data) {
+                        OBJY[params.pluralName](query).get(function(data) {
                             if (data.length == 0) error("User not found");
                             
                             if(callback) callback(data[0]);
