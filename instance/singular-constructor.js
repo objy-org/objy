@@ -887,7 +887,7 @@ export default function(OBJY) {
                     if (thisRef.onCreate) {
                         Object.keys(thisRef.onCreate).forEach(function (key) {
                             if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
-                                context.execProcessorAction(
+                                OBJY.execProcessorAction(
                                     thisRef.onCreate[key].value || thisRef.onCreate[key].action,
                                     thisRef,
                                     null,
@@ -1011,7 +1011,7 @@ export default function(OBJY) {
                                     Object.keys(data.onCreate).forEach(function (key) {
                                         try {
                                             if (data.onCreate[key].trigger == 'after') {
-                                                context.execProcessorAction(
+                                                OBJY.execProcessorAction(
                                                     data.onCreate[key].value || data.onCreate[key].action,
                                                     data,
                                                     null,
@@ -1174,7 +1174,7 @@ export default function(OBJY) {
                     if (thisRef.onChange) {
                         Object.keys(thisRef.onChange).forEach(function (key) {
                             if (thisRef.onChange[key].trigger == 'before') {
-                                context.execProcessorAction(
+                                OBJY.execProcessorAction(
                                     thisRef.onChange[key].value || thisRef.onChange[key].action,
                                     thisRef,
                                     null,
@@ -1194,7 +1194,7 @@ export default function(OBJY) {
 
                                 for (var handlerItem in handlerObj.handler) {
                                     if (handlerObj.handler[handlerItem].trigger == 'before') {
-                                        context.execProcessorAction(
+                                        OBJY.execProcessorAction(
                                             handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
                                             thisRef,
                                             handlerObj.prop,
@@ -1287,7 +1287,7 @@ export default function(OBJY) {
                                 if (data.onChange) {
                                     Object.keys(data.onChange).forEach(function (key) {
                                         if (data.onChange[key].trigger == 'after') {
-                                            context.execProcessorAction(
+                                            OBJY.execProcessorAction(
                                                 data.onChange[key].value || data.onChange[key].action,
                                                 data,
                                                 null,
@@ -1306,7 +1306,7 @@ export default function(OBJY) {
                                             var handlerObj = context.handlerSequence[thisRef._id][type][item];
                                             for (var handlerItem in handlerObj.handler) {
                                                 if (handlerObj.handler[handlerItem].trigger == 'after' || !handlerObj.handler[handlerItem].trigger) {
-                                                    context.execProcessorAction(
+                                                    OBJY.execProcessorAction(
                                                         handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
                                                         thisRef,
                                                         handlerObj.prop,
@@ -1500,7 +1500,7 @@ export default function(OBJY) {
                     if (thisRef.onDelete) {
                         Object.keys(thisRef.onDelete).forEach(function (key) {
                             if (thisRef.onDelete[key].trigger == 'before') {
-                                context.execProcessorAction(
+                                OBJY.execProcessorAction(
                                     thisRef.onDelete[key].value || thisRef.onDelete[key].action,
                                     thisRef,
                                     null,
@@ -1525,7 +1525,7 @@ export default function(OBJY) {
                                     if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
                                             if (thisRef.onDelete[key].trigger == 'after') {
-                                                context.execProcessorAction(
+                                                OBJY.execProcessorAction(
                                                     thisRef.onDelete[key].value || thisRef.onDelete[key].action,
                                                     thisRef,
                                                     null,

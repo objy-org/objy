@@ -264,7 +264,7 @@ export default function(OBJY) {
             if (propertyToReturn.type == 'action') {
                 propertyToReturn.call = function (callback, client) {
                     OBJY.checkAuthroisations(obj, user, 'x', app);
-                    thisRef.execProcessorAction(propertyToReturn.value || propertyToReturn.action, obj, propertyToReturn, {}, callback, client, {});
+                    OBJY.execProcessorAction(propertyToReturn.value || propertyToReturn.action, obj, propertyToReturn, {}, callback, client, {});
                 };
             }
 
