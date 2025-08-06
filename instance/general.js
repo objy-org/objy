@@ -29,6 +29,40 @@ export default function(OBJY) {
             return obj;
         },
 
+        clone() {
+            let objyClone = {};
+            let ctx = Object.assign({}, OBJY.globalCtx);
+
+            this.objectFamilies.forEach((objFamily) => {
+                let params = { name: objFamily, pluralName: objFamily + 's' };
+
+                objyClone[params.name] = function (obj) {
+                    //return OBJY.SingleProxy(obj, params.name, this, params);
+
+                    return new OBJY.Obj(obj, params.name, ctx, params);
+                };
+
+                objyClone[params.pluralName] = function (objs, flags) {
+                    return new OBJY.Objs(objs, params.name, ctx, params, flags);
+                };
+            });
+
+            objyClone.client = (client) => {
+                if (!client) throw new exceptions.General('No client specified');
+                ctx.activeTenant = client;
+            };
+
+            objyClone.useUser = (user) => {
+                ctx.activeUser = user;
+            };
+
+            objyClone.app = (app) => {
+                ctx.activeApp = app;
+            };
+
+            return objyClone;
+        },
+
         /**
          * Sets client (workspace) context (deprecated)
          * @param {tenant} - the tenant identifier

@@ -280,7 +280,7 @@ export default function (OBJY) {
 
                                 if (operation != h || (trigger && trigger != template[h][oC]?.trigger)) return;
 
-                                context.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
+                                OBJY.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
 
                                 }, client, null);
 

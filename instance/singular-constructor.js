@@ -1807,7 +1807,7 @@ export default function(OBJY) {
                         });
                     }
 
-                    if (context.caches[thisRef.role].data[thisRef._id]) {
+                    if (((context.caches || {})[thisRef.role]?.data || {})[thisRef._id]) {
                         prepareObj(context.caches[thisRef.role].data[thisRef._id]);
                     } else {
                         OBJY.getObjectById(
@@ -1816,7 +1816,7 @@ export default function(OBJY) {
                             function (data) {
                                 prepareObj(data);
 
-                                if (!context.caches[thisRef.role].data[thisRef._id]) {
+                                if (!((context.caches || {})[thisRef.role]?.data || {})[thisRef._id]) {
                                     //context.caches[thisRef.role].add(thisRef._id, data);
                                 }
                             },

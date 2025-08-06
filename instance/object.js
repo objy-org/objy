@@ -267,13 +267,13 @@ export default function(OBJY) {
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
 
-                        if (!obj.hasOwnProperty(p)) {
+                        if (!obj.hasOwnProperty(p) && isObject(obj[p])) {
 
                             obj[p] = cloned;
                             obj[p].template = templateId;
                             //delete obj[p].overwritten;
 
-                        } else {
+                        } else if (isObject(obj[p])) {
 
                             if (cloned.meta) {
                                 if (!obj[p].meta) {
@@ -464,7 +464,7 @@ export default function(OBJY) {
                                     if (counter == template.inherits.length) run(template);
 
 
-                                }, client, templateRole || obj.role, templateSource || context.activeTenant, params)
+                                }, client, templateRole || obj.role, templateSource || context.activeTenant, params, context)
 
                         })
 
