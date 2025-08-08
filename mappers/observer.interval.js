@@ -1,9 +1,5 @@
 import moment from 'moment';
 
-if (typeof moment == 'object') {
-    moment = moment.default;
-}
-
 export default function (OBJY) {
     return Object.assign(new OBJY.ObserverTemplate(OBJY), {
         initialize: function (millis) {

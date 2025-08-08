@@ -30,6 +30,13 @@
     "devDependencies": {
         "jest": "^25.1.0",
         "jsdoc-to-markdown": "^5.0.3",
+        "rollup": "^4.46.2",
         "tinyify": "^2.5.2"
+    },
+    "exports": {
+        ".": {
+            "require": "./dist/index.cjs",
+            "import": "./dist/index.js"
+        }
     }
 }

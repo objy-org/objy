@@ -1,3 +1,4 @@
+/*
 var _nodejs = (
     typeof process !== 'undefined' && process.versions && process.versions.node);
 if (_nodejs) {
@@ -5,6 +6,7 @@ if (_nodejs) {
         version: process.versions.node
     };
 }
+*/
 
 var isObject = function(a) {
     return (!!a) && (a.constructor === Object);

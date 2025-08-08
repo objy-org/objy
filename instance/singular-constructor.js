@@ -1,10 +1,6 @@
 //var moment = require('moment');
 import moment from 'moment';
 
-if (typeof moment == 'object') {
-    moment = moment.default;
-}
-
 /*var CONSTANTS = require('../lib/dependencies/constants.js');
 var exceptions = require('../lib/dependencies/exceptions.js');*/
 import CONSTANTS from '../lib/dependencies/constants.js';
