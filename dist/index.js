@@ -1796,7 +1796,7 @@ function objectFunctions(OBJY) {
 
 
                 // Properties
-                function doTheProps(template, obj) {
+                function doTheProps(template, obj, extendedStructure) {
 
                     if (!obj) obj = {};
 
@@ -1804,13 +1804,13 @@ function objectFunctions(OBJY) {
 
                     //if (params.object && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
-                    if(params.extendedStructure){
-                            Object.keys(params.extendedStructure).forEach(k => {
-                                if(isObject(params.extendedStructure[k]) && template[k]){
-                                    doTheProps(template[k], obj[k]);
+                        if(extendedStructure && typeof extendedStructure == "object"){
+                            Object.keys(extendedStructure).forEach(k => {
+                                if(isObject(extendedStructure[k]) && template[k]){
+                                    doTheProps(template[k], obj[k], extendedStructure[k]);
                                 }
                             });
-                    }
+                        }
 
                     Object.keys(template).forEach(function(p) {
 
@@ -1822,10 +1822,10 @@ function objectFunctions(OBJY) {
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
 
-                        if (!obj.hasOwnProperty(p) && isObject(obj[p])) {
+                        if (!obj.hasOwnProperty(p)) {
 
                             obj[p] = cloned;
-                            obj[p].template = templateId;
+                            if(isObject(obj[p])) obj[p].template = templateId;
                             //delete obj[p].overwritten;
 
                         } else if (isObject(obj[p])) {
@@ -1886,7 +1886,7 @@ function objectFunctions(OBJY) {
                 }
 
 
-                doTheProps(template, obj);
+                doTheProps(template, obj, params.extendedStructure);
 
                 // Applications
 
@@ -2068,7 +2068,7 @@ function objectFunctions(OBJY) {
             };
 
 
-            function doTheProps(obj) {
+            function doTheProps(obj, extendedStructure) {
 
                 if (obj) {
 
@@ -2104,10 +2104,10 @@ function objectFunctions(OBJY) {
                             return doTheProps(obj[p]);
                         }
 
-                        if(params.extendedStructure){
-                            Object.keys(params.extendedStructure).forEach(k => {
-                                if(isObject(params.extendedStructure[k]) && k == p){
-                                    doTheProps(obj[p]);
+                        if(extendedStructure && typeof extendedStructure == "object"){
+                            Object.keys(extendedStructure).forEach(k => {
+                                if(isObject(extendedStructure[k]) && k == p){
+                                    doTheProps(obj[p], extendedStructure[k]);
                                 }
                             });
                         }
@@ -2121,7 +2121,7 @@ function objectFunctions(OBJY) {
 
             }
 
-            doTheProps(obj);
+            doTheProps(obj, params.extendedStructure);
 
 
             // Applications: TODO!!!

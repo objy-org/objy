@@ -233,7 +233,7 @@ export default function(OBJY) {
 
 
                 // Properties
-                function doTheProps(template, obj) {
+                function doTheProps(template, obj, extendedStructure) {
 
                     if (!obj) obj = {}
 
@@ -241,21 +241,21 @@ export default function(OBJY) {
 
                     //if (params.object && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
-                    if(params.extendedStructure){
-                            Object.keys(params.extendedStructure).forEach(k => {
-                                if(isObject(params.extendedStructure[k]) && template[k]){
-                                    doTheProps(template[k], obj[k]);
+                        if(extendedStructure && typeof extendedStructure == "object"){
+                            Object.keys(extendedStructure).forEach(k => {
+                                if(isObject(extendedStructure[k]) && template[k]){
+                                    doTheProps(template[k], obj[k], extendedStructure[k]);
                                 }
-                            })
-                    } else {
-                        /*console.log(Object.keys(template))
-                        Object.keys(template).forEach(function(p) {
-                            if(!OBJY.predefinedProperties.includes(p) && isObject(template[p])){
-                                console.log('predef', p)
-                                doTheProps(template[p], obj[p]);
-                            }
-                        })*/
-                    }
+                            });
+                        } else {
+                            /*console.log(Object.keys(template))
+                            Object.keys(template).forEach(function(p) {
+                                if(!OBJY.predefinedProperties.includes(p) && isObject(template[p])){
+                                    console.log('predef', p)
+                                    doTheProps(template[p], obj[p]);
+                                }
+                            })*/
+                        }
 
                     Object.keys(template).forEach(function(p) {
 
@@ -267,10 +267,10 @@ export default function(OBJY) {
 
                         var cloned = JSON.parse(JSON.stringify(template[p]));
 
-                        if (!obj.hasOwnProperty(p) && isObject(obj[p])) {
+                        if (!obj.hasOwnProperty(p)) {
 
                             obj[p] = cloned;
-                            obj[p].template = templateId;
+                            if(isObject(obj[p])) obj[p].template = templateId;
                             //delete obj[p].overwritten;
 
                         } else if (isObject(obj[p])) {
@@ -331,7 +331,7 @@ export default function(OBJY) {
                 }
 
 
-                doTheProps(template, obj);
+                doTheProps(template, obj, params.extendedStructure);
 
                 // Applications
 
@@ -518,7 +518,7 @@ export default function(OBJY) {
             };
 
 
-            function doTheProps(obj) {
+            function doTheProps(obj, extendedStructure) {
 
                 if (obj) {
 
@@ -554,10 +554,10 @@ export default function(OBJY) {
                             return doTheProps(obj[p]);
                         }
 
-                        if(params.extendedStructure){
-                            Object.keys(params.extendedStructure).forEach(k => {
-                                if(isObject(params.extendedStructure[k]) && k == p){
-                                    doTheProps(obj[p]);
+                        if(extendedStructure && typeof extendedStructure == "object"){
+                            Object.keys(extendedStructure).forEach(k => {
+                                if(isObject(extendedStructure[k]) && k == p){
+                                    doTheProps(obj[p], extendedStructure[k]);
                                 }
                             })
                         }
@@ -576,7 +576,7 @@ export default function(OBJY) {
 
             }
 
-            doTheProps(obj);
+            doTheProps(obj, params.extendedStructure);
 
 
             // Applications: TODO!!!
