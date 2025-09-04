@@ -8,25 +8,25 @@ export default function (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options);
+                        if (typeof dsl === 'function') dsl(callback);
                         else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e);
                 }
-                if (callback) callback();
+                //if (callback) callback();
             } else {
                 try {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options);
+                        if (typeof dsl === 'function') dsl(callback);
                         else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e);
                 }
-                if (callback) callback();
+                //if (callback) callback();
             }
         },
     });

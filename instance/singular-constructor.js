@@ -880,7 +880,7 @@ export default function(OBJY) {
                         return this;
                     }
 
-                    if (thisRef.onCreate) {
+                    /*if (thisRef.onCreate) {
                         Object.keys(thisRef.onCreate).forEach(function (key) {
                             if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
                                 OBJY.execProcessorAction(
@@ -894,7 +894,7 @@ export default function(OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
@@ -1003,26 +1003,7 @@ export default function(OBJY) {
 
                                 OBJY.applyAffects(thisRef, 'onCreate', context, client);
                                 
-                                if (data.onCreate) {
-                                    Object.keys(data.onCreate).forEach(function (key) {
-                                        try {
-                                            if (data.onCreate[key].trigger == 'after') {
-                                                OBJY.execProcessorAction(
-                                                    data.onCreate[key].value || data.onCreate[key].action,
-                                                    data,
-                                                    null,
-                                                    null,
-                                                    function (data) {},
-                                                    client,
-                                                    null
-                                                );
-                                            }
-                                        } catch(e){
-                                            console.log(e)
-                                        }
-
-                                    });
-                                }
+                                
 
                                 if (mapper.type == 'scheduled') {
                                     context.eventAlterationSequence.forEach(function (evt) {
@@ -1053,10 +1034,43 @@ export default function(OBJY) {
 
                                 //OBJY.deSerializePropsObject(data, params);
 
-                                if (success) success(data);
-                                else {
-                                    resolve(data);
+
+                                // SYNC HANDLER
+                                if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
+                                    var callbackCounter = 0;
+                                    Object.keys(data.onCreate).forEach(function (key) {
+                                        try {
+                                            if (data.onCreate[key].trigger == 'after' || !data.onCreate[key].trigger) {
+                                                OBJY.execProcessorAction(
+                                                    data.onCreate[key].value || data.onCreate[key].action,
+                                                    data,
+                                                    null,
+                                                    null,
+                                                    function (cbData) {
+                                                        callbackCounter++;
+                                                        if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                            if (success) success(data);
+                                                            else {
+                                                                resolve(data);
+                                                            }
+                                                        }
+                                                    },
+                                                    client,
+                                                    null
+                                                );
+                                            }
+                                        } catch(e){
+                                            console.log(e)
+                                        }
+
+                                    });
+                                } else {
+                                    if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }
                                 }
+
 
                                 delete thisRef.context;
                             },
@@ -1167,7 +1181,7 @@ export default function(OBJY) {
                         throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
 
-                    if (thisRef.onChange) {
+                    /*if (thisRef.onChange) {
                         Object.keys(thisRef.onChange).forEach(function (key) {
                             if (thisRef.onChange[key].trigger == 'before') {
                                 OBJY.execProcessorAction(
@@ -1181,9 +1195,9 @@ export default function(OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
-                    if (context.handlerSequence[this._id]) {
+                    /*if (context.handlerSequence[this._id]) {
                         for (var type in context.handlerSequence[this._id]) {
                             for (var item in context.handlerSequence[this._id][type]) {
                                 var handlerObj = context.handlerSequence[this._id][type][item];
@@ -1203,7 +1217,7 @@ export default function(OBJY) {
                                 }
                             }
                         }
-                    }
+                    }*/
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -1280,7 +1294,7 @@ export default function(OBJY) {
                             function (data) {
                                 OBJY.applyAffects(data, 'onChange', context, client, 'after');
 
-                                if (data.onChange) {
+                                /*if (data.onChange) {
                                     Object.keys(data.onChange).forEach(function (key) {
                                         if (data.onChange[key].trigger == 'after') {
                                             OBJY.execProcessorAction(
@@ -1294,7 +1308,9 @@ export default function(OBJY) {
                                             );
                                         }
                                     });
-                                }
+                                }*/
+
+                                
 
                                 if (context.handlerSequence[thisRef._id]) {
                                     for (var type in context.handlerSequence[thisRef._id]) {
@@ -1350,10 +1366,51 @@ export default function(OBJY) {
                                 OBJY.Logger.log('Updated Object: ' + data);
                                 //OBJY.deSerializePropsObject(data, params);
                                 context.alterSequence = [];
-                                if (success) success(data);
+
+
+
+                                // SYNC HANDLER
+                                if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
+                                    var callbackCounter = 0;
+                                    Object.keys(data.onChange).forEach(function (key) {
+                                        try {
+                                            if (data.onChange[key].trigger == 'after' || !data.onChange[key].trigger) {
+                                                OBJY.execProcessorAction(
+                                                    data.onChange[key].value || data.onChange[key].action,
+                                                    data,
+                                                    null,
+                                                    null,
+                                                    function (cbData) {
+                                                        callbackCounter++;
+                                                        if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                            if (success) success(data);
+                                                            else {
+                                                                resolve(data);
+                                                            }
+                                                        }
+                                                    },
+                                                    client,
+                                                    null
+                                                );
+                                            }
+                                        } catch(e){
+                                            console.log(e)
+                                        }
+
+                                    });
+                                } else {
+                                    if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }
+                                }
+
+
+
+                                /*if (success) success(data);
                                 else {
                                     resolve(data);
-                                }
+                                }*/
                             },
                             function (err) {
                                 if (error) error(err);
@@ -1493,7 +1550,7 @@ export default function(OBJY) {
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
-                    if (thisRef.onDelete) {
+                    /*if (thisRef.onDelete) {
                         Object.keys(thisRef.onDelete).forEach(function (key) {
                             if (thisRef.onDelete[key].trigger == 'before') {
                                 OBJY.execProcessorAction(
@@ -1507,7 +1564,7 @@ export default function(OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
                     OBJY.getObjectById(
                         this.role,
@@ -1518,7 +1575,7 @@ export default function(OBJY) {
                                 function (_data) {
                                     OBJY.applyAffects(data, 'onDelete', context, client);
 
-                                    if (thisRef.onDelete) {
+                                    /*if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
                                             if (thisRef.onDelete[key].trigger == 'after') {
                                                 OBJY.execProcessorAction(
@@ -1532,7 +1589,7 @@ export default function(OBJY) {
                                                 );
                                             }
                                         });
-                                    }
+                                    }*/
 
                                     function aggregateAllEvents(props, prePropsString) {
                                         Object.keys(props || {}).forEach(function (p) {
@@ -1622,10 +1679,48 @@ export default function(OBJY) {
                                     OBJY.Logger.log('Removed Object: ' + data);
 
                                     //OBJY.deSerializePropsObject(data, params);
-                                    if (success) success(data);
+
+                                    // SYNC HANDLER
+                                    if (data.onDelete && Object.keys(data.onDelete || {}).length > 0) {
+                                        var callbackCounter = 0;
+                                        Object.keys(data.onDelete).forEach(function (key) {
+                                            try {
+                                                if (data.onDelete[key].trigger == 'after' || !data.onDelete[key].trigger) {
+                                                    OBJY.execProcessorAction(
+                                                        data.onDelete[key].value || data.onDelete[key].action,
+                                                        data,
+                                                        null,
+                                                        null,
+                                                        function (cbData) {
+                                                            callbackCounter++;
+                                                            if (callbackCounter == Object.keys(data.onDelete || {}).length) {
+                                                                if (success) success(data);
+                                                                else {
+                                                                    resolve(data);
+                                                                }
+                                                            }
+                                                        },
+                                                        client,
+                                                        null
+                                                    );
+                                                }
+                                            } catch(e){
+                                                console.log(e)
+                                            }
+
+                                        });
+                                    } else {
+                                        if (success) success(data);
+                                        else {
+                                            resolve(data);
+                                        }
+                                    }
+
+
+                                    /*if (success) success(data);
                                     else {
                                         resolve(data);
-                                    }
+                                    }*/
                                 },
                                 function (err) {
                                     if (error) error(err);
