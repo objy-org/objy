@@ -25,8 +25,8 @@ OBJY.define({
 OBJY.object({name: "hello", onCreate: {
     bef: {
         trigger: "after",
-        action: (callback) => {
-            console.log(111);
+        action: (callback, obj) => {
+            console.log('ddd', obj);
             callback(1);
         }
     }
@@ -43,16 +43,16 @@ OBJY.object({name: "hello", onCreate: {
     bef: {
         trigger: "after",
         action: (callback) => {
-            console.log('DELETE');
+            console.log('ddd', obj);
             callback(1);
         }
     }
 }}).add(d => {
     console.log('d', d)
 
-    d.setName('newname,,,').update(u => {
+   /* d.setName('newname,,,').update(u => {
         console.log('u updated', u)
     })
 
-    d.remove()
+    d.remove()*/
 })

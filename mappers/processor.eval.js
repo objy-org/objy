@@ -8,7 +8,7 @@ export default function (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(callback);
+                        if (typeof dsl === 'function') dsl(callback, obj);
                         else eval(dsl);
                     }
                 } catch (e) {
@@ -20,7 +20,7 @@ export default function (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(callback);
+                        if (typeof dsl === 'function') dsl(callback, obj);
                         else eval(dsl);
                     }
                 } catch (e) {
@@ -31,4 +31,3 @@ export default function (OBJY, mapperOptions) {
         },
     });
 };
-
