@@ -536,10 +536,11 @@ function generalFunctions(OBJY) {
             if (property.hasOwnProperty('conditions')) ;
         },
 
-        execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
-            let processorApp = this.context?.activeApp || (obj.applications || {})[0];
+        execProcessorAction: function(dsl, beforeObj, afterObj, prop, callback, client, options) {
+            let processorApp = this.context?.activeApp || ((beforeObj || {}).applications || {})[0] || ((afterObj || {}).applications || {})[0];
+            let role = (beforeObj || {}).role || (afterObj || {}).role;
             OBJY.Logger.log('triggering dsl');
-            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, processorApp, this.context?.activeUser, options);
+            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, processorApp, this.context?.activeUser, options);
         },
 
 
@@ -3081,7 +3082,7 @@ function DefaultStorageMapper(OBJY, options) {
 
 function DefaultProcessorMapper (OBJY, mapperOptions) {
     return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
-        execute: function (dsl, obj, prop, data, callback, client, app, user, options) {
+        execute: function (dsl, beforeObj, afterObj, prop, done, client, app, user, options) {
             OBJY.Logger.log('Executing dsl in mapper');
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
@@ -3089,25 +3090,25 @@ function DefaultProcessorMapper (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options);
+                        if (typeof dsl === 'function') dsl(done, obj);
                         else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e);
                 }
-                if (callback) callback();
+                //if (done) done();
             } else {
                 try {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options);
+                        if (typeof dsl === 'function') dsl(done, obj);
                         else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e);
                 }
-                if (callback) callback();
+                //if (done) done();
             }
         },
     });
@@ -5545,7 +5546,7 @@ function singularConstructorFunctions(OBJY) {
                         return this;
                     }
 
-                    if (thisRef.onCreate) {
+                    /*if (thisRef.onCreate) {
                         Object.keys(thisRef.onCreate).forEach(function (key) {
                             if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
                                 OBJY.execProcessorAction(
@@ -5559,7 +5560,7 @@ function singularConstructorFunctions(OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
@@ -5668,26 +5669,7 @@ function singularConstructorFunctions(OBJY) {
 
                                 OBJY.applyAffects(thisRef, 'onCreate', context, client);
                                 
-                                if (data.onCreate) {
-                                    Object.keys(data.onCreate).forEach(function (key) {
-                                        try {
-                                            if (data.onCreate[key].trigger == 'after') {
-                                                OBJY.execProcessorAction(
-                                                    data.onCreate[key].value || data.onCreate[key].action,
-                                                    data,
-                                                    null,
-                                                    null,
-                                                    function (data) {},
-                                                    client,
-                                                    null
-                                                );
-                                            }
-                                        } catch(e){
-                                            console.log(e);
-                                        }
-
-                                    });
-                                }
+                                
 
                                 if (mapper.type == 'scheduled') {
                                     context.eventAlterationSequence.forEach(function (evt) {
@@ -5718,10 +5700,41 @@ function singularConstructorFunctions(OBJY) {
 
                                 //OBJY.deSerializePropsObject(data, params);
 
-                                if (success) success(data);
-                                else {
-                                    resolve(data);
+
+                                // SYNC HANDLER
+                                if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
+                                    var callbackCounter = 0;
+                                    Object.keys(data.onCreate).forEach(function (key) {
+                                        try {
+                                            OBJY.execProcessorAction(
+                                                data.onCreate[key].value || data.onCreate[key].action,
+                                                null,
+                                                data,
+                                                null,
+                                                function (cbData) {
+                                                    callbackCounter++;
+                                                    if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                        if (success) success(data);
+                                                        else {
+                                                            resolve(data);
+                                                        }
+                                                    }
+                                                },
+                                                client,
+                                                null
+                                            );
+                                        } catch(e){
+                                            console.log(e);
+                                        }
+
+                                    });
+                                } else {
+                                    if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }
                                 }
+
 
                                 delete thisRef.context;
                             },
@@ -5832,7 +5845,7 @@ function singularConstructorFunctions(OBJY) {
                         throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
 
-                    if (thisRef.onChange) {
+                    /*if (thisRef.onChange) {
                         Object.keys(thisRef.onChange).forEach(function (key) {
                             if (thisRef.onChange[key].trigger == 'before') {
                                 OBJY.execProcessorAction(
@@ -5846,9 +5859,9 @@ function singularConstructorFunctions(OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
-                    if (context.handlerSequence[this._id]) {
+                    /*if (context.handlerSequence[this._id]) {
                         for (var type in context.handlerSequence[this._id]) {
                             for (var item in context.handlerSequence[this._id][type]) {
                                 var handlerObj = context.handlerSequence[this._id][type][item];
@@ -5868,7 +5881,7 @@ function singularConstructorFunctions(OBJY) {
                                 }
                             }
                         }
-                    }
+                    }*/
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -5945,7 +5958,7 @@ function singularConstructorFunctions(OBJY) {
                             function (data) {
                                 OBJY.applyAffects(data, 'onChange', context, client, 'after');
 
-                                if (data.onChange) {
+                                /*if (data.onChange) {
                                     Object.keys(data.onChange).forEach(function (key) {
                                         if (data.onChange[key].trigger == 'after') {
                                             OBJY.execProcessorAction(
@@ -5959,24 +5972,24 @@ function singularConstructorFunctions(OBJY) {
                                             );
                                         }
                                     });
-                                }
+                                }*/
+
+                                
 
                                 if (context.handlerSequence[thisRef._id]) {
                                     for (var type in context.handlerSequence[thisRef._id]) {
                                         for (var item in context.handlerSequence[thisRef._id][type]) {
                                             var handlerObj = context.handlerSequence[thisRef._id][type][item];
                                             for (var handlerItem in handlerObj.handler) {
-                                                if (handlerObj.handler[handlerItem].trigger == 'after' || !handlerObj.handler[handlerItem].trigger) {
-                                                    OBJY.execProcessorAction(
-                                                        handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                                        thisRef,
-                                                        handlerObj.prop,
-                                                        null,
-                                                        function (data) {},
-                                                        client,
-                                                        null
-                                                    );
-                                                }
+                                                OBJY.execProcessorAction(
+                                                    handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
+                                                    thisRef,
+                                                    data,
+                                                    handlerObj.prop,
+                                                    function (data) {},
+                                                    client,
+                                                    null
+                                                );
                                             }
                                         }
                                     }
@@ -6015,10 +6028,49 @@ function singularConstructorFunctions(OBJY) {
                                 OBJY.Logger.log('Updated Object: ' + data);
                                 //OBJY.deSerializePropsObject(data, params);
                                 context.alterSequence = [];
-                                if (success) success(data);
+
+
+
+                                // SYNC HANDLER
+                                if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
+                                    var callbackCounter = 0;
+                                    Object.keys(data.onChange).forEach(function (key) {
+                                        try {
+                                            OBJY.execProcessorAction(
+                                                data.onChange[key].value || data.onChange[key].action,
+                                                thisRef,
+                                                data,
+                                                null,
+                                                function (cbData) {
+                                                    callbackCounter++;
+                                                    if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                        if (success) success(data);
+                                                        else {
+                                                            resolve(data);
+                                                        }
+                                                    }
+                                                },
+                                                client,
+                                                null
+                                            );
+                                        } catch(e){
+                                            console.log(e);
+                                        }
+
+                                    });
+                                } else {
+                                    if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }
+                                }
+
+
+
+                                /*if (success) success(data);
                                 else {
                                     resolve(data);
-                                }
+                                }*/
                             },
                             function (err) {
                                 if (error) error(err);
@@ -6156,7 +6208,7 @@ function singularConstructorFunctions(OBJY) {
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
-                    if (thisRef.onDelete) {
+                    /*if (thisRef.onDelete) {
                         Object.keys(thisRef.onDelete).forEach(function (key) {
                             if (thisRef.onDelete[key].trigger == 'before') {
                                 OBJY.execProcessorAction(
@@ -6170,7 +6222,7 @@ function singularConstructorFunctions(OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
                     OBJY.getObjectById(
                         this.role,
@@ -6181,7 +6233,7 @@ function singularConstructorFunctions(OBJY) {
                                 function (_data) {
                                     OBJY.applyAffects(data, 'onDelete', context, client);
 
-                                    if (thisRef.onDelete) {
+                                    /*if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
                                             if (thisRef.onDelete[key].trigger == 'after') {
                                                 OBJY.execProcessorAction(
@@ -6195,7 +6247,7 @@ function singularConstructorFunctions(OBJY) {
                                                 );
                                             }
                                         });
-                                    }
+                                    }*/
 
                                     function aggregateAllEvents(props, prePropsString) {
                                         Object.keys(props || {}).forEach(function (p) {
@@ -6283,10 +6335,46 @@ function singularConstructorFunctions(OBJY) {
                                     OBJY.Logger.log('Removed Object: ' + data);
 
                                     //OBJY.deSerializePropsObject(data, params);
-                                    if (success) success(data);
+
+                                    // SYNC HANDLER
+                                    if (data.onDelete && Object.keys(data.onDelete || {}).length > 0) {
+                                        var callbackCounter = 0;
+                                        Object.keys(data.onDelete).forEach(function (key) {
+                                            try {
+                                                OBJY.execProcessorAction(
+                                                    data.onDelete[key].value || data.onDelete[key].action,
+                                                    data,
+                                                    null,
+                                                    null,
+                                                    function (cbData) {
+                                                        callbackCounter++;
+                                                        if (callbackCounter == Object.keys(data.onDelete || {}).length) {
+                                                            if (success) success(data);
+                                                            else {
+                                                                resolve(data);
+                                                            }
+                                                        }
+                                                    },
+                                                    client,
+                                                    null
+                                                );
+                                            } catch(e){
+                                                console.log(e);
+                                            }
+
+                                        });
+                                    } else {
+                                        if (success) success(data);
+                                        else {
+                                            resolve(data);
+                                        }
+                                    }
+
+
+                                    /*if (success) success(data);
                                     else {
                                         resolve(data);
-                                    }
+                                    }*/
                                 },
                                 function (err) {
                                     if (error) error(err);
