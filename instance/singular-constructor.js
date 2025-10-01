@@ -1040,25 +1040,23 @@ export default function(OBJY) {
                                     var callbackCounter = 0;
                                     Object.keys(data.onCreate).forEach(function (key) {
                                         try {
-                                            if (data.onCreate[key].trigger == 'after' || !data.onCreate[key].trigger) {
-                                                OBJY.execProcessorAction(
-                                                    data.onCreate[key].value || data.onCreate[key].action,
-                                                    null,
-                                                    data,
-                                                    null,
-                                                    function (cbData) {
-                                                        callbackCounter++;
-                                                        if (callbackCounter == Object.keys(data.onCreate || {}).length) {
-                                                            if (success) success(data);
-                                                            else {
-                                                                resolve(data);
-                                                            }
+                                            OBJY.execProcessorAction(
+                                                data.onCreate[key].value || data.onCreate[key].action,
+                                                null,
+                                                data,
+                                                null,
+                                                function (cbData) {
+                                                    callbackCounter++;
+                                                    if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                        if (success) success(data);
+                                                        else {
+                                                            resolve(data);
                                                         }
-                                                    },
-                                                    client,
-                                                    null
-                                                );
-                                            }
+                                                    }
+                                                },
+                                                client,
+                                                null
+                                            );
                                         } catch(e){
                                             console.log(e)
                                         }
@@ -1317,17 +1315,15 @@ export default function(OBJY) {
                                         for (var item in context.handlerSequence[thisRef._id][type]) {
                                             var handlerObj = context.handlerSequence[thisRef._id][type][item];
                                             for (var handlerItem in handlerObj.handler) {
-                                                if (handlerObj.handler[handlerItem].trigger == 'after' || !handlerObj.handler[handlerItem].trigger) {
-                                                    OBJY.execProcessorAction(
-                                                        handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                                        thisRef,
-                                                        data,
-                                                        handlerObj.prop,
-                                                        function (data) {},
-                                                        client,
-                                                        null
-                                                    );
-                                                }
+                                                OBJY.execProcessorAction(
+                                                    handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
+                                                    thisRef,
+                                                    data,
+                                                    handlerObj.prop,
+                                                    function (data) {},
+                                                    client,
+                                                    null
+                                                );
                                             }
                                         }
                                     }
@@ -1374,25 +1370,23 @@ export default function(OBJY) {
                                     var callbackCounter = 0;
                                     Object.keys(data.onChange).forEach(function (key) {
                                         try {
-                                            if (data.onChange[key].trigger == 'after' || !data.onChange[key].trigger) {
-                                                OBJY.execProcessorAction(
-                                                    data.onChange[key].value || data.onChange[key].action,
-                                                    thisRef,
-                                                    data,
-                                                    null,
-                                                    function (cbData) {
-                                                        callbackCounter++;
-                                                        if (callbackCounter == Object.keys(data.onChange || {}).length) {
-                                                            if (success) success(data);
-                                                            else {
-                                                                resolve(data);
-                                                            }
+                                            OBJY.execProcessorAction(
+                                                data.onChange[key].value || data.onChange[key].action,
+                                                thisRef,
+                                                data,
+                                                null,
+                                                function (cbData) {
+                                                    callbackCounter++;
+                                                    if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                        if (success) success(data);
+                                                        else {
+                                                            resolve(data);
                                                         }
-                                                    },
-                                                    client,
-                                                    null
-                                                );
-                                            }
+                                                    }
+                                                },
+                                                client,
+                                                null
+                                            );
                                         } catch(e){
                                             console.log(e)
                                         }
@@ -1685,25 +1679,23 @@ export default function(OBJY) {
                                         var callbackCounter = 0;
                                         Object.keys(data.onDelete).forEach(function (key) {
                                             try {
-                                                if (data.onDelete[key].trigger == 'after' || !data.onDelete[key].trigger) {
-                                                    OBJY.execProcessorAction(
-                                                        data.onDelete[key].value || data.onDelete[key].action,
-                                                        data,
-                                                        null,
-                                                        null,
-                                                        function (cbData) {
-                                                            callbackCounter++;
-                                                            if (callbackCounter == Object.keys(data.onDelete || {}).length) {
-                                                                if (success) success(data);
-                                                                else {
-                                                                    resolve(data);
-                                                                }
+                                                OBJY.execProcessorAction(
+                                                    data.onDelete[key].value || data.onDelete[key].action,
+                                                    data,
+                                                    null,
+                                                    null,
+                                                    function (cbData) {
+                                                        callbackCounter++;
+                                                        if (callbackCounter == Object.keys(data.onDelete || {}).length) {
+                                                            if (success) success(data);
+                                                            else {
+                                                                resolve(data);
                                                             }
-                                                        },
-                                                        client,
-                                                        null
-                                                    );
-                                                }
+                                                        }
+                                                    },
+                                                    client,
+                                                    null
+                                                );
                                             } catch(e){
                                                 console.log(e)
                                             }
