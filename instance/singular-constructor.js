@@ -1043,8 +1043,8 @@ export default function(OBJY) {
                                             if (data.onCreate[key].trigger == 'after' || !data.onCreate[key].trigger) {
                                                 OBJY.execProcessorAction(
                                                     data.onCreate[key].value || data.onCreate[key].action,
-                                                    data,
                                                     null,
+                                                    data,
                                                     null,
                                                     function (cbData) {
                                                         callbackCounter++;
@@ -1321,8 +1321,8 @@ export default function(OBJY) {
                                                     OBJY.execProcessorAction(
                                                         handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
                                                         thisRef,
+                                                        data,
                                                         handlerObj.prop,
-                                                        null,
                                                         function (data) {},
                                                         client,
                                                         null
@@ -1377,8 +1377,8 @@ export default function(OBJY) {
                                             if (data.onChange[key].trigger == 'after' || !data.onChange[key].trigger) {
                                                 OBJY.execProcessorAction(
                                                     data.onChange[key].value || data.onChange[key].action,
+                                                    thisRef,
                                                     data,
-                                                    null,
                                                     null,
                                                     function (cbData) {
                                                         callbackCounter++;

@@ -133,10 +133,11 @@ export default function(OBJY) {
             }
         },
 
-        execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
-            let processorApp = this.context?.activeApp || (obj.applications || {})[0]
+        execProcessorAction: function(dsl, beforeObj, afterObj, prop, callback, client, options) {
+            let processorApp = this.context?.activeApp || ((beforeObj || {}).applications || {})[0] || ((afterObj || {}).applications || {})[0]
+            let role = (beforeObj || {}).role || (afterObj || {}).role
             OBJY.Logger.log('triggering dsl');
-            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, processorApp, this.context?.activeUser, options);
+            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, processorApp, this.context?.activeUser, options);
         },
 
 

@@ -4,7 +4,7 @@ import _OBJY from './objy.js'
 
 var OBJY = new _OBJY();
 
-//OBJY.Logger.enabled = ['none']
+OBJY.Logger.enabled = ['none']
 
 OBJY.useUser({username: "hejh"})
 
@@ -22,29 +22,27 @@ OBJY.define({
 })
 
 
-OBJY.object({name: "hello", onCreate: {
+OBJY.object({name: "hello", 
+onCreate: {
     bef: {
-        trigger: "after",
-        action: (callback, obj) => {
-            console.log('ddd', obj);
-            callback(1);
-        }
+        action: "console.log('created');done(1)"/*(done, obj) => {
+            console.log('created!!!', obj);
+            done(1);
+        }*/
     }
 }, onChange: {
     bef: {
-        trigger: "after",
-        action: (callback) => {
+        action: (done) => {
             console.log('CHANGE');
-            callback(1);
+            done(1);
         }
     }
 },
  onDelete: {
     bef: {
-        trigger: "after",
-        action: (callback) => {
+        action: (done) => {
             console.log('ddd', obj);
-            callback(1);
+            done(1);
         }
     }
 }}).add(d => {
