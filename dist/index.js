@@ -4687,6 +4687,12 @@ var isObject = function (a) {
     return !!a && a.constructor === Object;
 };
 
+var isObjyObject = function (a) {
+    if(!isObject(a)) return false;
+    if (a._id && a.role) return true;
+};
+
+
 function singularConstructorFunctions(OBJY) {
     return {
         Obj: function (obj, role, context, params) {
@@ -5714,7 +5720,10 @@ function singularConstructorFunctions(OBJY) {
                                                 function (cbData) {
                                                     callbackCounter++;
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
-                                                        if (success) success(data);
+                                                        if (success) {
+                                                            if (isObjyObject(cbData)) return success(cbData)
+                                                            else success(data);
+                                                        } 
                                                         else {
                                                             resolve(data);
                                                         }
@@ -6044,7 +6053,10 @@ function singularConstructorFunctions(OBJY) {
                                                 function (cbData) {
                                                     callbackCounter++;
                                                     if (callbackCounter == Object.keys(data.onChange || {}).length) {
-                                                        if (success) success(data);
+                                                        if (success) {
+                                                            if (isObjyObject(cbData)) return success(cbData)
+                                                            else success(data);
+                                                        } 
                                                         else {
                                                             resolve(data);
                                                         }
@@ -6349,7 +6361,10 @@ function singularConstructorFunctions(OBJY) {
                                                     function (cbData) {
                                                         callbackCounter++;
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
-                                                            if (success) success(data);
+                                                            if (success) {
+                                                                if (isObjyObject(cbData)) return success(cbData)
+                                                                else success(data);
+                                                            } 
                                                             else {
                                                                 resolve(data);
                                                             }

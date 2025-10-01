@@ -25,7 +25,7 @@ OBJY.define({
 OBJY.object({name: "hello", 
 onCreate: {
     bef: {
-        action: "console.log('created');done(1)"/*(done, obj) => {
+        action: "console.log('created');done({name:1, _id: 2, role:2})"/*(done, obj) => {
             console.log('created!!!', obj);
             done(1);
         }*/
