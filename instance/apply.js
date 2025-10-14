@@ -280,9 +280,7 @@ export default function (OBJY) {
                     var template = a.apply;
                     var templateId = a._id;
 
-                    console.log(a, operation)
-
-
+                
                     // ONCREATE
                     if (operation == 'onCreate'){
                         if (template.onCreate && Object.keys(template.onCreate || {}).length > 0) {
