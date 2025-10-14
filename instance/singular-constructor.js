@@ -864,6 +864,8 @@ export default function(OBJY) {
 
                                 //OBJY.deSerializePropsObject(data, params);
 
+                                OBJY.applyAffects(null, data, 'onCreate', context, client);
+
                                 if (success) success(data);
                                 else {
                                     resolve(data);
@@ -1007,7 +1009,7 @@ export default function(OBJY) {
                             function (data) {
                                 obj._id = data._id;
 
-                                OBJY.applyAffects(thisRef, 'onCreate', context, client);
+                                
                                 
                                 
 
@@ -1040,6 +1042,8 @@ export default function(OBJY) {
 
                                 //OBJY.deSerializePropsObject(data, params);
 
+
+                                OBJY.applyAffects(null, data, 'onCreate', context, client);
 
                                 // SYNC HANDLER
                                 if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
@@ -1137,7 +1141,7 @@ export default function(OBJY) {
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    OBJY.applyAffects(this, 'onChange', context, client, 'before');
+                    
 
                     if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
 
@@ -1161,6 +1165,8 @@ export default function(OBJY) {
                                 //OBJY.deSerializePropsObject(data, params);
 
                                 context.alterSequence = [];
+
+                                OBJY.applyAffects(thisRef, data, 'onChange', context, client, 'before');
 
                                 if (success) success(data);
                                 else {
@@ -1299,7 +1305,7 @@ export default function(OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-                                OBJY.applyAffects(data, 'onChange', context, client, 'after');
+                                OBJY.applyAffects(thisRef, data, 'onChange', context, client, 'after');
 
                                 /*if (data.onChange) {
                                     Object.keys(data.onChange).forEach(function (key) {
@@ -1379,6 +1385,7 @@ export default function(OBJY) {
                                     var callbackCounter = 0;
                                     Object.keys(data.onChange).forEach(function (key) {
                                         try {
+                                            console.log('uuu', data.onChange[key].action)
                                             OBJY.execProcessorAction(
                                                 data.onChange[key].value || data.onChange[key].action,
                                                 thisRef,
@@ -1510,7 +1517,7 @@ export default function(OBJY) {
 
                     var thisRef = JSON.parse(JSON.stringify(this));
 
-                    OBJY.applyAffects(thisRef, 'onDelete', context, client);
+                    //OBJY.applyAffects(thisRef, null, 'onDelete', context, client);
 
                     if (params.dirty) {
                         OBJY.getObjectById(
@@ -1579,7 +1586,7 @@ export default function(OBJY) {
                             return OBJY.remove(
                                 thisRef,
                                 function (_data) {
-                                    OBJY.applyAffects(data, 'onDelete', context, client);
+                                    OBJY.applyAffects(data, null, 'onDelete', context, client);
 
                                     /*if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
@@ -1819,7 +1826,7 @@ export default function(OBJY) {
                     function prepareObj(data) {
                         var returnObject = OBJY[data.role](data);
 
-                        OBJY.applyAffects(data, null, context, client);
+                        //OBJY.applyAffects(data, null, context, client);
 
                         if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, context))
                             return error({ error: 'Lack of Permissions', source: 'authorisations' });
