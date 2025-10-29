@@ -8,7 +8,11 @@ export default function (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(done, obj);
+                        
+                        if (typeof dsl === 'function') {
+                            console.log(dsl.toString())
+                            dsl(done, obj);
+                        } 
                         else eval(dsl);
                     }
                 } catch (e) {

@@ -68,6 +68,8 @@ OBJY.object({name: "hello",
         console.log('updated...')
     }, err => console.log(err))
 
+    d.remove()
+
    /* d.setName('newname,,,').update(u => {
         console.log('u updated', u)
     })
