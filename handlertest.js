@@ -14,7 +14,7 @@ OBJY.define({
     
 })
 
-OBJY.staticRules.push({
+OBJY.affectables.push({
         _id: 321,
         affects: {
             role: 'object'
@@ -22,7 +22,7 @@ OBJY.staticRules.push({
         apply: {
             onCreate: {
                 numberCircle: {
-                    action: "console.log('created');done({name:1, _id: 2, role:23})",
+                    action: "console.log('created by rule');done()",
                 },
             },
         },
@@ -39,14 +39,11 @@ OBJY.define({
 
 OBJY.object({name: "hello", 
     role: "object",
-/*onCreate: {
+onCreate: {
     bef: {
-        action: "console.log('created');done({name:1, _id: 2, role:2})"/*(done, obj) => {
-            console.log('created!!!', obj);
-            done(1);
-        }*
+        action: "console.log('creatediiii');done({name:1, _id: 2, role:2})"
     }
-}, */onChange: {
+}, onChange: {
     bef: {
         action: `console.log('CHANGE');
             done(1);
@@ -61,7 +58,7 @@ OBJY.object({name: "hello",
         }
     }
 }}).add(d => {
-    console.log('d', d)
+    console.log('done-', d)
 
 
     d.setName('benjamin').update(u => {

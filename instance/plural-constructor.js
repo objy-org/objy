@@ -104,7 +104,7 @@ export default function (OBJY) {
 
                                                 if(success) success(data);
                                                 else {
-                                                        resolve(data);
+                                                    resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -119,7 +119,7 @@ export default function (OBJY) {
 
                                                 if(success) success(data);
                                                 else {
-                                                        resolve(data);
+                                                    resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -131,7 +131,7 @@ export default function (OBJY) {
 
                                         if(success) success(data);
                                         else {
-                                                resolve(data);
+                                            resolve(data);
                                         }
                                         return d;
                                     } else {
@@ -147,7 +147,7 @@ export default function (OBJY) {
                     }, function(err) {
                         if(error) error(err);
                         else {
-                                reject(err);
+                            reject(err);
                         }
                     }, app, client, flags || {}, params, context);
 

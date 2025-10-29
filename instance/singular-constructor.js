@@ -843,66 +843,13 @@ export default function(OBJY) {
 
                     var thisRef = this;
 
-                    //OBJY.applyAffects(thisRef, 'onCreate', context, client);
+                    OBJY.applyAffects(thisRef, context, client, params);
 
                     if (!OBJY.checkAuthroisations(this, user, 'c', app, context)) return error({ error: 'Lack of Permissions' });
 
                     if (!this._id) this._id = OBJY.ID();
 
-                    if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(obj);
-                        if (Array.isArray(constraints) && error) {
-                            return error({
-                                message: 'constraints error: ' + constraints.join(','),
-                            });
-                        }
-
-                        OBJY.add(
-                            thisRef,
-                            function (data) {
-                                thisRef._id = data._id;
-
-                                //OBJY.deSerializePropsObject(data, params);
-
-                                OBJY.applyAffects(null, data, 'onCreate', context, client);
-
-                                if (success) success(data);
-                                else {
-                                    resolve(data);
-                                }
-
-                                delete thisRef.context;
-                            },
-                            function (err) {
-                                console.warn('err', err, error);
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            params
-                        );
-
-                        return this;
-                    }
-
-                    /*if (thisRef.onCreate) {
-                        Object.keys(thisRef.onCreate).forEach(function (key) {
-                            if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
-                                OBJY.execProcessorAction(
-                                    thisRef.onCreate[key].value || thisRef.onCreate[key].action,
-                                    thisRef,
-                                    null,
-                                    null,
-                                    function (data) {},
-                                    client,
-                                    null
-                                );
-                            }
-                        });
-                    }*/
+                    
 
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
@@ -1008,9 +955,6 @@ export default function(OBJY) {
                             obj,
                             function (data) {
                                 obj._id = data._id;
-
-                                
-                                
                                 
 
                                 if (mapper.type == 'scheduled') {
@@ -1043,7 +987,7 @@ export default function(OBJY) {
                                 //OBJY.deSerializePropsObject(data, params);
 
 
-                                OBJY.applyAffects(null, data, 'onCreate', context, client);
+                                //OBJY.applyAffects(data, context, client, params);
 
                                 // SYNC HANDLER
                                 if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
@@ -1059,6 +1003,7 @@ export default function(OBJY) {
                                                     callbackCounter++;
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
                                                         if (success) {
+                                                            OBJY.unapplyAffects(data, context, client, params);
                                                             if (isObjyObject(cbData)) return success(cbData)
                                                             else success(data);
                                                         } 
@@ -1076,6 +1021,7 @@ export default function(OBJY) {
 
                                     });
                                 } else {
+                                    OBJY.unapplyAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);
@@ -1141,52 +1087,13 @@ export default function(OBJY) {
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    
-
-                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
-
                     var thisRef = this;
 
-                    if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(this);
-                        if (Array.isArray(constraints) && error) {
-                            return error({
-                                message: 'constraints error: ' + constraints.join(','),
-                            });
-                        }
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                        OBJY.updateO(
-                            thisRef,
-                            function (data) {
-                                delete context.handlerSequence[this._id];
 
-                                context.eventAlterationSequence = [];
+                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });                    
 
-                                //OBJY.deSerializePropsObject(data, params);
-
-                                context.alterSequence = [];
-
-                                OBJY.applyAffects(thisRef, data, 'onChange', context, client, 'before');
-
-                                if (success) success(data);
-                                else {
-                                    resolve(data);
-                                }
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            params,
-                            context
-                        );
-
-                        return this;
-                    }
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
 
@@ -1305,7 +1212,6 @@ export default function(OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-                                OBJY.applyAffects(thisRef, data, 'onChange', context, client, 'after');
 
                                 /*if (data.onChange) {
                                     Object.keys(data.onChange).forEach(function (key) {
@@ -1517,49 +1423,9 @@ export default function(OBJY) {
 
                     var thisRef = JSON.parse(JSON.stringify(this));
 
-                    //OBJY.applyAffects(thisRef, null, 'onDelete', context, client);
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                    if (params.dirty) {
-                        OBJY.getObjectById(
-                            this.role,
-                            this._id,
-                            function (data) {
-                                if (!OBJY.checkAuthroisations(data, user, 'd', app, context)) return error({ error: 'Lack of Permissions' });
 
-                                return OBJY.remove(
-                                    thisRef,
-                                    function (_data) {
-                                        //OBJY.deSerializePropsObject(data, params);
-
-                                        if (success) success(data);
-                                        else {
-                                            resolve(data);
-                                        }
-                                    },
-                                    function (err) {
-                                        if (error) error(err);
-                                        else {
-                                            reject(err);
-                                        }
-                                    },
-                                    app,
-                                    client
-                                );
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            context,
-                            params
-                        );
-
-                        return this;
-                    }
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
@@ -1586,7 +1452,7 @@ export default function(OBJY) {
                             return OBJY.remove(
                                 thisRef,
                                 function (_data) {
-                                    OBJY.applyAffects(data, null, 'onDelete', context, client);
+                                    //OBJY.applyAffects(data, null, 'onDelete', context, client, params);
 
                                     /*if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
@@ -1771,33 +1637,8 @@ export default function(OBJY) {
 
                     var thisRef = this;
 
-                    if (params.dirty) {
-                        OBJY.getObjectById(
-                            thisRef.role,
-                            thisRef._id,
-                            function (data) {
-                                //OBJY.deSerializePropsObject(data, params);
-                                if (!OBJY.checkAuthroisations(data, user, 'r', app, context)) return error({ error: 'Lack of Permissions' });
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                                if (success) success(OBJY[data.role](data));
-                                else {
-                                    resolve(OBJY[data.role](data));
-                                }
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            context,
-                            params
-                        );
-
-                        return this;
-                    }
 
                     var counter = 0;
 
