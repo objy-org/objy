@@ -984,11 +984,6 @@ export default function(OBJY) {
 
                                 OBJY.Logger.log('Added Object: ' + JSON.stringify(data, null, 2));
 
-                                //OBJY.deSerializePropsObject(data, params);
-
-
-                                //OBJY.applyAffects(data, context, client, params);
-
                                 // SYNC HANDLER
                                 if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
                                     var callbackCounter = 0;
@@ -1002,8 +997,9 @@ export default function(OBJY) {
                                                 function (cbData) {
                                                     callbackCounter++;
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                        OBJY.unapplyHiddenAffects(data, context, client, params);
                                                         if (success) {
-                                                            OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                            
                                                             if (isObjyObject(cbData)) return success(cbData)
                                                             else success(data);
                                                         } 
@@ -1300,6 +1296,7 @@ export default function(OBJY) {
                                                 function (cbData) {
                                                     callbackCounter++;
                                                     if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                        OBJY.unapplyHiddenAffects(data, context, client, params);
                                                         if (success) {
                                                             if (isObjyObject(cbData)) return success(cbData)
                                                             else success(data);
@@ -1318,6 +1315,7 @@ export default function(OBJY) {
 
                                     });
                                 } else {
+                                    OBJY.unapplyHiddenAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);
@@ -1572,6 +1570,7 @@ export default function(OBJY) {
                                                     function (cbData) {
                                                         callbackCounter++;
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
+                                                            OBJY.unapplyHiddenAffects(data, context, client, params);
                                                             if (success) {
                                                                 if (isObjyObject(cbData)) return success(cbData)
                                                                 else success(data);
@@ -1590,6 +1589,7 @@ export default function(OBJY) {
 
                                         });
                                     } else {
+                                        OBJY.unapplyHiddenAffects(data, context, client, params);
                                         if (success) success(data);
                                         else {
                                             resolve(data);
