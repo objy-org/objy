@@ -1003,7 +1003,7 @@ export default function(OBJY) {
                                                     callbackCounter++;
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
                                                         if (success) {
-                                                            OBJY.unapplyAffects(data, context, client, params);
+                                                            OBJY.unapplyHiddenAffects(data, context, client, params);
                                                             if (isObjyObject(cbData)) return success(cbData)
                                                             else success(data);
                                                         } 
@@ -1021,7 +1021,7 @@ export default function(OBJY) {
 
                                     });
                                 } else {
-                                    OBJY.unapplyAffects(data, context, client, params);
+                                    OBJY.unapplyHiddenAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);

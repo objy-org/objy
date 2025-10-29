@@ -23,6 +23,7 @@ OBJY.affectables.push({
             onCreate: {
                 numberCircle: {
                     action: "console.log('created by rule');done()",
+                    hidden: true
                 },
             },
         },

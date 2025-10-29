@@ -251,7 +251,7 @@ export default function (OBJY) {
         // THIS IS A PROTOTYPE!!!
         // removes stuff, that was inserted by affects
         // for now, only
-        unapplyAffects: function(afterObj, operation, context, client, params) {
+        unapplyHiddenAffects: function(afterObj, operation, context, client, params) {
             this.affectables.forEach(function(a) {
                 if (Query.query([afterObj], a.affects, Query.undot).length != 0) {
 
@@ -263,7 +263,8 @@ export default function (OBJY) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
                                 if (afterObj[h][oC]) {
-                                    delete afterObj[h][oC]
+                                    if (afterObj[h][oC].hidden == true)
+                                        delete afterObj[h][oC]
                                 }
                             })
                         }
