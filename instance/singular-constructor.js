@@ -987,6 +987,7 @@ export default function(OBJY) {
                                 // SYNC HANDLER
                                 if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
                                     var callbackCounter = 0;
+                                    var finalCallbackData = {}
                                     Object.keys(data.onCreate).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
@@ -996,11 +997,15 @@ export default function(OBJY) {
                                                 null,
                                                 function (cbData) {
                                                     callbackCounter++;
+
+                                                    // check if action returns data, then save it to current state
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData
+
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
                                                         OBJY.unapplyHiddenAffects(data, context, client, params);
                                                         if (success) {
                                                             
-                                                            if (isObjyObject(cbData)) return success(cbData)
+                                                            if (isObjyObject(finalCallbackData)) return success(finalCallbackData)
                                                             else success(data);
                                                         } 
                                                         else {
@@ -1097,43 +1102,6 @@ export default function(OBJY) {
                         throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
 
-                    /*if (thisRef.onChange) {
-                        Object.keys(thisRef.onChange).forEach(function (key) {
-                            if (thisRef.onChange[key].trigger == 'before') {
-                                OBJY.execProcessorAction(
-                                    thisRef.onChange[key].value || thisRef.onChange[key].action,
-                                    thisRef,
-                                    null,
-                                    null,
-                                    function (data) {},
-                                    client,
-                                    null
-                                );
-                            }
-                        });
-                    }*/
-
-                    /*if (context.handlerSequence[this._id]) {
-                        for (var type in context.handlerSequence[this._id]) {
-                            for (var item in context.handlerSequence[this._id][type]) {
-                                var handlerObj = context.handlerSequence[this._id][type][item];
-
-                                for (var handlerItem in handlerObj.handler) {
-                                    if (handlerObj.handler[handlerItem].trigger == 'before') {
-                                        OBJY.execProcessorAction(
-                                            handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                            thisRef,
-                                            handlerObj.prop,
-                                            null,
-                                            function (data) {},
-                                            client,
-                                            null
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }*/
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -1209,24 +1177,6 @@ export default function(OBJY) {
                             thisRef,
                             function (data) {
 
-                                /*if (data.onChange) {
-                                    Object.keys(data.onChange).forEach(function (key) {
-                                        if (data.onChange[key].trigger == 'after') {
-                                            OBJY.execProcessorAction(
-                                                data.onChange[key].value || data.onChange[key].action,
-                                                data,
-                                                null,
-                                                null,
-                                                function (data) {},
-                                                client,
-                                                null
-                                            );
-                                        }
-                                    });
-                                }*/
-
-                                
-
                                 if (context.handlerSequence[thisRef._id]) {
                                     for (var type in context.handlerSequence[thisRef._id]) {
                                         for (var item in context.handlerSequence[thisRef._id][type]) {
@@ -1285,9 +1235,9 @@ export default function(OBJY) {
                                 // SYNC HANDLER
                                 if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
                                     var callbackCounter = 0;
+                                    var finalCallbackData = {}
                                     Object.keys(data.onChange).forEach(function (key) {
                                         try {
-                                            console.log('uuu', data.onChange[key].action)
                                             OBJY.execProcessorAction(
                                                 data.onChange[key].value || data.onChange[key].action,
                                                 thisRef,
@@ -1295,10 +1245,14 @@ export default function(OBJY) {
                                                 null,
                                                 function (cbData) {
                                                     callbackCounter++;
+
+                                                    // check if action returns data, then save it to current state
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData
+
                                                     if (callbackCounter == Object.keys(data.onChange || {}).length) {
                                                         OBJY.unapplyHiddenAffects(data, context, client, params);
                                                         if (success) {
-                                                            if (isObjyObject(cbData)) return success(cbData)
+                                                            if (isObjyObject(finalCallbackData)) return success(finalCallbackData)
                                                             else success(data);
                                                         } 
                                                         else {
@@ -1322,12 +1276,6 @@ export default function(OBJY) {
                                     }
                                 }
 
-
-
-                                /*if (success) success(data);
-                                else {
-                                    resolve(data);
-                                }*/
                             },
                             function (err) {
                                 if (error) error(err);
@@ -1560,6 +1508,7 @@ export default function(OBJY) {
                                     // SYNC HANDLER
                                     if (data.onDelete && Object.keys(data.onDelete || {}).length > 0) {
                                         var callbackCounter = 0;
+                                        var finalCallbackData = {}
                                         Object.keys(data.onDelete).forEach(function (key) {
                                             try {
                                                 OBJY.execProcessorAction(
@@ -1569,10 +1518,14 @@ export default function(OBJY) {
                                                     null,
                                                     function (cbData) {
                                                         callbackCounter++;
+
+                                                         // check if action returns data, then save it to current state
+                                                        if (isObjyObject(cbData)) finalCallbackData = cbData
+
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
                                                             OBJY.unapplyHiddenAffects(data, context, client, params);
                                                             if (success) {
-                                                                if (isObjyObject(cbData)) return success(cbData)
+                                                                if (isObjyObject(finalCallbackData)) return success(finalCallbackData)
                                                                 else success(data);
                                                             } 
                                                             else {

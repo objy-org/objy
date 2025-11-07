@@ -42,28 +42,23 @@ OBJY.object({name: "hello",
     role: "object",
 onCreate: {
     bef: {
-        action: "console.log('creatediiii');done({name:1, _id: 2, role:2})"
+        action: "console.log('creatediiii');done()"
     }
 }, onChange: {
-    bef: {
-        action: `console.log('CHANGE');
-            done(1);
-        `
+    ch: {
+        action: `console.log('CHANGE');done(1);`
     }
 },
  onDelete: {
     bef: {
-        action: (done) => {
-            console.log('ddd', obj);
-            done(1);
-        }
+        action: "console.log('deleete')"
     }
 }}).add(d => {
     console.log('done-', d)
 
 
     d.setName('benjamin').update(u => {
-        console.log('updated...')
+        console.log('updated.....')
     }, err => console.log(err))
 
     d.remove()
