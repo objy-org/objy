@@ -1002,11 +1002,14 @@ export default function(OBJY) {
                                                     if (isObjyObject(cbData)) finalCallbackData = cbData
 
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
-                                                        OBJY.unapplyHiddenAffects(data, context, client, params);
                                                         if (success) {
-                                                            
-                                                            if (isObjyObject(finalCallbackData)) return success(finalCallbackData)
-                                                            else success(data);
+                                                            if (isObjyObject(finalCallbackData)) {
+                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                return success(finalCallbackData);
+                                                            } else {
+                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                success(data);
+                                                            }
                                                         } 
                                                         else {
                                                             resolve(data);
@@ -1250,10 +1253,14 @@ export default function(OBJY) {
                                                     if (isObjyObject(cbData)) finalCallbackData = cbData
 
                                                     if (callbackCounter == Object.keys(data.onChange || {}).length) {
-                                                        OBJY.unapplyHiddenAffects(data, context, client, params);
                                                         if (success) {
-                                                            if (isObjyObject(finalCallbackData)) return success(finalCallbackData)
-                                                            else success(data);
+                                                            if (isObjyObject(finalCallbackData)) {
+                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                return success(finalCallbackData);
+                                                            } else {
+                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                success(data);
+                                                            }
                                                         } 
                                                         else {
                                                             resolve(data);
@@ -1523,10 +1530,14 @@ export default function(OBJY) {
                                                         if (isObjyObject(cbData)) finalCallbackData = cbData
 
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
-                                                            OBJY.unapplyHiddenAffects(data, context, client, params);
                                                             if (success) {
-                                                                if (isObjyObject(finalCallbackData)) return success(finalCallbackData)
-                                                                else success(data);
+                                                                if (isObjyObject(finalCallbackData)) {
+                                                                    OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                    return success(finalCallbackData);
+                                                                } else {
+                                                                    OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                    success(data);
+                                                                }
                                                             } 
                                                             else {
                                                                 resolve(data);

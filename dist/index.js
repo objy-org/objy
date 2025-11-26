@@ -933,29 +933,33 @@ function generalFunctions(OBJY) {
 
 //var Query = require('../lib/dependencies/query.js');
 
+ var isObject$2 = function(a) {
+    return (!!a) && (a.constructor === Object);
+};
+
 function applyFunctions (OBJY) {
     return {
 
         /**
          * Applies affect rules
-         * @param {obj} - the object
+         * @param {afterObj} - the afterObject
          * @param {operation} - the operation (onChange, onCreate and onDelete)
-         * @param {insstance} - the current objy context
+         * @param {insstance} - the current afterObjy context
          * @param {client} - the active client
          */
-        applyAffects: function(obj, operation, context, client, trigger) {
+        applyAffects: function(afterObj, context, client, params) {
             this.affectables.forEach(function(a) {
-                if (Query.query([obj], a.affects, Query.undot).length != 0) {
+                if (Query.query([afterObj], a.affects, Query.undot).length != 0) {
 
                     var template = a.apply;
                     var templateId = a._id;
 
                     if (template.name) {
-                        if (!obj.name) obj.name = template.name;
+                        if (!afterObj.name) afterObj.name = template.name;
                     }
 
                     if (template.type) {
-                        if (!obj.type) obj.type = template.type;
+                        if (!afterObj.type) afterObj.type = template.type;
                     }
 
                     // Object handlers
@@ -963,149 +967,123 @@ function applyFunctions (OBJY) {
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
-                                if (!obj[h]) obj[h] = {};
-                                if (!obj[h][oC]) {
+                                if (!afterObj[h]) afterObj[h] = {};
+                                if (!afterObj[h][oC]) {
                                     if(!template[h][oC]) return;
-                                    obj[h][oC] = template[h][oC];
-                                    obj[h][oC].template = templateId;
+                                    afterObj[h][oC] = template[h][oC];
+                                    afterObj[h][oC].template = templateId;
                                 }
                             });
                         }
                     });
 
-                    var isObject = function(a) {
-                        return (!!a) && (a.constructor === Object);
-                    };
+                   
+                // Properties
+                function doTheProps(template, obj, extendedStructure) {
 
-                    // Properties
-                    function doTheProps(template, obj) {
+                    if (!obj) obj = {};
 
-                        var propsObj = obj;
-                        if(!template) return;
-                        var propsTmpl = template;
+                    if (!template) template = {};
 
-                        if (!propsObj) propsObj = {};
+                    //if (params.object && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
-                        /*if (obj.type == 'bag') {
-                            if (!obj.properties) {
-                                obj.properties = {};
-                            }
-                        }*/
+                        if(extendedStructure && typeof extendedStructure == "object"){
+                            Object.keys(extendedStructure).forEach(k => {
+                                if(isObject$2(extendedStructure[k]) && template[k]){
+                                    doTheProps(template[k], obj[k], extendedStructure[k]);
+                                }
+                            });
+                        }
 
-                        Object.keys(propsTmpl || {}).forEach(function(p) {
-                       
-                            var isO = isObject(propsTmpl[p]);
+                    Object.keys(template).forEach(function(p) {
 
-                            if ((propsTmpl[p] || {}).type == 'bag') {
+                        if ((OBJY.predefinedProperties.includes(p)/* || (isObject(template[p]) || Array.isArray(template[p]))*/)) return;
 
-                                if (!propsObj[p]) {
+                        if (!template[p]) return;
 
-                                    propsObj[p] = propsTmpl[p];
-                                    if (isO) propsObj[p].propsTmpl = templateId;
+                        if(isObject$2(template[p]))  doTheProps(template[p], obj[p]);
+
+                        var cloned = JSON.parse(JSON.stringify(template[p]));
+
+                        if (!obj.hasOwnProperty(p)) {
+
+                            obj[p] = cloned;
+                            if(isObject$2(obj[p])) obj[p].template = templateId;
+                            //delete obj[p].overwritten;
+
+                        } else if (isObject$2(obj[p])) {
+
+                            if (cloned.meta) {
+                                if (!obj[p].meta) {
+                                    obj[p].meta = cloned.meta;
+                                    //obj[p].meta.overwritten = true;
                                 } else {
-                                    if (!propsObj[p].overwritten && Object.keys(propsObj[p]).length == 0) {
-                                        propsObj[p] = propsTmpl[p];
+                                    if (!obj[p].meta.overwritten) {
+                                        obj[p].meta = cloned.meta;
+                                        //obj[p].meta.overwritten = true;
                                     }
-
-                                    if (isO) propsObj[p].propsTmpl = templateId;
-                                    //propsObj.properties[p].overwritten = true;
                                 }
+                            }
+                            if (!obj[p].type) obj[p].type = cloned.type;
 
-                                if (!propsObj[propsObj]) propsObj[p] = {};
+                            obj[p].template = templateId;
+                            //obj[p].overwritten = true;
 
-                                doTheProps(propsTmpl[p], propsObj[p]);
+                        }
 
-                            } else if (isObject(propsTmpl[p])) {
-
-                                if (!propsObj[p]) {
-
-                                    propsObj[p] = propsTmpl[p];
-
-                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-
+                        if (template.permissions) {
+                            if (!obj.permissions) obj.permissions = {};
+                            Object.keys(template.permissions).forEach(function(p) {
+                                if (!obj.permissions[p]) {
+                                    obj.permissions[p] = template.permissions[p];
+                                    obj.permissions[p].template = templateId;
                                 } else {
-
-                                    if (!propsObj[p].overwritten && Object.keys(propsObj[p]).length == 0) {
-                                        propsObj[p] = propsTmpl[p];
-                                    }
-
-                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-                                    //propsObj[p].overwritten = true;
+                                    obj.permissions[p].template = templateId;
+                                    obj.permissions[p].overwritten = true;
                                 }
+                            });
+                        }
 
-                                doTheProps(propsTmpl[p], propsObj[p]);
-                            }
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if (template[p][h]) {
+                                if (!obj[p][h]) obj[p][h] = {};
 
+                                Object.keys(template[p][h]).forEach(function(oC) {
 
-                            if (!propsObj[p]) {
-                                propsObj[p] = propsTmpl[p];
-                                if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-                                if (isO) delete propsObj[p].overwritten;
-                            } else {
-
-                                if (!propsObj[p].overwritten) {
-                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-                                    if (propsObj[p].value == null && isO) propsObj[p].value = propsTmpl[p].value;
-                                    //obj[p].overwritten = true;
-                                }
-
-                                if (!propsObj[p].metaOverwritten) {
-                                    propsObj[p].meta = propsTmpl[p].meta;
-                                }
-
-                                /*if (obj[p].type == 'bag') {
-                                    if (!obj[p].properties) {
-                                        obj[p].properties = {};
-                                    }
-                                }*/
-                            }
-
-
-                            if (propsTmpl.permissions) {
-                                if (!propsObj.permissions) propsObj.permissions = {};
-                                Object.keys(propsTmpl.permissions).forEach(function(p) {
-                                    if (!propsObj.permissions[p]) {
-                                        propsObj.permissions[p] = propsTmpl.permissions[p];
-                                        if (isO) propsObj.permissions[p].propsTmpl = templateId;
-                                    } else {
-                                        if (isO) propsObj.permissions[p].propsTmpl = templateId;
-                                        if (isO) propsObj.permissions[p].overwritten = true;
+                                    if (!obj[p][h][oC]) {
+                                        obj[p][h][oC] = template[p][h][oC];
+                                        if (obj[p][h][oC]) obj[p][h][oC].template = templateId;
                                     }
                                 });
                             }
-
-                            ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                                if (!isObject(propsTmpl[p])) return;
-                                if (propsTmpl[p][h]) {
-                                    if (!propsObj[p][h]) propsObj[p][h] = {};
-
-                                    Object.keys(propsTmpl[p][h]).forEach(function(oC) {
-
-                                        if (!propsObj[p][h][oC]) {
-                                            propsObj[p][h][oC] = propsTmpl[p][h][oC];
-                                            propsObj[p][h][oC].propsTmpl = templateId;
-                                        }
-                                    });
-                                }
-                            });
                         });
-                    }
 
-                    doTheProps(template || {}, obj || {});
+                        if (template[p].type == 'bag') {
+
+                            doTheProps(cloned, obj[p]);
+                        }
+
+                        
+
+                    });
+                }
+
+
+                doTheProps(template, afterObj, params.extendedStructure);
 
                     // Applications
 
                     if (template.applications) {
                         template.applications.forEach(function(a) {
-                            if (obj.applications)
-                                if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
+                            if (afterObj.applications)
+                                if (afterObj.applications.indexOf(a) == -1) afterObj.applications.push(a);
                         });
                     }
 
 
                     if (template._clients) {
                         template._clients.forEach(function(a) {
-                            if ((obj._clients || []).indexOf(a) == -1)(obj._clients || []).push(a);
+                            if ((afterObj._clients || []).indexOf(a) == -1)(afterObj._clients || []).push(a);
                         });
                     }
 
@@ -1113,15 +1091,15 @@ function applyFunctions (OBJY) {
                         var keys = Object.keys(template.authorisations);
 
                         if (keys.length > 0) {
-                            if (!obj.authorisations) obj.authorisations = {};
+                            if (!afterObj.authorisations) afterObj.authorisations = {};
                         }
 
                         keys.forEach(function(k) {
 
-                            if (!obj.authorisations[k]) {
-                                obj.authorisations[k] = template.authorisations[k];
+                            if (!afterObj.authorisations[k]) {
+                                afterObj.authorisations[k] = template.authorisations[k];
 
-                                obj.authorisations[k].forEach(function(a) {
+                                afterObj.authorisations[k].forEach(function(a) {
                                     a.template = template._id;
                                 });
 
@@ -1129,15 +1107,15 @@ function applyFunctions (OBJY) {
                                 template.authorisations[k].forEach(function(a) {
 
                                     var f = false;
-                                    obj.authorisations[k].forEach(function(objA) {
-                                        if (JSON.stringify(objA.query) == JSON.stringify(a.query)) f = true;
+                                    afterObj.authorisations[k].forEach(function(afterObjA) {
+                                        if (JSON.stringify(afterObjA.query) == JSON.stringify(a.query)) f = true;
                                     });
 
                                     if (f) {
                                         a.overwritten = true;
                                     } else {
                                         a.template = template._id;
-                                        obj.authorisations[k].push(a);
+                                        afterObj.authorisations[k].push(a);
                                     }
                                 });
                             }
@@ -1147,14 +1125,14 @@ function applyFunctions (OBJY) {
                     // Permissions
 
                     if (template.permissions) {
-                        if (!obj.permissions) obj.permissions = {};
+                        if (!afterObj.permissions) afterObj.permissions = {};
                         Object.keys(template.permissions).forEach(function(p) {
-                            if (!obj.permissions[p]) {
-                                obj.permissions[p] = template.permissions[p];
-                                obj.permissions[p].template = templateId;
+                            if (!afterObj.permissions[p]) {
+                                afterObj.permissions[p] = template.permissions[p];
+                                afterObj.permissions[p].template = templateId;
                             } else {
-                                obj.permissions[p].template = templateId;
-                                obj.permissions[p].overwritten = true;
+                                afterObj.permissions[p].template = templateId;
+                                afterObj.permissions[p].overwritten = true;
                             }
                         });
                     }
@@ -1162,19 +1140,19 @@ function applyFunctions (OBJY) {
                     // Privileges
 
                     if (template.privileges) {
-                        if (!obj.privileges) obj.privileges = {};
+                        if (!afterObj.privileges) afterObj.privileges = {};
                         Object.keys(template.privileges).forEach(function(a) {
-                            if (!obj.privileges[a]) obj.privileges[a] = [];
+                            if (!afterObj.privileges[a]) afterObj.privileges[a] = [];
 
                             template.privileges[a].forEach(function(tP) {
 
-                                obj.privileges[a].forEach(function(oP) {
+                                afterObj.privileges[a].forEach(function(oP) {
                                     if (oP.name == tP.name) ;
                                 });
                             });
 
                             if (!contains) {
-                                obj.privileges[a].push({
+                                afterObj.privileges[a].push({
                                     name: tP.name,
                                     template: templateId
                                 });
@@ -1186,54 +1164,34 @@ function applyFunctions (OBJY) {
                 }
             });
 
-            this.applyRules(obj, operation, context, client, trigger);
         },
 
-        /**
-         * Applies static rules
-         * @param {obj} - the object
-         * @param {operation} - the operation (onChange, onCreate and onDelete)
-         * @param {insstance} - the current objy context
-         * @param {client} - the active client
-         */
-
-        applyRules: function(obj, operation, context, client, trigger) {
-            var self = this;
-            self.staticRules.forEach(function(a) {
-                if (Query.query([obj], a.affects, Query.undot).length != 0) {
+        // THIS IS A PROTOTYPE!!!
+        // removes stuff, that was inserted by affects
+        // for now, only
+        unapplyHiddenAffects: function(afterObj, operation, context, client, params) {
+            this.affectables.forEach(function(a) {
+                if (Query.query([afterObj], a.affects, Query.undot).length != 0) {
 
                     var template = a.apply;
-                    var templateId = a._id;
+                    a._id;
 
+                    // Object handlers
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
-
-                                if (operation != h || (trigger && trigger != template[h][oC]?.trigger)) return;
-
-                                OBJY.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
-
-                                }, client, null);
-
+                                if (afterObj[h][oC]) {
+                                    if (afterObj[h][oC].hidden == true)
+                                        delete afterObj[h][oC];
+                                }
                             });
                         }
                     });
 
-                    if (template._constraints) {
-                        if (!Array.isArray(obj._constraints)) obj._constraints = [];
-                        template._constraints.forEach(c => {
-
-                            if (obj._constraints.find(el => el.key == c.key)) return;
-
-                            c.templateId = templateId;
-                            obj._constraints.push(c);
-                        });
-                    }
-
                 }
             });
-        },
 
+        }
 
     }
 }
@@ -3090,7 +3048,11 @@ function DefaultProcessorMapper (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(done, obj);
+                        
+                        if (typeof dsl === 'function') {
+                            console.log(dsl.toString());
+                            dsl(done, obj);
+                        } 
                         else eval(dsl);
                     }
                 } catch (e) {
@@ -4460,7 +4422,7 @@ function pluralConstructorFunctions (OBJY) {
 
                                                 if(success) success(data);
                                                 else {
-                                                        resolve(data);
+                                                    resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -4475,7 +4437,7 @@ function pluralConstructorFunctions (OBJY) {
 
                                                 if(success) success(data);
                                                 else {
-                                                        resolve(data);
+                                                    resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -4487,7 +4449,7 @@ function pluralConstructorFunctions (OBJY) {
 
                                         if(success) success(data);
                                         else {
-                                                resolve(data);
+                                            resolve(data);
                                         }
                                         return d;
                                     } else {
@@ -4503,7 +4465,7 @@ function pluralConstructorFunctions (OBJY) {
                     }, function(err) {
                         if(error) error(err);
                         else {
-                                reject(err);
+                            reject(err);
                         }
                     }, app, client, flags || {}, params, context);
 
@@ -5509,64 +5471,13 @@ function singularConstructorFunctions(OBJY) {
 
                     var thisRef = this;
 
-                    //OBJY.applyAffects(thisRef, 'onCreate', context, client);
+                    OBJY.applyAffects(thisRef, context, client, params);
 
                     if (!OBJY.checkAuthroisations(this, user, 'c', app, context)) return error({ error: 'Lack of Permissions' });
 
                     if (!this._id) this._id = OBJY.ID();
 
-                    if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(obj);
-                        if (Array.isArray(constraints) && error) {
-                            return error({
-                                message: 'constraints error: ' + constraints.join(','),
-                            });
-                        }
-
-                        OBJY.add(
-                            thisRef,
-                            function (data) {
-                                thisRef._id = data._id;
-
-                                //OBJY.deSerializePropsObject(data, params);
-
-                                if (success) success(data);
-                                else {
-                                    resolve(data);
-                                }
-
-                                delete thisRef.context;
-                            },
-                            function (err) {
-                                console.warn('err', err, error);
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            params
-                        );
-
-                        return this;
-                    }
-
-                    /*if (thisRef.onCreate) {
-                        Object.keys(thisRef.onCreate).forEach(function (key) {
-                            if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
-                                OBJY.execProcessorAction(
-                                    thisRef.onCreate[key].value || thisRef.onCreate[key].action,
-                                    thisRef,
-                                    null,
-                                    null,
-                                    function (data) {},
-                                    client,
-                                    null
-                                );
-                            }
-                        });
-                    }*/
+                    
 
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
@@ -5672,9 +5583,6 @@ function singularConstructorFunctions(OBJY) {
                             obj,
                             function (data) {
                                 obj._id = data._id;
-
-                                OBJY.applyAffects(thisRef, 'onCreate', context, client);
-                                
                                 
 
                                 if (mapper.type == 'scheduled') {
@@ -5704,12 +5612,10 @@ function singularConstructorFunctions(OBJY) {
 
                                 OBJY.Logger.log('Added Object: ' + JSON.stringify(data, null, 2));
 
-                                //OBJY.deSerializePropsObject(data, params);
-
-
                                 // SYNC HANDLER
                                 if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
                                     var callbackCounter = 0;
+                                    var finalCallbackData = {};
                                     Object.keys(data.onCreate).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
@@ -5719,10 +5625,19 @@ function singularConstructorFunctions(OBJY) {
                                                 null,
                                                 function (cbData) {
                                                     callbackCounter++;
+
+                                                    // check if action returns data, then save it to current state
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData;
+
                                                     if (callbackCounter == Object.keys(data.onCreate || {}).length) {
                                                         if (success) {
-                                                            if (isObjyObject(cbData)) return success(cbData)
-                                                            else success(data);
+                                                            if (isObjyObject(finalCallbackData)) {
+                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                return success(finalCallbackData);
+                                                            } else {
+                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                success(data);
+                                                            }
                                                         } 
                                                         else {
                                                             resolve(data);
@@ -5738,6 +5653,7 @@ function singularConstructorFunctions(OBJY) {
 
                                     });
                                 } else {
+                                    OBJY.unapplyHiddenAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);
@@ -5803,50 +5719,13 @@ function singularConstructorFunctions(OBJY) {
                     var app = context.activeApp;
                     var user = context.activeUser;
 
-                    OBJY.applyAffects(this, 'onChange', context, client, 'before');
-
-                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
-
                     var thisRef = this;
 
-                    if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(this);
-                        if (Array.isArray(constraints) && error) {
-                            return error({
-                                message: 'constraints error: ' + constraints.join(','),
-                            });
-                        }
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                        OBJY.updateO(
-                            thisRef,
-                            function (data) {
-                                delete context.handlerSequence[this._id];
 
-                                context.eventAlterationSequence = [];
+                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });                    
 
-                                //OBJY.deSerializePropsObject(data, params);
-
-                                context.alterSequence = [];
-
-                                if (success) success(data);
-                                else {
-                                    resolve(data);
-                                }
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            params,
-                            context
-                        );
-
-                        return this;
-                    }
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
 
@@ -5854,43 +5733,6 @@ function singularConstructorFunctions(OBJY) {
                         throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
 
-                    /*if (thisRef.onChange) {
-                        Object.keys(thisRef.onChange).forEach(function (key) {
-                            if (thisRef.onChange[key].trigger == 'before') {
-                                OBJY.execProcessorAction(
-                                    thisRef.onChange[key].value || thisRef.onChange[key].action,
-                                    thisRef,
-                                    null,
-                                    null,
-                                    function (data) {},
-                                    client,
-                                    null
-                                );
-                            }
-                        });
-                    }*/
-
-                    /*if (context.handlerSequence[this._id]) {
-                        for (var type in context.handlerSequence[this._id]) {
-                            for (var item in context.handlerSequence[this._id][type]) {
-                                var handlerObj = context.handlerSequence[this._id][type][item];
-
-                                for (var handlerItem in handlerObj.handler) {
-                                    if (handlerObj.handler[handlerItem].trigger == 'before') {
-                                        OBJY.execProcessorAction(
-                                            handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                            thisRef,
-                                            handlerObj.prop,
-                                            null,
-                                            function (data) {},
-                                            client,
-                                            null
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }*/
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -5965,25 +5807,6 @@ function singularConstructorFunctions(OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-                                OBJY.applyAffects(data, 'onChange', context, client, 'after');
-
-                                /*if (data.onChange) {
-                                    Object.keys(data.onChange).forEach(function (key) {
-                                        if (data.onChange[key].trigger == 'after') {
-                                            OBJY.execProcessorAction(
-                                                data.onChange[key].value || data.onChange[key].action,
-                                                data,
-                                                null,
-                                                null,
-                                                function (data) {},
-                                                client,
-                                                null
-                                            );
-                                        }
-                                    });
-                                }*/
-
-                                
 
                                 if (context.handlerSequence[thisRef._id]) {
                                     for (var type in context.handlerSequence[thisRef._id]) {
@@ -6043,6 +5866,7 @@ function singularConstructorFunctions(OBJY) {
                                 // SYNC HANDLER
                                 if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
                                     var callbackCounter = 0;
+                                    var finalCallbackData = {};
                                     Object.keys(data.onChange).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
@@ -6052,10 +5876,19 @@ function singularConstructorFunctions(OBJY) {
                                                 null,
                                                 function (cbData) {
                                                     callbackCounter++;
+
+                                                    // check if action returns data, then save it to current state
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData;
+
                                                     if (callbackCounter == Object.keys(data.onChange || {}).length) {
                                                         if (success) {
-                                                            if (isObjyObject(cbData)) return success(cbData)
-                                                            else success(data);
+                                                            if (isObjyObject(finalCallbackData)) {
+                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                return success(finalCallbackData);
+                                                            } else {
+                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                success(data);
+                                                            }
                                                         } 
                                                         else {
                                                             resolve(data);
@@ -6071,18 +5904,13 @@ function singularConstructorFunctions(OBJY) {
 
                                     });
                                 } else {
+                                    OBJY.unapplyHiddenAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);
                                     }
                                 }
 
-
-
-                                /*if (success) success(data);
-                                else {
-                                    resolve(data);
-                                }*/
                             },
                             function (err) {
                                 if (error) error(err);
@@ -6174,49 +6002,9 @@ function singularConstructorFunctions(OBJY) {
 
                     var thisRef = JSON.parse(JSON.stringify(this));
 
-                    OBJY.applyAffects(thisRef, 'onDelete', context, client);
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                    if (params.dirty) {
-                        OBJY.getObjectById(
-                            this.role,
-                            this._id,
-                            function (data) {
-                                if (!OBJY.checkAuthroisations(data, user, 'd', app, context)) return error({ error: 'Lack of Permissions' });
 
-                                return OBJY.remove(
-                                    thisRef,
-                                    function (_data) {
-                                        //OBJY.deSerializePropsObject(data, params);
-
-                                        if (success) success(data);
-                                        else {
-                                            resolve(data);
-                                        }
-                                    },
-                                    function (err) {
-                                        if (error) error(err);
-                                        else {
-                                            reject(err);
-                                        }
-                                    },
-                                    app,
-                                    client
-                                );
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            context,
-                            params
-                        );
-
-                        return this;
-                    }
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
@@ -6243,7 +6031,7 @@ function singularConstructorFunctions(OBJY) {
                             return OBJY.remove(
                                 thisRef,
                                 function (_data) {
-                                    OBJY.applyAffects(data, 'onDelete', context, client);
+                                    //OBJY.applyAffects(data, null, 'onDelete', context, client, params);
 
                                     /*if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
@@ -6351,6 +6139,7 @@ function singularConstructorFunctions(OBJY) {
                                     // SYNC HANDLER
                                     if (data.onDelete && Object.keys(data.onDelete || {}).length > 0) {
                                         var callbackCounter = 0;
+                                        var finalCallbackData = {};
                                         Object.keys(data.onDelete).forEach(function (key) {
                                             try {
                                                 OBJY.execProcessorAction(
@@ -6360,10 +6149,19 @@ function singularConstructorFunctions(OBJY) {
                                                     null,
                                                     function (cbData) {
                                                         callbackCounter++;
+
+                                                         // check if action returns data, then save it to current state
+                                                        if (isObjyObject(cbData)) finalCallbackData = cbData;
+
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
                                                             if (success) {
-                                                                if (isObjyObject(cbData)) return success(cbData)
-                                                                else success(data);
+                                                                if (isObjyObject(finalCallbackData)) {
+                                                                    OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                    return success(finalCallbackData);
+                                                                } else {
+                                                                    OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                    success(data);
+                                                                }
                                                             } 
                                                             else {
                                                                 resolve(data);
@@ -6379,6 +6177,7 @@ function singularConstructorFunctions(OBJY) {
 
                                         });
                                     } else {
+                                        OBJY.unapplyHiddenAffects(data, context, client, params);
                                         if (success) success(data);
                                         else {
                                             resolve(data);
@@ -6426,33 +6225,8 @@ function singularConstructorFunctions(OBJY) {
 
                     var thisRef = this;
 
-                    if (params.dirty) {
-                        OBJY.getObjectById(
-                            thisRef.role,
-                            thisRef._id,
-                            function (data) {
-                                //OBJY.deSerializePropsObject(data, params);
-                                if (!OBJY.checkAuthroisations(data, user, 'r', app, context)) return error({ error: 'Lack of Permissions' });
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                                if (success) success(OBJY[data.role](data));
-                                else {
-                                    resolve(OBJY[data.role](data));
-                                }
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            context,
-                            params
-                        );
-
-                        return this;
-                    }
 
                     var counter = 0;
 
@@ -6481,7 +6255,7 @@ function singularConstructorFunctions(OBJY) {
                     function prepareObj(data) {
                         var returnObject = OBJY[data.role](data);
 
-                        OBJY.applyAffects(data, null, context, client);
+                        //OBJY.applyAffects(data, null, context, client);
 
                         if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, context))
                             return error({ error: 'Lack of Permissions', source: 'authorisations' });
@@ -6490,6 +6264,7 @@ function singularConstructorFunctions(OBJY) {
                             return error({ error: 'Lack of Permissions', source: 'permissions' });
 
                         if (dontInherit) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -6498,6 +6273,7 @@ function singularConstructorFunctions(OBJY) {
                         }
 
                         if (params.templateMode == CONSTANTS$1.TEMPLATEMODES.STRICT) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -6506,6 +6282,7 @@ function singularConstructorFunctions(OBJY) {
                         }
 
                         if ((data.inherits || []).length == 0) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -6524,6 +6301,7 @@ function singularConstructorFunctions(OBJY) {
                                         counter++;
 
                                         if (counter == data.inherits.length) {
+                                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                                             if (success) success(returnObject);
                                             else {
                                                 resolve(returnObject);
@@ -6537,6 +6315,7 @@ function singularConstructorFunctions(OBJY) {
                                         var returnObject = OBJY[data.role](data);
 
                                         if (counter == data.inherits.length) {
+                                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                                             if (success) success(returnObject);
                                             else {
                                                 resolve(returnObject);
@@ -6554,6 +6333,7 @@ function singularConstructorFunctions(OBJY) {
                                 var returnObject = OBJY[data.role](data);
 
                                 if (thisRef.inherits.length == 1) {
+                                    OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                                     if (success) success(returnObject);
                                     else {
                                         resolve(returnObject);
