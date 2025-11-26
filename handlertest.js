@@ -61,6 +61,11 @@ onCreate: {
         console.log('updated.....')
     }, err => console.log(err))
 
+
+    OBJY.object(d._id).get(dd => {
+        console.log('dd', dd)
+    })
+
     d.remove()
 
    /* d.setName('newname,,,').update(u => {

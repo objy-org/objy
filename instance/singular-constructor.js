@@ -1629,6 +1629,7 @@ export default function(OBJY) {
                             return error({ error: 'Lack of Permissions', source: 'permissions' });
 
                         if (dontInherit) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -1637,6 +1638,7 @@ export default function(OBJY) {
                         }
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -1645,6 +1647,7 @@ export default function(OBJY) {
                         }
 
                         if ((data.inherits || []).length == 0) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -1663,6 +1666,7 @@ export default function(OBJY) {
                                         counter++;
 
                                         if (counter == data.inherits.length) {
+                                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                                             if (success) success(returnObject);
                                             else {
                                                 resolve(returnObject);
@@ -1676,6 +1680,7 @@ export default function(OBJY) {
                                         var returnObject = OBJY[data.role](data);
 
                                         if (counter == data.inherits.length) {
+                                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                                             if (success) success(returnObject);
                                             else {
                                                 resolve(returnObject);
@@ -1693,6 +1698,7 @@ export default function(OBJY) {
                                 var returnObject = OBJY[data.role](data);
 
                                 if (thisRef.inherits.length == 1) {
+                                    OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                                     if (success) success(returnObject);
                                     else {
                                         resolve(returnObject);
