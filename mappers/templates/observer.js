@@ -1,4 +1,4 @@
-const ObserverMapperTemplate = function(OBJY, options, content) {
+export default function(OBJY, options, content) {
     this.CONSTANTS = {
         MULTITENANCY: {
             ISOLATED: "isolated",
@@ -29,5 +29,3 @@ const ObserverMapperTemplate = function(OBJY, options, content) {
 
     if (content) Object.assign(this, content)
 }
-
-module.exports = ObserverMapperTemplate;

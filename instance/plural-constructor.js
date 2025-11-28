@@ -1,9 +1,9 @@
-var CONSTANTS = require('../lib/dependencies/constants.js')
+import CONSTANTS from '../lib/dependencies/constants.js'
 
-module.exports = function(OBJY) {
+export default function (OBJY) {
     return {
 
-        Objs: function(objs, role, instance, params, flags) {
+        Objs: function(objs, role, context, params, flags) {
             var self = this;
 
             if (typeof objs === "object" && !Array.isArray(objs)) {
@@ -17,15 +17,15 @@ module.exports = function(OBJY) {
                     }
                 })
 
-                objs = OBJY.buildAuthroisationQuery(objs, instance.activeUser, 'r', instance.activeApp, instance)
+                objs = OBJY.buildAuthroisationQuery(objs, context.activeUser, 'r', context.activeApp, context)
 
-                if (instance.activeUser) objs = OBJY.buildPermissionQuery(objs, instance.activeUser, instance.activeApp, instance);
+                if (context.activeUser) objs = OBJY.buildPermissionQuery(objs, context.activeUser, context.activeApp, context);
 
                 Object.getPrototypeOf(this).get = function(success, error, _client, _app) {
                 return new Promise((resolve, reject) => {
 
-                    var client = _client || instance.activeTenant;
-                    var app = _app || instance.activeApp;
+                    var client = _client || context.activeTenant;
+                    var app = _app || context.activeApp;
 
                     var thisRef = this;
 
@@ -35,7 +35,7 @@ module.exports = function(OBJY) {
 
                         var i;
                         for (i = 0; i < data.length; i++) {
-                            if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](OBJY.deserialize(data[i]))
+                            if (OBJY[data[i].role]) data[i] = OBJY[data[i].role](data[i])
                         }
 
 
@@ -43,9 +43,9 @@ module.exports = function(OBJY) {
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
-                            if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                            if(success) success(data);
                             else {
-                                    resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                    resolve(data);
                             }
                             return;
                         }
@@ -53,16 +53,16 @@ module.exports = function(OBJY) {
                         if (data.length == 0) {
                             //console.info(data)
 
-                            if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                            if(success) success(data);
                             else {
-                                    resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                    resolve(data);
                             }
                             return;
                         }
 
                         data.forEach(function(d) {
 
-                            OBJY.applyAffects(d, null, instance, client)
+                            OBJY.applyAffects(d, null, context, client)
 
                             if (!d.inherits) d.inherits = [];
 
@@ -80,9 +80,9 @@ module.exports = function(OBJY) {
 
                                 if (allCounter == data.length) {
 
-                                    if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                    if(success) success(data);
                                     else {
-                                            resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                            resolve(data);
                                     }
                                     return d;
                                 }
@@ -102,9 +102,9 @@ module.exports = function(OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                if(success) success(data);
                                                 else {
-                                                        resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                    resolve(data);
                                                 }
                                                 return d;
                                             }
@@ -117,21 +117,21 @@ module.exports = function(OBJY) {
 
                                             if (allCounter == data.length) {
 
-                                                if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                                if(success) success(data);
                                                 else {
-                                                        resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                                    resolve(data);
                                                 }
                                                 return d;
                                             }
 
-                                        }, client, params.templateFamily, params.templateSource, params, instance)
+                                        }, client, params.templateFamily, params.templateSource, params, context)
                                 } else {
 
                                     if (d.inherits.length == 1) {
 
-                                        if(success) success(OBJY.deSerializePropsObjectMulti(data, params));
+                                        if(success) success(data);
                                         else {
-                                                resolve(OBJY.deSerializePropsObjectMulti(data, params));
+                                            resolve(data);
                                         }
                                         return d;
                                     } else {
@@ -147,9 +147,9 @@ module.exports = function(OBJY) {
                     }, function(err) {
                         if(error) error(err);
                         else {
-                                reject(err);
+                            reject(err);
                         }
-                    }, app, client, flags || {}, params, instance);
+                    }, app, client, flags || {}, params, context);
 
                 });
 
@@ -158,8 +158,8 @@ module.exports = function(OBJY) {
                 Object.getPrototypeOf(this).count = function(success, error) {
                 return new Promise((resolve, reject) => {
 
-                    var client = instance.activeTenant;
-                    var app = instance.activeApp;
+                    var client = context.activeTenant;
+                    var app = context.activeApp;
 
                     var thisRef = this;
                     var counter = 0;
@@ -176,7 +176,7 @@ module.exports = function(OBJY) {
                         else {
                                 reject(err);
                         }
-                    }, app, client, flags || {}, params, instance);
+                    }, app, client, flags || {}, params, context);
 
                     return;
 
@@ -189,8 +189,8 @@ module.exports = function(OBJY) {
                 Object.getPrototypeOf(this).add = function(success, error) {
                 return new Promise((resolve, reject) => {
 
-                    var client = instance.activeTenant;
-                    var app = instance.activeApp;
+                    var client = context.activeTenant;
+                    var app = context.activeApp;
 
 
                     var i;
@@ -198,7 +198,7 @@ module.exports = function(OBJY) {
                     for (i = 0; i < objs.length; i++) {
                         objs[i] = OBJY[role](objs[i]).add(function(data) {
 
-                            OBJY.applyAffects(data, 'onCreate', instance, client)
+                            OBJY.applyAffects(data, 'onCreate', context, client)
 
                             if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
 
@@ -242,7 +242,7 @@ module.exports = function(OBJY) {
                                                         reject(err);
                                                 }
                                                 return data;
-                                            }, client, params.templateFamily, params.templateSource, params, instance)
+                                            }, client, params.templateFamily, params.templateSource, params, context)
                                     } else {
 
                                         if (data.inherits.length == 1) {
@@ -290,9 +290,9 @@ module.exports = function(OBJY) {
                     return new Promise((resolve, reject) => {
                         var query = { username: userObj.username };
 
-                        if (instance.authableFields) {
+                        if (OBJY.authableFields) {
                             query = { $or: [] };
-                            instance.authableFields.forEach(function(field) {
+                            OBJY.authableFields.forEach(function(field) {
                                 var f = {};
                                 f[field] = userObj[field];
                                 if (f[field]) query.$or.push(f)
@@ -301,7 +301,7 @@ module.exports = function(OBJY) {
                         }
 
 
-                        instance[params.pluralName](query).get(function(data) {
+                        OBJY[params.pluralName](query).get(function(data) {
                             if (data.length == 0) error("User not found");
                             
                             if(callback) callback(data[0]);

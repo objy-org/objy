@@ -1,28 +1,38 @@
-var Query = require('../lib/dependencies/query.js');
+//var Query = require('../lib/dependencies/query.js');
+import Query from '../lib/dependencies/query.js';
 
-module.exports = function(OBJY) {
+ var isObject = function(a) {
+    return (!!a) && (a.constructor === Object);
+};
+
+function isObjyObject (a) {
+    if(!isObject(a)) return false;
+    if (a._id && a.role) return true;
+};
+
+export default function (OBJY) {
     return {
 
         /**
          * Applies affect rules
-         * @param {obj} - the object
+         * @param {afterObj} - the afterObject
          * @param {operation} - the operation (onChange, onCreate and onDelete)
-         * @param {insstance} - the current objy instance
+         * @param {insstance} - the current afterObjy context
          * @param {client} - the active client
          */
-        applyAffects: function(obj, operation, instance, client, trigger) {
+        applyAffects: function(afterObj, context, client, params) {
             this.affectables.forEach(function(a) {
-                if (Query.query([obj], a.affects, Query.undot).length != 0) {
+                if (Query.query([afterObj], a.affects, Query.undot).length != 0) {
 
                     var template = a.apply;
                     var templateId = a._id;
 
                     if (template.name) {
-                        if (!obj.name) obj.name = template.name;
+                        if (!afterObj.name) afterObj.name = template.name;
                     }
 
                     if (template.type) {
-                        if (!obj.type) obj.type = template.type;
+                        if (!afterObj.type) afterObj.type = template.type;
                     }
 
                     // Object handlers
@@ -30,149 +40,131 @@ module.exports = function(OBJY) {
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
-                                if (!obj[h]) obj[h] = {};
-                                if (!obj[h][oC]) {
+                                if (!afterObj[h]) afterObj[h] = {};
+                                if (!afterObj[h][oC]) {
                                     if(!template[h][oC]) return;
-                                    obj[h][oC] = template[h][oC];
-                                    obj[h][oC].template = templateId;
+                                    afterObj[h][oC] = template[h][oC];
+                                    afterObj[h][oC].template = templateId;
                                 }
                             })
                         }
                     })
 
-                    var isObject = function(a) {
-                        return (!!a) && (a.constructor === Object);
-                    };
+                   
+                // Properties
+                function doTheProps(template, obj, extendedStructure) {
 
-                    // Properties
-                    function doTheProps(template, obj) {
+                    if (!obj) obj = {}
 
-                        var propsObj = obj;
-                        if(!template) return;
-                        var propsTmpl = template;
+                    if (!template) template = {};
 
-                        if (!propsObj) propsObj = {}
+                    //if (params.object && !obj.hasOwnProperty(params.propsObject)) obj[params.propsObject] = {};
 
-                        /*if (obj.type == 'bag') {
-                            if (!obj.properties) {
-                                obj.properties = {};
-                            }
-                        }*/
+                        if(extendedStructure && typeof extendedStructure == "object"){
+                            Object.keys(extendedStructure).forEach(k => {
+                                if(isObject(extendedStructure[k]) && template[k]){
+                                    doTheProps(template[k], obj[k], extendedStructure[k]);
+                                }
+                            });
+                        } else {
+                            /*console.log(Object.keys(template))
+                            Object.keys(template).forEach(function(p) {
+                                if(!OBJY.predefinedProperties.includes(p) && isObject(template[p])){
+                                    console.log('predef', p)
+                                    doTheProps(template[p], obj[p]);
+                                }
+                            })*/
+                        }
 
-                        Object.keys(propsTmpl || {}).forEach(function(p) {
-                       
-                            var isO = isObject(propsTmpl[p]);
+                    Object.keys(template).forEach(function(p) {
 
-                            if ((propsTmpl[p] || {}).type == 'bag') {
+                        if ((OBJY.predefinedProperties.includes(p)/* || (isObject(template[p]) || Array.isArray(template[p]))*/)) return;
 
-                                if (!propsObj[p]) {
+                        if (!template[p]) return;
 
-                                    propsObj[p] = propsTmpl[p];
-                                    if (isO) propsObj[p].propsTmpl = templateId;
+                        if(isObject(template[p]))  doTheProps(template[p], obj[p]);
+
+                        var cloned = JSON.parse(JSON.stringify(template[p]));
+
+                        if (!obj.hasOwnProperty(p)) {
+
+                            obj[p] = cloned;
+                            if(isObject(obj[p])) obj[p].template = templateId;
+                            //delete obj[p].overwritten;
+
+                        } else if (isObject(obj[p])) {
+
+                            if (cloned.meta) {
+                                if (!obj[p].meta) {
+                                    obj[p].meta = cloned.meta;
+                                    //obj[p].meta.overwritten = true;
                                 } else {
-                                    if (!propsObj[p].overwritten && Object.keys(propsObj[p]).length == 0) {
-                                        propsObj[p] = propsTmpl[p];
+                                    if (!obj[p].meta.overwritten) {
+                                        obj[p].meta = cloned.meta;
+                                        //obj[p].meta.overwritten = true;
                                     }
-
-                                    if (isO) propsObj[p].propsTmpl = templateId;
-                                    //propsObj.properties[p].overwritten = true;
                                 }
+                            }
+                            if (!obj[p].type) obj[p].type = cloned.type;
 
-                                if (!propsObj[propsObj]) propsObj[p] = {};
+                            obj[p].template = templateId;
+                            //obj[p].overwritten = true;
 
-                                doTheProps(propsTmpl[p], propsObj[p]);
+                        }
 
-                            } else if (isObject(propsTmpl[p])) {
-
-                                if (!propsObj[p]) {
-
-                                    propsObj[p] = propsTmpl[p];
-
-                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-
+                        if (template.permissions) {
+                            if (!obj.permissions) obj.permissions = {};
+                            Object.keys(template.permissions).forEach(function(p) {
+                                if (!obj.permissions[p]) {
+                                    obj.permissions[p] = template.permissions[p];
+                                    obj.permissions[p].template = templateId;
                                 } else {
-
-                                    if (!propsObj[p].overwritten && Object.keys(propsObj[p]).length == 0) {
-                                        propsObj[p] = propsTmpl[p];
-                                    }
-
-                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-                                    //propsObj[p].overwritten = true;
+                                    obj.permissions[p].template = templateId;
+                                    obj.permissions[p].overwritten = true;
                                 }
+                            })
+                        }
 
-                                doTheProps(propsTmpl[p], propsObj[p]);
-                            }
+                        ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
+                            if (template[p][h]) {
+                                if (!obj[p][h]) obj[p][h] = {};
 
+                                Object.keys(template[p][h]).forEach(function(oC) {
 
-                            if (!propsObj[p]) {
-                                propsObj[p] = propsTmpl[p];
-                                if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-                                if (isO) delete propsObj[p].overwritten;
-                            } else {
-
-                                if (!propsObj[p].overwritten) {
-                                    if (p != 'properties' && isO) propsObj[p].propsTmpl = templateId;
-                                    if (propsObj[p].value == null && isO) propsObj[p].value = propsTmpl[p].value;
-                                    //obj[p].overwritten = true;
-                                }
-
-                                if (!propsObj[p].metaOverwritten) {
-                                    propsObj[p].meta = propsTmpl[p].meta;
-                                }
-
-                                /*if (obj[p].type == 'bag') {
-                                    if (!obj[p].properties) {
-                                        obj[p].properties = {};
-                                    }
-                                }*/
-                            }
-
-
-                            if (propsTmpl.permissions) {
-                                if (!propsObj.permissions) propsObj.permissions = {};
-                                Object.keys(propsTmpl.permissions).forEach(function(p) {
-                                    if (!propsObj.permissions[p]) {
-                                        propsObj.permissions[p] = propsTmpl.permissions[p];
-                                        if (isO) propsObj.permissions[p].propsTmpl = templateId;
-                                    } else {
-                                        if (isO) propsObj.permissions[p].propsTmpl = templateId;
-                                        if (isO) propsObj.permissions[p].overwritten = true;
+                                    if (!obj[p][h][oC]) {
+                                        obj[p][h][oC] = template[p][h][oC];
+                                        if (obj[p][h][oC]) obj[p][h][oC].template = templateId;
                                     }
                                 })
                             }
-
-                            ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
-                                if (!isObject(propsTmpl[p])) return;
-                                if (propsTmpl[p][h]) {
-                                    if (!propsObj[p][h]) propsObj[p][h] = {};
-
-                                    Object.keys(propsTmpl[p][h]).forEach(function(oC) {
-
-                                        if (!propsObj[p][h][oC]) {
-                                            propsObj[p][h][oC] = propsTmpl[p][h][oC];
-                                            propsObj[p][h][oC].propsTmpl = templateId;
-                                        }
-                                    })
-                                }
-                            })
                         })
-                    }
 
-                    doTheProps(template || {}, obj || {});
+                        if (template[p].type == 'bag') {
+
+                            doTheProps(cloned, obj[p]);
+                        }
+
+                        
+
+                    })
+                }
+
+
+                doTheProps(template, afterObj, params.extendedStructure);
 
                     // Applications
 
                     if (template.applications) {
                         template.applications.forEach(function(a) {
-                            if (obj.applications)
-                                if (obj.applications.indexOf(a) == -1) obj.applications.push(a);
+                            if (afterObj.applications)
+                                if (afterObj.applications.indexOf(a) == -1) afterObj.applications.push(a);
                         })
                     }
 
 
                     if (template._clients) {
                         template._clients.forEach(function(a) {
-                            if ((obj._clients || []).indexOf(a) == -1)(obj._clients || []).push(a);
+                            if ((afterObj._clients || []).indexOf(a) == -1)(afterObj._clients || []).push(a);
                         })
                     }
 
@@ -180,15 +172,15 @@ module.exports = function(OBJY) {
                         var keys = Object.keys(template.authorisations);
 
                         if (keys.length > 0) {
-                            if (!obj.authorisations) obj.authorisations = {};
+                            if (!afterObj.authorisations) afterObj.authorisations = {};
                         }
 
                         keys.forEach(function(k) {
 
-                            if (!obj.authorisations[k]) {
-                                obj.authorisations[k] = template.authorisations[k]
+                            if (!afterObj.authorisations[k]) {
+                                afterObj.authorisations[k] = template.authorisations[k]
 
-                                obj.authorisations[k].forEach(function(a) {
+                                afterObj.authorisations[k].forEach(function(a) {
                                     a.template = template._id;
                                 })
 
@@ -196,15 +188,15 @@ module.exports = function(OBJY) {
                                 template.authorisations[k].forEach(function(a) {
 
                                     var f = false;
-                                    obj.authorisations[k].forEach(function(objA) {
-                                        if (JSON.stringify(objA.query) == JSON.stringify(a.query)) f = true;
+                                    afterObj.authorisations[k].forEach(function(afterObjA) {
+                                        if (JSON.stringify(afterObjA.query) == JSON.stringify(a.query)) f = true;
                                     })
 
                                     if (f) {
                                         a.overwritten = true;
                                     } else {
                                         a.template = template._id;
-                                        obj.authorisations[k].push(a)
+                                        afterObj.authorisations[k].push(a)
                                     }
                                 })
                             }
@@ -214,14 +206,14 @@ module.exports = function(OBJY) {
                     // Permissions
 
                     if (template.permissions) {
-                        if (!obj.permissions) obj.permissions = {};
+                        if (!afterObj.permissions) afterObj.permissions = {};
                         Object.keys(template.permissions).forEach(function(p) {
-                            if (!obj.permissions[p]) {
-                                obj.permissions[p] = template.permissions[p];
-                                obj.permissions[p].template = templateId;
+                            if (!afterObj.permissions[p]) {
+                                afterObj.permissions[p] = template.permissions[p];
+                                afterObj.permissions[p].template = templateId;
                             } else {
-                                obj.permissions[p].template = templateId;
-                                obj.permissions[p].overwritten = true;
+                                afterObj.permissions[p].template = templateId;
+                                afterObj.permissions[p].overwritten = true;
                             }
                         })
                     }
@@ -229,20 +221,20 @@ module.exports = function(OBJY) {
                     // Privileges
 
                     if (template.privileges) {
-                        if (!obj.privileges) obj.privileges = {};
+                        if (!afterObj.privileges) afterObj.privileges = {};
                         Object.keys(template.privileges).forEach(function(a) {
-                            if (!obj.privileges[a]) obj.privileges[a] = [];
+                            if (!afterObj.privileges[a]) afterObj.privileges[a] = [];
 
                             template.privileges[a].forEach(function(tP) {
                                 var contains = false;
 
-                                obj.privileges[a].forEach(function(oP) {
+                                afterObj.privileges[a].forEach(function(oP) {
                                     if (oP.name == tP.name) contains = true;
                                 })
                             })
 
                             if (!contains) {
-                                obj.privileges[a].push({
+                                afterObj.privileges[a].push({
                                     name: tP.name,
                                     template: templateId
                                 })
@@ -254,54 +246,34 @@ module.exports = function(OBJY) {
                 }
             })
 
-            this.applyRules(obj, operation, instance, client, trigger);
         },
 
-        /**
-         * Applies static rules
-         * @param {obj} - the object
-         * @param {operation} - the operation (onChange, onCreate and onDelete)
-         * @param {insstance} - the current objy instance
-         * @param {client} - the active client
-         */
-
-        applyRules: function(obj, operation, instance, client, trigger) {
-            var self = this;
-            self.staticRules.forEach(function(a) {
-                if (Query.query([obj], a.affects, Query.undot).length != 0) {
+        // THIS IS A PROTOTYPE!!!
+        // removes stuff, that was inserted by affects
+        // for now, only
+        unapplyHiddenAffects: function(afterObj, operation, context, client, params) {
+            this.affectables.forEach(function(a) {
+                if (Query.query([afterObj], a.affects, Query.undot).length != 0) {
 
                     var template = a.apply;
                     var templateId = a._id;
 
+                    // Object handlers
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
-
-                                if (operation != h || (trigger && trigger != template[h][oC]?.trigger)) return;
-
-                                instance.execProcessorAction(template[h][oC].value || template[h][oC].action, obj, null, null, function(data) {
-
-                                }, client, null);
-
+                                if (afterObj[h][oC]) {
+                                    if (afterObj[h][oC].hidden == true)
+                                        delete afterObj[h][oC]
+                                }
                             })
                         }
                     })
 
-                    if (template._constraints) {
-                        if (!Array.isArray(obj._constraints)) obj._constraints = [];
-                        template._constraints.forEach(c => {
-
-                            if (obj._constraints.find(el => el.key == c.key)) return;
-
-                            c.templateId = templateId;
-                            obj._constraints.push(c)
-                        })
-                    }
-
                 }
             })
-        },
 
+        }
 
     }
 }

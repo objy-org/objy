@@ -1,18 +1,26 @@
-var moment = require('moment');
-if (typeof moment == 'object') {
-    moment = moment.default;
-}
-var CONSTANTS = require('../lib/dependencies/constants.js');
-var exceptions = require('../lib/dependencies/exceptions.js');
+//var moment = require('moment');
+import moment from 'moment';
+
+/*var CONSTANTS = require('../lib/dependencies/constants.js');
+var exceptions = require('../lib/dependencies/exceptions.js');*/
+import CONSTANTS from '../lib/dependencies/constants.js';
+import exceptions from '../lib/dependencies/exceptions.js';
 
 var isObject = function (a) {
     return !!a && a.constructor === Object;
 };
 
-module.exports = function (OBJY) {
+var isObjyObject = function (a) {
+    if(!isObject(a)) return false;
+    if (a._id && a.role) return true;
+};
+
+
+export default function(OBJY) {
     return {
-        Obj: function (obj, role, instance, params) {
-            if (instance.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
+        Obj: function (obj, role, context, params) {
+
+            //if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
 
             if (!obj) obj = {}; //throw new Error("Invalid param");
 
@@ -40,8 +48,8 @@ module.exports = function (OBJY) {
             }
 
             if (params.hasAffects) {
-                this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, instance);
-                this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, instance);
+                this.affects = OBJY.AffectsCreateWrapper(this, obj.affects, context);
+                this.apply = OBJY.ApplyCreateWrapper(this, obj.apply, context);
             }
 
             this._constraints = obj._constraints;
@@ -56,15 +64,15 @@ module.exports = function (OBJY) {
             //@TODO: DEPRECATE THIS!
             // this.name = obj.name; // || null;
 
-            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, instance);
-            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, instance);
-            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, instance);
+            this.onCreate = OBJY.ObjectOnCreateCreateWrapper(this, obj.onCreate, context);
+            this.onChange = OBJY.ObjectOnChangeCreateWrapper(this, obj.onChange, context);
+            this.onDelete = OBJY.ObjectOnDeleteCreateWrapper(this, obj.onDelete, context);
 
             this.created = obj.created || moment().utc().toDate().toISOString();
             this.lastModified = obj.lastModified || moment().utc().toDate().toISOString();
 
-            //this.properties = OBJY.PropertiesChecker(this, obj.properties, instance); // || {};
-            OBJY.PropertiesChecker(this, obj, instance, params);
+            //this.properties = OBJY.PropertiesChecker(this, obj.properties, context); // || {};
+            OBJY.PropertiesChecker(this, obj, context, params);
 
             this.permissions = OBJY.ObjectPermissionsCreateWrapper(this, obj.permissions); // || {};
 
@@ -83,34 +91,34 @@ module.exports = function (OBJY) {
 
                 this.setUsername = function (username) {
                     this.username = username;
-                    OBJY.chainPermission(this, instance, 'o', 'setUsername', username);
-                    instance.alterSequence.push({ setUsername: arguments });
+                    OBJY.chainPermission(this, context, 'o', 'setUsername', username);
+                    context.alterSequence.push({ setUsername: arguments });
                     return this;
                 };
 
                 this.setEmail = function (email) {
                     this.email = email;
-                    OBJY.chainPermission(this, instance, 'h', 'setEmail', email);
-                    instance.alterSequence.push({ setEmail: arguments });
+                    OBJY.chainPermission(this, context, 'h', 'setEmail', email);
+                    context.alterSequence.push({ setEmail: arguments });
                     return this;
                 };
 
                 this.setPassword = function (password) {
                     // should be encrypted at this point
                     this.password = password;
-                    instance.alterSequence.push({ setPassword: arguments });
+                    context.alterSequence.push({ setPassword: arguments });
                     return this;
                 };
 
                 this.setAuthorisation = function (authorisationObj) {
-                    new OBJY.ObjectAuthorisationSetWrapper(this, authorisationObj, instance);
-                    instance.alterSequence.push({ setAuthorisation: arguments });
+                    new OBJY.ObjectAuthorisationSetWrapper(this, authorisationObj, context);
+                    context.alterSequence.push({ setAuthorisation: arguments });
                     return this;
                 };
 
                 this.removeAuthorisation = function (authorisationId) {
-                    new OBJY.ObjectAuthorisationRemoveWrapper(this, authorisationId, instance);
-                    instance.alterSequence.push({ removeAuthorisation: arguments });
+                    new OBJY.ObjectAuthorisationRemoveWrapper(this, authorisationId, context);
+                    context.alterSequence.push({ removeAuthorisation: arguments });
                     return this;
                 };
             }
@@ -121,11 +129,11 @@ module.exports = function (OBJY) {
                 this._clients = obj._clients;
 
                 this.addPrivilege = function (privilege) {
-                    if (instance.activeApp) {
+                    if (context.activeApp) {
                         var tmpPriv = {};
-                        tmpPriv[instance.activeApp] = { name: privilege };
+                        tmpPriv[context.activeApp] = { name: privilege };
                         new OBJY.PrivilegeChecker(this, tmpPriv);
-                        instance.alterSequence.push({ addPrivilege: arguments });
+                        context.alterSequence.push({ addPrivilege: arguments });
                         return this;
                     } else throw new exceptions.General('Invalid app id');
 
@@ -133,35 +141,35 @@ module.exports = function (OBJY) {
                 };
 
                 this.removePrivilege = function (privilege) {
-                    new OBJY.PrivilegeRemover(this, privilege, instance);
-                    instance.alterSequence.push({ removePrivilege: arguments });
+                    new OBJY.PrivilegeRemover(this, privilege, context);
+                    context.alterSequence.push({ removePrivilege: arguments });
                     return this;
                 };
 
                 this.addClient = function (client) {
                     if (this._clients.indexOf(client) != -1) throw new exceptions.General('Client ' + client + ' already exists');
                     this._clients.push(client);
-                    instance.alterSequence.push({ addClient: arguments });
+                    context.alterSequence.push({ addClient: arguments });
                     return this;
                 };
 
                 this.removeClient = function (client) {
                     if (this._clients.indexOf(client) == -1) throw new exceptions.General('Client ' + client + ' does not exist');
                     this._clients.splice(this._clients.indexOf(client), 1);
-                    instance.alterSequence.push({ removeClient: arguments });
+                    context.alterSequence.push({ removeClient: arguments });
                     return this;
                 };
             }
 
             /* this.props = function(properties) {
-                 this.properties = OBJY.PropertiesChecker(this, properties, instance) || {};
+                 this.properties = OBJY.PropertiesChecker(this, properties, context) || {};
                  return this;
              };*/
 
             Object.getPrototypeOf(this).addInherit = function (templateId) {
-                OBJY.addTemplateToObject(this, templateId, instance);
+                OBJY.addTemplateToObject(this, templateId, context);
 
-                instance.alterSequence.push({ addInherit: arguments });
+                context.alterSequence.push({ addInherit: arguments });
 
                 return this;
             };
@@ -176,26 +184,26 @@ module.exports = function (OBJY) {
                     function (err) {
                         if (error) error(err);
                     },
-                    instance
+                    context
                 );
 
-                instance.alterSequence.push({ removeInherit: arguments });
+                context.alterSequence.push({ removeInherit: arguments });
 
                 return this;
             };
 
             Object.getPrototypeOf(this).addApplication = function (application) {
-                OBJY.addApplicationToObject(this, application, instance);
+                OBJY.addApplicationToObject(this, application, context);
 
-                instance.alterSequence.push({ addApplication: arguments });
+                context.alterSequence.push({ addApplication: arguments });
 
                 return this;
             };
 
             Object.getPrototypeOf(this).removeApplication = function (application) {
-                OBJY.removeApplicationFromObject(this, application, instance);
+                OBJY.removeApplicationFromObject(this, application, context);
 
-                instance.alterSequence.push({ removeApplication: arguments });
+                context.alterSequence.push({ removeApplication: arguments });
 
                 return this;
             };
@@ -245,16 +253,16 @@ module.exports = function (OBJY) {
                     newProp[newProKey] = property[propertyKey];
 
                     this.addPropertyToBag(bag, newProp);
-                    //new OBJY.PropertyCreateWrapper(this[bag], prop, false, instance, params, true);
+                    //new OBJY.PropertyCreateWrapper(this[bag], prop, false, context, params, true);
 
-                    instance.alterSequence.push({ addProperty: arguments });
+                    context.alterSequence.push({ addProperty: arguments });
 
                     return this;
                 }
 
-                new OBJY.PropertyCreateWrapper(this, property, false, instance, params, true);
+                new OBJY.PropertyCreateWrapper(this, property, false, context, params, true);
 
-                instance.alterSequence.push({ addProperty: arguments });
+                context.alterSequence.push({ addProperty: arguments });
                 return this;
             };
 
@@ -262,9 +270,9 @@ module.exports = function (OBJY) {
                 if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance);
+                new OBJY.ObjectOnChangeSetWrapper(this, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, context);
 
-                instance.alterSequence.push({ setOnChange: arguments });
+                context.alterSequence.push({ setOnChange: arguments });
 
                 return this;
             };
@@ -273,9 +281,9 @@ module.exports = function (OBJY) {
                 if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance);
+                new OBJY.ObjectOnDeleteSetWrapper(this, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, context);
 
-                instance.alterSequence.push({ setOnDelete: arguments });
+                context.alterSequence.push({ setOnDelete: arguments });
 
                 return this;
             };
@@ -284,9 +292,9 @@ module.exports = function (OBJY) {
                 if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance);
+                new OBJY.ObjectOnCreateSetWrapper(this, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, context);
 
-                instance.alterSequence.push({ setOnCreate: arguments });
+                context.alterSequence.push({ setOnCreate: arguments });
 
                 return this;
             };
@@ -294,21 +302,21 @@ module.exports = function (OBJY) {
             Object.getPrototypeOf(this).removeOnChange = function (name) {
                 if (!this.onChange[name]) throw new exceptions.HandlerNotFoundException(name);
                 else delete this.onChange[name];
-                instance.alterSequence.push({ removeOnChange: arguments });
+                context.alterSequence.push({ removeOnChange: arguments });
                 return this;
             };
 
             Object.getPrototypeOf(this).removeOnDelete = function (name) {
                 if (!this.onDelete[name]) throw new exceptions.HandlerNotFoundException(name);
                 else delete this.onDelete[name];
-                instance.alterSequence.push({ removeOnDelete: arguments });
+                context.alterSequence.push({ removeOnDelete: arguments });
                 return this;
             };
 
             Object.getPrototypeOf(this).removeOnCreate = function (name) {
                 if (!this.onCreate[name]) throw new exceptions.HandlerNotFoundException(name);
                 else delete this.onCreate[name];
-                instance.alterSequence.push({ removeOnCreate: arguments });
+                context.alterSequence.push({ removeOnCreate: arguments });
                 return this;
             };
 
@@ -317,33 +325,33 @@ module.exports = function (OBJY) {
                 perm[name] = permission;
                 permission = perm;
 
-                new OBJY.ObjectPermissionSetWrapper(this, permission, instance);
-                instance.alterSequence.push({ setPermission: arguments });
+                new OBJY.ObjectPermissionSetWrapper(this, permission, context);
+                context.alterSequence.push({ setPermission: arguments });
                 return this;
             };
 
             Object.getPrototypeOf(this).removePermission = function (permission) {
-                new OBJY.ObjectPermissionRemoveWrapper(this, permission, instance);
-                instance.alterSequence.push({ removePermission: arguments });
+                new OBJY.ObjectPermissionRemoveWrapper(this, permission, context);
+                context.alterSequence.push({ removePermission: arguments });
                 return this;
             };
 
             Object.getPrototypeOf(this).setPropertyValue = function (property, value, client) {
-                new OBJY.PropertySetWrapper(this, property, value, instance, params);
-                instance.alterSequence.push({ setPropertyValue: arguments });
+                new OBJY.PropertySetWrapper(this, property, value, context, params);
+                context.alterSequence.push({ setPropertyValue: arguments });
 
                 return this;
             };
 
             Object.getPrototypeOf(this).setProperty = function (property, value, client) {
-                new OBJY.PropertySetFullWrapper(this, property, value, instance, false, params);
-                instance.alterSequence.push({ setProperty: arguments });
+                new OBJY.PropertySetFullWrapper(this, property, value, context, false, params);
+                context.alterSequence.push({ setProperty: arguments });
                 return this;
             };
 
             Object.getPrototypeOf(this).makeProperty = function (property, value, client) {
-                new OBJY.PropertySetFullWrapper(this, property, value, instance, true, params);
-                instance.alterSequence.push({ makeProperty: arguments });
+                new OBJY.PropertySetFullWrapper(this, property, value, context, true, params);
+                context.alterSequence.push({ makeProperty: arguments });
                 return this;
             };
 
@@ -358,8 +366,8 @@ module.exports = function (OBJY) {
                     return;
                 }
 
-                new OBJY.EventDateSetWrapper(this, property, value, client, instance, params);
-                instance.alterSequence.push({ setEventDate: arguments });
+                new OBJY.EventDateSetWrapper(this, property, value, client, context, params);
+                context.alterSequence.push({ setEventDate: arguments });
                 return this;
             };
 
@@ -374,8 +382,8 @@ module.exports = function (OBJY) {
                     return;
                 }
 
-                new OBJY.EventActionSetWrapper(this, property, value, client, instance, params);
-                instance.alterSequence.push({ setEventAction: arguments });
+                new OBJY.EventActionSetWrapper(this, property, value, client, context, params);
+                context.alterSequence.push({ setEventAction: arguments });
                 return this;
             };
 
@@ -390,8 +398,8 @@ module.exports = function (OBJY) {
                     return;
                 }
 
-                new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance, params);
-                instance.alterSequence.push({ setEventTriggered: arguments });
+                new OBJY.EventTriggeredSetWrapper(this, property, value, client, context, params);
+                context.alterSequence.push({ setEventTriggered: arguments });
                 return this;
             };
 
@@ -407,7 +415,7 @@ module.exports = function (OBJY) {
                 }
 
                 new OBJY.EventLastOccurenceSetWrapper(this, property, value, client, params);
-                instance.alterSequence.push({ setEventLastOccurence: arguments });
+                context.alterSequence.push({ setEventLastOccurence: arguments });
                 return this;
             };
 
@@ -422,8 +430,8 @@ module.exports = function (OBJY) {
                     return;
                 }
 
-                new OBJY.EventIntervalSetWrapper(this, property, value, client, instance, params);
-                instance.alterSequence.push({ setEventInterval: arguments });
+                new OBJY.EventIntervalSetWrapper(this, property, value, client, context, params);
+                context.alterSequence.push({ setEventInterval: arguments });
                 return this;
             };
 
@@ -436,7 +444,7 @@ module.exports = function (OBJY) {
                 tmpProp[tmpName] = value[propKey];
 
                 this.addPropertyToBag(array, tmpProp);
-                instance.alterSequence.push({ pushToArray: arguments });
+                context.alterSequence.push({ pushToArray: arguments });
             };
 
             Object.getPrototypeOf(this).setPropertyPermission = function (property, name, permission) {
@@ -444,8 +452,8 @@ module.exports = function (OBJY) {
                 perm[name] = permission;
                 permission = perm;
 
-                new OBJY.PropertyPermissionSetWrapper(this, property, permission, instance, params);
-                instance.alterSequence.push({ setPropertyPermission: arguments });
+                new OBJY.PropertyPermissionSetWrapper(this, property, permission, context, params);
+                context.alterSequence.push({ setPropertyPermission: arguments });
                 return this;
             };
 
@@ -453,8 +461,8 @@ module.exports = function (OBJY) {
                 if (typeof onCreateObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, instance, params);
-                instance.alterSequence.push({ setPropertyOnCreate: arguments });
+                new OBJY.PropertyOnCreateSetWrapper(this, property, key, onCreateObj.value, onCreateObj.trigger, onCreateObj.type, context, params);
+                context.alterSequence.push({ setPropertyOnCreate: arguments });
                 return this;
             };
 
@@ -469,7 +477,7 @@ module.exports = function (OBJY) {
                     delete this[propertyName].onCreate[propertyName];
                 }
 
-                instance.alterSequence.push({ removePropertyOnCreate: arguments });
+                context.alterSequence.push({ removePropertyOnCreate: arguments });
 
                 return this;
             };
@@ -479,13 +487,13 @@ module.exports = function (OBJY) {
                 if (this.role == 'template') {
                 }
                 new OBJY.PropertyBagItemOnCreateRemover(this, property, handlerName);
-                instance.alterSequence.push({ removePropertyOnCreateFromBag: arguments });
+                context.alterSequence.push({ removePropertyOnCreateFromBag: arguments });
                 return this;
             };
 
             Object.getPrototypeOf(this).setPropertyMeta = function (property, meta) {
                 new OBJY.PropertyMetaSetWrapper(this, property, meta, params);
-                instance.alterSequence.push({ setPropertyMeta: arguments });
+                context.alterSequence.push({ setPropertyMeta: arguments });
                 return this;
             };
 
@@ -508,7 +516,7 @@ module.exports = function (OBJY) {
                     delete this[propertyName].meta;
                 }
 
-                instance.alterSequence.push({ removePropertyMeta: arguments });
+                context.alterSequence.push({ removePropertyMeta: arguments });
                 return this;
             };
 
@@ -516,8 +524,8 @@ module.exports = function (OBJY) {
                 if (typeof onChangeObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name; //Object.keys(onChangeObj)[0];
 
-                new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, instance, params);
-                instance.alterSequence.push({ setPropertyOnChange: arguments });
+                new OBJY.PropertyOnChangeSetWrapper(this, property, key, onChangeObj.value, onChangeObj.trigger, onChangeObj.type, context, params);
+                context.alterSequence.push({ setPropertyOnChange: arguments });
                 return this;
             };
 
@@ -531,7 +539,7 @@ module.exports = function (OBJY) {
                     delete this[propertyName][name];
                 }
 
-                instance.alterSequence.push({ removePropertyOnChange: arguments });
+                context.alterSequence.push({ removePropertyOnChange: arguments });
                 return this;
             };
 
@@ -547,8 +555,8 @@ module.exports = function (OBJY) {
                 if (typeof onDeleteObj !== 'object') throw new exceptions.InvalidArgumentException();
                 var key = name;
 
-                new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, instance, params);
-                instance.alterSequence.push({ setPropertyOnDelete: arguments });
+                new OBJY.PropertyOnDeleteSetWrapper(this, property, key, onDeleteObj.value, onDeleteObj.trigger, onDeleteObj.type, context, params);
+                context.alterSequence.push({ setPropertyOnDelete: arguments });
                 return this;
             };
 
@@ -562,7 +570,7 @@ module.exports = function (OBJY) {
                     delete this[propertyName].onDelete[name];
                 }
 
-                instance.alterSequence.push({ removePropertyOnDelete: arguments });
+                context.alterSequence.push({ removePropertyOnDelete: arguments });
                 return this;
             };
 
@@ -585,7 +593,7 @@ module.exports = function (OBJY) {
                     return;
                 }
                 new OBJY.PropertyConditionsSetWrapper(this, property, conditions, params);
-                instance.alterSequence.push({ setPropertyConditions: arguments });
+                context.alterSequence.push({ setPropertyConditions: arguments });
                 return this;
             };
 
@@ -610,7 +618,7 @@ module.exports = function (OBJY) {
                     return;
                 }
                 new OBJY.PropertyQuerySetWrapper(this, property, options, params);
-                instance.alterSequence.push({ setPropertyQuery: arguments });
+                context.alterSequence.push({ setPropertyQuery: arguments });
                 return this;
             };
 
@@ -624,7 +632,7 @@ module.exports = function (OBJY) {
                     this.setBagPropertyEventInterval(bag, newProKey, value);
                     return;
                 }
-                new OBJY.PropertyEventIntervalSetWrapper(this, property, interval, instance);
+                new OBJY.PropertyEventIntervalSetWrapper(this, property, interval, context);
                 return this;
             };*/
 
@@ -638,7 +646,7 @@ module.exports = function (OBJY) {
                     delete this[propertyName].query;
                 }
 
-                instance.alterSequence.push({ removePropertyQuery: arguments });
+                context.alterSequence.push({ removePropertyQuery: arguments });
 
                 return this;
             };
@@ -684,9 +692,9 @@ module.exports = function (OBJY) {
                     if (!this[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
                     if (!this[propertyName].permissions[permissionKey]) throw new exceptions.NoSuchPermissionException(permissionKey);
 
-                    OBJY.chainPermission(this, instance, 'x', 'removePropertyPermission', permissionKey);
+                    OBJY.chainPermission(this, context, 'x', 'removePropertyPermission', permissionKey);
 
-                    instance.alterSequence.push({ removePropertyPermission: arguments });
+                    context.alterSequence.push({ removePropertyPermission: arguments });
 
                     delete this[propertyName].permissions[permissionKey];
                 }
@@ -695,27 +703,27 @@ module.exports = function (OBJY) {
             };
 
             Object.getPrototypeOf(this).setBagPropertyValue = function (bag, property, value, client) {
-                new OBJY.PropertySetWrapper(this.getProperty(bag), property, value, instance, params);
+                new OBJY.PropertySetWrapper(this.getProperty(bag), property, value, context, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventDate = function (bag, property, value, client) {
-                new OBJY.EventDateSetWrapper(this.getProperty(bag), property, value, instance, params);
+                new OBJY.EventDateSetWrapper(this.getProperty(bag), property, value, context, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventAction = function (bag, property, value, client) {
-                new OBJY.EventActionSetWrapper(this.getProperty(bag), property, value, instance, params);
+                new OBJY.EventActionSetWrapper(this.getProperty(bag), property, value, context, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventInterval = function (bag, property, value, client) {
-                new OBJY.EventIntervalSetWrapper(this.getProperty(bag), property, value, instance, params);
+                new OBJY.EventIntervalSetWrapper(this.getProperty(bag), property, value, context, params);
                 return this;
             };
 
             Object.getPrototypeOf(this).setBagEventTriggered = function (bag, property, value, client) {
-                new OBJY.EventTriggeredSetWrapper(this, property, value, client, instance, params);
+                new OBJY.EventTriggeredSetWrapper(this, property, value, client, context, params);
                 return this;
             };
 
@@ -727,7 +735,7 @@ module.exports = function (OBJY) {
             Object.getPrototypeOf(this).addPropertyToBag = function (bag, property) {
                 var tmpBag = this.getProperty(bag);
 
-                new OBJY.PropertyCreateWrapper(tmpBag, property, true, instance, params, true);
+                new OBJY.PropertyCreateWrapper(tmpBag, property, true, context, params, true);
 
                 return this;
             };
@@ -735,14 +743,14 @@ module.exports = function (OBJY) {
             Object.getPrototypeOf(this).removePropertyFromBag = function (property, client) {
                 var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemRemover(this, property, params, instance);
+                new OBJY.PropertyBagItemRemover(this, property, params, context);
                 return this;
             };
 
             Object.getPrototypeOf(this).removePropertyPermissionFromBag = function (property, permissionKey) {
                 var bag = this.getProperty(property);
 
-                new OBJY.PropertyBagItemPermissionRemover(this, property, permissionKey, instance);
+                new OBJY.PropertyBagItemPermissionRemover(this, property, permissionKey, context);
                 return this;
             };
 
@@ -751,7 +759,7 @@ module.exports = function (OBJY) {
 
                 if (propertyName.indexOf('.') != -1) {
                     this.removePropertyFromBag(propertyName, client);
-                    instance.alterSequence.push({ removeProperty: arguments });
+                    context.alterSequence.push({ removeProperty: arguments });
                     return this;
                 } else {
                     if (!thisRef[propertyName]) throw new exceptions.NoSuchPropertyException(propertyName);
@@ -760,20 +768,20 @@ module.exports = function (OBJY) {
 
                     if (tmpProp.onDelete) {
                         if (Object.keys(tmpProp.onDelete).length > 0) {
-                            if (!instance.handlerSequence[this._id]) instance.handlerSequence[this._id] = {};
-                            if (!instance.handlerSequence[this._id].onDelete) instance.handlerSequence[this._id].onDelete = [];
-                            instance.handlerSequence[this._id].onDelete.push({
+                            if (!context.handlerSequence[this._id]) context.handlerSequence[this._id] = {};
+                            if (!context.handlerSequence[this._id].onDelete) context.handlerSequence[this._id].onDelete = [];
+                            context.handlerSequence[this._id].onDelete.push({
                                 handler: tmpProp.onDelete,
                                 prop: tmpProp,
                             });
                         }
                     }
 
-                    OBJY.chainPermission(thisRef[propertyName], instance, 'd', 'removeProperty', propertyName);
+                    OBJY.chainPermission(thisRef[propertyName], context, 'd', 'removeProperty', propertyName);
 
-                    instance.alterSequence.push({ removeProperty: arguments });
+                    context.alterSequence.push({ removeProperty: arguments });
 
-                    /*if (this[propertyName].type == 'date') instance.eventAlterationSequence.push({
+                    /*if (this[propertyName].type == 'date') context.eventAlterationSequence.push({
                         operation: 'remove',
                         obj: this,
                         propName: propertyName,
@@ -797,17 +805,17 @@ module.exports = function (OBJY) {
             Object.getPrototypeOf(this).setName = function (name) {
                 this.name = name;
 
-                OBJY.chainPermission(this, instance, 'n', 'setName', name);
+                OBJY.chainPermission(this, context, 'n', 'setName', name);
 
-                instance.alterSequence.push({ setName: arguments });
+                context.alterSequence.push({ setName: arguments });
 
                 return this;
             };
 
             Object.getPrototypeOf(this).setType = function (type) {
                 this.type = type;
-                OBJY.chainPermission(this, instance, 't', 'setType', type);
-                instance.alterSequence.push({ setType: arguments });
+                OBJY.chainPermission(this, context, 't', 'setType', type);
+                context.alterSequence.push({ setType: arguments });
                 return this;
             };
 
@@ -820,7 +828,7 @@ module.exports = function (OBJY) {
             };
 
             Object.getPrototypeOf(this).getProperty = function (propertyName) {
-                return OBJY.PropertyParser(this, propertyName, instance, params);
+                return OBJY.PropertyParser(this, propertyName, context, params);
             };
 
             Object.getPrototypeOf(this).getProperties = function () {
@@ -829,70 +837,19 @@ module.exports = function (OBJY) {
 
             Object.getPrototypeOf(this).add = function (success, error, client) {
                 return new Promise((resolve, reject) => {
-                    var client = client || instance.activeTenant;
-                    var app = instance.activeApp;
-                    var user = instance.activeUser;
+                    var client = client || context.activeTenant;
+                    var app = context.activeApp;
+                    var user = context.activeUser;
 
                     var thisRef = this;
 
-                    //OBJY.applyAffects(thisRef, 'onCreate', instance, client);
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                    if (!OBJY.checkAuthroisations(this, user, 'c', app, instance)) return error({ error: 'Lack of Permissions' });
+                    if (!OBJY.checkAuthroisations(this, user, 'c', app, context)) return error({ error: 'Lack of Permissions' });
 
                     if (!this._id) this._id = OBJY.ID();
 
-                    if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(obj);
-                        if (Array.isArray(constraints) && error) {
-                            return error({
-                                message: 'constraints error: ' + constraints.join(','),
-                            });
-                        }
-
-                        OBJY.add(
-                            thisRef,
-                            function (data) {
-                                thisRef._id = data._id;
-
-                                OBJY.deSerializePropsObject(data, params);
-
-                                if (success) success(OBJY.deserialize(data));
-                                else {
-                                    resolve(OBJY.deserialize(data));
-                                }
-
-                                delete thisRef.instance;
-                            },
-                            function (err) {
-                                console.warn('err', err, error);
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            params
-                        );
-
-                        return OBJY.deserialize(this);
-                    }
-
-                    if (thisRef.onCreate) {
-                        Object.keys(thisRef.onCreate).forEach(function (key) {
-                            if (thisRef.onCreate[key].trigger == 'before' || !thisRef.onCreate[key].trigger) {
-                                instance.execProcessorAction(
-                                    thisRef.onCreate[key].value || thisRef.onCreate[key].action,
-                                    thisRef,
-                                    null,
-                                    null,
-                                    function (data) {},
-                                    client,
-                                    null
-                                );
-                            }
-                        });
-                    }
+                    
 
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
@@ -926,7 +883,7 @@ module.exports = function (OBJY) {
                                 }
 
                                 if (prePropsString) {
-                                    instance.eventAlterationSequence.push({
+                                    context.eventAlterationSequence.push({
                                         operation: 'add',
                                         obj: thisRef,
                                         propName: prePropsString + '.' + p,
@@ -946,7 +903,7 @@ module.exports = function (OBJY) {
                                         });
                                 } else {
 
-                                    instance.eventAlterationSequence.push({
+                                    context.eventAlterationSequence.push({
                                         operation: 'add',
                                         obj: thisRef,
                                         propName: p,
@@ -972,11 +929,12 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    var mapper = instance.observers[thisRef.role];
+                    var mapper = OBJY.observers[thisRef.role];
 
                     //if (this) aggregateAllEvents(this.properties);
 
-                    aggregateAllEvents(thisRef);
+                    aggregateAllEvents(thisRef);     
+
 
                     if (app) {
                         if (!this.applications) this.applications = [];
@@ -984,7 +942,7 @@ module.exports = function (OBJY) {
                     }
 
                     var addFn = function (obj) {
-                        if (!OBJY.checkPermissions(user, app, obj, 'c', false, instance)) return error({ error: 'Lack of Permissions' });
+                        if (!OBJY.checkPermissions(user, app, obj, 'c', false, context)) return error({ error: 'Lack of Permissions' });
 
                         var constraints = OBJY.checkConstraints(obj);
                         if (Array.isArray(constraints) && error) {
@@ -997,32 +955,10 @@ module.exports = function (OBJY) {
                             obj,
                             function (data) {
                                 obj._id = data._id;
-
-                                OBJY.applyAffects(thisRef, 'onCreate', instance, client);
                                 
-                                if (data.onCreate) {
-                                    Object.keys(data.onCreate).forEach(function (key) {
-                                        try {
-                                            if (data.onCreate[key].trigger == 'after') {
-                                                instance.execProcessorAction(
-                                                    data.onCreate[key].value || data.onCreate[key].action,
-                                                    data,
-                                                    null,
-                                                    null,
-                                                    function (data) {},
-                                                    client,
-                                                    null
-                                                );
-                                            }
-                                        } catch(e){
-                                            console.log(e)
-                                        }
-
-                                    });
-                                }
 
                                 if (mapper.type == 'scheduled') {
-                                    instance.eventAlterationSequence.forEach(function (evt) {
+                                    context.eventAlterationSequence.forEach(function (evt) {
                                         if (evt.operation == 'add') {
                                             mapper.addEvent(
                                                 obj._id,
@@ -1030,7 +966,7 @@ module.exports = function (OBJY) {
                                                 evt.property,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                instance.activeTenant
+                                                context.activeTenant
                                             );
                                         } else if (evt.operation == 'remove') {
                                             mapper.addEvent(
@@ -1038,24 +974,66 @@ module.exports = function (OBJY) {
                                                 evt.propName,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                instance.activeTenant
+                                                context.activeTenant
                                             );
                                         }
                                     });
                                 }
 
-                                instance.eventAlterationSequence = [];
+                                context.eventAlterationSequence = [];
 
                                 OBJY.Logger.log('Added Object: ' + JSON.stringify(data, null, 2));
 
-                                OBJY.deSerializePropsObject(data, params);
+                                // SYNC HANDLER
+                                if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
+                                    var callbackCounter = 0;
+                                    var finalCallbackData = {}
+                                    Object.keys(data.onCreate).forEach(function (key) {
+                                        try {
+                                            OBJY.execProcessorAction(
+                                                data.onCreate[key].value || data.onCreate[key].action,
+                                                null,
+                                                data,
+                                                null,
+                                                function (cbData) {
+                                                    callbackCounter++;
 
-                                if (success) success(OBJY.deserialize(data));
-                                else {
-                                    resolve(OBJY.deserialize(data));
+                                                    // check if action returns data, then save it to current state
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData
+
+                                                    if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                        if (success) {
+                                                            if (isObjyObject(finalCallbackData)) {
+                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                return success(finalCallbackData);
+                                                            } else {
+                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                success(data);
+                                                            }
+                                                        } 
+                                                        else {
+                                                            resolve(data);
+                                                        }
+                                                    }
+                                                },
+                                                client,
+                                                null
+                                            );
+                                        } catch(e){
+                                            console.log(e)
+                                        }
+
+                                    });
+                                } else {
+                                    OBJY.unapplyHiddenAffects(data, context, client, params);
+                                    if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }
                                 }
 
-                                delete thisRef.instance;
+
+                                delete thisRef.context;
                             },
                             function (err) {
                                 if (error) error(err);
@@ -1066,7 +1044,7 @@ module.exports = function (OBJY) {
                             app,
                             client,
                             params,
-                            instance
+                            context
                         );
                     };
 
@@ -1103,104 +1081,30 @@ module.exports = function (OBJY) {
                     } else {
                         addFn(thisRef);
                     }
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
             Object.getPrototypeOf(this).update = function (success, error, client) {
                 return new Promise((resolve, reject) => {
-                    var client = client || instance.activeTenant;
-                    var app = instance.activeApp;
-                    var user = instance.activeUser;
-
-                    OBJY.applyAffects(this, 'onChange', instance, client, 'before');
-
-                    if (!OBJY.checkAuthroisations(this, user, 'u', app, instance)) return error({ error: 'Lack of Permissions' });
+                    var client = client || context.activeTenant;
+                    var app = context.activeApp;
+                    var user = context.activeUser;
 
                     var thisRef = this;
 
-                    if (params.dirty) {
-                        var constraints = OBJY.checkConstraints(this);
-                        if (Array.isArray(constraints) && error) {
-                            return error({
-                                message: 'constraints error: ' + constraints.join(','),
-                            });
-                        }
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                        OBJY.updateO(
-                            thisRef,
-                            function (data) {
-                                delete instance.handlerSequence[this._id];
 
-                                instance.eventAlterationSequence = [];
+                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });                    
 
-                                OBJY.deSerializePropsObject(data, params);
 
-                                instance.alterSequence = [];
+                    if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
 
-                                if (success) success(OBJY.deserialize(data));
-                                else {
-                                    resolve(OBJY.deserialize(data));
-                                }
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            params,
-                            instance
-                        );
-
-                        return OBJY.deserialize(this);
+                    if ((context.permissionSequence[thisRef._id] || []).length > 0) {
+                        throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
 
-                    if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, instance)) return error({ error: 'Lack of Permissions' });
-
-                    if ((instance.permissionSequence[thisRef._id] || []).length > 0) {
-                        throw new exceptions.LackOfPermissionsException(instance.permissionSequence[thisRef._id]);
-                    }
-
-                    if (thisRef.onChange) {
-                        Object.keys(thisRef.onChange).forEach(function (key) {
-                            if (thisRef.onChange[key].trigger == 'before') {
-                                instance.execProcessorAction(
-                                    thisRef.onChange[key].value || thisRef.onChange[key].action,
-                                    thisRef,
-                                    null,
-                                    null,
-                                    function (data) {},
-                                    client,
-                                    null
-                                );
-                            }
-                        });
-                    }
-
-                    if (instance.handlerSequence[this._id]) {
-                        for (var type in instance.handlerSequence[this._id]) {
-                            for (var item in instance.handlerSequence[this._id][type]) {
-                                var handlerObj = instance.handlerSequence[this._id][type][item];
-
-                                for (var handlerItem in handlerObj.handler) {
-                                    if (handlerObj.handler[handlerItem].trigger == 'before') {
-                                        instance.execProcessorAction(
-                                            handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                            thisRef,
-                                            handlerObj.prop,
-                                            null,
-                                            function (data) {},
-                                            client,
-                                            null
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -1259,7 +1163,7 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    var mapper = instance.observers[thisRef.role];
+                    var mapper = OBJY.observers[thisRef.role];
 
                     //if (mapper.type != 'scheduled' && this) aggregateAllEvents(this.properties);
                     if (mapper.type != 'scheduled') aggregateAllEvents(this);
@@ -1275,49 +1179,30 @@ module.exports = function (OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-                                OBJY.applyAffects(data, 'onChange', instance, client, 'after');
 
-                                if (data.onChange) {
-                                    Object.keys(data.onChange).forEach(function (key) {
-                                        if (data.onChange[key].trigger == 'after') {
-                                            instance.execProcessorAction(
-                                                data.onChange[key].value || data.onChange[key].action,
-                                                data,
-                                                null,
-                                                null,
-                                                function (data) {},
-                                                client,
-                                                null
-                                            );
-                                        }
-                                    });
-                                }
-
-                                if (instance.handlerSequence[thisRef._id]) {
-                                    for (var type in instance.handlerSequence[thisRef._id]) {
-                                        for (var item in instance.handlerSequence[thisRef._id][type]) {
-                                            var handlerObj = instance.handlerSequence[thisRef._id][type][item];
+                                if (context.handlerSequence[thisRef._id]) {
+                                    for (var type in context.handlerSequence[thisRef._id]) {
+                                        for (var item in context.handlerSequence[thisRef._id][type]) {
+                                            var handlerObj = context.handlerSequence[thisRef._id][type][item];
                                             for (var handlerItem in handlerObj.handler) {
-                                                if (handlerObj.handler[handlerItem].trigger == 'after' || !handlerObj.handler[handlerItem].trigger) {
-                                                    instance.execProcessorAction(
-                                                        handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                                        thisRef,
-                                                        handlerObj.prop,
-                                                        null,
-                                                        function (data) {},
-                                                        client,
-                                                        null
-                                                    );
-                                                }
+                                                OBJY.execProcessorAction(
+                                                    handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
+                                                    thisRef,
+                                                    data,
+                                                    handlerObj.prop,
+                                                    function (data) {},
+                                                    client,
+                                                    null
+                                                );
                                             }
                                         }
                                     }
                                 }
 
-                                delete instance.handlerSequence[thisRef._id];
+                                delete context.handlerSequence[thisRef._id];
 
                                 if (mapper.type == 'scheduled') {
-                                    instance.eventAlterationSequence.forEach(function (evt) {
+                                    context.eventAlterationSequence.forEach(function (evt) {
                                         if (evt.type == 'add') {
                                             mapper.addEvent(
                                                 thisRef._id,
@@ -1325,13 +1210,13 @@ module.exports = function (OBJY) {
                                                 evt.property,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                instance.activeTenant
+                                                context.activeTenant
                                             );
                                         }
                                     });
                                 }
 
-                                instance.eventAlterationSequence = [];
+                                context.eventAlterationSequence = [];
 
                                 if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                                     OBJY.updateInheritedObjs(
@@ -1345,12 +1230,59 @@ module.exports = function (OBJY) {
                                 }
 
                                 OBJY.Logger.log('Updated Object: ' + data);
-                                OBJY.deSerializePropsObject(data, params);
-                                instance.alterSequence = [];
-                                if (success) success(OBJY.deserialize(data));
-                                else {
-                                    resolve(OBJY.deserialize(data));
+                                //OBJY.deSerializePropsObject(data, params);
+                                context.alterSequence = [];
+
+
+
+                                // SYNC HANDLER
+                                if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
+                                    var callbackCounter = 0;
+                                    var finalCallbackData = {}
+                                    Object.keys(data.onChange).forEach(function (key) {
+                                        try {
+                                            OBJY.execProcessorAction(
+                                                data.onChange[key].value || data.onChange[key].action,
+                                                thisRef,
+                                                data,
+                                                null,
+                                                function (cbData) {
+                                                    callbackCounter++;
+
+                                                    // check if action returns data, then save it to current state
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData
+
+                                                    if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                        if (success) {
+                                                            if (isObjyObject(finalCallbackData)) {
+                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                return success(finalCallbackData);
+                                                            } else {
+                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                success(data);
+                                                            }
+                                                        } 
+                                                        else {
+                                                            resolve(data);
+                                                        }
+                                                    }
+                                                },
+                                                client,
+                                                null
+                                            );
+                                        } catch(e){
+                                            console.log(e)
+                                        }
+
+                                    });
+                                } else {
+                                    OBJY.unapplyHiddenAffects(data, context, client, params);
+                                    if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }
                                 }
+
                             },
                             function (err) {
                                 if (error) error(err);
@@ -1361,14 +1293,14 @@ module.exports = function (OBJY) {
                             app,
                             client,
                             params,
-                            instance
+                            context
                         );
                     }
 
-                    if (instance.commandSequence.length > 0 && params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
+                    if (context.commandSequence.length > 0 && params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
                         var found = false;
                         var foundCounter = 0;
-                        instance.commandSequence.forEach(function (i) {
+                        context.commandSequence.forEach(function (i) {
                             if (i.name == 'addInherit' || i.name == 'removeInherit') {
                                 foundCounter++;
                                 found = true;
@@ -1378,7 +1310,7 @@ module.exports = function (OBJY) {
                         if (foundCounter == 0) updateFn(thisRef);
 
                         var execCounter = 0;
-                        instance.commandSequence.forEach(function (i) {
+                        context.commandSequence.forEach(function (i) {
                             if (i.name == 'addInherit' && thisRef.inherits.indexOf(i.value) != -1) {
                                 execCounter++;
 
@@ -1401,7 +1333,7 @@ module.exports = function (OBJY) {
                                     params.templateFamily,
                                     params.templateSource,
                                     params,
-                                    instance
+                                    context
                                 );
                             }
 
@@ -1424,76 +1356,36 @@ module.exports = function (OBJY) {
                                     },
                                     client,
                                     params,
-                                    instance
+                                    context
                                 );
                             }
                         });
                     } else updateFn(thisRef);
 
-                    instance.commandSequence = [];
+                    context.commandSequence = [];
 
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
             Object.getPrototypeOf(this).remove = function (success, error, client) {
                 return new Promise((resolve, reject) => {
-                    var client = client || instance.activeTenant;
-                    var app = instance.activeApp;
-                    var user = instance.activeUser;
+                    var client = client || context.activeTenant;
+                    var app = context.activeApp;
+                    var user = context.activeUser;
 
                     var thisRef = JSON.parse(JSON.stringify(this));
 
-                    OBJY.applyAffects(thisRef, 'onDelete', instance, client);
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                    if (params.dirty) {
-                        OBJY.getObjectById(
-                            this.role,
-                            this._id,
-                            function (data) {
-                                if (!OBJY.checkAuthroisations(data, user, 'd', app, instance)) return error({ error: 'Lack of Permissions' });
 
-                                return OBJY.remove(
-                                    thisRef,
-                                    function (_data) {
-                                        OBJY.deSerializePropsObject(data, params);
 
-                                        if (success) success(OBJY.deserialize(data));
-                                        else {
-                                            resolve(OBJY.deserialize(data));
-                                        }
-                                    },
-                                    function (err) {
-                                        if (error) error(err);
-                                        else {
-                                            reject(err);
-                                        }
-                                    },
-                                    app,
-                                    client
-                                );
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            instance,
-                            params
-                        );
+                    if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
-                        return OBJY.deserialize(this);
-                    }
-
-                    if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, instance)) return error({ error: 'Lack of Permissions' });
-
-                    if (thisRef.onDelete) {
+                    /*if (thisRef.onDelete) {
                         Object.keys(thisRef.onDelete).forEach(function (key) {
                             if (thisRef.onDelete[key].trigger == 'before') {
-                                instance.execProcessorAction(
+                                OBJY.execProcessorAction(
                                     thisRef.onDelete[key].value || thisRef.onDelete[key].action,
                                     thisRef,
                                     null,
@@ -1504,7 +1396,7 @@ module.exports = function (OBJY) {
                                 );
                             }
                         });
-                    }
+                    }*/
 
                     OBJY.getObjectById(
                         this.role,
@@ -1513,12 +1405,12 @@ module.exports = function (OBJY) {
                             return OBJY.remove(
                                 thisRef,
                                 function (_data) {
-                                    OBJY.applyAffects(data, 'onDelete', instance, client);
+                                    //OBJY.applyAffects(data, null, 'onDelete', context, client, params);
 
-                                    if (thisRef.onDelete) {
+                                    /*if (thisRef.onDelete) {
                                         Object.keys(thisRef.onDelete).forEach(function (key) {
                                             if (thisRef.onDelete[key].trigger == 'after') {
-                                                instance.execProcessorAction(
+                                                OBJY.execProcessorAction(
                                                     thisRef.onDelete[key].value || thisRef.onDelete[key].action,
                                                     thisRef,
                                                     null,
@@ -1529,7 +1421,7 @@ module.exports = function (OBJY) {
                                                 );
                                             }
                                         });
-                                    }
+                                    }*/
 
                                     function aggregateAllEvents(props, prePropsString) {
                                         Object.keys(props || {}).forEach(function (p) {
@@ -1556,7 +1448,7 @@ module.exports = function (OBJY) {
                                                 }
 
                                                 if (prePropsString) {
-                                                    instance.eventAlterationSequence.push({
+                                                    context.eventAlterationSequence.push({
                                                         operation: 'remove',
                                                         obj: thisRef,
                                                         propName: prePropsString + '.' + p,
@@ -1565,7 +1457,7 @@ module.exports = function (OBJY) {
 
                                                     var found = false;
                                                 } else {
-                                                    instance.eventAlterationSequence.push({
+                                                    context.eventAlterationSequence.push({
                                                         operation: 'remove',
                                                         obj: thisRef,
                                                         propName: p,
@@ -1576,12 +1468,12 @@ module.exports = function (OBJY) {
                                         });
                                     }
 
-                                    var mapper = instance.observers[thisRef.role];
+                                    var mapper = OBJY.observers[thisRef.role];
 
                                     aggregateAllEvents(data || {});
 
                                     if (mapper.type == 'scheduled') {
-                                        instance.eventAlterationSequence.forEach(function (evt) {
+                                        context.eventAlterationSequence.forEach(function (evt) {
                                             if (evt.operation == 'add') {
                                                 mapper.addEvent(
                                                     data._id,
@@ -1589,7 +1481,7 @@ module.exports = function (OBJY) {
                                                     evt.property,
                                                     function (evtData) {},
                                                     function (evtErr) {},
-                                                    instance.activeTenant
+                                                    context.activeTenant
                                                 );
                                             } else if (evt.operation == 'remove') {
                                                 mapper.removeEvent(
@@ -1599,7 +1491,7 @@ module.exports = function (OBJY) {
                                                     function (evtErr) {
                                                         console.log(evtErr);
                                                     },
-                                                    instance.activeTenant
+                                                    context.activeTenant
                                                 );
                                             }
                                         });
@@ -1618,11 +1510,61 @@ module.exports = function (OBJY) {
 
                                     OBJY.Logger.log('Removed Object: ' + data);
 
-                                    OBJY.deSerializePropsObject(data, params);
-                                    if (success) success(OBJY.deserialize(data));
-                                    else {
-                                        resolve(OBJY.deserialize(data));
+                                    //OBJY.deSerializePropsObject(data, params);
+
+                                    // SYNC HANDLER
+                                    if (data.onDelete && Object.keys(data.onDelete || {}).length > 0) {
+                                        var callbackCounter = 0;
+                                        var finalCallbackData = {}
+                                        Object.keys(data.onDelete).forEach(function (key) {
+                                            try {
+                                                OBJY.execProcessorAction(
+                                                    data.onDelete[key].value || data.onDelete[key].action,
+                                                    data,
+                                                    null,
+                                                    null,
+                                                    function (cbData) {
+                                                        callbackCounter++;
+
+                                                         // check if action returns data, then save it to current state
+                                                        if (isObjyObject(cbData)) finalCallbackData = cbData
+
+                                                        if (callbackCounter == Object.keys(data.onDelete || {}).length) {
+                                                            if (success) {
+                                                                if (isObjyObject(finalCallbackData)) {
+                                                                    OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
+                                                                    return success(finalCallbackData);
+                                                                } else {
+                                                                    OBJY.unapplyHiddenAffects(data, context, client, params);
+                                                                    success(data);
+                                                                }
+                                                            } 
+                                                            else {
+                                                                resolve(data);
+                                                            }
+                                                        }
+                                                    },
+                                                    client,
+                                                    null
+                                                );
+                                            } catch(e){
+                                                console.log(e)
+                                            }
+
+                                        });
+                                    } else {
+                                        OBJY.unapplyHiddenAffects(data, context, client, params);
+                                        if (success) success(data);
+                                        else {
+                                            resolve(data);
+                                        }
                                     }
+
+
+                                    /*if (success) success(data);
+                                    else {
+                                        resolve(data);
+                                    }*/
                                 },
                                 function (err) {
                                     if (error) error(err);
@@ -1632,7 +1574,7 @@ module.exports = function (OBJY) {
                                 },
                                 app,
                                 client,
-                                instance
+                                context
                             );
                         },
                         function (err) {
@@ -1643,49 +1585,24 @@ module.exports = function (OBJY) {
                         },
                         app,
                         client,
-                        instance,
+                        context,
                         params
                     );
 
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
             Object.getPrototypeOf(this).get = function (success, error, dontInherit) {
                 return new Promise((resolve, reject) => {
-                    var client = instance.activeTenant;
-                    var app = instance.activeApp;
-                    var user = instance.activeUser;
+                    var client = context.activeTenant;
+                    var app = context.activeApp;
+                    var user = context.activeUser;
 
                     var thisRef = this;
 
-                    if (params.dirty) {
-                        OBJY.getObjectById(
-                            thisRef.role,
-                            thisRef._id,
-                            function (data) {
-                                OBJY.deSerializePropsObject(data, params);
-                                if (!OBJY.checkAuthroisations(data, user, 'r', app, instance)) return error({ error: 'Lack of Permissions' });
+                    OBJY.applyAffects(thisRef, context, client, params);
 
-                                if (success) success(OBJY[data.role](OBJY.deserialize(data)));
-                                else {
-                                    resolve(OBJY[data.role](OBJY.deserialize(data)));
-                                }
-                            },
-                            function (err) {
-                                if (error) error(err);
-                                else {
-                                    reject(err);
-                                }
-                            },
-                            app,
-                            client,
-                            instance,
-                            params
-                        );
-
-                        return OBJY.deserialize(this);
-                    }
 
                     var counter = 0;
 
@@ -1712,17 +1629,18 @@ module.exports = function (OBJY) {
                 }*/
 
                     function prepareObj(data) {
-                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                        var returnObject = OBJY[data.role](data);
 
-                        OBJY.applyAffects(data, null, instance, client);
+                        //OBJY.applyAffects(data, null, context, client);
 
-                        if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, instance))
+                        if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, context))
                             return error({ error: 'Lack of Permissions', source: 'authorisations' });
 
-                        if (!OBJY.checkPermissions(user, app, data, 'r', false, instance))
+                        if (!OBJY.checkPermissions(user, app, data, 'r', false, context))
                             return error({ error: 'Lack of Permissions', source: 'permissions' });
 
                         if (dontInherit) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -1731,6 +1649,7 @@ module.exports = function (OBJY) {
                         }
 
                         if (params.templateMode == CONSTANTS.TEMPLATEMODES.STRICT) {
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
                             if (success) success(returnObject);
                             else {
                                 resolve(returnObject);
@@ -1739,9 +1658,10 @@ module.exports = function (OBJY) {
                         }
 
                         if ((data.inherits || []).length == 0) {
-                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
+                            if (success) success(returnObject);
                             else {
-                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                resolve(returnObject);
                             }
                             return data;
                         }
@@ -1752,14 +1672,15 @@ module.exports = function (OBJY) {
                                     data,
                                     template,
                                     function () {
-                                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                                        var returnObject = OBJY[data.role](data);
 
                                         counter++;
 
                                         if (counter == data.inherits.length) {
-                                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
+                                            if (success) success(returnObject);
                                             else {
-                                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                                resolve(returnObject);
                                             }
                                             return data;
                                         }
@@ -1767,12 +1688,13 @@ module.exports = function (OBJY) {
                                     function (err) {
                                         counter++;
 
-                                        var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                                        var returnObject = OBJY[data.role](data);
 
                                         if (counter == data.inherits.length) {
-                                            if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                            OBJY.unapplyHiddenAffects(returnObject, context, client, params);
+                                            if (success) success(returnObject);
                                             else {
-                                                resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                                resolve(returnObject);
                                             }
                                             return data;
                                         }
@@ -1781,15 +1703,16 @@ module.exports = function (OBJY) {
                                     params.templateFamily,
                                     params.templateSource,
                                     params,
-                                    instance
+                                    context
                                 );
                             } else {
-                                var returnObject = OBJY[data.role](OBJY.deserialize(data));
+                                var returnObject = OBJY[data.role](data);
 
                                 if (thisRef.inherits.length == 1) {
-                                    if (success) success(OBJY.deSerializePropsObject(returnObject, params));
+                                    OBJY.unapplyHiddenAffects(returnObject, context, client, params);
+                                    if (success) success(returnObject);
                                     else {
-                                        resolve(OBJY.deSerializePropsObject(returnObject, params));
+                                        resolve(returnObject);
                                     }
                                     return data;
                                 } else {
@@ -1800,8 +1723,8 @@ module.exports = function (OBJY) {
                         });
                     }
 
-                    if (instance.caches[thisRef.role].data[thisRef._id]) {
-                        prepareObj(instance.caches[thisRef.role].data[thisRef._id]);
+                    if (((context.caches || {})[thisRef.role]?.data || {})[thisRef._id]) {
+                        prepareObj(context.caches[thisRef.role].data[thisRef._id]);
                     } else {
                         OBJY.getObjectById(
                             thisRef.role,
@@ -1809,8 +1732,8 @@ module.exports = function (OBJY) {
                             function (data) {
                                 prepareObj(data);
 
-                                if (!instance.caches[thisRef.role].data[thisRef._id]) {
-                                    //instance.caches[thisRef.role].add(thisRef._id, data);
+                                if (!((context.caches || {})[thisRef.role]?.data || {})[thisRef._id]) {
+                                    //context.caches[thisRef.role].add(thisRef._id, data);
                                 }
                             },
                             function (err) {
@@ -1821,16 +1744,16 @@ module.exports = function (OBJY) {
                             },
                             app,
                             client,
-                            instance,
+                            context,
                             params
                         );
                     }
 
-                    return OBJY.deserialize(this);
+                    return this;
                 });
             };
 
-            const validator = {
+            /*const validator = {
                 get: (obj, prop) => {
                     if (typeof obj[prop] === 'object' && obj[prop] !== null) {
                         return new Proxy(obj[prop], validator);
@@ -1863,17 +1786,17 @@ module.exports = function (OBJY) {
                         function (err) {
                             console.log('err', err);
                         },
-                        instance.activeTenant,
+                        context.activeTenant,
                         params.templateFamily,
                         params.templateSource,
                         params,
-                        instance
+                        context
                     );
                 });
 
                 return new Proxy(this, validator);
-            }
-            return OBJY.deserialize(this);
+            }*/
+            return this;
         },
     };
 };

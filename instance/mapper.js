@@ -1,10 +1,12 @@
-var exceptions = require('../lib/dependencies/exceptions.js');
+//var exceptions = require('../lib/dependencies/exceptions.js');
+
+import exceptions from '../lib/dependencies/exceptions.js';
 
 var isObject = function(a) {
     return (!!a) && (a.constructor === Object);
 };
 
-module.exports = function(OBJY) {
+export default function(OBJY) {
     return {
 
         customStorage: function(data, options) {
@@ -21,7 +23,7 @@ module.exports = function(OBJY) {
 
         /**
          * Returns the persistence mapper attached to the specified object family
-         * @returns {mapper} the mapper instance
+         * @returns {mapper} the mapper context
          */
         getPersistenceMapper: function(family) {
 
@@ -31,7 +33,7 @@ module.exports = function(OBJY) {
 
         /**
          * Returns the persistence mapper attached to the specified object family
-         * @returns {mapper} the mapper instance
+         * @returns {mapper} the mapper context
          */
         getPersistence: function(family) {
             if (!this.mappers[family]) throw new exceptions.General("No such Object Family: " + family);
@@ -66,7 +68,7 @@ module.exports = function(OBJY) {
 
         /**
          * Returns the processor mapper attached to the specified object family
-         * @returns {mapper} the mapper instance
+         * @returns {mapper} the mapper context
          */
         getProcessor: function(family) {
             if (!this.processors[family]) throw new exceptions.General("No such Object Family");
@@ -107,13 +109,13 @@ module.exports = function(OBJY) {
         },
 
 
-        remove: function(obj, success, error, app, client, params, instance) {
+        remove: function(obj, success, error, app, client, params, context) {
 
-            this.removeObject(obj, success, error, app, client, params, instance);
+            this.removeObject(obj, success, error, app, client, params, context);
 
         },
 
-        removeObject: function(obj, success, error, app, client, params, instance) {
+        removeObject: function(obj, success, error, app, client, params, context) {
 
             var self = this;
 
@@ -123,10 +125,10 @@ module.exports = function(OBJY) {
 
             }, function(err) {
                 error(err);
-            }, app, client, params, instance);
+            }, app, client, params, context);
         },
 
-        add: function(obj, success, error, app, client, params, instance) {
+        add: function(obj, success, error, app, client, params, context) {
 
             if (obj) {
 
@@ -146,11 +148,11 @@ module.exports = function(OBJY) {
 
             }
 
-            this.addObject(obj, success, error, app, client, params, instance);
+            this.addObject(obj, success, error, app, client, params, context);
 
         },
 
-        addObject: function(obj, success, error, app, client, params, instance) {
+        addObject: function(obj, success, error, app, client, params, context) {
 
             // OBJY.deSerializePropsObject(obj, params)
 
@@ -169,7 +171,7 @@ module.exports = function(OBJY) {
 
                     }, function(err) {
                         error(err);
-                    }, app, client, sequence[idx - 1], instance);
+                    }, app, client, sequence[idx - 1], context);
                 }
 
                 commit(idx);
@@ -183,12 +185,12 @@ module.exports = function(OBJY) {
 
                 }, function(err) {
                     error(err);
-                }, app, client, params, instance);
+                }, app, client, params, context);
             }
 
         },
 
-        updateO: function(obj, success, error, app, client, params, instance) {
+        updateO: function(obj, success, error, app, client, params, context) {
 
             var thisRef = this;
 
@@ -210,12 +212,12 @@ module.exports = function(OBJY) {
                         },
                         function(err) {
 
-                            thisRef.updateObject(obj, success, error, app, client, params, instance);
+                            thisRef.updateObject(obj, success, error, app, client, params, context);
                             return obj;
-                        }, client, params, instance)
+                        }, client, params, context)
                 } else {
                     if (obj.inherits.length == 1) {
-                        thisRef.updateObject(obj, success, error, app, client, params, instance);
+                        thisRef.updateObject(obj, success, error, app, client, params, context);
                         return obj;
                     } else {
                         counter++;
@@ -229,16 +231,16 @@ module.exports = function(OBJY) {
             // ADD TENANT AND APPLICATION!!!
         },
 
-        updateObject: function(obj, success, error, app, client, params, instance) {
+        updateObject: function(obj, success, error, app, client, params, context) {
 
             this.mappers[obj.role].update(obj, function(data) {
                 success(data);
             }, function(err) {
                 error(err);
-            }, app, client, params, instance);
+            }, app, client, params, context);
         },
 
-        getObjectById: function(role, id, success, error, app, client, instance, params) {
+        getObjectById: function(role, id, success, error, app, client, context, params) {
 
             this.mappers[role].getById(id, function(data) {
 
@@ -259,10 +261,10 @@ module.exports = function(OBJY) {
 
             }, function(err) {
                 error('Error - Could get object: ' + err);
-            }, app, client, params, instance);
+            }, app, client, params, context);
         },
 
-        findObjects: function(criteria, role, success, error, app, client, flags, params, instance) {
+        findObjects: function(criteria, role, success, error, app, client, flags, params, context) {
 
             var templatesCache = [];
             var objectsCache = [];
@@ -291,10 +293,10 @@ module.exports = function(OBJY) {
 
             }, function(err) {
                 error('Error - Could get object: ' + err);
-            }, app, client, flags, params, instance);
+            }, app, client, flags, params, context);
         },
 
-        countObjects: function(criteria, role, success, error, app, client, flags, params, instance) {
+        countObjects: function(criteria, role, success, error, app, client, flags, params, context) {
 
             var templatesCache = [];
             var objectsCache = [];
@@ -308,11 +310,11 @@ module.exports = function(OBJY) {
 
             }, function(err) {
                 error('Error - Could get object: ' + err);
-            }, app, client, flags, params, instance);
+            }, app, client, flags, params, context);
         },
 
-        findAllObjects: function(role, criteria, success, error, client, flags, params, instance) {
-            this.findObjects(role, criteria, success, error, client, flags, params, instance);
+        findAllObjects: function(role, criteria, success, error, client, flags, params, context) {
+            this.findObjects(role, criteria, success, error, client, flags, params, context);
         },
     }
 }

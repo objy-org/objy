@@ -1,5 +1,7 @@
-import shortid$1 from 'shortid';
-import moment from 'moment';
+'use strict';
+
+var shortid$1 = require('shortid');
+var moment = require('moment');
 
 function StorageMapperTemplate(OBJY, options) {
     this.CONSTANTS = {
@@ -6515,5 +6517,5 @@ else if(typeof window !== 'undefined') {
 
 //if(0)typeof await/2//2; export default OBJY
 
-export { OBJY as default };
-//# sourceMappingURL=index.js.map
+module.exports = OBJY;
+//# sourceMappingURL=index.cjs.map

@@ -1,9 +1,6 @@
 // SCHEDULED MAPPER
 
-var moment = require('moment');
-if (typeof moment == 'object') {
-    moment = moment.default;
-}
+import moment from 'moment';
 
 var CONSTANTS = {
     MULTITENANCY: {
@@ -16,7 +13,7 @@ var CONSTANTS = {
     },
 };
 
-const Mapper = function (OBJY, options) {
+export default function (OBJY, options) {
     this.type = (options || {}).type || CONSTANTS.TYPES.SCHEDULED;
     this.database = {};
     this.objectFamily = null;
@@ -135,4 +132,3 @@ const Mapper = function (OBJY, options) {
     };
 };
 
-module.exports = Mapper;

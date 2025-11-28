@@ -1,6 +1,6 @@
-const Mapper = function (OBJY, mapperOptions) {
+export default function (OBJY, mapperOptions) {
     return Object.assign(new OBJY.ProcessorTemplate(OBJY), {
-        execute: function (dsl, obj, prop, data, callback, client, app, user, options) {
+        execute: function (dsl, beforeObj, afterObj, prop, done, client, app, user, options) {
             OBJY.Logger.log('Executing dsl in mapper');
 
             if (this.multitenancy == this.CONSTANTS.MULTITENANCY.ISOLATED) {
@@ -8,28 +8,30 @@ const Mapper = function (OBJY, mapperOptions) {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options);
+                        
+                        if (typeof dsl === 'function') {
+                            console.log(dsl.toString())
+                            dsl(done, obj);
+                        } 
                         else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e);
                 }
-                if (callback) callback();
+                //if (done) done();
             } else {
                 try {
                     if ((mapperOptions || {}).hasOwnProperty('parse')) {
                         mapperOptions.parse(dsl);
                     } else {
-                        if (typeof dsl === 'function') dsl(obj, prop, data, callback, client, app, user, options);
+                        if (typeof dsl === 'function') dsl(done, obj);
                         else eval(dsl);
                     }
                 } catch (e) {
                     OBJY.Logger.error(e);
                 }
-                if (callback) callback();
+                //if (done) done();
             }
         },
     });
 };
-
-module.exports = Mapper;

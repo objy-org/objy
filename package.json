@@ -1,6 +1,7 @@
 {
     "name": "objy",
-    "version": "0.7.228",
+    "type": "module",
+    "version": "0.7.229",
     "description": "A JavaScript framework for building object-driven applications",
     "main": "objy.js",
     "scripts": {
@@ -29,6 +30,13 @@
     "devDependencies": {
         "jest": "^25.1.0",
         "jsdoc-to-markdown": "^5.0.3",
+        "rollup": "^4.46.2",
         "tinyify": "^2.5.2"
+    },
+    "exports": {
+        ".": {
+            "require": "./dist/index.cjs",
+            "import": "./dist/index.js"
+        }
     }
 }

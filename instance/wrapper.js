@@ -1,8 +1,12 @@
-var DefaultStorageMapper = require('../mappers/storage.inmemory.js')
+/*var DefaultStorageMapper = require('../mappers/storage.inmemory.js')
 var DefaultProcessorMapper = require('../mappers/processor.eval.js')
-var DefaultObserverMapper = require('../mappers/observer.interval.js')
+var DefaultObserverMapper = require('../mappers/observer.interval.js')*/
 
-module.exports = function(OBJY) {
+import DefaultStorageMapper from '../mappers/storage.inmemory.js'
+import DefaultProcessorMapper from '../mappers/processor.eval.js'
+import DefaultObserverMapper from '../mappers/observer.interval.js'
+
+export default function(OBJY) {
     return {
 
 
@@ -23,13 +27,17 @@ module.exports = function(OBJY) {
 
             this[params.name] = function(obj) {
                 //return OBJY.SingleProxy(obj, params.name, this, params);
-                return new OBJY.Obj(obj, params.name, this, params);
+                
+                let ctx = Object.assign({}, OBJY.globalCtx);
+
+                return new OBJY.Obj(obj, params.name, ctx, params);
             }
 
             if (this.objectFamilies.indexOf(params.name) == -1) this.objectFamilies.push(params.name);
 
             this[params.pluralName] = function(objs, flags) {
-                return new OBJY.Objs(objs, params.name, this, params, flags);
+                let ctx = Object.assign({}, OBJY.globalCtx);
+                return new OBJY.Objs(objs, params.name, ctx, params, flags);
             }
 
             if (params.storage) this.plugInPersistenceMapper(params.name, params.storage);

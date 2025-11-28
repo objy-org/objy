@@ -1,7 +1,10 @@
-var shortid = require('shortid');
-var exceptions = require('../lib/dependencies/exceptions.js');
+/*var shortid = require('shortid');
+var exceptions = require('../lib/dependencies/exceptions.js');*/
 
-module.exports = function(OBJY) {
+import shortid from 'shortid';
+import exceptions from '../lib/dependencies/exceptions.js';
+
+export default function(OBJY) {
     return {
         /**
          * Serialises an object into the objy structure (comming soon)
@@ -26,6 +29,40 @@ module.exports = function(OBJY) {
             return obj;
         },
 
+        clone() {
+            let objyClone = {};
+            let ctx = Object.assign({}, OBJY.globalCtx);
+
+            this.objectFamilies.forEach((objFamily) => {
+                let params = { name: objFamily, pluralName: objFamily + 's' };
+
+                objyClone[params.name] = function (obj) {
+                    //return OBJY.SingleProxy(obj, params.name, this, params);
+
+                    return new OBJY.Obj(obj, params.name, ctx, params);
+                };
+
+                objyClone[params.pluralName] = function (objs, flags) {
+                    return new OBJY.Objs(objs, params.name, ctx, params, flags);
+                };
+            });
+
+            objyClone.client = (client) => {
+                if (!client) throw new exceptions.General('No client specified');
+                ctx.activeTenant = client;
+            };
+
+            objyClone.useUser = (user) => {
+                ctx.activeUser = user;
+            };
+
+            objyClone.app = (app) => {
+                ctx.activeApp = app;
+            };
+
+            return objyClone;
+        },
+
         /**
          * Sets client (workspace) context (deprecated)
          * @param {tenant} - the tenant identifier
@@ -42,7 +79,7 @@ module.exports = function(OBJY) {
          */
         client: function(client) {
             if (!client) throw new exceptions.General("No client specified");
-            this.activeTenant = client;
+            OBJY.globalCtx.activeTenant = client
             return this;
         },
 
@@ -52,7 +89,7 @@ module.exports = function(OBJY) {
          * @returns {this}
          */
         useUser: function(user) {
-            this.activeUser = user;
+            OBJY.globalCtx.activeUser = user
             return this;
         },
 
@@ -63,7 +100,7 @@ module.exports = function(OBJY) {
          */
         app: function(app) {
             //if (!app) throw new Error("No app specified");
-            this.activeApp = app;
+            OBJY.globalCtx.activeApp = app
 
             return this;
         },
@@ -73,43 +110,15 @@ module.exports = function(OBJY) {
             return obj;
         },
 
-        serializePropsObject: function(realObj, obj, propsObject, instance, params) {
-            /*
-            if (!obj.hasOwnProperty(propsObject)) return;
-            Object.keys(obj[propsObject]).forEach(p => {
-                if (!OBJY.predefinedProperties.includes(p) && realObj.hasOwnProperty('role')) {
-                    var prop = {};
-                    prop[p] = obj[propsObject][p]
-                    realObj[p] =  obj[propsObject][p]
-                    //new OBJY.PropertyCreateWrapper(realObj, prop, false, instance, params);
-                }
-            })
-            delete obj[propsObject];*/
-        },
-
-        deSerializePropsObject: function(obj, params) {
-            return obj;
-        },
-
-        deSerializePropsObjectMulti: function(objs, params) {
-            /*if (!params.propsObject) return objs;
-            
-            objs.forEach(obj => {
-                OBJY.deSerializePropsObject(obj, params)
-            })*/
-
-            return objs;
-        },
-
         /**
          * Chains command information, when performing multiple operations
          * @param {obj} - the object
-         * @param {instance} - the OBJY instance
+         * @param {context} - the OBJY context
          * @param {key} - the command name
          * @param {value} - the command value (parameter)
          */
-        chainCommand: function(obj, instance, key, value) {
-            instance.commandSequence.push({
+        chainCommand: function(obj, context, key, value) {
+            context.commandSequence.push({
                 name: key,
                 value: value
             });
@@ -124,10 +133,11 @@ module.exports = function(OBJY) {
             }
         },
 
-        execProcessorAction: function(dsl, obj, prop, data, callback, client, options) {
-            let processorApp = this.instance?.activeApp || (obj.applications || {})[0]
+        execProcessorAction: function(dsl, beforeObj, afterObj, prop, callback, client, options) {
+            let processorApp = this.context?.activeApp || ((beforeObj || {}).applications || {})[0] || ((afterObj || {}).applications || {})[0]
+            let role = (beforeObj || {}).role || (afterObj || {}).role
             OBJY.Logger.log('triggering dsl');
-            this.processors[obj.role].execute(dsl, obj, prop, data, callback, client, processorApp, this.instance?.activeUser, options);
+            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, processorApp, this.context?.activeUser, options);
         },
 
 
