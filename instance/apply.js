@@ -262,7 +262,7 @@ export default function (OBJY) {
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
-                                if (afterObj[h][oC]) {
+                                if ((afterObj[h] || {})[oC]) {
                                     if (afterObj[h][oC].hidden == true)
                                         delete afterObj[h][oC]
                                 }

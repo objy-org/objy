@@ -466,6 +466,8 @@ function generalFunctions(OBJY) {
                 ctx.activeApp = app;
             };
 
+            objyClone.globalCtx = ctx;
+
             return objyClone;
         },
 
@@ -537,10 +539,10 @@ function generalFunctions(OBJY) {
         },
 
         execProcessorAction: function(dsl, beforeObj, afterObj, prop, callback, client, options) {
-            let processorApp = this.context?.activeApp || ((beforeObj || {}).applications || {})[0] || ((afterObj || {}).applications || {})[0];
+            let processorApp = OBJY.globalCtx?.activeApp || ((beforeObj || {}).applications || {})[0] || ((afterObj || {}).applications || {})[0];
             let role = (beforeObj || {}).role || (afterObj || {}).role;
             OBJY.Logger.log('triggering dsl');
-            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, processorApp, this.context?.activeUser, options);
+            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, processorApp, OBJY.globalCtx?.activeUser, options);
         },
 
 
@@ -1180,7 +1182,7 @@ function applyFunctions (OBJY) {
                     ['onCreate', 'onChange', 'onDelete'].forEach(function(h) {
                         if (template[h]) {
                             Object.keys(template[h]).forEach(function(oC) {
-                                if (afterObj[h][oC]) {
+                                if ((afterObj[h] || {})[oC]) {
                                     if (afterObj[h][oC].hidden == true)
                                         delete afterObj[h][oC];
                                 }
