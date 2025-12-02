@@ -442,7 +442,7 @@ function generalFunctions(OBJY) {
             let ctx = Object.assign({}, OBJY.globalCtx);
 
             this.objectFamilies.forEach((objFamily) => {
-                let params = { name: objFamily, pluralName: objFamily + 's' };
+                let params = OBJY.globalCtx.familyParams[objFamily];
 
                 objyClone[params.name] = function (obj) {
                     //return OBJY.SingleProxy(obj, params.name, this, params);
@@ -3169,6 +3169,14 @@ function wrapperFunctions(OBJY) {
             if (!params.name || !params.pluralName) {
                 throw new Error("Invalid arguments");
             }
+
+            OBJY.globalCtx.familyParams[params.name] = {
+                name: params.name,
+                pluralName: params.pluralName,
+                extendedStructure: params.extendedStructure,
+                authable: params.authable,
+                authableTemplate: params.authableTemplate,
+            };
 
             this[params.name] = function(obj) {
                 //return OBJY.SingleProxy(obj, params.name, this, params);
@@ -6447,7 +6455,8 @@ let contextTemplate = {
     commandSequence: [],
     permissionSequence: {},
     eventAlterationSequence: [],
-    handlerSequence: {}
+    handlerSequence: {},
+    familyParams: {}
 };
 
 
