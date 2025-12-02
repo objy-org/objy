@@ -34,7 +34,7 @@ export default function(OBJY) {
             let ctx = Object.assign({}, OBJY.globalCtx);
 
             this.objectFamilies.forEach((objFamily) => {
-                let params = { name: objFamily, pluralName: objFamily + 's' };
+                let params = OBJY.globalCtx.familyParams[objFamily];
 
                 objyClone[params.name] = function (obj) {
                     //return OBJY.SingleProxy(obj, params.name, this, params);
