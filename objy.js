@@ -32,7 +32,8 @@ let contextTemplate = {
     commandSequence: [],
     permissionSequence: {},
     eventAlterationSequence: [],
-    handlerSequence: {}
+    handlerSequence: {},
+    familyParams: {}
 }
 
 

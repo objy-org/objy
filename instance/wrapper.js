@@ -25,6 +25,14 @@ export default function(OBJY) {
                 throw new Error("Invalid arguments");
             }
 
+            OBJY.globalCtx.familyParams[params.name] = {
+                name: params.name,
+                pluralName: params.pluralName,
+                extendedStructure: params.extendedStructure,
+                authable: params.authable,
+                authableTemplate: params.authableTemplate,
+            }
+
             this[params.name] = function(obj) {
                 //return OBJY.SingleProxy(obj, params.name, this, params);
                 
