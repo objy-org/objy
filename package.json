@@ -5,7 +5,6 @@
     "description": "A JavaScript framework for building object-driven applications",
     "main": "objy.js",
     "scripts": {
-        "test": "jest",
         "build": "rollup -c"
     },
     "repository": {
