@@ -36,5 +36,3 @@ jobs:
       - run: git config --global user.name "Marco Boelling"
 #      - run: npm version ${{steps.get_version.outputs.VERSION}}
       - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
