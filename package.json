@@ -6,7 +6,7 @@
     "main": "objy.js",
     "scripts": {
         "test": "jest",
-        "build": "ncc build objy.js -m -o dist && browserify -p tinyify objy.js -o dist/browser.js"
+        "build": "rollup -c"
     },
     "repository": {
         "type": "git",
