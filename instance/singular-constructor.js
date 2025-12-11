@@ -81,7 +81,9 @@ export default function(OBJY) {
 
             this.authorisations = obj.authorisations || undefined;
 
-            initObj = JSON.parse(JSON.stringify(this));
+            if(role != "file"){
+                initObj = JSON.parse(JSON.stringify(this));
+            } else initObj = this;
 
             if (params.authable) {
                 this.username = obj.username || null;
