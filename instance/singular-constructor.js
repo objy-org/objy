@@ -19,6 +19,7 @@ var isObjyObject = function (a) {
 export default function(OBJY) {
     return {
         Obj: function (obj, role, context, params) {
+            let initObj = null;
 
             //if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
 
@@ -79,6 +80,8 @@ export default function(OBJY) {
             this._aggregatedEvents = obj._aggregatedEvents;
 
             this.authorisations = obj.authorisations || undefined;
+
+            initObj = JSON.parse(JSON.stringify(this));
 
             if (params.authable) {
                 this.username = obj.username || null;
@@ -1187,7 +1190,7 @@ export default function(OBJY) {
                                             for (var handlerItem in handlerObj.handler) {
                                                 OBJY.execProcessorAction(
                                                     handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                                    thisRef,
+                                                    initObj,
                                                     data,
                                                     handlerObj.prop,
                                                     function (data) {},
@@ -1243,7 +1246,7 @@ export default function(OBJY) {
                                         try {
                                             OBJY.execProcessorAction(
                                                 data.onChange[key].value || data.onChange[key].action,
-                                                thisRef,
+                                                initObj,
                                                 data,
                                                 null,
                                                 function (cbData) {
