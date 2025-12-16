@@ -350,7 +350,7 @@ export default function(OBJY) {
                             if (isNaN(property[propertyKey].value))
                                 throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS.PROPERTY.TYPE_NUMBER);
                     }
-                    property[propertyKey].value = +property[propertyKey].value;
+                    property[propertyKey].value = Number(property[propertyKey].value);
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
