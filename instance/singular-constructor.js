@@ -1022,6 +1022,8 @@ export default function(OBJY) {
                                                     }
                                                 },
                                                 client,
+                                                app,
+                                                user,
                                                 null
                                             );
                                         } catch(e){
@@ -1197,6 +1199,8 @@ export default function(OBJY) {
                                                     handlerObj.prop,
                                                     function (data) {},
                                                     client,
+                                                    app,
+                                                    user,
                                                     null
                                                 );
                                             }
@@ -1273,6 +1277,8 @@ export default function(OBJY) {
                                                     }
                                                 },
                                                 client,
+                                                app,
+                                                user,
                                                 null
                                             );
                                         } catch(e){
@@ -1397,6 +1403,8 @@ export default function(OBJY) {
                                     null,
                                     function (data) {},
                                     client,
+                                    app,
+                                    user,
                                     null
                                 );
                             }
@@ -1422,6 +1430,8 @@ export default function(OBJY) {
                                                     null,
                                                     function (data) {},
                                                     client,
+                                                    app,
+                                                    user,
                                                     null
                                                 );
                                             }
@@ -1550,6 +1560,8 @@ export default function(OBJY) {
                                                         }
                                                     },
                                                     client,
+                                                    app,
+                                                    user,
                                                     null
                                                 );
                                             } catch(e){

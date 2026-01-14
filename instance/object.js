@@ -39,7 +39,7 @@ export default function(OBJY) {
 
             this.execProcessorAction(code, templ, null, null, function(data) {
 
-            }, client, {})*/
+            }, client, OBJY.activeApp, OBJY.activeUser, {})*/
         },
 
         removeInheritedObjs: function(templ, pluralName, success, error, client) {
@@ -53,7 +53,7 @@ export default function(OBJY) {
 
             this.execProcessorAction(code, templ, null, null, function(data) {
 
-            }, client, {})
+            }, client, OBJY.activeApp, OBJY.activeUser, {})
         },
 
 

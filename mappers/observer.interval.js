@@ -48,6 +48,8 @@ export default function (OBJY) {
                                                 );
                                             },
                                             tenant,
+                                            OBJY.activeApp,
+                                            OBJY.activeUser,
                                             {}
                                         );
                                     });

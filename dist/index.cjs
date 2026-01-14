@@ -540,11 +540,10 @@ function generalFunctions(OBJY) {
             if (property.hasOwnProperty('conditions')) ;
         },
 
-        execProcessorAction: function(dsl, beforeObj, afterObj, prop, callback, client, options) {
-            let processorApp = OBJY.globalCtx?.activeApp || ((beforeObj || {}).applications || {})[0] || ((afterObj || {}).applications || {})[0];
+        execProcessorAction: function(dsl, beforeObj, afterObj, prop, callback, client, app, user, options) {
             let role = (beforeObj || {}).role || (afterObj || {}).role;
             OBJY.Logger.log('triggering dsl');
-            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, processorApp, OBJY.globalCtx?.activeUser, options);
+            this.processors[role].execute(dsl, beforeObj, afterObj, prop, callback, client, app, user, options);
         },
 
 
@@ -1569,7 +1568,7 @@ function objectFunctions(OBJY) {
 
             this.execProcessorAction(code, templ, null, null, function(data) {
 
-            }, client, {})*/
+            }, client, OBJY.activeApp, OBJY.activeUser, {})*/
         },
 
         removeInheritedObjs: function(templ, pluralName, success, error, client) {
@@ -1583,7 +1582,7 @@ function objectFunctions(OBJY) {
 
             this.execProcessorAction(code, templ, null, null, function(data) {
 
-            }, client, {});
+            }, client, OBJY.activeApp, OBJY.activeUser, {});
         },
 
 
@@ -3128,6 +3127,8 @@ function DefaultObserverMapper (OBJY) {
                                                 );
                                             },
                                             tenant,
+                                            OBJY.activeApp,
+                                            OBJY.activeUser,
                                             {}
                                         );
                                     });
@@ -3535,7 +3536,7 @@ function propertyFunctions(OBJY) {
             if (propertyToReturn.type == 'action') {
                 propertyToReturn.call = function (callback, client) {
                     OBJY.checkAuthroisations(obj, user, 'x', app);
-                    OBJY.execProcessorAction(propertyToReturn.value || propertyToReturn.action, obj, propertyToReturn, {}, callback, client, {});
+                    OBJY.execProcessorAction(propertyToReturn.value || propertyToReturn.action, obj, propertyToReturn, {}, callback, client, app, user, {});
                 };
             }
 
@@ -3623,7 +3624,7 @@ function propertyFunctions(OBJY) {
                             if (isNaN(property[propertyKey].value))
                                 throw new exceptions.InvalidValueException(property[propertyKey].value, CONSTANTS$1.PROPERTY.TYPE_NUMBER);
                     }
-                    property[propertyKey].value = +property[propertyKey].value;
+                    property[propertyKey].value = Number(property[propertyKey].value);
                     propsObj[propertyKey] = property[propertyKey];
                     OBJY.ValuePropertyMetaSubstituter(propsObj[propertyKey]);
                     break;
@@ -4670,6 +4671,7 @@ var isObjyObject = function (a) {
 function singularConstructorFunctions(OBJY) {
     return {
         Obj: function (obj, role, context, params) {
+            let initObj = null;
 
             //if (context.metaPropPrefix != '' && typeof obj !== 'string') obj = OBJY.serialize(obj);
 
@@ -4730,6 +4732,10 @@ function singularConstructorFunctions(OBJY) {
             this._aggregatedEvents = obj._aggregatedEvents;
 
             this.authorisations = obj.authorisations || undefined;
+
+            if(role != "file"){
+                initObj = JSON.parse(JSON.stringify(this));
+            } else initObj = this;
 
             if (params.authable) {
                 this.username = obj.username || null;
@@ -5657,6 +5663,8 @@ function singularConstructorFunctions(OBJY) {
                                                     }
                                                 },
                                                 client,
+                                                app,
+                                                user,
                                                 null
                                             );
                                         } catch(e){
@@ -5827,11 +5835,13 @@ function singularConstructorFunctions(OBJY) {
                                             for (var handlerItem in handlerObj.handler) {
                                                 OBJY.execProcessorAction(
                                                     handlerObj.handler[handlerItem].value || handlerObj.handler[handlerItem].action,
-                                                    thisRef,
+                                                    initObj,
                                                     data,
                                                     handlerObj.prop,
                                                     function (data) {},
                                                     client,
+                                                    app,
+                                                    user,
                                                     null
                                                 );
                                             }
@@ -5883,7 +5893,7 @@ function singularConstructorFunctions(OBJY) {
                                         try {
                                             OBJY.execProcessorAction(
                                                 data.onChange[key].value || data.onChange[key].action,
-                                                thisRef,
+                                                initObj,
                                                 data,
                                                 null,
                                                 function (cbData) {
@@ -5908,6 +5918,8 @@ function singularConstructorFunctions(OBJY) {
                                                     }
                                                 },
                                                 client,
+                                                app,
+                                                user,
                                                 null
                                             );
                                         } catch(e){
@@ -6030,6 +6042,8 @@ function singularConstructorFunctions(OBJY) {
                                     null,
                                     function (data) {},
                                     client,
+                                    app,
+                                    user,
                                     null
                                 );
                             }
@@ -6055,6 +6069,8 @@ function singularConstructorFunctions(OBJY) {
                                                     null,
                                                     function (data) {},
                                                     client,
+                                                    app,
+                                                    user,
                                                     null
                                                 );
                                             }
@@ -6181,6 +6197,8 @@ function singularConstructorFunctions(OBJY) {
                                                         }
                                                     },
                                                     client,
+                                                    app,
+                                                    user,
                                                     null
                                                 );
                                             } catch(e){
