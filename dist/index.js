@@ -466,6 +466,10 @@ function generalFunctions(OBJY) {
                 ctx.activeApp = app;
             };
 
+            objyClone.staticRules = OBJY.staticRules;
+
+            objyClone.affectables = OBJY.affectables;
+
             objyClone.globalCtx = ctx;
 
             return objyClone;
