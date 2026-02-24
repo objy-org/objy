@@ -11,12 +11,11 @@ var isObject = function (a) {
 };
 
 var isObjyObject = function (a) {
-    if(!isObject(a)) return false;
+    if (!isObject(a)) return false;
     if (a._id && a.role) return true;
 };
 
-
-export default function(OBJY) {
+export default function (OBJY) {
     return {
         Obj: function (obj, role, context, params) {
             let initObj = null;
@@ -81,7 +80,7 @@ export default function(OBJY) {
 
             this.authorisations = obj.authorisations || undefined;
 
-            if(role != "file"){
+            if (role != 'file') {
                 initObj = JSON.parse(JSON.stringify(this));
             } else initObj = this;
 
@@ -189,7 +188,7 @@ export default function(OBJY) {
                     function (err) {
                         if (error) error(err);
                     },
-                    context
+                    context,
                 );
 
                 context.alterSequence.push({ removeInherit: arguments });
@@ -854,8 +853,6 @@ export default function(OBJY) {
 
                     if (!this._id) this._id = OBJY.ID();
 
-                    
-
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
 
@@ -866,14 +863,12 @@ export default function(OBJY) {
                             if (!isObject(props[p])) return;
 
                             //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                if (prePropsString) {
-                                    aggregateAllEvents(props[p], prePropsString + '.' + p);
-                                } else {
-                                    aggregateAllEvents(props[p], p)
-
-                                }
+                            if (prePropsString) {
+                                aggregateAllEvents(props[p], prePropsString + '.' + p);
+                            } else {
+                                aggregateAllEvents(props[p], p);
+                            }
                             //}
-
 
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
                                 var date = null;
@@ -907,7 +902,6 @@ export default function(OBJY) {
                                             date: date,
                                         });
                                 } else {
-
                                     context.eventAlterationSequence.push({
                                         operation: 'add',
                                         obj: thisRef,
@@ -921,9 +915,7 @@ export default function(OBJY) {
                                         if (aE.propName == p) found = true;
                                     });
 
-                                    
-                                    if (!found && props[p].triggered != true){
-
+                                    if (!found && props[p].triggered != true) {
                                         thisRef._aggregatedEvents.push({
                                             propName: p,
                                             date: date,
@@ -938,8 +930,7 @@ export default function(OBJY) {
 
                     //if (this) aggregateAllEvents(this.properties);
 
-                    aggregateAllEvents(thisRef);     
-
+                    aggregateAllEvents(thisRef);
 
                     if (app) {
                         if (!this.applications) this.applications = [];
@@ -947,6 +938,12 @@ export default function(OBJY) {
                     }
 
                     var addFn = function (obj) {
+                        let actions = {
+                            onCreate: Object.assign({}, obj.onCreate),
+                            onChange: Object.assign({}, obj.onChange),
+                            onDelete: Object.assign({}, obj.onDelete),
+                        };
+
                         if (!OBJY.checkPermissions(user, app, obj, 'c', false, context)) return error({ error: 'Lack of Permissions' });
 
                         var constraints = OBJY.checkConstraints(obj);
@@ -956,11 +953,12 @@ export default function(OBJY) {
                             });
                         }
 
+                        OBJY.unapplyHiddenAffects(obj, context, client, params);
+
                         OBJY.add(
                             obj,
                             function (data) {
                                 obj._id = data._id;
-                                
 
                                 if (mapper.type == 'scheduled') {
                                     context.eventAlterationSequence.forEach(function (evt) {
@@ -971,7 +969,7 @@ export default function(OBJY) {
                                                 evt.property,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                context.activeTenant
+                                                context.activeTenant,
                                             );
                                         } else if (evt.operation == 'remove') {
                                             mapper.addEvent(
@@ -979,7 +977,7 @@ export default function(OBJY) {
                                                 evt.propName,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                context.activeTenant
+                                                context.activeTenant,
                                             );
                                         }
                                     });
@@ -990,13 +988,13 @@ export default function(OBJY) {
                                 OBJY.Logger.log('Added Object: ' + JSON.stringify(data, null, 2));
 
                                 // SYNC HANDLER
-                                if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
+                                if (actions.onCreate && Object.keys(actions.onCreate || {}).length > 0) {
                                     var callbackCounter = 0;
-                                    var finalCallbackData = {}
-                                    Object.keys(data.onCreate).forEach(function (key) {
+                                    var finalCallbackData = {};
+                                    Object.keys(actions.onCreate).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
-                                                data.onCreate[key].value || data.onCreate[key].action,
+                                                actions.onCreate[key].value || actions.onCreate[key].action,
                                                 null,
                                                 data,
                                                 null,
@@ -1004,19 +1002,16 @@ export default function(OBJY) {
                                                     callbackCounter++;
 
                                                     // check if action returns data, then save it to current state
-                                                    if (isObjyObject(cbData)) finalCallbackData = cbData
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData;
 
-                                                    if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                    if (callbackCounter == Object.keys(actions.onCreate || {}).length) {
                                                         if (success) {
                                                             if (isObjyObject(finalCallbackData)) {
-                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
                                                                 return success(finalCallbackData);
                                                             } else {
-                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
                                                                 success(data);
                                                             }
-                                                        } 
-                                                        else {
+                                                        } else {
                                                             resolve(data);
                                                         }
                                                     }
@@ -1024,21 +1019,18 @@ export default function(OBJY) {
                                                 client,
                                                 app,
                                                 user,
-                                                null
+                                                null,
                                             );
-                                        } catch(e){
-                                            console.log(e)
+                                        } catch (e) {
+                                            console.log(e);
                                         }
-
                                     });
                                 } else {
-                                    OBJY.unapplyHiddenAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);
                                     }
                                 }
-
 
                                 delete thisRef.context;
                             },
@@ -1051,7 +1043,7 @@ export default function(OBJY) {
                             app,
                             client,
                             params,
-                            context
+                            context,
                         );
                     };
 
@@ -1081,7 +1073,7 @@ export default function(OBJY) {
                                     client,
                                     params.templateFamily,
                                     params.templateSource,
-                                    params
+                                    params,
                                 );
                             }
                         });
@@ -1097,21 +1089,17 @@ export default function(OBJY) {
                     var client = client || context.activeTenant;
                     var app = context.activeApp;
                     var user = context.activeUser;
-
                     var thisRef = this;
 
                     OBJY.applyAffects(thisRef, context, client, params);
 
-
-                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });                    
-
+                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
 
                     if ((context.permissionSequence[thisRef._id] || []).length > 0) {
                         throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
-
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -1124,11 +1112,11 @@ export default function(OBJY) {
                             if (!isObject(props[p])) return;
 
                             //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                if (prePropsString) {
-                                    aggregateAllEvents(props[p], prePropsString + '.' + p);
-                                } else {
-                                    aggregateAllEvents(props[p], p);
-                                }
+                            if (prePropsString) {
+                                aggregateAllEvents(props[p], prePropsString + '.' + p);
+                            } else {
+                                aggregateAllEvents(props[p], p);
+                            }
                             //}
 
                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
@@ -1176,6 +1164,14 @@ export default function(OBJY) {
                     if (mapper.type != 'scheduled') aggregateAllEvents(this);
 
                     function updateFn() {
+                        let actions = {
+                            onCreate: Object.assign({}, thisRef.onCreate),
+                            onChange: Object.assign({}, thisRef.onChange),
+                            onDelete: Object.assign({}, thisRef.onDelete),
+                        };
+
+                        OBJY.unapplyHiddenAffects(thisRef, context, client, params);
+
                         var constraints = OBJY.checkConstraints(thisRef);
                         if (Array.isArray(constraints) && error) {
                             return error({
@@ -1186,7 +1182,6 @@ export default function(OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-
                                 if (context.handlerSequence[thisRef._id]) {
                                     for (var type in context.handlerSequence[thisRef._id]) {
                                         for (var item in context.handlerSequence[thisRef._id][type]) {
@@ -1201,7 +1196,7 @@ export default function(OBJY) {
                                                     client,
                                                     app,
                                                     user,
-                                                    null
+                                                    null,
                                                 );
                                             }
                                         }
@@ -1219,7 +1214,7 @@ export default function(OBJY) {
                                                 evt.property,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                context.activeTenant
+                                                context.activeTenant,
                                             );
                                         }
                                     });
@@ -1234,7 +1229,7 @@ export default function(OBJY) {
                                         function (data) {},
                                         function (err) {},
                                         client,
-                                        params
+                                        params,
                                     );
                                 }
 
@@ -1242,16 +1237,14 @@ export default function(OBJY) {
                                 //OBJY.deSerializePropsObject(data, params);
                                 context.alterSequence = [];
 
-
-
                                 // SYNC HANDLER
-                                if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
+                                if (actions.onChange && Object.keys(actions.onChange || {}).length > 0) {
                                     var callbackCounter = 0;
-                                    var finalCallbackData = {}
-                                    Object.keys(data.onChange).forEach(function (key) {
+                                    var finalCallbackData = {};
+                                    Object.keys(actions.onChange).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
-                                                data.onChange[key].value || data.onChange[key].action,
+                                                actions.onChange[key].value || actions.onChange[key].action,
                                                 initObj,
                                                 data,
                                                 null,
@@ -1259,9 +1252,9 @@ export default function(OBJY) {
                                                     callbackCounter++;
 
                                                     // check if action returns data, then save it to current state
-                                                    if (isObjyObject(cbData)) finalCallbackData = cbData
+                                                    if (isObjyObject(cbData)) finalCallbackData = cbData;
 
-                                                    if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                    if (callbackCounter == Object.keys(actions.onChange || {}).length) {
                                                         if (success) {
                                                             if (isObjyObject(finalCallbackData)) {
                                                                 OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
@@ -1270,8 +1263,7 @@ export default function(OBJY) {
                                                                 OBJY.unapplyHiddenAffects(data, context, client, params);
                                                                 success(data);
                                                             }
-                                                        } 
-                                                        else {
+                                                        } else {
                                                             resolve(data);
                                                         }
                                                     }
@@ -1279,12 +1271,11 @@ export default function(OBJY) {
                                                 client,
                                                 app,
                                                 user,
-                                                null
+                                                null,
                                             );
-                                        } catch(e){
-                                            console.log(e)
+                                        } catch (e) {
+                                            console.log(e);
                                         }
-
                                     });
                                 } else {
                                     OBJY.unapplyHiddenAffects(data, context, client, params);
@@ -1293,7 +1284,6 @@ export default function(OBJY) {
                                         resolve(data);
                                     }
                                 }
-
                             },
                             function (err) {
                                 if (error) error(err);
@@ -1304,7 +1294,7 @@ export default function(OBJY) {
                             app,
                             client,
                             params,
-                            context
+                            context,
                         );
                     }
 
@@ -1344,7 +1334,7 @@ export default function(OBJY) {
                                     params.templateFamily,
                                     params.templateSource,
                                     params,
-                                    context
+                                    context,
                                 );
                             }
 
@@ -1367,7 +1357,7 @@ export default function(OBJY) {
                                     },
                                     client,
                                     params,
-                                    context
+                                    context,
                                 );
                             }
                         });
@@ -1388,8 +1378,6 @@ export default function(OBJY) {
                     var thisRef = JSON.parse(JSON.stringify(this));
 
                     OBJY.applyAffects(thisRef, context, client, params);
-
-
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
@@ -1443,11 +1431,11 @@ export default function(OBJY) {
                                             if (!isObject(props[p])) return;
 
                                             //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                                if (prePropsString) {
-                                                    aggregateAllEvents(props[p], prePropsString + '.' + p);
-                                                } else {
-                                                    aggregateAllEvents(props[p], p);
-                                                }
+                                            if (prePropsString) {
+                                                aggregateAllEvents(props[p], prePropsString + '.' + p);
+                                            } else {
+                                                aggregateAllEvents(props[p], p);
+                                            }
                                             //}
 
                                             if (props[p].type == CONSTANTS.PROPERTY.TYPE_EVENT) {
@@ -1496,7 +1484,7 @@ export default function(OBJY) {
                                                     evt.property,
                                                     function (evtData) {},
                                                     function (evtErr) {},
-                                                    context.activeTenant
+                                                    context.activeTenant,
                                                 );
                                             } else if (evt.operation == 'remove') {
                                                 mapper.removeEvent(
@@ -1506,7 +1494,7 @@ export default function(OBJY) {
                                                     function (evtErr) {
                                                         console.log(evtErr);
                                                     },
-                                                    context.activeTenant
+                                                    context.activeTenant,
                                                 );
                                             }
                                         });
@@ -1519,7 +1507,7 @@ export default function(OBJY) {
                                             function (data) {},
                                             function (err) {},
                                             client,
-                                            params
+                                            params,
                                         );
                                     }
 
@@ -1530,7 +1518,7 @@ export default function(OBJY) {
                                     // SYNC HANDLER
                                     if (data.onDelete && Object.keys(data.onDelete || {}).length > 0) {
                                         var callbackCounter = 0;
-                                        var finalCallbackData = {}
+                                        var finalCallbackData = {};
                                         Object.keys(data.onDelete).forEach(function (key) {
                                             try {
                                                 OBJY.execProcessorAction(
@@ -1541,8 +1529,8 @@ export default function(OBJY) {
                                                     function (cbData) {
                                                         callbackCounter++;
 
-                                                         // check if action returns data, then save it to current state
-                                                        if (isObjyObject(cbData)) finalCallbackData = cbData
+                                                        // check if action returns data, then save it to current state
+                                                        if (isObjyObject(cbData)) finalCallbackData = cbData;
 
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
                                                             if (success) {
@@ -1553,8 +1541,7 @@ export default function(OBJY) {
                                                                     OBJY.unapplyHiddenAffects(data, context, client, params);
                                                                     success(data);
                                                                 }
-                                                            } 
-                                                            else {
+                                                            } else {
                                                                 resolve(data);
                                                             }
                                                         }
@@ -1562,12 +1549,11 @@ export default function(OBJY) {
                                                     client,
                                                     app,
                                                     user,
-                                                    null
+                                                    null,
                                                 );
-                                            } catch(e){
-                                                console.log(e)
+                                            } catch (e) {
+                                                console.log(e);
                                             }
-
                                         });
                                     } else {
                                         OBJY.unapplyHiddenAffects(data, context, client, params);
@@ -1576,7 +1562,6 @@ export default function(OBJY) {
                                             resolve(data);
                                         }
                                     }
-
 
                                     /*if (success) success(data);
                                     else {
@@ -1591,7 +1576,7 @@ export default function(OBJY) {
                                 },
                                 app,
                                 client,
-                                context
+                                context,
                             );
                         },
                         function (err) {
@@ -1603,7 +1588,7 @@ export default function(OBJY) {
                         app,
                         client,
                         context,
-                        params
+                        params,
                     );
 
                     return this;
@@ -1619,7 +1604,6 @@ export default function(OBJY) {
                     var thisRef = this;
 
                     OBJY.applyAffects(thisRef, context, client, params);
-
 
                     var counter = 0;
 
@@ -1653,8 +1637,7 @@ export default function(OBJY) {
                         if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, context))
                             return error({ error: 'Lack of Permissions', source: 'authorisations' });
 
-                        if (!OBJY.checkPermissions(user, app, data, 'r', false, context))
-                            return error({ error: 'Lack of Permissions', source: 'permissions' });
+                        if (!OBJY.checkPermissions(user, app, data, 'r', false, context)) return error({ error: 'Lack of Permissions', source: 'permissions' });
 
                         if (dontInherit) {
                             OBJY.unapplyHiddenAffects(returnObject, context, client, params);
@@ -1720,7 +1703,7 @@ export default function(OBJY) {
                                     params.templateFamily,
                                     params.templateSource,
                                     params,
-                                    context
+                                    context,
                                 );
                             } else {
                                 var returnObject = OBJY[data.role](data);
@@ -1762,7 +1745,7 @@ export default function(OBJY) {
                             app,
                             client,
                             context,
-                            params
+                            params,
                         );
                     }
 
@@ -1816,4 +1799,4 @@ export default function(OBJY) {
             return this;
         },
     };
-};
+}

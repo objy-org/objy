@@ -4665,12 +4665,11 @@ var isObject = function (a) {
 };
 
 var isObjyObject = function (a) {
-    if(!isObject(a)) return false;
+    if (!isObject(a)) return false;
     if (a._id && a.role) return true;
 };
 
-
-function singularConstructorFunctions(OBJY) {
+function singularConstructorFunctions (OBJY) {
     return {
         Obj: function (obj, role, context, params) {
             let initObj = null;
@@ -4735,7 +4734,7 @@ function singularConstructorFunctions(OBJY) {
 
             this.authorisations = obj.authorisations || undefined;
 
-            if(role != "file"){
+            if (role != 'file') {
                 initObj = JSON.parse(JSON.stringify(this));
             } else initObj = this;
 
@@ -4841,7 +4840,7 @@ function singularConstructorFunctions(OBJY) {
                     function (err) {
                         if (error) error(err);
                     },
-                    context
+                    context,
                 );
 
                 context.alterSequence.push({ removeInherit: arguments });
@@ -5497,8 +5496,6 @@ function singularConstructorFunctions(OBJY) {
 
                     if (!this._id) this._id = OBJY.ID();
 
-                    
-
                     this.created = moment().utc().toDate().toISOString();
                     this.lastModified = moment().utc().toDate().toISOString();
 
@@ -5509,14 +5506,12 @@ function singularConstructorFunctions(OBJY) {
                             if (!isObject(props[p])) return;
 
                             //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                if (prePropsString) {
-                                    aggregateAllEvents(props[p], prePropsString + '.' + p);
-                                } else {
-                                    aggregateAllEvents(props[p], p);
-
-                                }
+                            if (prePropsString) {
+                                aggregateAllEvents(props[p], prePropsString + '.' + p);
+                            } else {
+                                aggregateAllEvents(props[p], p);
+                            }
                             //}
-
 
                             if (props[p].type == CONSTANTS$1.PROPERTY.TYPE_EVENT) {
                                 var date = null;
@@ -5550,7 +5545,6 @@ function singularConstructorFunctions(OBJY) {
                                             date: date,
                                         });
                                 } else {
-
                                     context.eventAlterationSequence.push({
                                         operation: 'add',
                                         obj: thisRef,
@@ -5564,9 +5558,7 @@ function singularConstructorFunctions(OBJY) {
                                         if (aE.propName == p) found = true;
                                     });
 
-                                    
-                                    if (!found && props[p].triggered != true){
-
+                                    if (!found && props[p].triggered != true) {
                                         thisRef._aggregatedEvents.push({
                                             propName: p,
                                             date: date,
@@ -5581,8 +5573,7 @@ function singularConstructorFunctions(OBJY) {
 
                     //if (this) aggregateAllEvents(this.properties);
 
-                    aggregateAllEvents(thisRef);     
-
+                    aggregateAllEvents(thisRef);
 
                     if (app) {
                         if (!this.applications) this.applications = [];
@@ -5590,6 +5581,12 @@ function singularConstructorFunctions(OBJY) {
                     }
 
                     var addFn = function (obj) {
+                        let actions = {
+                            onCreate: Object.assign({}, obj.onCreate),
+                            onChange: Object.assign({}, obj.onChange),
+                            onDelete: Object.assign({}, obj.onDelete),
+                        };
+
                         if (!OBJY.checkPermissions(user, app, obj, 'c', false, context)) return error({ error: 'Lack of Permissions' });
 
                         var constraints = OBJY.checkConstraints(obj);
@@ -5599,11 +5596,12 @@ function singularConstructorFunctions(OBJY) {
                             });
                         }
 
+                        OBJY.unapplyHiddenAffects(obj, context, client, params);
+
                         OBJY.add(
                             obj,
                             function (data) {
                                 obj._id = data._id;
-                                
 
                                 if (mapper.type == 'scheduled') {
                                     context.eventAlterationSequence.forEach(function (evt) {
@@ -5614,7 +5612,7 @@ function singularConstructorFunctions(OBJY) {
                                                 evt.property,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                context.activeTenant
+                                                context.activeTenant,
                                             );
                                         } else if (evt.operation == 'remove') {
                                             mapper.addEvent(
@@ -5622,7 +5620,7 @@ function singularConstructorFunctions(OBJY) {
                                                 evt.propName,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                context.activeTenant
+                                                context.activeTenant,
                                             );
                                         }
                                     });
@@ -5633,13 +5631,13 @@ function singularConstructorFunctions(OBJY) {
                                 OBJY.Logger.log('Added Object: ' + JSON.stringify(data, null, 2));
 
                                 // SYNC HANDLER
-                                if (data.onCreate && Object.keys(data.onCreate || {}).length > 0) {
+                                if (actions.onCreate && Object.keys(actions.onCreate || {}).length > 0) {
                                     var callbackCounter = 0;
                                     var finalCallbackData = {};
-                                    Object.keys(data.onCreate).forEach(function (key) {
+                                    Object.keys(actions.onCreate).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
-                                                data.onCreate[key].value || data.onCreate[key].action,
+                                                actions.onCreate[key].value || actions.onCreate[key].action,
                                                 null,
                                                 data,
                                                 null,
@@ -5649,17 +5647,14 @@ function singularConstructorFunctions(OBJY) {
                                                     // check if action returns data, then save it to current state
                                                     if (isObjyObject(cbData)) finalCallbackData = cbData;
 
-                                                    if (callbackCounter == Object.keys(data.onCreate || {}).length) {
+                                                    if (callbackCounter == Object.keys(actions.onCreate || {}).length) {
                                                         if (success) {
                                                             if (isObjyObject(finalCallbackData)) {
-                                                                OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
                                                                 return success(finalCallbackData);
                                                             } else {
-                                                                OBJY.unapplyHiddenAffects(data, context, client, params);
                                                                 success(data);
                                                             }
-                                                        } 
-                                                        else {
+                                                        } else {
                                                             resolve(data);
                                                         }
                                                     }
@@ -5667,21 +5662,18 @@ function singularConstructorFunctions(OBJY) {
                                                 client,
                                                 app,
                                                 user,
-                                                null
+                                                null,
                                             );
-                                        } catch(e){
+                                        } catch (e) {
                                             console.log(e);
                                         }
-
                                     });
                                 } else {
-                                    OBJY.unapplyHiddenAffects(data, context, client, params);
                                     if (success) success(data);
                                     else {
                                         resolve(data);
                                     }
                                 }
-
 
                                 delete thisRef.context;
                             },
@@ -5694,7 +5686,7 @@ function singularConstructorFunctions(OBJY) {
                             app,
                             client,
                             params,
-                            context
+                            context,
                         );
                     };
 
@@ -5724,7 +5716,7 @@ function singularConstructorFunctions(OBJY) {
                                     client,
                                     params.templateFamily,
                                     params.templateSource,
-                                    params
+                                    params,
                                 );
                             }
                         });
@@ -5740,21 +5732,17 @@ function singularConstructorFunctions(OBJY) {
                     var client = client || context.activeTenant;
                     var app = context.activeApp;
                     var user = context.activeUser;
-
                     var thisRef = this;
 
                     OBJY.applyAffects(thisRef, context, client, params);
 
-
-                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });                    
-
+                    if (!OBJY.checkAuthroisations(this, user, 'u', app, context)) return error({ error: 'Lack of Permissions' });
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'u', false, context)) return error({ error: 'Lack of Permissions' });
 
                     if ((context.permissionSequence[thisRef._id] || []).length > 0) {
                         throw new exceptions.LackOfPermissionsException(context.permissionSequence[thisRef._id]);
                     }
-
 
                     this.lastModified = moment().toDate().toISOString();
 
@@ -5767,11 +5755,11 @@ function singularConstructorFunctions(OBJY) {
                             if (!isObject(props[p])) return;
 
                             //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                if (prePropsString) {
-                                    aggregateAllEvents(props[p], prePropsString + '.' + p);
-                                } else {
-                                    aggregateAllEvents(props[p], p);
-                                }
+                            if (prePropsString) {
+                                aggregateAllEvents(props[p], prePropsString + '.' + p);
+                            } else {
+                                aggregateAllEvents(props[p], p);
+                            }
                             //}
 
                             if (props[p].type == CONSTANTS$1.PROPERTY.TYPE_EVENT) {
@@ -5819,6 +5807,14 @@ function singularConstructorFunctions(OBJY) {
                     if (mapper.type != 'scheduled') aggregateAllEvents(this);
 
                     function updateFn() {
+                        let actions = {
+                            onCreate: Object.assign({}, thisRef.onCreate),
+                            onChange: Object.assign({}, thisRef.onChange),
+                            onDelete: Object.assign({}, thisRef.onDelete),
+                        };
+
+                        OBJY.unapplyHiddenAffects(thisRef, context, client, params);
+
                         var constraints = OBJY.checkConstraints(thisRef);
                         if (Array.isArray(constraints) && error) {
                             return error({
@@ -5829,7 +5825,6 @@ function singularConstructorFunctions(OBJY) {
                         OBJY.updateO(
                             thisRef,
                             function (data) {
-
                                 if (context.handlerSequence[thisRef._id]) {
                                     for (var type in context.handlerSequence[thisRef._id]) {
                                         for (var item in context.handlerSequence[thisRef._id][type]) {
@@ -5844,7 +5839,7 @@ function singularConstructorFunctions(OBJY) {
                                                     client,
                                                     app,
                                                     user,
-                                                    null
+                                                    null,
                                                 );
                                             }
                                         }
@@ -5862,7 +5857,7 @@ function singularConstructorFunctions(OBJY) {
                                                 evt.property,
                                                 function (evtData) {},
                                                 function (evtErr) {},
-                                                context.activeTenant
+                                                context.activeTenant,
                                             );
                                         }
                                     });
@@ -5877,7 +5872,7 @@ function singularConstructorFunctions(OBJY) {
                                         function (data) {},
                                         function (err) {},
                                         client,
-                                        params
+                                        params,
                                     );
                                 }
 
@@ -5885,16 +5880,14 @@ function singularConstructorFunctions(OBJY) {
                                 //OBJY.deSerializePropsObject(data, params);
                                 context.alterSequence = [];
 
-
-
                                 // SYNC HANDLER
-                                if (data.onChange && Object.keys(data.onChange || {}).length > 0) {
+                                if (actions.onChange && Object.keys(actions.onChange || {}).length > 0) {
                                     var callbackCounter = 0;
                                     var finalCallbackData = {};
-                                    Object.keys(data.onChange).forEach(function (key) {
+                                    Object.keys(actions.onChange).forEach(function (key) {
                                         try {
                                             OBJY.execProcessorAction(
-                                                data.onChange[key].value || data.onChange[key].action,
+                                                actions.onChange[key].value || actions.onChange[key].action,
                                                 initObj,
                                                 data,
                                                 null,
@@ -5904,7 +5897,7 @@ function singularConstructorFunctions(OBJY) {
                                                     // check if action returns data, then save it to current state
                                                     if (isObjyObject(cbData)) finalCallbackData = cbData;
 
-                                                    if (callbackCounter == Object.keys(data.onChange || {}).length) {
+                                                    if (callbackCounter == Object.keys(actions.onChange || {}).length) {
                                                         if (success) {
                                                             if (isObjyObject(finalCallbackData)) {
                                                                 OBJY.unapplyHiddenAffects(finalCallbackData, context, client, params);
@@ -5913,8 +5906,7 @@ function singularConstructorFunctions(OBJY) {
                                                                 OBJY.unapplyHiddenAffects(data, context, client, params);
                                                                 success(data);
                                                             }
-                                                        } 
-                                                        else {
+                                                        } else {
                                                             resolve(data);
                                                         }
                                                     }
@@ -5922,12 +5914,11 @@ function singularConstructorFunctions(OBJY) {
                                                 client,
                                                 app,
                                                 user,
-                                                null
+                                                null,
                                             );
-                                        } catch(e){
+                                        } catch (e) {
                                             console.log(e);
                                         }
-
                                     });
                                 } else {
                                     OBJY.unapplyHiddenAffects(data, context, client, params);
@@ -5936,7 +5927,6 @@ function singularConstructorFunctions(OBJY) {
                                         resolve(data);
                                     }
                                 }
-
                             },
                             function (err) {
                                 if (error) error(err);
@@ -5947,7 +5937,7 @@ function singularConstructorFunctions(OBJY) {
                             app,
                             client,
                             params,
-                            context
+                            context,
                         );
                     }
 
@@ -5985,7 +5975,7 @@ function singularConstructorFunctions(OBJY) {
                                     params.templateFamily,
                                     params.templateSource,
                                     params,
-                                    context
+                                    context,
                                 );
                             }
 
@@ -6008,7 +5998,7 @@ function singularConstructorFunctions(OBJY) {
                                     },
                                     client,
                                     params,
-                                    context
+                                    context,
                                 );
                             }
                         });
@@ -6029,8 +6019,6 @@ function singularConstructorFunctions(OBJY) {
                     var thisRef = JSON.parse(JSON.stringify(this));
 
                     OBJY.applyAffects(thisRef, context, client, params);
-
-
 
                     if (!OBJY.checkPermissions(user, app, thisRef, 'd', false, context)) return error({ error: 'Lack of Permissions' });
 
@@ -6084,11 +6072,11 @@ function singularConstructorFunctions(OBJY) {
                                             if (!isObject(props[p])) return;
 
                                             //if (props[p].type == CONSTANTS.PROPERTY.TYPE_PROPERTY_BAG){
-                                                if (prePropsString) {
-                                                    aggregateAllEvents(props[p], prePropsString + '.' + p);
-                                                } else {
-                                                    aggregateAllEvents(props[p], p);
-                                                }
+                                            if (prePropsString) {
+                                                aggregateAllEvents(props[p], prePropsString + '.' + p);
+                                            } else {
+                                                aggregateAllEvents(props[p], p);
+                                            }
                                             //}
 
                                             if (props[p].type == CONSTANTS$1.PROPERTY.TYPE_EVENT) {
@@ -6135,7 +6123,7 @@ function singularConstructorFunctions(OBJY) {
                                                     evt.property,
                                                     function (evtData) {},
                                                     function (evtErr) {},
-                                                    context.activeTenant
+                                                    context.activeTenant,
                                                 );
                                             } else if (evt.operation == 'remove') {
                                                 mapper.removeEvent(
@@ -6145,7 +6133,7 @@ function singularConstructorFunctions(OBJY) {
                                                     function (evtErr) {
                                                         console.log(evtErr);
                                                     },
-                                                    context.activeTenant
+                                                    context.activeTenant,
                                                 );
                                             }
                                         });
@@ -6158,7 +6146,7 @@ function singularConstructorFunctions(OBJY) {
                                             function (data) {},
                                             function (err) {},
                                             client,
-                                            params
+                                            params,
                                         );
                                     }
 
@@ -6180,7 +6168,7 @@ function singularConstructorFunctions(OBJY) {
                                                     function (cbData) {
                                                         callbackCounter++;
 
-                                                         // check if action returns data, then save it to current state
+                                                        // check if action returns data, then save it to current state
                                                         if (isObjyObject(cbData)) finalCallbackData = cbData;
 
                                                         if (callbackCounter == Object.keys(data.onDelete || {}).length) {
@@ -6192,8 +6180,7 @@ function singularConstructorFunctions(OBJY) {
                                                                     OBJY.unapplyHiddenAffects(data, context, client, params);
                                                                     success(data);
                                                                 }
-                                                            } 
-                                                            else {
+                                                            } else {
                                                                 resolve(data);
                                                             }
                                                         }
@@ -6201,12 +6188,11 @@ function singularConstructorFunctions(OBJY) {
                                                     client,
                                                     app,
                                                     user,
-                                                    null
+                                                    null,
                                                 );
-                                            } catch(e){
+                                            } catch (e) {
                                                 console.log(e);
                                             }
-
                                         });
                                     } else {
                                         OBJY.unapplyHiddenAffects(data, context, client, params);
@@ -6215,7 +6201,6 @@ function singularConstructorFunctions(OBJY) {
                                             resolve(data);
                                         }
                                     }
-
 
                                     /*if (success) success(data);
                                     else {
@@ -6230,7 +6215,7 @@ function singularConstructorFunctions(OBJY) {
                                 },
                                 app,
                                 client,
-                                context
+                                context,
                             );
                         },
                         function (err) {
@@ -6242,7 +6227,7 @@ function singularConstructorFunctions(OBJY) {
                         app,
                         client,
                         context,
-                        params
+                        params,
                     );
 
                     return this;
@@ -6258,7 +6243,6 @@ function singularConstructorFunctions(OBJY) {
                     var thisRef = this;
 
                     OBJY.applyAffects(thisRef, context, client, params);
-
 
                     var counter = 0;
 
@@ -6292,8 +6276,7 @@ function singularConstructorFunctions(OBJY) {
                         if (!OBJY.checkAuthroisations(returnObject, user, 'r', app, context))
                             return error({ error: 'Lack of Permissions', source: 'authorisations' });
 
-                        if (!OBJY.checkPermissions(user, app, data, 'r', false, context))
-                            return error({ error: 'Lack of Permissions', source: 'permissions' });
+                        if (!OBJY.checkPermissions(user, app, data, 'r', false, context)) return error({ error: 'Lack of Permissions', source: 'permissions' });
 
                         if (dontInherit) {
                             OBJY.unapplyHiddenAffects(returnObject, context, client, params);
@@ -6359,7 +6342,7 @@ function singularConstructorFunctions(OBJY) {
                                     params.templateFamily,
                                     params.templateSource,
                                     params,
-                                    context
+                                    context,
                                 );
                             } else {
                                 var returnObject = OBJY[data.role](data);
@@ -6399,7 +6382,7 @@ function singularConstructorFunctions(OBJY) {
                             app,
                             client,
                             context,
-                            params
+                            params,
                         );
                     }
 
