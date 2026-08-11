@@ -11,6 +11,8 @@ const node = new CRDTNode({
   url: config.node.url,
   retainOps: config.node.retainOps,
   syncBatchSize: config.node.syncBatchSize,
+  storage: config.storage,
+  vector: config.vector,
 });
 const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence);
 const storedShardMap = await shardMapStore?.load();
@@ -30,11 +32,19 @@ const state = await startServer({
   node,
   shardMapStore,
   auth: config.auth,
+  persistence,
 });
 console.log(`spread-db node ${state.node.id} listening on http://localhost:${state.port}`);
 
+let syncing = false;
 const timer = setInterval(() => {
-  state.node.syncAll();
+  if (syncing) return;
+  syncing = true;
+  state.node.syncAll()
+    .catch((err) => console.error(`replication sync failed: ${err.message}`))
+    .finally(() => {
+      syncing = false;
+    });
 }, config.cluster.syncMs);
 
 let shuttingDown = false;

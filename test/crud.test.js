@@ -105,13 +105,35 @@ test("bulk operations are the internal write default", () => {
   assert.equal(replaced.replaced, 2);
   assert.deepEqual(n.get("db", "c", "a"), { id: "a", z: true });
 
-  const removed = n.removeMany("db", "c", ["a", "b", "a", "missing"]);
+  const removed = n.removeMany("db", "c", ["a", "b", "missing"]);
   assert.equal(removed.deleted, 2);
-  assert.deepEqual(removed.skipped, ["a", "missing"]);
+  assert.deepEqual(removed.skipped, ["missing"]);
   assert.equal(n.count("db", "c"), 0);
 
   changes.length = 0;
   n.insert("db", "c", { id: "single", v: 1 });
   assert.equal(changes[0].kind, "ops");
   assert.equal(changes[0].ops.length, 1);
+});
+
+test("bulk operations reject duplicate ids", () => {
+  const n = makeNode("a");
+  n.insert("db", "c", { id: "a", x: 1 });
+
+  assert.throws(
+    () => n.insertMany("db", "c", [{ id: "dup", x: 1 }, { id: "dup", x: 2 }]),
+    /duplicate id in bulk request: dup/,
+  );
+  assert.throws(
+    () => n.updateMany("db", "c", [{ id: "a", y: 1 }, { id: "a", z: 2 }]),
+    /duplicate id in bulk request: a/,
+  );
+  assert.throws(
+    () => n.replaceMany("db", "c", [{ id: "a", y: 1 }, { id: "a", z: 2 }]),
+    /duplicate id in bulk request: a/,
+  );
+  assert.throws(
+    () => n.removeMany("db", "c", ["a", "a"]),
+    /duplicate id in bulk request: a/,
+  );
 });

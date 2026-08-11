@@ -1,4 +1,5 @@
 import { json, readJson } from "../http-router.js";
+import { localClusterStatus } from "../cluster-status.js";
 
 export function createClusterInterface() {
   return {
@@ -10,6 +11,10 @@ export function createClusterInterface() {
 
       router.get("/cluster/shards", (req, res) => {
         json(res, 200, { node: node.id, shardMap: node.shardMapSnapshot() });
+      });
+
+      router.get("/cluster/status", (req, res) => {
+        json(res, 200, localClusterStatus(node));
       });
 
       router.put("/cluster/shards", async (req, res) => {
@@ -37,7 +42,7 @@ export function createClusterInterface() {
         const after = Number(req.query.get("after") || 0);
         const limit = Number(req.query.get("limit") || 0);
         const scope = scopeFromParams(req.query);
-        if (after < node.trimmed) {
+        if (node.needsSnapshot(after, scope)) {
           json(res, 410, {
             error: "log truncated, snapshot required",
             node: node.id,

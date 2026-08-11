@@ -84,6 +84,19 @@ export class AuthService {
   }
 
   login(database, collection, username, password) {
+    this.assertLoginInput(database, collection, username, password);
+    if (this.node.getCollectionMeta(database, collection) === null) return null;
+    return this.loginFromUsers(database, collection, username, password, this.node.find(database, collection, { username }));
+  }
+
+  loginFromUsers(database, collection, username, password, users = []) {
+    this.assertLoginInput(database, collection, username, password);
+    const user = (users || []).find((candidate) => verifyPassword(password, candidate.password));
+    if (!user) return null;
+    return this.authResponse(database, collection, user);
+  }
+
+  assertLoginInput(database, collection, username, password) {
     assertName(database, "database");
     assertName(collection, "collection");
     if (typeof username !== "string" || username.length === 0) {
@@ -92,16 +105,24 @@ export class AuthService {
     if (typeof password !== "string") {
       throw httpError(400, "body.password must be a string");
     }
-
-    if (this.node.getCollectionMeta(database, collection) === null) return null;
-
-    const matches = this.node.find(database, collection, { username });
-    const user = matches.find((candidate) => verifyPassword(password, candidate.password));
-    if (!user) return null;
-    return this.authResponse(database, collection, user);
   }
 
   renew(database, collection, refreshToken) {
+    const claims = this.verifyRefreshClaims(database, collection, refreshToken);
+    const user = this.node.get(database, collection, claims.sub);
+    return this.renewForUser(database, collection, refreshToken, user, claims);
+  }
+
+  renewForUser(database, collection, refreshToken, user, claims = null) {
+    const verified = claims || this.verifyRefreshClaims(database, collection, refreshToken);
+    if (!user) throw httpError(401, "invalid refresh token: user not found");
+    if ((user.tokenVersion || 0) !== (verified.tokenVersion || 0)) {
+      throw httpError(401, "invalid refresh token: token version changed");
+    }
+    return this.authResponse(database, collection, user, { sessionId: verified.sessionId });
+  }
+
+  verifyRefreshClaims(database, collection, refreshToken) {
     assertName(database, "database");
     assertName(collection, "collection");
     if (typeof refreshToken !== "string" || refreshToken.length === 0) {
@@ -124,12 +145,7 @@ export class AuthService {
       throw httpError(403, "token collection does not match URL collection");
     }
 
-    const user = this.node.get(database, collection, claims.sub);
-    if (!user) throw httpError(401, "invalid refresh token: user not found");
-    if ((user.tokenVersion || 0) !== (claims.tokenVersion || 0)) {
-      throw httpError(401, "invalid refresh token: token version changed");
-    }
-    return this.authResponse(database, collection, user, { sessionId: claims.sessionId });
+    return claims;
   }
 
   authResponse(database, collection, user, { sessionId = null } = {}) {
@@ -254,8 +270,8 @@ export class AuthService {
   }
 
   redactObject(database, collection, object) {
-    if (!object || !this.isAuthObject(object)) return object;
-    return this.redactUser(object);
+    if (!object) return object;
+    return redactSensitiveValue(object);
   }
 
   redactObjects(database, collection, objects) {
@@ -301,7 +317,19 @@ class DisabledAuthService {
     throw httpError(404, "auth is disabled");
   }
 
+  loginFromUsers() {
+    throw httpError(404, "auth is disabled");
+  }
+
   renew() {
+    throw httpError(404, "auth is disabled");
+  }
+
+  renewForUser() {
+    throw httpError(404, "auth is disabled");
+  }
+
+  verifyRefreshClaims() {
     throw httpError(404, "auth is disabled");
   }
 
@@ -328,6 +356,17 @@ export function isPasswordHash(value) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function redactSensitiveValue(value) {
+  if (Array.isArray(value)) return value.map(redactSensitiveValue);
+  if (!isPlainObject(value)) return value;
+  const out = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "password" || key === "_vec") continue;
+    out[key] = redactSensitiveValue(item);
+  }
+  return out;
 }
 
 function isAuthObject(object) {

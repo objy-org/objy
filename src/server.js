@@ -6,6 +6,7 @@ import { createAuthInterface } from "./interfaces/auth.js";
 import { createClusterInterface, httpPeer, shardMapFromHttp } from "./interfaces/cluster.js";
 import { createPublicObjectInterface } from "./interfaces/public-object.js";
 import { createUiInterface } from "./interfaces/ui.js";
+import { ShardRequestRouter } from "./shard-router.js";
 
 export { httpPeer, shardMapFromHttp };
 
@@ -16,6 +17,7 @@ export async function startServer({
   node,
   shardMapStore,
   auth,
+  persistence,
   interfaces = [],
   useDefaultInterfaces = true,
 } = {}) {
@@ -27,7 +29,7 @@ export async function startServer({
   for (const peer of peers) n.addPeer(httpPeer(peer, n.id));
 
   const router = new HttpRouter();
-  const context = createInterfaceContext({ node: n, shardMapStore, auth: authService });
+  const context = createInterfaceContext({ node: n, shardMapStore, auth: authService, persistence });
   const activeInterfaces = [
     ...(useDefaultInterfaces ? defaultInterfaces() : []),
     ...interfaces,
@@ -59,11 +61,15 @@ export function defaultInterfaces() {
   ];
 }
 
-export function createInterfaceContext({ node, shardMapStore, auth }) {
+export function createInterfaceContext({ node, shardMapStore, auth, persistence, durability }) {
   return {
     node,
     shardMapStore,
     auth,
+    routing: new ShardRequestRouter({ node }),
+    durability: durability || {
+      afterWrite: () => persistence?.afterWrite?.() || Promise.resolve({ records: 0, ops: 0 }),
+    },
     data: {
       node,
       store: node.db,

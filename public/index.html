@@ -212,7 +212,7 @@
     border-right: 1px solid var(--line-soft);
     background: var(--band);
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
   .login-panel {
@@ -275,6 +275,112 @@
   .tree {
     overflow: auto;
     padding: 0 10px 14px;
+  }
+
+  .cluster-panel {
+    border-top: 1px solid var(--line-soft);
+    display: grid;
+    grid-template-rows: auto minmax(0, auto);
+    min-height: 0;
+  }
+
+  .cluster-status {
+    overflow: auto;
+    max-height: 38vh;
+    padding: 0 10px 14px;
+    display: grid;
+    gap: 9px;
+  }
+
+  .cluster-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
+  }
+
+  .cluster-metric, .node-row, .shard-row {
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .018);
+  }
+
+  .cluster-metric {
+    display: grid;
+    gap: 1px;
+    padding: 9px;
+    min-width: 0;
+  }
+
+  .cluster-metric strong {
+    font-size: 15px;
+    line-height: 1.1;
+    color: #fff7e8;
+  }
+
+  .cluster-metric span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .cluster-group {
+    display: grid;
+    gap: 7px;
+  }
+
+  .cluster-label {
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+    padding: 2px 2px 0;
+  }
+
+  .node-row, .shard-row {
+    padding: 9px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .node-main, .shard-main, .peer-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .node-main strong, .shard-main strong {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rss-value {
+    margin-left: auto;
+    color: var(--teal);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .node-meta, .shard-peers, .peer-line {
+    color: var(--muted);
+    font-size: 11px;
+    min-width: 0;
+  }
+
+  .node-meta, .shard-peers {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .peer-line span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .db-block {
@@ -703,6 +809,18 @@
           <div class="empty">Sign in to load databases.</div>
         </div>
       </section>
+
+      <section class="cluster-panel">
+        <div class="tree-head">
+          <span class="section-title">Cluster</span>
+          <button id="refresh-cluster-btn" class="secondary icon-only" title="Refresh cluster" aria-label="Refresh cluster" disabled>
+            <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+          </button>
+        </div>
+        <div class="cluster-status" id="cluster-status">
+          <div class="empty">Sign in to load cluster status.</div>
+        </div>
+      </section>
     </aside>
 
     <main class="main">
@@ -958,6 +1076,7 @@ const state = {
   tree: {},
   active: null,
   collectionMeta: null,
+  cluster: null,
   objects: [],
   selected: null,
   objectMode: "add",
@@ -1021,12 +1140,14 @@ function clearSession(render = true) {
   state.tree = {};
   state.active = null;
   state.collectionMeta = null;
+  state.cluster = null;
   state.objects = [];
   state.selected = null;
   localStorage.removeItem(STORE_KEY);
   if (render) {
     renderSession();
     renderTree();
+    renderClusterStatus(null);
     renderObjects();
     renderDetail(null);
     setMeta("");
@@ -1051,6 +1172,7 @@ function renderActionState() {
   const hasObject = hasCollection && !!state.selected?.id;
   $("add-db-btn").disabled = !signedIn;
   $("add-coll-btn").disabled = !signedIn;
+  $("refresh-cluster-btn").disabled = !signedIn;
   $("edit-meta-btn").disabled = !hasCollection;
   $("delete-coll-btn").disabled = !hasCollection;
   $("add-object-btn").disabled = !hasCollection;
@@ -1119,7 +1241,7 @@ async function login() {
   saveSession();
   renderSession();
   showToast("Signed in");
-  await loadTree();
+  await Promise.all([loadTree(), loadClusterStatus()]);
 }
 
 async function renewToken({ silent = false } = {}) {
@@ -1163,6 +1285,126 @@ async function loadTree() {
 
   const first = pickFirstCollection();
   if (!state.active && first) await selectCollection(first.db, first.collection);
+}
+
+async function loadClusterStatus() {
+  if (!state.accessToken) {
+    state.cluster = null;
+    renderClusterStatus(null);
+    renderActionState();
+    return;
+  }
+
+  $("cluster-status").innerHTML = `<div class="empty">Loading cluster...</div>`;
+  const result = await apiFetch("GET", "/api/config");
+  if (!result.ok) {
+    state.cluster = null;
+    $("cluster-status").innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load cluster status")}</div>`;
+    return;
+  }
+
+  state.cluster = result.body || null;
+  renderClusterStatus(state.cluster);
+}
+
+function renderClusterStatus(config) {
+  const root = $("cluster-status");
+  if (!state.accessToken) {
+    root.innerHTML = `<div class="empty">Sign in to load cluster status.</div>`;
+    return;
+  }
+  if (!config) {
+    root.innerHTML = `<div class="empty">No cluster status loaded.</div>`;
+    return;
+  }
+
+  const nodes = Array.isArray(config.nodes) ? config.nodes : [];
+  const shards = Array.isArray(config.shards) ? config.shards : [];
+  const peers = Array.isArray(config.peers) ? config.peers : [];
+  const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
+  const totalRss = nodes.reduce((sum, nodeStatus) => sum + (Number(nodeStatus.memory?.rss) || 0), 0);
+
+  root.innerHTML = `
+    <div class="cluster-summary">
+      <div class="cluster-metric"><strong>${nodes.length}</strong><span>nodes</span></div>
+      <div class="cluster-metric"><strong>${shards.length}</strong><span>shards</span></div>
+      <div class="cluster-metric"><strong>${formatMb(totalRss)}</strong><span>rss</span></div>
+    </div>
+    <div class="cluster-group" id="cluster-nodes"></div>
+    <div class="cluster-group" id="cluster-shards"></div>
+  `;
+
+  const nodeRoot = $("cluster-nodes");
+  nodeRoot.innerHTML = `<div class="cluster-label">Nodes ${online}/${nodes.length} online</div>`;
+  for (const nodeStatus of nodes) nodeRoot.appendChild(renderNodeStatus(nodeStatus));
+
+  const shardRoot = $("cluster-shards");
+  shardRoot.innerHTML = `<div class="cluster-label">Shards ${peers.length} peers</div>`;
+  for (const shard of shards) shardRoot.appendChild(renderShardStatus(shard));
+}
+
+function renderNodeStatus(nodeStatus) {
+  const online = isNodeOnline(nodeStatus);
+  const row = document.createElement("div");
+  row.className = "node-row";
+  row.innerHTML = `
+    <div class="node-main">
+      <span class="dot ${online ? "ok" : "bad"}"></span>
+      <strong></strong>
+      <span class="rss-value"></span>
+    </div>
+    <div class="node-meta"></div>
+  `;
+  row.querySelector("strong").textContent = nodeName(nodeStatus);
+  row.querySelector(".rss-value").textContent = nodeStatus.memory ? formatMb(nodeStatus.memory.rss) : "offline";
+  row.querySelector(".node-meta").textContent = nodeMeta(nodeStatus);
+  return row;
+}
+
+function renderShardStatus(shard) {
+  const row = document.createElement("div");
+  row.className = "shard-row";
+  const peers = Array.isArray(shard.peers) ? shard.peers : [];
+  const online = peers.filter((peer) => peer.online).length;
+  row.innerHTML = `
+    <div class="shard-main">
+      <strong></strong>
+      <span class="rss-value">${online}/${peers.length}</span>
+    </div>
+    <div class="shard-peers"></div>
+  `;
+  row.querySelector("strong").textContent = shard.name || "default";
+  row.querySelector(".shard-peers").textContent = peers.length
+    ? peers.map((peer) => `${peer.online ? "up" : "down"} ${peerName(peer)}${peer.rss ? ` (${formatMb(peer.rss)})` : ""}`).join(" | ")
+    : "no peers";
+  return row;
+}
+
+function isNodeOnline(nodeStatus) {
+  return nodeStatus && nodeStatus.ok !== false && nodeStatus.reachable !== false;
+}
+
+function nodeName(nodeStatus) {
+  return nodeStatus.node?.id || nodeStatus.node?.url || nodeStatus.sourcePeer?.url || "unknown";
+}
+
+function nodeMeta(nodeStatus) {
+  if (!isNodeOnline(nodeStatus)) return nodeStatus.error || "unreachable";
+  const shards = Array.isArray(nodeStatus.ownedShards) && nodeStatus.ownedShards.length
+    ? nodeStatus.ownedShards.join(", ")
+    : "no owned shards";
+  const seq = Number.isFinite(nodeStatus.replication?.seq) ? `seq ${nodeStatus.replication.seq}` : "seq n/a";
+  return `${shards} | ${seq}`;
+}
+
+function peerName(peer) {
+  return peer.nodeId || peer.url || peer.key || "unknown";
+}
+
+function formatMb(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "0 MiB";
+  return `${(value / 1024 / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
 }
 
 function pickFirstCollection() {
@@ -1290,8 +1532,8 @@ async function loadObjects({ selectId = null } = {}) {
     renderDetail(null);
     return;
   }
-  state.objects = Array.isArray(result.body?.objects) ? result.body.objects : [];
-  $("object-count").textContent = `${state.objects.length} of ${result.body?.count ?? state.objects.length}`;
+  state.objects = Array.isArray(result.body) ? result.body : [];
+  $("object-count").textContent = `${state.objects.length} shown`;
   renderObjects();
   const selected = selectId === null
     ? null
@@ -1651,6 +1893,7 @@ $("password").addEventListener("keydown", (event) => { if (event.key === "Enter"
 $("renew-btn").addEventListener("click", () => renewToken());
 $("logout-btn").addEventListener("click", () => clearSession());
 $("refresh-tree-btn").addEventListener("click", loadTree);
+$("refresh-cluster-btn").addEventListener("click", loadClusterStatus);
 $("add-db-btn").addEventListener("click", openDatabaseModal);
 $("add-coll-btn").addEventListener("click", openCollectionModal);
 $("edit-meta-btn").addEventListener("click", openMetaModal);
@@ -1685,7 +1928,10 @@ document.addEventListener("keydown", (event) => {
 
 loadSession();
 checkHealth();
-if (state.accessToken) loadTree();
+if (state.accessToken) {
+  loadTree();
+  loadClusterStatus();
+}
 </script>
 </body>
 </html>

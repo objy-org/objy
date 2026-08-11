@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CRDTNode } from "../src/crdt.js";
+import { AGGREGATE_PATH, READ_PATH } from "../src/query-planner.js";
 
 function seedUsers(n) {
   n.insert("db", "users", {
@@ -182,6 +183,45 @@ test("equality indexes are maintained across updates and deletes", () => {
   assert.deepEqual(n.find("db", "users", { "profile.city": "Arlington" }), []);
 });
 
+test("field indexes also drive sorted paging and stay fresh", () => {
+  const n = new CRDTNode({ id: "a" });
+  seedUsers(n);
+  n.createIndex("db", "users", "score");
+
+  assert.deepEqual(
+    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o.id),
+    ["grace", "ada"],
+  );
+  assert.equal(n.indexStats("db", "users")[0].orderedEntries, 3);
+
+  n.update("db", "users", "linus", { score: 30 });
+  assert.deepEqual(
+    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o.id),
+    ["linus", "grace"],
+  );
+
+  n.remove("db", "users", "linus");
+  assert.deepEqual(
+    n.find("db", "users", {}, { sortBy: "score", sort: "asc", limit: 3 }).map((o) => o.id),
+    ["ada", "grace"],
+  );
+});
+
+test("ordered index verifies filters it cannot prove", () => {
+  const n = new CRDTNode({ id: "a" });
+  n.insertMany("db", "items", [
+    { id: "a", bucket: "b1", score: 1 },
+    { id: "b", score: 2 },
+    { id: "c", bucket: "b2", score: 3 },
+  ]);
+  n.createIndex("db", "items", "id");
+
+  assert.deepEqual(
+    n.find("db", "items", { bucket: { $exists: false } }, { sortBy: "id", sort: "asc" }).map((o) => o.id),
+    ["b"],
+  );
+});
+
 test("reverse indexes narrow old equality, in, logical, array, and id queries", () => {
   const n = new CRDTNode({ id: "a" });
   seedUsers(n);
@@ -211,6 +251,50 @@ test("reverse indexes narrow old equality, in, logical, array, and id queries", 
   assert.deepEqual(
     n.find("db", "users", { tags: "history" }).map((o) => o.id),
     ["ada"],
+  );
+});
+
+test("queries can follow live reference objects", () => {
+  const n = new CRDTNode({ id: "a" });
+  n.insertMany("db", "authors", [
+    { id: "alice", name: "Alice", score: 10 },
+    { id: "bob", name: "Bob", score: 20 },
+  ]);
+  n.insertMany("db", "posts", [
+    { id: "p1", title: "One", author: { type: "reference", collection: "authors", value: "alice" } },
+    { id: "p2", title: "Two", author: { type: "reference", collection: "authors", value: "bob" } },
+    { id: "p3", title: "Missing", author: { type: "reference", collection: "authors", value: "missing" } },
+  ]);
+
+  assert.equal(n.get("db", "posts", "p1").author.object, undefined);
+  assert.equal(n.get("db", "posts", "p1", { refDepth: 1 }).author.object.name, "Alice");
+  assert.deepEqual(
+    n.find("db", "posts", { "author.object.name": "Alice" }).map((post) => post.id),
+    ["p1"],
+  );
+
+  n.update("db", "authors", "alice", { name: "Ada" });
+  assert.deepEqual(
+    n.find("db", "posts", { "author.object.name": "Ada" }).map((post) => post.id),
+    ["p1"],
+  );
+  assert.deepEqual(
+    n.find("db", "posts", { "author.object": null }).map((post) => post.id),
+    ["p3"],
+  );
+
+  const sorted = n.find("db", "posts", {}, { sortBy: "author.object.score", sort: "asc" });
+  assert.deepEqual(sorted.map((post) => post.id), ["p1", "p2", "p3"]);
+
+  assert.deepEqual(
+    n.aggregate("db", "posts", { "author.object": { $ne: null } }, {
+      groupBy: "author.object.name",
+      sum: "author.object.score",
+    }),
+    [
+      { count: 1, key: "Ada", sum: { "author.object.score": 10 } },
+      { count: 1, key: "Bob", sum: { "author.object.score": 20 } },
+    ],
   );
 });
 
@@ -255,5 +339,162 @@ test("aggregate supports old object-db aggregate specs", () => {
     },
   }), [
     { minScore: 10, maxScore: 20, scored: 2 },
+  ]);
+});
+
+test("column indexes drive object-db aggregates and stay fresh", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "users", {
+    indexes: ["status"],
+    columnIndexes: ["status", "score"],
+  });
+  seedUsers(n);
+  await n.awaitColumnIndexes("db", "users");
+
+  assert.deepEqual(
+    n.indexStats("db", "users")
+      .filter((entry) => entry.type === "column")
+      .map(({ path, status, entries }) => ({ path, status, entries })),
+    [
+      { path: "status", status: "ready", entries: 3 },
+      { path: "score", status: "ready", entries: 3 },
+    ],
+  );
+
+  assert.deepEqual(n.aggregate("db", "users", {}, {
+    groupBy: "status",
+    fields: {
+      total: { $sum: "score" },
+      average: { $avg: "score" },
+      n: { $count: true },
+    },
+    $sort: { total: -1 },
+  }), [
+    { status: "active", total: 30, average: 15, n: 2 },
+    { status: "inactive", total: 5, average: 5, n: 1 },
+  ]);
+
+  const collection = n.db.collection("db", "users");
+  const originalRead = collection.read.bind(collection);
+  let reads = 0;
+  collection.read = (id) => {
+    reads++;
+    return originalRead(id);
+  };
+  assert.deepEqual(n.aggregate("db", "users", {}, {
+    fields: {
+      totalScore: { $sum: "score" },
+    },
+  }), [
+    { totalScore: 35 },
+  ]);
+  assert.equal(reads, 0);
+  collection.read = originalRead;
+
+  n.update("db", "users", "ada", { status: "inactive", score: 15 });
+  n.remove("db", "users", "linus");
+
+  assert.deepEqual(n.aggregate("db", "users", {}, {
+    groupBy: "status",
+    fields: {
+      total: { $sum: "score" },
+      n: { $count: true },
+    },
+    $sort: { total: -1 },
+  }), [
+    { status: "active", total: 20, n: 1 },
+    { status: "inactive", total: 15, n: 1 },
+  ]);
+});
+
+test("query planner chooses old index-style read and aggregate paths", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "users", {
+    indexes: ["status"],
+    columnIndexes: ["score", "profile.city"],
+  });
+  seedUsers(n);
+  await n.awaitColumnIndexes("db", "users");
+
+  const collection = n.db.collection("db", "users");
+  assert.equal(collection._planRead({ status: "active" }, {}).path, READ_PATH.INDEX_EXACT);
+  assert.equal(collection._planRead({ status: "active", age: { $gt: 30 } }, {}).path, READ_PATH.INDEX_PARTIAL);
+  assert.equal(collection._planRead({ age: { $gt: 30 } }, {}).path, READ_PATH.SCAN);
+  assert.equal(collection._planRead({}, { sortBy: "status" }).path, READ_PATH.ORDERED_INDEX);
+  assert.equal(collection._planRead({}, { sortBy: "score" }).path, READ_PATH.SCAN);
+
+  assert.equal(collection._planAggregate({}, {
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.COLUMN_SUMMARY);
+  assert.equal(collection._planAggregate({ status: "active" }, {
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.COLUMN_SCAN);
+  assert.equal(collection._planAggregate({}, {
+    groupBy: "status",
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.GROUP_INDEX);
+  assert.equal(collection._planAggregate({}, {
+    groupBy: "profile.city",
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.GROUP_COLUMN_SCAN);
+  assert.equal(collection._planAggregate({}, {
+    fields: {
+      total: { $sum: "missingColumn" },
+    },
+  }).path, AGGREGATE_PATH.SCAN);
+});
+
+test("column indexes build in the background and absorb live deltas", async () => {
+  const n = new CRDTNode({ id: "a" });
+  const objects = [];
+  for (let i = 0; i < 512; i++) {
+    objects.push({
+      id: `e${i}`,
+      status: i % 2 === 0 ? "hot" : "cold",
+      score: i,
+      payload: { bucket: i % 8 },
+    });
+  }
+  n.insertMany("db", "events", objects);
+  n.createIndex("db", "events", "status");
+  n.setCollectionMeta("db", "events", {
+    indexes: ["status"],
+    columnIndexes: ["score", "payload"],
+  });
+
+  n.update("db", "events", "e10", { score: 100, payload: { bucket: "changed" } });
+  n.remove("db", "events", "e11");
+
+  assert.deepEqual(n.aggregate("db", "events", { status: "hot" }, {
+    fields: {
+      total: { $sum: "score" },
+      payloads: { $count: "payload" },
+      n: { $count: true },
+    },
+  }), [
+    { total: 65370, payloads: 256, n: 256 },
+  ]);
+
+  await n.awaitColumnIndexes("db", "events");
+  const columns = n.indexStats("db", "events").filter((entry) => entry.type === "column");
+  assert.equal(columns.every((entry) => entry.status === "ready"), true);
+  assert.equal(columns.find((entry) => entry.path === "payload").nonScalarEntries, 511);
+
+  assert.deepEqual(n.aggregate("db", "events", { status: "hot" }, {
+    fields: {
+      total: { $sum: "score" },
+      payloads: { $count: "payload" },
+      n: { $count: true },
+    },
+  }), [
+    { total: 65370, payloads: 256, n: 256 },
   ]);
 });

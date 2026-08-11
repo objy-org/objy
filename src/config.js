@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { normalizeAuthConfig } from "./auth.js";
+import { normalizeVectorConfig } from "./vector.js";
 
 export const DEFAULT_CONFIG_PATH = "spread-db.config.json";
 
@@ -32,6 +33,8 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
     server: {
       port,
     },
+    storage: normalizeStorageConfig(config.storage),
+    vector: normalizeVectorConfig(config.vector),
     cluster: {
       syncMs: positiveInt(config.cluster?.syncMs, 1000),
       shardMap: config.cluster?.shardMap,
@@ -39,6 +42,36 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
     },
     auth: normalizeAuthConfig(config.auth),
     persistence: normalizePersistenceConfig(config.persistence),
+  };
+}
+
+function normalizeStorageConfig(config = {}) {
+  const engine = config.engine || "shape";
+  if (!["shape", "object"].includes(engine)) {
+    throw new Error("storage.engine must be one of: shape, object");
+  }
+  return {
+    engine,
+    object: normalizeObjectStorageConfig(config.object),
+  };
+}
+
+function normalizeObjectStorageConfig(config = {}) {
+  return {
+    valueDirectory: normalizeValueDirectoryConfig(config.valueDirectory),
+  };
+}
+
+function normalizeValueDirectoryConfig(config = {}) {
+  return {
+    enabled: config.enabled !== false,
+    minRefs: positiveInt(config.minRefs, 2),
+    maxEntries: positiveInt(config.maxEntries, 100_000),
+    maxCandidates: positiveInt(config.maxCandidates, 4_096),
+    maxCandidatesPerPath: positiveInt(config.maxCandidatesPerPath, 256),
+    maxPaths: positiveInt(config.maxPaths, 1_024),
+    maxStringLength: positiveInt(config.maxStringLength, 256),
+    maxKeyBytes: positiveInt(config.maxKeyBytes, 512),
   };
 }
 
@@ -63,6 +96,7 @@ function normalizePersistenceConfig(config = {}) {
   if (!["off", "memory", "s3"].includes(mode)) {
     throw new Error(`unsupported persistence mode: ${mode}`);
   }
+  const ack = ackMode(config.ack);
 
   return {
     mode,
@@ -72,8 +106,12 @@ function normalizePersistenceConfig(config = {}) {
     snapshotMs: positiveInt(config.snapshotMs, 60_000),
     segmentBytes: positiveInt(config.segmentBytes, 16 * 1024 * 1024),
     compactJournals: config.compactJournals !== false,
+    snapshotDirtyOnly: config.snapshotDirtyOnly !== false,
+    snapshotRole: snapshotRole(config.snapshotRole),
     restoreMode: config.restoreMode || "scoped",
     restoreScopes: Array.isArray(config.restoreScopes) ? config.restoreScopes : undefined,
+    ack,
+    localWal: normalizeLocalWalConfig(config.localWal, ack),
     s3: {
       bucket: config.s3?.bucket || "spread-db",
       endpoint: config.s3?.endpoint,
@@ -137,4 +175,32 @@ function readJsonFile(path) {
 function positiveInt(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
+function snapshotRole(value) {
+  const role = value || "primary";
+  if (role === "primary" || role === "all" || role === "none") return role;
+  throw new Error("persistence.snapshotRole must be one of: primary, all, none");
+}
+
+function ackMode(value) {
+  const mode = value || "memory";
+  if (mode === "memory") return "memory";
+  if (mode === "localWal" || mode === "local-wal" || mode === "wal") return "localWal";
+  throw new Error("persistence.ack must be one of: memory, localWal");
+}
+
+function normalizeLocalWalConfig(config = {}, ack = "memory") {
+  const rawMode = config.mode ?? (ack === "localWal" ? "on" : "off");
+  const mode = rawMode === true ? "on" : rawMode === false ? "off" : rawMode;
+  if (mode !== "off" && mode !== "on") throw new Error("persistence.localWal.mode must be one of: off, on");
+  if (ack === "localWal" && mode === "off") {
+    throw new Error("persistence.ack localWal requires persistence.localWal.mode on");
+  }
+  return {
+    mode,
+    dir: config.dir || ".spread-db/wal",
+    fsync: config.fsync !== false,
+    flushMs: positiveInt(config.flushMs, 0),
+  };
 }
