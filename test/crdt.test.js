@@ -10,6 +10,20 @@ function pair() {
   return { a, b };
 }
 
+function shardMapFor(shards) {
+  return {
+    shards: Object.fromEntries(shards.map((shard) => [shard, { peers: [] }])),
+  };
+}
+
+function idForShard(node, shard) {
+  for (let i = 0; i < 10_000; i++) {
+    const id = `id-${i}`;
+    if (node.shardForObject("app", "events", id) === shard) return id;
+  }
+  throw new Error(`no test id found for ${shard}`);
+}
+
 function op(kind, id, extra = {}) {
   return { kind, id, db: "db", coll: "c", ...extra };
 }
@@ -209,6 +223,30 @@ test("field type change replicates cleanly", async () => {
   assert.deepEqual(b.get("db", "c", id), { id, v: "now a string" });
 });
 
+test("replication receive updates declared field indexes", async () => {
+  const { a, b } = pair();
+  b.createCollection("db", "events", { indexes: ["value"] });
+
+  a.insertMany("db", "events", [
+    { id: "e1", value: 2 },
+    { id: "e2", value: 1 },
+  ]);
+  await b.syncAll();
+
+  assert.deepEqual(
+    b.find("db", "events", {}, { sortBy: "value", limit: 2 }).map((event) => event.id),
+    ["e2", "e1"],
+  );
+  assert.equal(b.indexStats("db", "events")[0].orderedEntries, 2);
+
+  a.update("db", "events", "e1", { value: 0 });
+  await b.syncAll();
+  assert.deepEqual(
+    b.find("db", "events", {}, { sortBy: "value", limit: 2 }).map((event) => event.id),
+    ["e1", "e2"],
+  );
+});
+
 test("retention prunes ops once acked", async () => {
   const a = new CRDTNode({ id: "a", retainOps: 0 });
   const b = new CRDTNode({ id: "b" });
@@ -221,6 +259,18 @@ test("retention prunes ops once acked", async () => {
   assert.equal(a.trimmed, 50);
   assert.equal(a.log.length, 0);
   assert.equal(a.prune(), 0, "pruning is idempotent");
+});
+
+test("scoped replication snapshots only when that scope was trimmed", () => {
+  const source = new CRDTNode({ id: "source", retainOps: 0 });
+  source.replaceShardMap(shardMapFor(["shard-0", "shard-1"]));
+
+  source.insert("app", "events", { id: idForShard(source, "shard-0"), value: 1 });
+  source.receiveAck("replica", source.seq, { database: "*", collection: "*", shard: "shard-0" });
+
+  assert.equal(source.trimmed, 1);
+  assert.equal(source.needsSnapshot(0, { database: "*", collection: "*", shard: "shard-0" }), true);
+  assert.equal(source.needsSnapshot(0, { database: "*", collection: "*", shard: "shard-1" }), false);
 });
 
 test("retention keeps ops for a peer that acked but fell behind", async () => {

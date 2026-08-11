@@ -8,6 +8,21 @@
   "server": {
     "port": 8080
   },
+  "storage": {
+    "engine": "object",
+    "object": {
+      "valueDirectory": {
+        "enabled": true,
+        "minRefs": 2,
+        "maxEntries": 100000,
+        "maxCandidates": 4096,
+        "maxCandidatesPerPath": 256,
+        "maxPaths": 1024,
+        "maxStringLength": 256,
+        "maxKeyBytes": 512
+      }
+    }
+  },
   "cluster": {
     "syncMs": 250,
     "shardMapStore": {
@@ -34,10 +49,19 @@
     "prefix": "spread-db",
     "flushMs": 1000,
     "opBatchSize": 10000,
-    "snapshotMs": 60000,
+    "snapshotMs": 3600000,
+    "snapshotDirtyOnly": true,
+    "snapshotRole": "primary",
     "segmentBytes": 16777216,
     "compactJournals": true,
     "restoreMode": "scoped",
+    "ack": "localWal",
+    "localWal": {
+      "mode": "on",
+      "dir": ".spread-db/wal",
+      "fsync": true,
+      "flushMs": 1000
+    },
     "s3": {
       "bucket": "spread-db",
       "endpoint": "http://localhost:9000",

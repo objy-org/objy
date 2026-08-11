@@ -7,6 +7,10 @@ export function isObjectDbAggregateSpec(spec) {
 }
 
 export function aggregateObjects(rows, spec) {
+  return mergeAggregatePartials(aggregatePartialObjects(rows, spec), spec);
+}
+
+export function aggregatePartialObjects(rows, spec) {
   const normalized = normalizeAggregateSpec(spec);
   const buckets = new Map();
   let rowsSeen = 0;
@@ -37,6 +41,18 @@ export function aggregateObjects(rows, spec) {
 
   if (rowsSeen === 0) return [];
 
+  return [...buckets.values()].map((bucket) => {
+    const out = { ...bucket.groupValues };
+    for (const field of normalized.fields) writePartialField(out, bucket.fields[field.resultKey], field);
+    return out;
+  });
+}
+
+export function mergeAggregatePartials(rows, spec) {
+  const normalized = normalizeAggregateSpec(spec);
+  const buckets = aggregatePartialBuckets(rows, normalized);
+  if (buckets === null) return [];
+
   let result = [...buckets.values()].map((bucket) => {
     const out = { ...bucket.groupValues };
     for (const field of normalized.fields) out[field.resultKey] = finishField(bucket.fields[field.resultKey], field);
@@ -49,7 +65,50 @@ export function aggregateObjects(rows, spec) {
   return result.slice(start, start + normalized.pageSize);
 }
 
-function normalizeAggregateSpec(spec) {
+export function combineAggregatePartials(rows, spec) {
+  const normalized = normalizeAggregateSpec(spec);
+  const buckets = aggregatePartialBuckets(rows, normalized);
+  if (buckets === null) return [];
+
+  return [...buckets.values()].map((bucket) => {
+    const out = { ...bucket.groupValues };
+    for (const field of normalized.fields) writePartialField(out, bucket.fields[field.resultKey], field);
+    return out;
+  });
+}
+
+function aggregatePartialBuckets(rows, normalized) {
+  const buckets = new Map();
+  let rowsSeen = 0;
+
+  for (const row of rows || []) {
+    rowsSeen++;
+    const groupValues = {};
+    const groupKeyValues = [];
+    for (const path of normalized.groupBy) {
+      const value = row?.[path];
+      const stored = value === undefined ? null : value;
+      groupValues[path] = stored;
+      groupKeyValues.push(stored);
+    }
+
+    const key = stableKey(groupKeyValues);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        groupValues,
+        fields: makeFieldState(normalized.fields),
+      };
+      buckets.set(key, bucket);
+    }
+
+    for (const field of normalized.fields) mergePartialField(bucket.fields[field.resultKey], field, row);
+  }
+
+  return rowsSeen === 0 ? null : buckets;
+}
+
+export function normalizeAggregateSpec(spec) {
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
     throw new TypeError("$aggregate must be a plain object");
   }
@@ -202,6 +261,65 @@ function finishField(state, field) {
     default:
       return null;
   }
+}
+
+function writePartialField(out, state, field) {
+  switch (field.operator) {
+    case "$sum":
+      out[field.resultKey] = state.sum;
+      return;
+    case "$avg":
+      out[avgSumKey(field.resultKey)] = state.sum;
+      out[avgCountKey(field.resultKey)] = state.count;
+      return;
+    case "$min":
+    case "$max":
+      out[field.resultKey] = state.value === undefined ? null : state.value;
+      return;
+    case "$count":
+      out[field.resultKey] = state.count;
+  }
+}
+
+function mergePartialField(state, field, row) {
+  switch (field.operator) {
+    case "$sum": {
+      const value = row?.[field.resultKey];
+      if (typeof value === "number" && Number.isFinite(value)) state.sum += value;
+      return;
+    }
+    case "$avg": {
+      const sum = row?.[avgSumKey(field.resultKey)];
+      const count = row?.[avgCountKey(field.resultKey)];
+      if (typeof sum === "number" && Number.isFinite(sum)) state.sum += sum;
+      if (typeof count === "number" && Number.isFinite(count)) state.count += count;
+      return;
+    }
+    case "$min": {
+      const value = row?.[field.resultKey];
+      if (!isComparable(value)) return;
+      if (state.value === undefined || sameTypeLessThan(value, state.value)) state.value = value;
+      return;
+    }
+    case "$max": {
+      const value = row?.[field.resultKey];
+      if (!isComparable(value)) return;
+      if (state.value === undefined || sameTypeLessThan(state.value, value)) state.value = value;
+      return;
+    }
+    case "$count": {
+      const value = row?.[field.resultKey];
+      if (typeof value === "number" && Number.isFinite(value)) state.count += value;
+    }
+  }
+}
+
+function avgSumKey(resultKey) {
+  return `$partial.${resultKey}.sum`;
+}
+
+function avgCountKey(resultKey) {
+  return `$partial.${resultKey}.count`;
 }
 
 function isComparable(value) {

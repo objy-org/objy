@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CRDTNode } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
@@ -9,6 +12,55 @@ function shardMapFor(shards, peerByShard = {}) {
     shards: Object.fromEntries(shards.map((shard) => [shard, { peers: peerByShard[shard] || [] }])),
   };
 }
+
+function restoredCursor(node, sourceNode, scope) {
+  return new Map(node.getStats().lastSeen).get(node._cursorKey(sourceNode, scope));
+}
+
+test("local WAL restores acknowledged writes before S3 journal flush", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "spread-db-wal-"));
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({
+    node,
+    storage,
+    flushMs: 0,
+    snapshotMs: 0,
+    ack: "localWal",
+    localWal: { mode: "on", dir, fsync: true },
+  });
+
+  try {
+    persistence.start();
+    node.insertMany("app", "events", [
+      { id: "e1", value: 1 },
+      { id: "e2", value: 2 },
+    ]);
+    const flushed = await persistence.afterWrite();
+
+    assert.equal(flushed.records, 1);
+    assert.equal(flushed.ops, 2);
+    assert.deepEqual(await storage.list("spread-db/"), []);
+    assert.equal(readFileSync(join(dir, "n1", "wal.jsonl"), "utf8").trim().split("\n").length, 1);
+
+    const fresh = new CRDTNode({ id: "n1" });
+    const restored = await new PersistenceManager({
+      node: fresh,
+      storage,
+      flushMs: 0,
+      snapshotMs: 0,
+      ack: "localWal",
+      localWal: { mode: "on", dir, fsync: true },
+    }).restore();
+
+    assert.equal(restored.localWalOps, 2);
+    assert.deepEqual(fresh.get("app", "events", "e1"), { id: "e1", value: 1 });
+    assert.deepEqual(fresh.get("app", "events", "e2"), { id: "e2", value: 2 });
+  } finally {
+    await persistence.stop().catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("journaled writes restore by database, collection, and shard", async () => {
   const storage = new MemoryObjectStorage();
@@ -52,6 +104,35 @@ test("snapshots restore full objects and tombstones", async () => {
   assert.deepEqual(fresh.get("app", "users", "u2"), { id: "u2", name: "Grace" });
 });
 
+test("restore seeds replication cursors from persisted source nodes", async () => {
+  const snapshotStorage = new MemoryObjectStorage();
+  const snapshotWriter = new CRDTNode({ id: "snapshot-writer" });
+  snapshotWriter.insert("app", "events", { id: "e1", value: 1 });
+  await new PersistenceManager({ node: snapshotWriter, storage: snapshotStorage }).checkpoint();
+
+  const snapshotReplica = new CRDTNode({ id: "snapshot-replica" });
+  await new PersistenceManager({ node: snapshotReplica, storage: snapshotStorage }).restore();
+  assert.equal(
+    restoredCursor(snapshotReplica, "snapshot-writer", { database: "app", collection: "events", shard: "default" }),
+    snapshotWriter.seq,
+  );
+
+  const journalStorage = new MemoryObjectStorage();
+  const journalWriter = new CRDTNode({ id: "journal-writer" });
+  const journalPersistence = new PersistenceManager({ node: journalWriter, storage: journalStorage, flushMs: 0, snapshotMs: 0 });
+  journalPersistence.start();
+  journalWriter.insert("app", "events", { id: "e1", value: 1 });
+  journalWriter.update("app", "events", "e1", { value: 2 });
+  await journalPersistence.stop();
+
+  const journalReplica = new CRDTNode({ id: "journal-replica" });
+  await new PersistenceManager({ node: journalReplica, storage: journalStorage }).restore();
+  assert.equal(
+    restoredCursor(journalReplica, "journal-writer", { database: "app", collection: "events", shard: "default" }),
+    journalWriter.seq,
+  );
+});
+
 test("collection metadata persists outside shard snapshots and restores indexes", async () => {
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "n1" });
@@ -70,6 +151,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   const rawMeta = await storage.get("spread-db/db/app/collection/orders/meta.json");
   assert.deepEqual(JSON.parse(rawMeta), {
     indexes: ["status"],
+    columnIndexes: [],
     owner: "events-team",
   });
   assert.deepEqual(JSON.parse(await storage.get("spread-db/db/empty/meta.json")), {
@@ -77,6 +159,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   });
   assert.deepEqual(JSON.parse(await storage.get("spread-db/db/app/collection/empty_collection/meta.json")), {
     indexes: [],
+    columnIndexes: [],
   });
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -87,10 +170,16 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   assert.deepEqual(fresh.listCollections("app").sort(), ["empty_collection", "orders"]);
   assert.deepEqual(fresh.getCollectionMeta("app", "orders"), {
     indexes: ["status"],
+    columnIndexes: [],
     owner: "events-team",
   });
   assert.deepEqual(fresh.get("app", "orders", "o1"), { id: "o1", status: "paid", amount: 10 });
   assert.equal(fresh.indexStats("app", "orders")[0].entries, 1);
+  assert.equal(fresh.indexStats("app", "orders")[0].orderedEntries, 1);
+  assert.deepEqual(
+    fresh.find("app", "orders", {}, { sortBy: "status", limit: 1 }).map((order) => order.id),
+    ["o1"],
+  );
 });
 
 test("collection removal deletes the persisted collection prefix", async () => {
@@ -190,6 +279,46 @@ test("checkpoint compacts journal segments for the snapshotted scope", async () 
   const fresh = new CRDTNode({ id: "fresh" });
   await new PersistenceManager({ node: fresh, storage }).restore();
   assert.equal(fresh.count("app", "users"), 2);
+});
+
+test("automatic checkpoints are dirty-only and primary-only", async () => {
+  const shardMap = shardMapFor(["events-0"], {
+    "events-0": [{ url: "http://node-a" }, { url: "http://node-b" }],
+  });
+
+  const primaryStorage = new MemoryObjectStorage();
+  const primary = new CRDTNode({ id: "node-a", url: "http://node-a" });
+  primary.replaceShardMap(shardMap);
+  const primaryPersistence = new PersistenceManager({ node: primary, storage: primaryStorage, flushMs: 0, snapshotMs: 0 });
+  primaryPersistence.start();
+  primary.insert("app", "events", { id: "e1", value: 1 });
+
+  const first = await primaryPersistence.checkpoint({ automatic: true });
+  assert.equal(first.scopes, 1);
+  assert.equal(first.objects, 1);
+  assert.ok(await primaryStorage.get("spread-db/db/app/collection/events/shard/events-0/latest.json"));
+  assert.equal(primaryPersistence.getStats().dirtyScopes, 0);
+
+  const clean = await primaryPersistence.checkpoint({ automatic: true });
+  assert.equal(clean.scopes, 0);
+
+  const secondaryStorage = new MemoryObjectStorage();
+  const secondary = new CRDTNode({ id: "node-b", url: "http://node-b" });
+  secondary.replaceShardMap(shardMap);
+  const secondaryPersistence = new PersistenceManager({ node: secondary, storage: secondaryStorage, flushMs: 0, snapshotMs: 0 });
+  secondaryPersistence.start();
+  secondary.insert("app", "events", { id: "e1", value: 1 });
+
+  const skipped = await secondaryPersistence.checkpoint({ automatic: true });
+  assert.equal(skipped.scopes, 0);
+  assert.equal(await secondaryStorage.get("spread-db/db/app/collection/events/shard/events-0/latest.json"), null);
+
+  const manual = await secondaryPersistence.checkpoint();
+  assert.equal(manual.scopes, 1);
+  assert.ok(await secondaryStorage.get("spread-db/db/app/collection/events/shard/events-0/latest.json"));
+
+  await primaryPersistence.stop();
+  await secondaryPersistence.stop();
 });
 
 test("restore only hydrates shards owned by an explicitly scoped replica", async () => {

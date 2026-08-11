@@ -2,16 +2,28 @@ import { randomUUID } from "node:crypto";
 import { Store } from "./store.js";
 import { makeClock, nextTs, touch } from "./clock.js";
 import { DEFAULT_SHARD, GLOBAL_COLLECTION, GLOBAL_DATABASE, ShardMap } from "./shard-map.js";
+import { aggregateObjects, isObjectDbAggregateSpec } from "./aggregate.js";
+import { compareSortValues, getPathValue, matchesQuery, stableKey } from "./query.js";
+import {
+  baseCriteriaForReferenceQuery,
+  expandReferencesSync,
+  normalizeRefDepth,
+  pathHasReferenceObject,
+  referenceDepthForAggregateSpec,
+  referenceDepthForQuery,
+  stripReferenceObjects,
+} from "./references.js";
 
 export class CRDTNode {
-  constructor({ id = randomUUID(), url, clock, retainOps = 256, syncBatchSize = 1024, shardMap } = {}) {
+  constructor({ id = randomUUID(), url, clock, retainOps = 256, syncBatchSize = 1024, shardMap, storage, vector } = {}) {
     this.id = id;
     this.url = normalizeUrl(url);
-    this.db = new Store();
+    this.db = new Store({ ...(storage || {}), vector });
     this.clock = clock || makeClock(id);
     this.log = [];
     this.seq = 0;
     this.trimmed = 0;
+    this.scopeTrimmed = new Map();
     this.retainOps = retainOps;
     this.lastSeen = new Map();
     this.acks = new Map();
@@ -85,7 +97,7 @@ export class CRDTNode {
       db,
       coll,
       id: String(id),
-      value: withoutId(value),
+      value: this._prepareWriteValue(db, coll, value),
       ts: this.nextTs(),
     })));
   }
@@ -99,6 +111,7 @@ export class CRDTNode {
       const id = obj && obj.id ? String(obj.id) : randomUUID();
       return { id, value: withoutId(obj) };
     });
+    assertUniqueIds(items.map((item) => item.id));
     this._writeMany(db, coll, items);
     return items.map(({ id }) => this.get(db, coll, id) || { id });
   }
@@ -117,7 +130,10 @@ export class CRDTNode {
 
   replaceMany(db, coll, objects) {
     const items = normalizeObjectsWithIds(objects);
-    this._writeMany(db, coll, items.map((object) => ({ id: object.id, value: withoutId(object) })));
+    this._writeMany(db, coll, items.map((object) => ({
+      id: object.id,
+      value: this.db.preserveVector(db, coll, object.id, withoutId(object)),
+    })));
     return {
       replaced: items.length,
       items: this.getMany(db, coll, items.map((item) => item.id)),
@@ -127,7 +143,10 @@ export class CRDTNode {
   updateMany(db, coll, objects) {
     const items = normalizeObjectsWithIds(objects).map((object) => {
       const current = this.get(db, coll, object.id) || { id: object.id };
-      return { id: object.id, value: { ...withoutId(current), ...withoutId(object) } };
+      return {
+        id: object.id,
+        value: this.db.preserveVector(db, coll, object.id, { ...withoutId(current), ...withoutId(object) }),
+      };
     });
     this._writeMany(db, coll, items);
     return {
@@ -139,14 +158,12 @@ export class CRDTNode {
   removeMany(db, coll, ids) {
     const skipped = [];
     const ops = [];
-    const seen = new Set();
-    for (const rawId of ids || []) {
-      const id = String(rawId);
-      if (seen.has(id) || !this.db.collection(db, coll).has(id)) {
+    const normalized = normalizeIds(ids);
+    for (const id of normalized) {
+      if (!this.db.collection(db, coll).has(id)) {
         skipped.push(id);
         continue;
       }
-      seen.add(id);
       ops.push({ kind: "delObj", db, coll, id, ts: this.nextTs() });
     }
     const { applied } = this._commitLocalOps(ops);
@@ -157,12 +174,17 @@ export class CRDTNode {
     };
   }
 
-  get(db, coll, id) {
-    return this.db.collection(db, coll).read(id);
+  get(db, coll, id, options = {}) {
+    const object = this.db.collection(db, coll).read(id);
+    if (!object) return object;
+    const depth = normalizeRefDepth(options.refDepth, 0);
+    return depth > 0 ? this.expandReferences(db, object, depth) : object;
   }
 
-  getMany(db, coll, ids) {
-    return this.db.readObjects(db, coll, ids);
+  getMany(db, coll, ids, options = {}) {
+    const objects = this.db.readObjects(db, coll, ids);
+    const depth = normalizeRefDepth(options.refDepth, 0);
+    return depth > 0 ? objects.map((object) => this.expandReferences(db, object, depth)) : objects;
   }
 
   list(db, coll) {
@@ -170,15 +192,43 @@ export class CRDTNode {
   }
 
   find(db, coll, query = {}, options = {}) {
+    if (this._needsReferenceRead(query, options)) return this._findWithReferences(db, coll, query, options);
     return this.db.collection(db, coll).find(query, options);
   }
 
-  count(db, coll, query = {}) {
-    return this.db.collection(db, coll).count(query);
+  findShards(db, coll, query = {}, options = {}, shards = []) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.find(db, coll, query, includeId ? { ...options, includeId } : options);
   }
 
-  aggregate(db, coll, query = {}, spec = {}) {
-    return this.db.collection(db, coll).aggregate(query, spec);
+  count(db, coll, query = {}, options = {}) {
+    if (referenceDepthForQuery(query) > 0) return this._countWithReferences(db, coll, query, options);
+    return this.db.collection(db, coll).count(query, options);
+  }
+
+  countShards(db, coll, query = {}, shards = []) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.count(db, coll, query, includeId ? { includeId } : {});
+  }
+
+  aggregate(db, coll, query = {}, spec = {}, options = {}) {
+    if (referenceDepthForQuery(query) > 0 || referenceDepthForAggregateSpec(spec) > 0) {
+      return this._aggregateWithReferences(db, coll, query, spec);
+    }
+    return this.db.collection(db, coll).aggregate(query, spec, options);
+  }
+
+  aggregateShards(db, coll, query = {}, spec = {}, shards = []) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.aggregate(db, coll, query, spec, includeId ? { includeId } : {});
+  }
+
+  expandReferences(database, object, depth = 1) {
+    return expandReferencesSync(object, {
+      database,
+      depth,
+      getObject: (targetDatabase, targetCollection, id) => this.get(targetDatabase, targetCollection, id, { refDepth: 0 }),
+    });
   }
 
   createIndex(db, coll, path) {
@@ -239,6 +289,33 @@ export class CRDTNode {
 
   indexStats(db, coll) {
     return this.db.collection(db, coll).indexStats();
+  }
+
+  awaitColumnIndexes(db, coll) {
+    return this.db.awaitColumnIndexes(db, coll);
+  }
+
+  vectorSearch(db, coll, queryVec, limit = 20, options = {}) {
+    return this.db.vectorSearch(db, coll, queryVec, limit, options);
+  }
+
+  vectorSearchShards(db, coll, queryVec, limit = 20, shards = [], options = {}) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.vectorSearch(db, coll, queryVec, limit, includeId
+      ? { includeId, indexKey: vectorShardIndexKey(shards), ...options }
+      : options);
+  }
+
+  rankVectorRows(db, coll, rows, queryVec, limit = 20) {
+    return this.db.rankVectorRows(db, coll, rows, queryVec, limit);
+  }
+
+  getVector(db, coll, id) {
+    return this.db.getVector(db, coll, id);
+  }
+
+  vectorStats() {
+    return this.db.vectorStats();
   }
 
   async syncPeer(peer, scope) {
@@ -333,9 +410,30 @@ export class CRDTNode {
     };
   }
 
+  *snapshotScopeObjects(scope) {
+    if (!scope || scope.database === GLOBAL_DATABASE || scope.collection === GLOBAL_COLLECTION) {
+      for (const collection of this._snapshotCollections(scope)) {
+        yield* collection.objects;
+      }
+      return;
+    }
+
+    yield* this.db.collectionSnapshotObjects(scope.database, scope.collection, {
+      includeId: (id) => this.shardForObject(scope.database, scope.collection, id) === scope.shard,
+    });
+  }
+
   receiveAck(peerNodeId, after, scope) {
     this.acks.set(this._cursorKey(peerNodeId, scope), Math.min(after, this.seq));
     return this.prune();
+  }
+
+  needsSnapshot(after, scope) {
+    if (!scope) return after < this.trimmed;
+    for (const [key, trimmed] of this.scopeTrimmed) {
+      if (trimmed > after && scopeMatches(parseScopeKey(key), scope)) return true;
+    }
+    return false;
   }
 
   prune() {
@@ -347,10 +445,17 @@ export class CRDTNode {
     const cut = Math.min(safe, this.seq);
     const removed = cut - this.trimmed;
     if (removed > 0) {
-      this.log.splice(0, removed);
+      const removedOps = this.log.splice(0, removed);
+      for (const op of removedOps) this._rememberScopeTrim(op);
       this.trimmed = cut;
     }
     return removed;
+  }
+
+  _rememberScopeTrim(op) {
+    if (!op?.db || !op.coll || !op.shard || !Number.isFinite(op.seq)) return;
+    const key = scopeKey({ database: op.db, collection: op.coll, shard: op.shard });
+    this.scopeTrimmed.set(key, Math.max(this.scopeTrimmed.get(key) || 0, op.seq));
   }
 
   getStats() {
@@ -362,6 +467,7 @@ export class CRDTNode {
       syncBatchSize: this.syncBatchSize,
       acks: [...this.acks.entries()],
       lastSeen: [...this.lastSeen.entries()],
+      scopeTrimmed: [...this.scopeTrimmed.entries()],
     };
   }
 
@@ -409,9 +515,21 @@ export class CRDTNode {
     return this.shardMap.peersFor(shard);
   }
 
+  ownsShard(shard = DEFAULT_SHARD) {
+    if (!this.url) return true;
+    const peers = this.peersForShard(shard);
+    if (!peers.length) return true;
+    return peers.some((peer) => this._isSelfPeer(peer));
+  }
+
+  routingPeersForShard(shard = DEFAULT_SHARD) {
+    return this.peersForShard(shard).filter((peer) => peer.url && !this._isSelfPeer(peer));
+  }
+
   replaceShardMap(shardMap) {
     this.shardMap.replace(shardMap);
     this.peers = this.shardMap.allPeers();
+    this.db.clearVectorIndexes();
   }
 
   shardMapSnapshot() {
@@ -422,23 +540,82 @@ export class CRDTNode {
     return this.shardMap.shardForObject(database, collection, objectId);
   }
 
-  _snapshotCollections(scope) {
-    const collections = this.db.snapshot();
-    if (!scope) return collections;
+  _includeShardId(database, collection, shards = []) {
+    const shardSet = new Set((shards || []).filter(Boolean));
+    if (!shardSet.size) return null;
+    return (id) => shardSet.has(this.shardForObject(database, collection, id));
+  }
 
-    return collections
-      .filter((collection) => {
-        return (
-          (scope.database === GLOBAL_DATABASE || collection.db === scope.database) &&
-          (scope.collection === GLOBAL_COLLECTION || collection.coll === scope.collection)
-        );
-      })
-      .map((collection) => ({
-        ...collection,
-        objects: collection.objects.filter((object) => {
-          return this.shardForObject(collection.db, collection.coll, object.id) === scope.shard;
-        }),
-      }));
+  _needsReferenceRead(query = {}, options = {}) {
+    return referenceDepthForQuery(query) > 0 ||
+      pathHasReferenceObject(options.sortBy) ||
+      normalizeRefDepth(options.refDepth, 0) > 0;
+  }
+
+  _findWithReferences(db, coll, query = {}, options = {}) {
+    const criteria = query || {};
+    const queryDepth = referenceDepthForQuery(criteria);
+    const sortDepth = pathHasReferenceObject(options.sortBy) ? 1 : 0;
+    const responseDepth = normalizeRefDepth(options.refDepth, queryDepth > 0 || sortDepth > 0 ? 1 : 0);
+    const matchDepth = Math.max(queryDepth, sortDepth);
+    if (matchDepth <= 0) {
+      return this.db.collection(db, coll)
+        .find(criteria, withoutReferenceOptions(options))
+        .map((object) => this.expandReferences(db, object, responseDepth));
+    }
+    const fetchOptions = {
+      ...(typeof options.includeId === "function" ? { includeId: options.includeId } : {}),
+    };
+    const candidates = this.db.collection(db, coll).find(
+      matchDepth > 0 ? baseCriteriaForReferenceQuery(criteria) : criteria,
+      fetchOptions,
+    );
+    const matched = [];
+    for (const object of candidates) {
+      const matchObject = matchDepth > 0 ? this.expandReferences(db, object, matchDepth) : object;
+      if (matchesQuery(matchObject, criteria)) matched.push({ raw: object, matchObject });
+    }
+    const sorted = sortReferencePairs(matched, options);
+    const paged = paginatePairs(sorted, options);
+    return paged.map(({ raw }) => responseDepth > 0 ? this.expandReferences(db, raw, responseDepth) : raw);
+  }
+
+  _countWithReferences(db, coll, query = {}, options = {}) {
+    const criteria = query || {};
+    const depth = referenceDepthForQuery(criteria);
+    let n = 0;
+    const candidates = this.db.collection(db, coll).find(baseCriteriaForReferenceQuery(criteria), {
+      ...(typeof options.includeId === "function" ? { includeId: options.includeId } : {}),
+    });
+    for (const object of candidates) {
+      if (matchesQuery(this.expandReferences(db, object, depth), criteria)) n++;
+    }
+    return n;
+  }
+
+  _aggregateWithReferences(db, coll, query = {}, spec = {}) {
+    const depth = Math.max(referenceDepthForQuery(query), referenceDepthForAggregateSpec(spec));
+    const rows = this._findWithReferences(db, coll, query, { refDepth: depth });
+    if (isObjectDbAggregateSpec(spec)) return aggregateObjects(rows, spec);
+    return aggregateLegacyRows(rows, spec);
+  }
+
+  _prepareWriteValue(db, coll, value) {
+    const prepared = stripReferenceObjects(withoutId(value));
+    this.db.validateWriteValue(db, coll, prepared);
+    return prepared;
+  }
+
+  _snapshotCollections(scope) {
+    if (!scope) return this.db.snapshot();
+
+    return this.db.snapshot({
+      database: scope.database,
+      collection: scope.collection,
+      includeObject: (database, collection, id) => {
+        return this.shardForObject(database, collection, id) === scope.shard;
+      },
+    });
   }
 
   _opsAfter(after, limit, scope) {
@@ -497,9 +674,118 @@ function withoutId(object) {
   return rest;
 }
 
+function withoutReferenceOptions(options = {}) {
+  const { refDepth, ...rest } = options;
+  return rest;
+}
+
+function vectorShardIndexKey(shards = []) {
+  const shardList = [...new Set((shards || []).filter(Boolean).map(String))].sort();
+  return shardList.length ? `shards:${shardList.join(",")}` : "all";
+}
+
+function sortReferencePairs(pairs, options = {}) {
+  if (!options.sortBy) return pairs;
+  const direction = options.sort === "desc" ? -1 : 1;
+  return [...pairs].sort((left, right) => {
+    return compareSortValues(
+      getPathValue(left.matchObject, options.sortBy),
+      getPathValue(right.matchObject, options.sortBy),
+    ) * direction;
+  });
+}
+
+function paginatePairs(pairs, options = {}) {
+  const offset = options.offset || 0;
+  const limit = options.limit ?? Infinity;
+  if (limit <= 0) return [];
+  return pairs.slice(offset, offset + limit);
+}
+
+function aggregateLegacyRows(rows, spec = {}) {
+  const groupBy = spec.groupBy;
+  const metrics = {
+    sum: asArray(spec.sum),
+    avg: asArray(spec.avg),
+    min: asArray(spec.min),
+    max: asArray(spec.max),
+  };
+  const groups = new Map();
+
+  for (const object of rows || []) {
+    const key = groupBy ? stableKey(getPathValue(object, groupBy)) : "__all__";
+    let bucket = groups.get(key);
+    if (!bucket) {
+      bucket = makeAggregateBucket(groupBy ? getPathValue(object, groupBy) : undefined, metrics);
+      groups.set(key, bucket);
+    }
+    addAggregateRow(bucket, object, metrics);
+  }
+
+  if (!groupBy) return finishAggregateBucket(groups.get("__all__") || makeAggregateBucket(undefined, metrics), metrics);
+  return [...groups.values()].map((bucket) => finishAggregateBucket(bucket, metrics));
+}
+
+function makeAggregateBucket(key, metrics) {
+  return {
+    key,
+    count: 0,
+    sum: Object.fromEntries(metrics.sum.map((field) => [field, 0])),
+    avg: Object.fromEntries(metrics.avg.map((field) => [field, { sum: 0, count: 0 }])),
+    min: Object.fromEntries(metrics.min.map((field) => [field, undefined])),
+    max: Object.fromEntries(metrics.max.map((field) => [field, undefined])),
+  };
+}
+
+function addAggregateRow(bucket, object, metrics) {
+  bucket.count++;
+  for (const field of metrics.sum) {
+    const value = getPathValue(object, field);
+    if (typeof value === "number") bucket.sum[field] += value;
+  }
+  for (const field of metrics.avg) {
+    const value = getPathValue(object, field);
+    if (typeof value === "number") {
+      bucket.avg[field].sum += value;
+      bucket.avg[field].count++;
+    }
+  }
+  for (const field of metrics.min) {
+    const value = getPathValue(object, field);
+    if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
+      bucket.min[field] = value;
+    }
+  }
+  for (const field of metrics.max) {
+    const value = getPathValue(object, field);
+    if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
+      bucket.max[field] = value;
+    }
+  }
+}
+
+function finishAggregateBucket(bucket, metrics) {
+  const out = { count: bucket.count };
+  if (bucket.key !== undefined) out.key = bucket.key;
+  if (metrics.sum.length) out.sum = bucket.sum;
+  if (metrics.avg.length) {
+    out.avg = Object.fromEntries(
+      Object.entries(bucket.avg).map(([field, state]) => [field, state.count ? state.sum / state.count : null]),
+    );
+  }
+  if (metrics.min.length) out.min = bucket.min;
+  if (metrics.max.length) out.max = bucket.max;
+  return out;
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 function normalizeObjectsWithIds(objects) {
   if (!Array.isArray(objects)) throw new TypeError("objects must be an array");
-  return objects.map((object, index) => {
+  const normalized = objects.map((object, index) => {
     if (!object || typeof object !== "object" || Array.isArray(object)) {
       const err = new TypeError(`item at index ${index} must be an object`);
       err.index = index;
@@ -512,10 +798,58 @@ function normalizeObjectsWithIds(objects) {
     }
     return { ...object, id: String(object.id) };
   });
+  assertUniqueIds(normalized.map((object) => object.id));
+  return normalized;
+}
+
+function normalizeIds(ids) {
+  if (!Array.isArray(ids)) throw new TypeError("ids must be an array");
+  const normalized = ids.map((rawId, index) => {
+    const id = String(rawId);
+    if (id.length === 0) {
+      const err = new TypeError(`id at index ${index} must be non-empty`);
+      err.index = index;
+      throw err;
+    }
+    return id;
+  });
+  assertUniqueIds(normalized);
+  return normalized;
+}
+
+function assertUniqueIds(ids) {
+  const seen = new Set();
+  for (let i = 0; i < ids.length; i++) {
+    const id = String(ids[i]);
+    if (seen.has(id)) {
+      const err = new TypeError(`duplicate id in bulk request: ${id}`);
+      err.index = i;
+      err.id = id;
+      throw err;
+    }
+    seen.add(id);
+  }
 }
 
 function normalizeUrl(url) {
   return url ? String(url).replace(/\/+$/, "") : null;
+}
+
+function scopeKey(scope) {
+  return `${scope.database}\n${scope.collection}\n${scope.shard}`;
+}
+
+function parseScopeKey(key) {
+  const [database, collection, shard] = key.split("\n");
+  return { database, collection, shard };
+}
+
+function scopeMatches(opScope, requested) {
+  return (
+    (requested.database === GLOBAL_DATABASE || requested.database === opScope.database) &&
+    (requested.collection === GLOBAL_COLLECTION || requested.collection === opScope.collection) &&
+    requested.shard === opScope.shard
+  );
 }
 
 export function localPeer(node) {
@@ -523,7 +857,7 @@ export function localPeer(node) {
     key: node.id,
     nodeId: node.id,
     pull: async (after, limit, scope) => {
-      if (after < node.trimmed) {
+      if (node.needsSnapshot(after, scope)) {
         return { status: 410, nodeId: node.id, lastSeq: node.seq, trimmed: node.trimmed };
       }
       const ops = node._opsAfter(after, limit, scope);
