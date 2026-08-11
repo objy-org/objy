@@ -1,0 +1,16 @@
+{
+  "shards": {
+    "shard-0": {
+      "peers": [
+        { "url": "http://localhost:8080" },
+        { "url": "http://localhost:8081" }
+      ]
+    },
+    "shard-1": {
+      "peers": [
+        { "url": "http://localhost:8082" },
+        { "url": "http://localhost:8083" }
+      ]
+    }
+  }
+}

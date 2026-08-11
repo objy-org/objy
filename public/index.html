@@ -1,0 +1,1691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>spread-db console</title>
+<style>
+  :root {
+    --bg: #0d0e0f;
+    --band: #121416;
+    --panel: #171a1d;
+    --panel-2: #1d2125;
+    --line: #2b3136;
+    --line-soft: #22272b;
+    --text: #ece7db;
+    --muted: #a6a095;
+    --faint: #746f66;
+    --teal: #3ed7b5;
+    --teal-2: #16443a;
+    --amber: #f0b64d;
+    --red: #ef6f6c;
+    --blue: #6ea8fe;
+    --shadow: 0 16px 48px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  button, input, textarea, select { font: inherit; }
+
+  button {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    min-height: 34px;
+    padding: 7px 11px;
+    background: var(--teal);
+    color: #061713;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    white-space: nowrap;
+    font-weight: 700;
+  }
+
+  button:hover { filter: brightness(1.06); }
+  button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+  button.secondary { background: var(--panel-2); color: var(--text); border-color: var(--line); }
+  button.ghost { background: transparent; color: var(--muted); border-color: var(--line-soft); }
+  button.danger { background: #3c1f21; color: #ffd7d4; border-color: #743134; }
+  button.icon-only { width: 34px; padding: 0; }
+
+  svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+  }
+
+  input, textarea, select {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0f1112;
+    color: var(--text);
+    padding: 9px 10px;
+  }
+
+  textarea {
+    min-height: 78px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  input:focus, textarea:focus, select:focus, button:focus-visible {
+    outline: 2px solid rgba(62, 215, 181, .45);
+    outline-offset: 1px;
+  }
+
+  label {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  .app {
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: 58px 1fr;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(210px, 320px) 1fr auto;
+    align-items: center;
+    gap: 18px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--line-soft);
+    background: rgba(13, 14, 15, .94);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(16px);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background:
+      linear-gradient(135deg, rgba(62, 215, 181, .9), rgba(240, 182, 77, .88));
+    color: #10110f;
+    font-weight: 900;
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.1;
+  }
+
+  .brand small {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  .connection {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .connection input {
+    height: 34px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  .session {
+    display: flex;
+    align-items: center;
+    justify-content: end;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 28px;
+    max-width: 280px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    background: var(--panel);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--faint);
+    flex: 0 0 auto;
+  }
+
+  .dot.ok { background: var(--teal); box-shadow: 0 0 0 4px rgba(62, 215, 181, .12); }
+  .dot.bad { background: var(--red); box-shadow: 0 0 0 4px rgba(239, 111, 108, .12); }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 326px minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .sidebar {
+    min-width: 0;
+    border-right: 1px solid var(--line-soft);
+    background: var(--band);
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .login-panel {
+    padding: 16px;
+    border-bottom: 1px solid var(--line-soft);
+    display: grid;
+    gap: 12px;
+  }
+
+  .login-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+  }
+
+  .login-actions {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .tree-panel {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .tree-head, .content-head, .detail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .tree-actions, .content-actions, .object-actions, .modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .content-actions, .object-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .tree-head {
+    padding: 14px 16px 10px;
+  }
+
+  .section-title {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .tree {
+    overflow: auto;
+    padding: 0 10px 14px;
+  }
+
+  .db-block {
+    margin-bottom: 8px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .015);
+  }
+
+  .db-row, .coll-row {
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    min-height: 38px;
+    padding: 8px 10px;
+    justify-content: flex-start;
+    font-weight: 750;
+  }
+
+  .db-row {
+    color: #fff7e8;
+    background: rgba(255, 255, 255, .025);
+  }
+
+  .coll-row {
+    color: var(--muted);
+    padding-left: 28px;
+    font-weight: 650;
+  }
+
+  .coll-row.active {
+    color: var(--teal);
+    background: rgba(62, 215, 181, .09);
+  }
+
+  .db-name, .coll-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .count-chip {
+    margin-left: auto;
+    color: var(--faint);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .main {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    background:
+      linear-gradient(180deg, rgba(62, 215, 181, .035), transparent 180px),
+      var(--bg);
+  }
+
+  .toolbar {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line-soft);
+    display: grid;
+    gap: 12px;
+  }
+
+  .breadcrumb {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .breadcrumb strong {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .query-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 92px auto auto;
+    gap: 10px;
+    align-items: start;
+  }
+
+  .query-row textarea {
+    min-height: 42px;
+    max-height: 160px;
+  }
+
+  .workspace {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+  }
+
+  .object-list {
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--line-soft);
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .content-head, .detail-head {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .objects {
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .object-card {
+    display: grid;
+    gap: 7px;
+    width: 100%;
+    margin-bottom: 9px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text);
+    text-align: left;
+    padding: 10px;
+    font-weight: 500;
+  }
+
+  .object-card:hover { border-color: rgba(62, 215, 181, .45); filter: none; }
+  .object-card.active { border-color: var(--teal); background: rgba(62, 215, 181, .075); }
+
+  .object-id {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #fff5df;
+  }
+
+  .object-id span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .object-preview {
+    color: var(--muted);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .viewer {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .detail-tools {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .json-view {
+    min-height: 0;
+    overflow: auto;
+    padding: 18px;
+  }
+
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .json-box {
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: #101213;
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .j-key { color: var(--teal); }
+  .j-str { color: #f3c878; }
+  .j-num { color: var(--blue); }
+  .j-bool { color: #b98cff; }
+  .j-null { color: var(--faint); }
+
+  .empty, .error {
+    padding: 18px;
+    color: var(--muted);
+    min-height: 110px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+  }
+
+  .error { color: #ffd1cf; }
+
+  .meta-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 20;
+    max-width: min(420px, calc(100vw - 36px));
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #151819;
+    color: var(--text);
+    box-shadow: var(--shadow);
+    padding: 12px 14px;
+    display: none;
+  }
+
+  .toast.show { display: block; }
+  .toast.bad { border-color: rgba(239, 111, 108, .55); color: #ffd1cf; }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    display: none;
+    place-items: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, .62);
+  }
+
+  .modal-backdrop.open {
+    display: grid;
+  }
+
+  .modal {
+    width: min(720px, 100%);
+    max-height: min(760px, calc(100vh - 36px));
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #141719;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .modal.small { width: min(460px, 100%); }
+
+  .modal-head, .modal-foot {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .modal-foot {
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 0;
+    justify-content: flex-end;
+  }
+
+  .modal-head h2 {
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .modal-body {
+    overflow: auto;
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .form-grid .wide, .modal-body .wide {
+    grid-column: 1 / -1;
+  }
+
+  .json-editor {
+    min-height: 260px;
+  }
+
+  .modal-error {
+    display: none;
+    color: #ffd1cf;
+    border: 1px solid rgba(239, 111, 108, .38);
+    border-radius: 8px;
+    background: rgba(239, 111, 108, .08);
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .modal-error.show {
+    display: block;
+  }
+
+  .confirm-name {
+    color: #fff5df;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    word-break: break-word;
+  }
+
+  @media (max-width: 980px) {
+    .app { grid-template-rows: auto 1fr; }
+    .topbar { grid-template-columns: 1fr; height: auto; padding: 12px; gap: 10px; position: static; }
+    .connection, .session { justify-content: stretch; }
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+    .tree { max-height: 260px; }
+    .workspace { grid-template-columns: 1fr; }
+    .object-list { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+    .objects { max-height: 320px; }
+    .query-row { grid-template-columns: 1fr 84px; }
+    .query-row button { min-width: 0; }
+  }
+
+  @media (max-width: 560px) {
+    .login-grid, .login-actions, .query-row { grid-template-columns: 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+    .tree-head, .content-head, .detail-head { align-items: flex-start; flex-direction: column; }
+    .tree-actions, .content-actions, .object-actions, .modal-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+    .session { flex-wrap: wrap; justify-content: flex-start; }
+    .pill { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">S</div>
+      <div>
+        <h1>spread-db console</h1>
+        <small id="node-label">checking node</small>
+      </div>
+    </div>
+
+    <div class="connection">
+      <label>
+        Server
+        <input id="server" type="url" autocomplete="off" />
+      </label>
+      <button id="health-btn" class="secondary icon-only" title="Check health" aria-label="Check health">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v7h-7"/></svg>
+      </button>
+    </div>
+
+    <div class="session">
+      <span class="pill" id="health-pill"><span class="dot"></span><span>unknown</span></span>
+      <span class="pill" id="session-pill">not signed in</span>
+      <button id="renew-btn" class="secondary" disabled>
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+        Renew
+      </button>
+      <button id="logout-btn" class="ghost" disabled>
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        Logout
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <section class="login-panel">
+        <div class="tree-head" style="padding:0">
+          <span class="section-title">Login</span>
+          <button id="login-btn" title="Log in">
+            <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+            Login
+          </button>
+        </div>
+        <div class="login-grid">
+          <label>Database <input id="auth-db" value="_global" autocomplete="off" /></label>
+          <label>Collection <input id="auth-coll" value="users" autocomplete="off" /></label>
+          <label>Username <input id="username" value="admin" autocomplete="username" /></label>
+          <label>Password <input id="password" type="password" value="123" autocomplete="current-password" /></label>
+        </div>
+      </section>
+
+      <section class="tree-panel">
+        <div class="tree-head">
+          <span class="section-title">Databases</span>
+          <div class="tree-actions">
+            <button id="add-db-btn" class="secondary" title="Add database" aria-label="Add database" disabled>
+              <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              Database
+            </button>
+            <button id="add-coll-btn" class="secondary" title="Add collection" aria-label="Add collection" disabled>
+              <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/><path d="M18 16v6"/><path d="M15 19h6"/></svg>
+              Collection
+            </button>
+            <button id="refresh-tree-btn" class="secondary icon-only" title="Refresh tree" aria-label="Refresh tree">
+              <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="tree" id="tree">
+          <div class="empty">Sign in to load databases.</div>
+        </div>
+      </section>
+    </aside>
+
+    <main class="main">
+      <section class="toolbar">
+        <div class="content-head" style="padding:0;border:0">
+          <div>
+            <div class="breadcrumb" id="breadcrumb"><span>Select a collection</span></div>
+            <div class="meta-line" id="collection-meta"></div>
+          </div>
+          <div class="content-actions">
+            <button id="edit-meta-btn" class="secondary" disabled>
+              <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              Meta
+            </button>
+            <button id="delete-coll-btn" class="danger" disabled>
+              <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+              Collection
+            </button>
+          </div>
+        </div>
+        <div class="query-row">
+          <label>
+            Query JSON
+            <textarea id="query" spellcheck="false" placeholder='{"status":"active"}'></textarea>
+          </label>
+          <label>
+            Limit
+            <select id="limit">
+              <option>25</option>
+              <option selected>50</option>
+              <option>100</option>
+              <option>250</option>
+            </select>
+          </label>
+          <button id="format-query-btn" class="secondary">
+            <svg viewBox="0 0 24 24"><path d="M21 10H7"/><path d="M21 6H3"/><path d="M21 14H3"/><path d="M21 18H7"/></svg>
+            Format
+          </button>
+          <button id="load-objects-btn">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+            Load
+          </button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="object-list">
+          <div class="content-head">
+            <span class="section-title">Objects</span>
+            <div class="object-actions">
+              <span class="pill" id="object-count">0 shown</span>
+              <button id="add-object-btn" class="secondary" disabled>
+                <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                Object
+              </button>
+            </div>
+          </div>
+          <div class="objects" id="objects">
+            <div class="empty">Pick a collection from the tree.</div>
+          </div>
+        </div>
+
+        <div class="viewer">
+          <div class="detail-head">
+            <span class="section-title" id="detail-title">Object</span>
+            <div class="detail-tools">
+              <button id="edit-object-btn" class="secondary" disabled>
+                <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                Edit
+              </button>
+              <button id="delete-object-btn" class="danger" disabled>
+                <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                Delete
+              </button>
+              <button id="copy-id-btn" class="secondary" disabled>
+                <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                ID
+              </button>
+              <button id="reload-object-btn" class="secondary" disabled>
+                <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+                Reload
+              </button>
+            </div>
+          </div>
+          <div class="json-view" id="detail">
+            <div class="empty">Select an object.</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="db-modal" role="dialog" aria-modal="true" aria-labelledby="db-modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="db-modal-title">Add Database</h2>
+      <button class="ghost icon-only" data-close-modal="db-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>Name <input id="db-name" autocomplete="off" /></label>
+        <label class="wide">Meta JSON <textarea id="db-meta-json" class="json-editor" spellcheck="false">{}</textarea></label>
+      </div>
+      <div class="modal-error" id="db-modal-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" data-close-modal="db-modal">Cancel</button>
+      <button id="db-modal-save">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+        Save
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="collection-modal" role="dialog" aria-modal="true" aria-labelledby="collection-modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="collection-modal-title">Add Collection</h2>
+      <button class="ghost icon-only" data-close-modal="collection-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>Database <input id="collection-db" autocomplete="off" /></label>
+        <label>Collection <input id="collection-name" autocomplete="off" /></label>
+        <label class="wide">Meta JSON <textarea id="collection-meta-json" class="json-editor" spellcheck="false">{
+  "indexes": []
+}</textarea></label>
+      </div>
+      <div class="modal-error" id="collection-modal-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" data-close-modal="collection-modal">Cancel</button>
+      <button id="collection-modal-save">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+        Save
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="meta-modal" role="dialog" aria-modal="true" aria-labelledby="meta-modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="meta-modal-title">Edit Collection Meta</h2>
+      <button class="ghost icon-only" data-close-modal="meta-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <label>Meta JSON <textarea id="meta-json" class="json-editor" spellcheck="false"></textarea></label>
+      <div class="modal-error" id="meta-modal-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" data-close-modal="meta-modal">Cancel</button>
+      <button id="meta-modal-save">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+        Save
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="object-modal" role="dialog" aria-modal="true" aria-labelledby="object-modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="object-modal-title">Add Object</h2>
+      <button class="ghost icon-only" data-close-modal="object-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>Object ID <input id="object-id" autocomplete="off" /></label>
+        <label class="wide">Object JSON <textarea id="object-json" class="json-editor" spellcheck="false">{}</textarea></label>
+      </div>
+      <div class="modal-error" id="object-modal-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" data-close-modal="object-modal">Cancel</button>
+      <button id="object-modal-save">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+        Save
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="delete-object-modal" role="dialog" aria-modal="true" aria-labelledby="delete-object-title">
+  <div class="modal small">
+    <div class="modal-head">
+      <h2 id="delete-object-title">Delete Object</h2>
+      <button class="ghost icon-only" data-close-modal="delete-object-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div>Delete <span class="confirm-name" id="delete-object-name"></span>?</div>
+      <div class="modal-error" id="delete-object-modal-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" data-close-modal="delete-object-modal">Cancel</button>
+      <button id="delete-object-confirm" class="danger">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="delete-collection-modal" role="dialog" aria-modal="true" aria-labelledby="delete-collection-title">
+  <div class="modal small">
+    <div class="modal-head">
+      <h2 id="delete-collection-title">Delete Collection</h2>
+      <button class="ghost icon-only" data-close-modal="delete-collection-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div>Delete <span class="confirm-name" id="delete-collection-name"></span>?</div>
+      <div class="modal-error" id="delete-collection-modal-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" data-close-modal="delete-collection-modal">Cancel</button>
+      <button id="delete-collection-confirm" class="danger">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const STORE_KEY = "spread-db-ui:session";
+
+const state = {
+  server: defaultServer(),
+  accessToken: "",
+  refreshToken: "",
+  authDb: "_global",
+  authColl: "users",
+  user: null,
+  tree: {},
+  active: null,
+  collectionMeta: null,
+  objects: [],
+  selected: null,
+  objectMode: "add",
+};
+
+function defaultServer() {
+  const origin = window.location.origin;
+  if (origin && origin !== "null" && /^https?:\/\//i.test(origin)) return origin.replace(/\/+$/, "");
+  return "http://localhost:8080";
+}
+
+function enc(value) {
+  return encodeURIComponent(String(value || ""));
+}
+
+function authPath(kind, db = state.authDb, coll = state.authColl) {
+  return `/api/${enc(db)}/${enc(coll)}/${kind}`;
+}
+
+function collectionPath(db, coll, tail = "") {
+  return `/api/${enc(db)}/${enc(coll)}${tail}`;
+}
+
+function objectPath(db, coll, tail = "") {
+  return `/api/${enc(db)}/${enc(coll)}/object${tail}`;
+}
+
+function loadSession() {
+  $("server").value = localStorage.getItem("spread-db-ui:server") || state.server;
+  state.server = $("server").value.replace(/\/+$/, "");
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
+    state.accessToken = saved.accessToken || "";
+    state.refreshToken = saved.refreshToken || "";
+    state.authDb = saved.authDb || "_global";
+    state.authColl = saved.authColl || "users";
+    state.user = saved.user || null;
+    $("auth-db").value = state.authDb;
+    $("auth-coll").value = state.authColl;
+  } catch {
+    clearSession(false);
+  }
+  renderSession();
+}
+
+function saveSession() {
+  localStorage.setItem("spread-db-ui:server", state.server);
+  localStorage.setItem(STORE_KEY, JSON.stringify({
+    accessToken: state.accessToken,
+    refreshToken: state.refreshToken,
+    authDb: state.authDb,
+    authColl: state.authColl,
+    user: state.user,
+  }));
+}
+
+function clearSession(render = true) {
+  state.accessToken = "";
+  state.refreshToken = "";
+  state.user = null;
+  state.tree = {};
+  state.active = null;
+  state.collectionMeta = null;
+  state.objects = [];
+  state.selected = null;
+  localStorage.removeItem(STORE_KEY);
+  if (render) {
+    renderSession();
+    renderTree();
+    renderObjects();
+    renderDetail(null);
+    setMeta("");
+    setBreadcrumb();
+    renderActionState();
+  }
+}
+
+function renderSession() {
+  const user = state.user;
+  $("session-pill").textContent = user
+    ? `${user.username || user.id || "user"} at ${state.authDb}/${state.authColl}`
+    : "not signed in";
+  $("renew-btn").disabled = !state.refreshToken;
+  $("logout-btn").disabled = !state.accessToken;
+  renderActionState();
+}
+
+function renderActionState() {
+  const signedIn = !!state.accessToken;
+  const hasCollection = signedIn && !!state.active;
+  const hasObject = hasCollection && !!state.selected?.id;
+  $("add-db-btn").disabled = !signedIn;
+  $("add-coll-btn").disabled = !signedIn;
+  $("edit-meta-btn").disabled = !hasCollection;
+  $("delete-coll-btn").disabled = !hasCollection;
+  $("add-object-btn").disabled = !hasCollection;
+  $("edit-object-btn").disabled = !hasObject;
+  $("delete-object-btn").disabled = !hasObject;
+  $("copy-id-btn").disabled = !hasObject;
+  $("reload-object-btn").disabled = !hasObject;
+}
+
+function authHeaders() {
+  return state.accessToken ? { authorization: `Bearer ${state.accessToken}` } : {};
+}
+
+function requestInit(method, body, includeAuth = true) {
+  return {
+    method,
+    headers: {
+      ...(includeAuth ? authHeaders() : {}),
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  };
+}
+
+async function apiFetch(method, path, body, { retry = true, auth = true } = {}) {
+  const url = state.server + path;
+  let res;
+  try {
+    res = await fetch(url, requestInit(method, body, auth));
+  } catch (err) {
+    return { ok: false, status: 0, body: { error: err.message } };
+  }
+  if (res.status === 401 && retry && state.refreshToken && !/\/(?:auth|renew)$/.test(path)) {
+    const renewed = await renewToken({ silent: true });
+    if (renewed.ok) return apiFetch(method, path, body, { retry: false, auth });
+  }
+  const text = await res.text();
+  let parsed = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+  return { ok: res.ok, status: res.status, body: parsed };
+}
+
+async function checkHealth() {
+  const result = await apiFetch("GET", "/health", undefined, { auth: false });
+  const dot = $("health-pill").querySelector(".dot");
+  const label = $("health-pill").querySelector("span:last-child");
+  dot.className = "dot " + (result.ok ? "ok" : "bad");
+  label.textContent = result.ok ? "reachable" : "unreachable";
+  $("node-label").textContent = result.body?.node ? `node ${result.body.node}` : "node unknown";
+}
+
+async function login() {
+  state.server = $("server").value.trim().replace(/\/+$/, "") || defaultServer();
+  state.authDb = $("auth-db").value.trim() || "_global";
+  state.authColl = $("auth-coll").value.trim() || "users";
+  const username = $("username").value.trim();
+  const password = $("password").value;
+
+  const result = await apiFetch("POST", authPath("auth"), { username, password }, { auth: false });
+  if (!result.ok) return showToast(result.body?.error || "Login failed", true);
+
+  state.accessToken = result.body.accessToken || "";
+  state.refreshToken = result.body.refreshToken || "";
+  state.user = result.body.user || null;
+  $("password").value = "";
+  saveSession();
+  renderSession();
+  showToast("Signed in");
+  await loadTree();
+}
+
+async function renewToken({ silent = false } = {}) {
+  const result = await apiFetch("POST", authPath("renew"), { refreshToken: state.refreshToken }, { auth: false, retry: false });
+  if (!result.ok) {
+    if (!silent) showToast(result.body?.error || "Renew failed", true);
+    if (result.status === 401 || result.status === 403) clearSession();
+    return result;
+  }
+  state.accessToken = result.body.accessToken || state.accessToken;
+  state.refreshToken = result.body.refreshToken || state.refreshToken;
+  state.user = result.body.user || state.user;
+  saveSession();
+  renderSession();
+  if (!silent) showToast("Token renewed");
+  return result;
+}
+
+async function loadTree() {
+  if (!state.accessToken) {
+    $("tree").innerHTML = `<div class="empty">Sign in to load databases.</div>`;
+    renderActionState();
+    return;
+  }
+
+  $("tree").innerHTML = `<div class="empty">Loading databases...</div>`;
+  const dbs = await apiFetch("GET", "/api/databases");
+  if (!dbs.ok) {
+    $("tree").innerHTML = `<div class="error">${escapeHtml(dbs.body?.error || "Could not load databases")}</div>`;
+    return;
+  }
+
+  const names = Array.isArray(dbs.body?.databases) ? dbs.body.databases : [];
+  const entries = await Promise.all(names.map(async (db) => {
+    const result = await apiFetch("GET", `/api/${enc(db)}/collections`);
+    return [db, result.ok && Array.isArray(result.body?.collections) ? result.body.collections : []];
+  }));
+  state.tree = Object.fromEntries(entries);
+  renderTree();
+  renderActionState();
+
+  const first = pickFirstCollection();
+  if (!state.active && first) await selectCollection(first.db, first.collection);
+}
+
+function pickFirstCollection() {
+  const names = Object.keys(state.tree).sort();
+  for (const db of names) {
+    const collections = [...(state.tree[db] || [])].sort();
+    const preferred = collections.find((name) => db !== "_global" || name !== "users") || collections[0];
+    if (preferred) return { db, collection: preferred };
+  }
+  return null;
+}
+
+function renderTree() {
+  const root = $("tree");
+  const dbs = Object.keys(state.tree).sort();
+  if (!state.accessToken) {
+    root.innerHTML = `<div class="empty">Sign in to load databases.</div>`;
+    return;
+  }
+  if (!dbs.length) {
+    root.innerHTML = `<div class="empty">No databases yet.</div>`;
+    return;
+  }
+
+  root.innerHTML = "";
+  for (const db of dbs) {
+    const block = document.createElement("div");
+    block.className = "db-block";
+
+    const dbRow = document.createElement("button");
+    dbRow.className = "db-row";
+    dbRow.type = "button";
+    dbRow.innerHTML = `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="db-name"></span><span class="count-chip"></span>`;
+    dbRow.querySelector(".db-name").textContent = db;
+    dbRow.querySelector(".count-chip").textContent = String((state.tree[db] || []).length);
+    block.appendChild(dbRow);
+
+    for (const collection of [...(state.tree[db] || [])].sort()) {
+      const active = state.active?.db === db && state.active?.collection === collection;
+      const row = document.createElement("button");
+      row.className = "coll-row" + (active ? " active" : "");
+      row.type = "button";
+      row.innerHTML = `<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg><span class="coll-name"></span>`;
+      row.querySelector(".coll-name").textContent = collection;
+      row.addEventListener("click", () => selectCollection(db, collection));
+      block.appendChild(row);
+    }
+    root.appendChild(block);
+  }
+}
+
+async function selectCollection(db, collection) {
+  state.active = { db, collection };
+  state.selected = null;
+  state.collectionMeta = null;
+  setBreadcrumb();
+  renderTree();
+  renderDetail(null);
+  renderActionState();
+  await loadCollectionMeta();
+  await loadObjects();
+}
+
+function setBreadcrumb() {
+  const el = $("breadcrumb");
+  if (!state.active) {
+    el.innerHTML = `<span>Select a collection</span>`;
+    return;
+  }
+  el.innerHTML = `<strong></strong><span>/</span><strong></strong>`;
+  el.querySelectorAll("strong")[0].textContent = state.active.db;
+  el.querySelectorAll("strong")[1].textContent = state.active.collection;
+}
+
+async function loadCollectionMeta() {
+  if (!state.active) {
+    state.collectionMeta = null;
+    renderActionState();
+    return setMeta("");
+  }
+  const result = await apiFetch("GET", collectionPath(state.active.db, state.active.collection, "/meta"));
+  if (!result.ok) {
+    state.collectionMeta = null;
+    renderActionState();
+    return setMeta("");
+  }
+  state.collectionMeta = result.body || {};
+  const indexes = Array.isArray(result.body?.indexes) ? result.body.indexes : [];
+  setMeta(indexes.length ? `indexes: ${indexes.join(", ")}` : "no indexes");
+  renderActionState();
+}
+
+function setMeta(text) {
+  $("collection-meta").textContent = text;
+}
+
+function parseQuery() {
+  const raw = $("query").value.trim();
+  if (!raw) return { ok: true, params: new URLSearchParams() };
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { ok: false, error: "Query must be a JSON object" };
+    }
+    const params = new URLSearchParams({ q: JSON.stringify(value) });
+    return { ok: true, params };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function loadObjects({ selectId = null } = {}) {
+  if (!state.active) return;
+  const parsed = parseQuery();
+  if (!parsed.ok) return showToast(`Invalid query: ${parsed.error}`, true);
+  parsed.params.set("limit", $("limit").value);
+  const query = parsed.params.toString();
+  $("objects").innerHTML = `<div class="empty">Loading objects...</div>`;
+  const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, query ? `?${query}` : ""));
+  if (!result.ok) {
+    $("objects").innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load objects")}</div>`;
+    $("object-count").textContent = "0 shown";
+    state.objects = [];
+    state.selected = null;
+    renderDetail(null);
+    return;
+  }
+  state.objects = Array.isArray(result.body?.objects) ? result.body.objects : [];
+  $("object-count").textContent = `${state.objects.length} of ${result.body?.count ?? state.objects.length}`;
+  renderObjects();
+  const selected = selectId === null
+    ? null
+    : state.objects.find((object) => String(object.id) === String(selectId));
+  if (selected) showObject(selected);
+  else if (state.objects.length) showObject(state.objects[0]);
+  else renderDetail(null);
+}
+
+function renderObjects() {
+  const root = $("objects");
+  if (!state.active) {
+    root.innerHTML = `<div class="empty">Pick a collection from the tree.</div>`;
+    $("object-count").textContent = "0 shown";
+    return;
+  }
+  if (!state.objects.length) {
+    root.innerHTML = `<div class="empty">No matching objects.</div>`;
+    return;
+  }
+
+  root.innerHTML = "";
+  for (const object of state.objects) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "object-card" + (state.selected?.id === object.id ? " active" : "");
+    card.innerHTML = `
+      <div class="object-id"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg><span></span></div>
+      <div class="object-preview"></div>
+    `;
+    card.querySelector(".object-id span").textContent = object.id;
+    card.querySelector(".object-preview").textContent = previewObject(object);
+    card.addEventListener("click", () => showObject(object));
+    root.appendChild(card);
+  }
+}
+
+function previewObject(object) {
+  const entries = Object.entries(object || {}).filter(([key]) => key !== "id").slice(0, 4);
+  if (!entries.length) return "{}";
+  return entries.map(([key, value]) => `${key}: ${shortValue(value)}`).join(", ");
+}
+
+function shortValue(value) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return String(text).length > 46 ? String(text).slice(0, 43) + "..." : String(text);
+}
+
+function showObject(object) {
+  state.selected = object;
+  renderObjects();
+  renderDetail(object);
+}
+
+async function reloadObject() {
+  if (!state.active || !state.selected?.id) return;
+  const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, `/${enc(state.selected.id)}`));
+  if (!result.ok) return showToast(result.body?.error || "Could not reload object", true);
+  showObject(result.body);
+}
+
+function renderDetail(object) {
+  $("detail-title").textContent = object?.id ? `Object ${object.id}` : "Object";
+  renderActionState();
+  if (!object) {
+    $("detail").innerHTML = `<div class="empty">Select an object.</div>`;
+    return;
+  }
+  $("detail").innerHTML = `<div class="json-box"><pre>${highlightJson(object)}</pre></div>`;
+}
+
+function highlightJson(value) {
+  return escapeHtml(JSON.stringify(value, null, 2)).replace(
+    /(&quot;(?:\\.|[^\\])*?&quot;)(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?/g,
+    (match, str, colon) => {
+      if (str) return colon ? `<span class="j-key">${str}</span>${colon}` : `<span class="j-str">${str}</span>`;
+      if (match === "true" || match === "false") return `<span class="j-bool">${match}</span>`;
+      if (match === "null") return `<span class="j-null">${match}</span>`;
+      return `<span class="j-num">${match}</span>`;
+    },
+  );
+}
+
+function formatQuery() {
+  const raw = $("query").value.trim();
+  if (!raw) {
+    $("query").value = "{}";
+    return;
+  }
+  try {
+    $("query").value = JSON.stringify(JSON.parse(raw), null, 2);
+  } catch (err) {
+    showToast(`Invalid query: ${err.message}`, true);
+  }
+}
+
+async function copySelectedId() {
+  if (!state.selected?.id) return;
+  try {
+    await navigator.clipboard.writeText(state.selected.id);
+    showToast("Object id copied");
+  } catch {
+    showToast("Clipboard unavailable", true);
+  }
+}
+
+function openDatabaseModal() {
+  if (!state.accessToken) return showToast("Sign in first", true);
+  $("db-name").value = "";
+  setJsonField("db-meta-json", {});
+  openModal("db-modal", "db-name");
+}
+
+async function saveDatabase() {
+  clearModalError("db-modal");
+  const name = $("db-name").value.trim();
+  if (!name) return setModalError("db-modal", "Database name is required");
+  const parsed = parseJsonField("db-meta-json", "Database meta");
+  if (!parsed.ok) return setModalError("db-modal", parsed.error);
+
+  const result = await apiFetch("POST", "/api/databases", { name, meta: parsed.value });
+  if (!result.ok) return setModalError("db-modal", result.body?.error || "Could not save database");
+  closeModal("db-modal");
+  showToast(result.body?.created ? "Database created" : "Database updated");
+  await loadTree();
+}
+
+function openCollectionModal() {
+  if (!state.accessToken) return showToast("Sign in first", true);
+  $("collection-db").value = state.active?.db || state.authDb || "_global";
+  $("collection-name").value = "";
+  setJsonField("collection-meta-json", { indexes: [] });
+  openModal("collection-modal", "collection-name");
+}
+
+async function saveCollection() {
+  clearModalError("collection-modal");
+  const db = $("collection-db").value.trim();
+  const name = $("collection-name").value.trim();
+  if (!db) return setModalError("collection-modal", "Database name is required");
+  if (!name) return setModalError("collection-modal", "Collection name is required");
+  const parsed = parseJsonField("collection-meta-json", "Collection meta");
+  if (!parsed.ok) return setModalError("collection-modal", parsed.error);
+
+  const result = await apiFetch("POST", `/api/${enc(db)}/collections`, { name, meta: parsed.value });
+  if (!result.ok) return setModalError("collection-modal", result.body?.error || "Could not save collection");
+  closeModal("collection-modal");
+  showToast(result.body?.created ? "Collection created" : "Collection updated");
+  state.active = { db, collection: name };
+  await loadTree();
+  await selectCollection(db, name);
+}
+
+async function openMetaModal() {
+  if (!state.active) return showToast("Select a collection first", true);
+  if (state.collectionMeta === null) await loadCollectionMeta();
+  setJsonField("meta-json", state.collectionMeta || {});
+  openModal("meta-modal", "meta-json");
+}
+
+async function saveCollectionMeta() {
+  if (!state.active) return;
+  clearModalError("meta-modal");
+  const parsed = parseJsonField("meta-json", "Collection meta");
+  if (!parsed.ok) return setModalError("meta-modal", parsed.error);
+
+  const result = await apiFetch("PUT", collectionPath(state.active.db, state.active.collection, "/meta"), parsed.value);
+  if (!result.ok) return setModalError("meta-modal", result.body?.error || "Could not save collection meta");
+  state.collectionMeta = result.body || parsed.value;
+  closeModal("meta-modal");
+  showToast("Collection meta saved");
+  await loadCollectionMeta();
+}
+
+function openObjectModal(mode) {
+  if (!state.active) return showToast("Select a collection first", true);
+  state.objectMode = mode;
+  clearModalError("object-modal");
+  $("object-modal-title").textContent = mode === "edit" ? "Edit Object" : "Add Object";
+  $("object-id").disabled = mode === "edit";
+
+  if (mode === "edit") {
+    if (!state.selected?.id) return showToast("Select an object first", true);
+    $("object-id").value = state.selected.id;
+    setJsonField("object-json", state.selected);
+  } else {
+    $("object-id").value = "";
+    setJsonField("object-json", {});
+  }
+  openModal("object-modal", mode === "edit" ? "object-json" : "object-id");
+}
+
+async function saveObject() {
+  if (!state.active) return;
+  clearModalError("object-modal");
+  const parsed = parseJsonField("object-json", "Object JSON", { allowArray: state.objectMode === "add" });
+  if (!parsed.ok) return setModalError("object-modal", parsed.error);
+
+  if (state.objectMode === "edit") {
+    if (!state.selected?.id) return setModalError("object-modal", "Selected object is missing");
+    if (!isPlainObject(parsed.value)) return setModalError("object-modal", "Object JSON must be a plain object");
+    const id = state.selected.id;
+    const result = await apiFetch("PUT", objectPath(state.active.db, state.active.collection, `/${enc(id)}`), {
+      ...parsed.value,
+      id,
+    });
+    if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
+    closeModal("object-modal");
+    showToast("Object saved");
+    await loadObjects({ selectId: id });
+    return;
+  }
+
+  const explicitId = $("object-id").value.trim();
+  let body = parsed.value;
+  if (Array.isArray(body)) {
+    if (explicitId) return setModalError("object-modal", "Object ID is only for single-object inserts");
+    const badIndex = body.findIndex((item) => !isPlainObject(item));
+    if (badIndex >= 0) return setModalError("object-modal", `Item at index ${badIndex} must be a plain object`);
+  } else if (explicitId) {
+    body = { ...body, id: explicitId };
+  }
+
+  const result = await apiFetch("POST", objectPath(state.active.db, state.active.collection), body);
+  if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
+  const newId = Array.isArray(body) ? result.body?.items?.[0]?.id : result.body?.id;
+  closeModal("object-modal");
+  showToast(Array.isArray(body) ? `${result.body?.inserted ?? body.length} objects added` : "Object added");
+  await loadObjects({ selectId: newId || null });
+}
+
+function openDeleteObjectModal() {
+  if (!state.selected?.id) return showToast("Select an object first", true);
+  clearModalError("delete-object-modal");
+  $("delete-object-name").textContent = state.selected.id;
+  openModal("delete-object-modal", "delete-object-confirm");
+}
+
+async function deleteSelectedObject() {
+  if (!state.active || !state.selected?.id) return;
+  clearModalError("delete-object-modal");
+  const id = state.selected.id;
+  const result = await apiFetch("DELETE", objectPath(state.active.db, state.active.collection, `/${enc(id)}`));
+  if (!result.ok) return setModalError("delete-object-modal", result.body?.error || "Could not delete object");
+  closeModal("delete-object-modal");
+  showToast("Object deleted");
+  state.selected = null;
+  await loadObjects();
+}
+
+function openDeleteCollectionModal() {
+  if (!state.active) return showToast("Select a collection first", true);
+  clearModalError("delete-collection-modal");
+  $("delete-collection-name").textContent = `${state.active.db}/${state.active.collection}`;
+  openModal("delete-collection-modal", "delete-collection-confirm");
+}
+
+async function deleteActiveCollection() {
+  if (!state.active) return;
+  clearModalError("delete-collection-modal");
+  const { db, collection } = state.active;
+  const result = await apiFetch("DELETE", `/api/${enc(db)}/collections/${enc(collection)}`);
+  if (!result.ok) return setModalError("delete-collection-modal", result.body?.error || "Could not delete collection");
+  closeModal("delete-collection-modal");
+  showToast("Collection deleted");
+  state.active = null;
+  state.collectionMeta = null;
+  state.objects = [];
+  state.selected = null;
+  setBreadcrumb();
+  setMeta("");
+  renderObjects();
+  renderDetail(null);
+  await loadTree();
+}
+
+function parseJsonField(id, label, { allowArray = false } = {}) {
+  const raw = $(id).value.trim();
+  let value;
+  try {
+    value = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    return { ok: false, error: `${label}: ${err.message}` };
+  }
+  if (allowArray && Array.isArray(value)) return { ok: true, value };
+  if (!isPlainObject(value)) return { ok: false, error: `${label} must be a plain object` };
+  return { ok: true, value };
+}
+
+function setJsonField(id, value) {
+  $(id).value = JSON.stringify(value, null, 2);
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function openModal(id, focusId) {
+  const modal = $(id);
+  modal.classList.add("open");
+  requestAnimationFrame(() => {
+    const target = focusId ? $(focusId) : modal.querySelector("input, textarea, button");
+    target?.focus();
+  });
+}
+
+function closeModal(id) {
+  const modal = $(id);
+  if (!modal) return;
+  modal.classList.remove("open");
+  clearModalError(id);
+}
+
+function closeAllModals() {
+  document.querySelectorAll(".modal-backdrop.open").forEach((modal) => closeModal(modal.id));
+}
+
+function setModalError(modalId, message) {
+  const el = $(`${modalId}-error`);
+  if (!el) return showToast(message, true);
+  el.textContent = message;
+  el.classList.add("show");
+}
+
+function clearModalError(modalId) {
+  const el = $(`${modalId}-error`);
+  if (!el) return;
+  el.textContent = "";
+  el.classList.remove("show");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+let toastTimer = null;
+function showToast(message, bad = false) {
+  const el = $("toast");
+  el.textContent = message;
+  el.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = "toast"; }, 2600);
+}
+
+$("server").addEventListener("input", () => {
+  state.server = $("server").value.trim().replace(/\/+$/, "") || defaultServer();
+  saveSession();
+});
+$("health-btn").addEventListener("click", checkHealth);
+$("login-btn").addEventListener("click", login);
+$("password").addEventListener("keydown", (event) => { if (event.key === "Enter") login(); });
+$("renew-btn").addEventListener("click", () => renewToken());
+$("logout-btn").addEventListener("click", () => clearSession());
+$("refresh-tree-btn").addEventListener("click", loadTree);
+$("add-db-btn").addEventListener("click", openDatabaseModal);
+$("add-coll-btn").addEventListener("click", openCollectionModal);
+$("edit-meta-btn").addEventListener("click", openMetaModal);
+$("delete-coll-btn").addEventListener("click", openDeleteCollectionModal);
+$("load-objects-btn").addEventListener("click", loadObjects);
+$("format-query-btn").addEventListener("click", formatQuery);
+$("add-object-btn").addEventListener("click", () => openObjectModal("add"));
+$("edit-object-btn").addEventListener("click", () => openObjectModal("edit"));
+$("delete-object-btn").addEventListener("click", openDeleteObjectModal);
+$("copy-id-btn").addEventListener("click", copySelectedId);
+$("reload-object-btn").addEventListener("click", reloadObject);
+$("db-modal-save").addEventListener("click", saveDatabase);
+$("collection-modal-save").addEventListener("click", saveCollection);
+$("meta-modal-save").addEventListener("click", saveCollectionMeta);
+$("object-modal-save").addEventListener("click", saveObject);
+$("delete-object-confirm").addEventListener("click", deleteSelectedObject);
+$("delete-collection-confirm").addEventListener("click", deleteActiveCollection);
+
+document.querySelectorAll("[data-close-modal]").forEach((button) => {
+  button.addEventListener("click", () => closeModal(button.dataset.closeModal));
+});
+
+document.querySelectorAll(".modal-backdrop").forEach((modal) => {
+  modal.addEventListener("mousedown", (event) => {
+    if (event.target === modal) closeModal(modal.id);
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeAllModals();
+});
+
+loadSession();
+checkHealth();
+if (state.accessToken) loadTree();
+</script>
+</body>
+</html>

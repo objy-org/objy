@@ -1,0 +1,50 @@
+{
+  "node": {
+    "id": "node-a",
+    "url": "http://localhost:8080",
+    "retainOps": 256,
+    "syncBatchSize": 1024
+  },
+  "server": {
+    "port": 8080
+  },
+  "cluster": {
+    "syncMs": 1000,
+    "shardMapStore": {
+      "mode": "off",
+      "prefix": "spread-db",
+      "key": "cluster/shard-map.json"
+    }
+  },
+  "auth": {
+    "jwtSecret": "local-dev-jwt-secret-change-me",
+    "accessTokenTtlSeconds": 900,
+    "refreshTokenTtlSeconds": 1209600,
+    "users": [
+      {
+        "id": "admin",
+        "username": "admin",
+        "password": "123",
+        "role": "admin"
+      }
+    ]
+  },
+  "persistence": {
+    "mode": "off",
+    "prefix": "spread-db",
+    "flushMs": 1000,
+    "opBatchSize": 1000,
+    "snapshotMs": 60000,
+    "segmentBytes": 16777216,
+    "compactJournals": true,
+    "restoreMode": "scoped",
+    "s3": {
+      "bucket": "spread-db",
+      "endpoint": "http://localhost:9000",
+      "region": "us-east-1",
+      "accessKeyId": "minioadmin",
+      "secretAccessKey": "minioadmin",
+      "forcePathStyle": true
+    }
+  }
+}
