@@ -47,11 +47,12 @@ export class HttpRouter {
   }
 }
 
-export function json(res, status, body) {
+export function json(res, status, body, headers = {}) {
   const payload = body === undefined ? "" : JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
+    ...headers,
   });
   res.end(payload);
 }

@@ -26,6 +26,8 @@ export function localClusterStatus(node) {
       retainOps: node.retainOps,
       syncBatchSize: node.syncBatchSize,
     },
+    indexes: node.indexReadiness(),
+    vectors: node.vectorStats(),
     process: {
       pid: process.pid,
       uptimeMs: Math.round(process.uptime() * 1000),

@@ -1,5 +1,21 @@
 export const DEFAULT_VECTOR_FIELD = "_vec";
 
+export class VectorIndexWarmingError extends Error {
+  constructor({ database, collection, indexKey = "all", indexStatus = "warming" } = {}) {
+    super("vector index warming");
+    this.name = "VectorIndexWarmingError";
+    this.code = "VECTOR_INDEX_WARMING";
+    this.status = 503;
+    this.body = {
+      error: "vector index warming",
+      ...(database ? { database } : {}),
+      ...(collection ? { collection } : {}),
+      indexKey,
+      indexStatus,
+    };
+  }
+}
+
 export function isValidVector(value) {
   return Array.isArray(value) &&
     value.length > 0 &&

@@ -22,7 +22,7 @@ export function aggregatePartialObjects(rows, spec) {
     for (const path of normalized.groupBy) {
       const value = getPathValue(row, path);
       const stored = value === undefined ? null : value;
-      groupValues[path] = stored;
+      groupValues[path] = cloneResultValue(stored);
       groupKeyValues.push(stored);
     }
 
@@ -42,7 +42,7 @@ export function aggregatePartialObjects(rows, spec) {
   if (rowsSeen === 0) return [];
 
   return [...buckets.values()].map((bucket) => {
-    const out = { ...bucket.groupValues };
+    const out = cloneGroupValues(bucket.groupValues);
     for (const field of normalized.fields) writePartialField(out, bucket.fields[field.resultKey], field);
     return out;
   });
@@ -54,7 +54,7 @@ export function mergeAggregatePartials(rows, spec) {
   if (buckets === null) return [];
 
   let result = [...buckets.values()].map((bucket) => {
-    const out = { ...bucket.groupValues };
+    const out = cloneGroupValues(bucket.groupValues);
     for (const field of normalized.fields) out[field.resultKey] = finishField(bucket.fields[field.resultKey], field);
     return out;
   });
@@ -71,7 +71,7 @@ export function combineAggregatePartials(rows, spec) {
   if (buckets === null) return [];
 
   return [...buckets.values()].map((bucket) => {
-    const out = { ...bucket.groupValues };
+    const out = cloneGroupValues(bucket.groupValues);
     for (const field of normalized.fields) writePartialField(out, bucket.fields[field.resultKey], field);
     return out;
   });
@@ -88,7 +88,7 @@ function aggregatePartialBuckets(rows, normalized) {
     for (const path of normalized.groupBy) {
       const value = row?.[path];
       const stored = value === undefined ? null : value;
-      groupValues[path] = stored;
+      groupValues[path] = cloneResultValue(stored);
       groupKeyValues.push(stored);
     }
 
@@ -226,13 +226,13 @@ function stepField(state, field, row) {
     case "$min": {
       const value = getPathValue(row, field.operand);
       if (!isComparable(value)) return;
-      if (state.value === undefined || sameTypeLessThan(value, state.value)) state.value = value;
+      if (state.value === undefined || sameTypeLessThan(value, state.value)) state.value = cloneResultValue(value);
       return;
     }
     case "$max": {
       const value = getPathValue(row, field.operand);
       if (!isComparable(value)) return;
-      if (state.value === undefined || sameTypeLessThan(state.value, value)) state.value = value;
+      if (state.value === undefined || sameTypeLessThan(state.value, value)) state.value = cloneResultValue(value);
       return;
     }
     case "$count": {
@@ -255,7 +255,7 @@ function finishField(state, field) {
       return state.count ? state.sum / state.count : null;
     case "$min":
     case "$max":
-      return state.value === undefined ? null : state.value;
+      return state.value === undefined ? null : cloneResultValue(state.value);
     case "$count":
       return state.count;
     default:
@@ -274,7 +274,7 @@ function writePartialField(out, state, field) {
       return;
     case "$min":
     case "$max":
-      out[field.resultKey] = state.value === undefined ? null : state.value;
+      out[field.resultKey] = state.value === undefined ? null : cloneResultValue(state.value);
       return;
     case "$count":
       out[field.resultKey] = state.count;
@@ -298,13 +298,13 @@ function mergePartialField(state, field, row) {
     case "$min": {
       const value = row?.[field.resultKey];
       if (!isComparable(value)) return;
-      if (state.value === undefined || sameTypeLessThan(value, state.value)) state.value = value;
+      if (state.value === undefined || sameTypeLessThan(value, state.value)) state.value = cloneResultValue(value);
       return;
     }
     case "$max": {
       const value = row?.[field.resultKey];
       if (!isComparable(value)) return;
-      if (state.value === undefined || sameTypeLessThan(state.value, value)) state.value = value;
+      if (state.value === undefined || sameTypeLessThan(state.value, value)) state.value = cloneResultValue(value);
       return;
     }
     case "$count": {
@@ -320,6 +320,15 @@ function avgSumKey(resultKey) {
 
 function avgCountKey(resultKey) {
   return `$partial.${resultKey}.count`;
+}
+
+function cloneGroupValues(values) {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, cloneResultValue(value)]));
+}
+
+function cloneResultValue(value) {
+  if (value === null || typeof value !== "object") return value;
+  return structuredClone(value);
 }
 
 function isComparable(value) {

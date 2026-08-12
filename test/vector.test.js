@@ -4,7 +4,7 @@ import { CRDTNode, localPeer } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 
-test("vectors are stored outside returned objects and searched through HNSW", () => {
+test("vectors are stored outside returned objects and searched through warmed HNSW", async () => {
   const node = new CRDTNode({ id: "vector-node" });
 
   node.insertMany("app", "docs", [
@@ -19,6 +19,11 @@ test("vectors are stored outside returned objects and searched through HNSW", ()
     status: "active",
   });
   assert.deepEqual(node.getVector("app", "docs", "a"), [1, 0, 0]);
+  assert.throws(
+    () => node.vectorSearch("app", "docs", [1, 0, 0], 2),
+    (err) => err.status === 503 && /vector index warming/.test(err.message),
+  );
+  await node.awaitVectorIndexes();
 
   const hits = node.vectorSearch("app", "docs", [1, 0, 0], 2);
   assert.deepEqual(hits.map((hit) => hit.id), ["a", "b"]);
@@ -67,6 +72,7 @@ test("replication carries vectors in object ops and rebuilds local vector indexe
 
   assert.deepEqual(replica.get("app", "docs", "doc"), { id: "doc", title: "replicated" });
   assert.deepEqual(replica.getVector("app", "docs", "doc"), [0, 1, 0]);
+  await replica.awaitVectorIndexes();
   assert.deepEqual(replica.vectorSearch("app", "docs", [0, 1, 0], 1).map((hit) => hit.id), ["doc"]);
 });
 
@@ -79,6 +85,14 @@ test("snapshots persist vectors but not vector indexes", async () => {
     { id: "near", title: "near", _vec: [1, 0] },
     { id: "far", title: "far", _vec: [0, 1] },
   ]);
+  const snapshotRows = [...node.db.collection("app", "docs").snapshotObjects()];
+  const nearSnapshot = snapshotRows.find((row) => row.id === "near");
+  nearSnapshot.value.title = "changed";
+  nearSnapshot.value._vec[0] = 99;
+  assert.deepEqual(node.get("app", "docs", "near"), { id: "near", title: "near" });
+  assert.deepEqual(node.getVector("app", "docs", "near"), [1, 0]);
+
+  await node.awaitVectorIndexes();
   node.vectorSearch("app", "docs", [1, 0], 1);
   await persistence.checkpoint();
 
@@ -94,5 +108,10 @@ test("snapshots persist vectors but not vector indexes", async () => {
   const restored = await new PersistenceManager({ node: fresh, storage }).restore();
   assert.equal(restored.snapshotObjects, 2);
   assert.deepEqual(fresh.get("app", "docs", "near"), { id: "near", title: "near" });
+  assert.throws(
+    () => fresh.vectorSearch("app", "docs", [1, 0], 1),
+    (err) => err.status === 503 && /vector index warming/.test(err.message),
+  );
+  await fresh.awaitVectorIndexes();
   assert.deepEqual(fresh.vectorSearch("app", "docs", [1, 0], 1).map((hit) => hit.id), ["near"]);
 });

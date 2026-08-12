@@ -24,6 +24,7 @@ async function login(base, username = "admin", password = "123", database = "_gl
 
 function api(base, token = null) {
   const authHeaders = token ? { authorization: `Bearer ${token}` } : {};
+  const result = async (r) => ({ status: r.status, headers: r.headers, body: await r.json().catch(() => null) });
   return {
     post: async (path, body) => {
       const r = await fetch(base + path, {
@@ -31,11 +32,11 @@ function api(base, token = null) {
         headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify(body),
       });
-      return { status: r.status, body: await r.json().catch(() => null) };
+      return result(r);
     },
     get: async (path) => {
       const r = await fetch(base + path, { headers: authHeaders });
-      return { status: r.status, body: await r.json().catch(() => null) };
+      return result(r);
     },
     patch: async (path, body) => {
       const r = await fetch(base + path, {
@@ -43,7 +44,7 @@ function api(base, token = null) {
         headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify(body),
       });
-      return { status: r.status, body: await r.json().catch(() => null) };
+      return result(r);
     },
     put: async (path, body) => {
       const r = await fetch(base + path, {
@@ -51,7 +52,7 @@ function api(base, token = null) {
         headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify(body),
       });
-      return { status: r.status, body: await r.json().catch(() => null) };
+      return result(r);
     },
     del: async (path, body) => {
       const r = await fetch(base + path, {
@@ -59,7 +60,7 @@ function api(base, token = null) {
         headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...authHeaders },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
-      return { status: r.status, body: await r.json().catch(() => null) };
+      return result(r);
     },
   };
 }
@@ -193,6 +194,16 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.ok(remote.memory.rss > 0);
     assert.deepEqual(local.ownedShards, ["shard-a"]);
     assert.deepEqual(remote.ownedShards, ["shard-b"]);
+    assert.equal(local.indexes.status, "ready");
+    assert.equal(local.indexes.workers.columnIndex.type, "worker_thread");
+    assert.equal(local.indexes.workers.vectorIndex.type, "same_thread_task");
+    assert.equal(Number.isInteger(local.indexes.workers.columnIndex.active), true);
+    assert.equal(Number.isInteger(local.indexes.workers.vectorIndex.active), true);
+    assert.ok(local.indexes.collections.some((entry) => (
+      entry.database === "_global" &&
+      entry.collection === "users" &&
+      entry.fieldIndexes.some((index) => index.path === "username" && index.status === "ready")
+    )));
     assert.equal(status.body.shards.find((shard) => shard.name === "shard-b").peers[0].online, true);
   } finally {
     a.server.close();
@@ -277,6 +288,61 @@ test("auth routes database users to the owning shard", async () => {
     });
     assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
     assert.equal(renewed.body.user.id, remoteUserId);
+  } finally {
+    a.server.close();
+    b.server.close();
+  }
+});
+
+test("database creation can bootstrap a routed admin user", async () => {
+  const { a, b, urlA } = await startRoutedTwoShardCluster();
+  try {
+    const root = await login(urlA);
+    const admin = api(urlA, root.accessToken);
+    const db = "boot_admin";
+    const coll = "users";
+    const remoteAdminId = idForShard(a.node, db, coll, "shard-b", "owner");
+
+    const created = await admin.post("/api/databases", {
+      name: db,
+      adminUser: {
+        id: remoteAdminId,
+        username: "owner",
+        password: "owner-secret",
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.name, db);
+    assert.equal(created.body.created, true);
+    assert.equal(created.body.adminUser.collection, coll);
+    assert.equal(created.body.adminUser.user.id, remoteAdminId);
+    assert.equal(created.body.adminUser.user.username, "owner");
+    assert.equal(created.body.adminUser.user.admin, true);
+    assert.equal(created.body.adminUser.user.password, undefined);
+
+    assert.deepEqual(a.node.getCollectionMeta(db, coll), { indexes: ["username"], columnIndexes: [] });
+    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["username"], columnIndexes: [] });
+    assert.equal(a.node.get(db, coll, remoteAdminId), undefined);
+    assert.equal(b.node.get(db, coll, remoteAdminId).admin, true);
+    assert.match(b.node.get(db, coll, remoteAdminId).password, /^pbkdf2\$sha256\$/);
+
+    const session = await api(urlA, null).post(`/api/${db}/${coll}/auth`, {
+      username: "owner",
+      password: "owner-secret",
+    });
+    assert.equal(session.status, 200, JSON.stringify(session.body));
+    assert.equal(session.body.user.admin, true);
+    assert.equal(session.body.user.password, undefined);
+
+    const duplicate = await admin.post("/api/databases", {
+      name: db,
+      adminUser: {
+        username: "other",
+        password: "other-secret",
+      },
+    });
+    assert.equal(duplicate.status, 409);
+    assert.match(duplicate.body.error, /already has an admin user/);
   } finally {
     a.server.close();
     b.server.close();
@@ -825,6 +891,57 @@ test("public object interface returns old aggregate rows from the object route",
   }
 });
 
+test("public query responses expose planner path headers", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const session = await login(`http://localhost:${s.port}`);
+    const c = api(`http://localhost:${s.port}`, session.accessToken);
+    const db = "app";
+    const coll = "path_headers";
+    const base = `/api/${db}/${coll}/object`;
+
+    const createdCollection = await c.post(`/api/${db}/collections`, {
+      name: coll,
+      indexes: ["status"],
+      columnIndexes: ["score"],
+    });
+    assert.equal(createdCollection.status, 201);
+    assert.equal((await c.post(base, [
+      { id: "a", status: "active", score: 1 },
+      { id: "b", status: "active", score: 2 },
+      { id: "c", status: "archived", score: 3 },
+    ])).status, 201);
+
+    const listed = await c.get(`${base}?limit=2`);
+    assert.equal(listed.status, 200);
+    assert.equal(listed.headers.get("x-spread-db-query-path"), "scan");
+
+    const indexedQuery = encodeURIComponent(JSON.stringify({ status: "active" }));
+    const indexed = await c.get(`${base}?q=${indexedQuery}`);
+    assert.equal(indexed.status, 200);
+    assert.equal(indexed.headers.get("x-spread-db-query-path"), "index-full");
+
+    const partialQuery = encodeURIComponent(JSON.stringify({ status: "active", score: { $gt: 1 } }));
+    const partial = await c.get(`${base}?q=${partialQuery}`);
+    assert.equal(partial.status, 200);
+    assert.equal(partial.headers.get("x-spread-db-query-path"), "index-partial");
+
+    const aggregateQuery = encodeURIComponent(JSON.stringify({
+      $aggregate: {
+        fields: {
+          total: { $sum: "score" },
+        },
+      },
+    }));
+    const aggregate = await c.get(`${base}?q=${aggregateQuery}`);
+    assert.equal(aggregate.status, 200);
+    assert.deepEqual(aggregate.body, [{ total: 6 }]);
+    assert.equal(aggregate.headers.get("x-spread-db-query-path"), "aggregate-column-summary");
+  } finally {
+    s.server.close();
+  }
+});
+
 test("sharded object-db aggregate merges shard partials without fetching raw objects", async () => {
   const { a, b, urlA, urlB } = await startRoutedTwoShardCluster();
   const originalFetch = globalThis.fetch;
@@ -880,6 +997,7 @@ test("sharded object-db aggregate merges shard partials without fetching raw obj
       { status: "done", score: 30, average: 15, n: 2 },
       { status: "new", score: 3, average: 1.5, n: 2 },
     ]);
+    assert.equal(result.headers.get("x-spread-db-query-path"), "aggregate-group-index");
     assert.equal(
       forwarded.some((entry) => entry.method === "GET" && entry.url.includes("%22%24aggregate%22")),
       true,
@@ -915,6 +1033,14 @@ test("public vector search supports GET query syntax and POST body payloads", as
       status: "active",
       $vector: { vector: [1, 0, 0], limit: 2 },
     }));
+    await s.node.awaitVectorIndexes();
+    s.node.vectorWarmupEnabled = false;
+    s.node.db.clearVectorIndexes();
+    const warming = await c.get(`${base}?q=${q}`);
+    assert.equal(warming.status, 503, JSON.stringify(warming.body));
+    assert.match(warming.body.error, /vector index warming/);
+    await s.node.awaitVectorIndexes();
+
     const getSearch = await c.get(`${base}?q=${q}`);
     assert.equal(getSearch.status, 200, JSON.stringify(getSearch.body));
     assert.deepEqual(getSearch.body.map((row) => row.id), ["near", "mid"]);
@@ -968,6 +1094,7 @@ test("sharded vector search fans out with POST bodies and merges scores", async 
     assert.equal(created.status, 201);
     assert.equal(a.node.get(db, coll, idA).side, "a");
     assert.equal(b.node.get(db, coll, idB).side, "b");
+    await Promise.all([a.node.awaitVectorIndexes(), b.node.awaitVectorIndexes()]);
 
     const forwarded = [];
     globalThis.fetch = async (input, init = {}) => {
@@ -1115,6 +1242,11 @@ test("serves the console UI at /", async () => {
     assert.match(r.headers.get("content-type"), /text\/html/);
     const html = await r.text();
     assert.match(html, /spread-db console/);
+
+    const docs = await fetch(`http://localhost:${s.port}/API.md`);
+    assert.equal(docs.status, 200);
+    assert.match(docs.headers.get("content-type"), /text\/markdown/);
+    assert.match(await docs.text(), /# spread-db API/);
   } finally {
     s.server.close();
   }

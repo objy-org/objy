@@ -1,6 +1,7 @@
 import { DEFAULT_SHARD } from "./shard-map.js";
 import { aggregateObjects, aggregatePartialObjects, isObjectDbAggregateSpec, mergeAggregatePartials } from "./aggregate.js";
 import { compareSortValues, getPathValue } from "./query.js";
+import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEADER } from "./query-planner.js";
 
 export const FORWARDED_HEADER = "x-spread-db-forwarded";
 export const TARGET_SHARD_HEADER = "x-spread-db-target-shard";
@@ -76,16 +77,19 @@ export class ShardRequestRouter {
       return {
         count: countIfNeeded(options, () => this.node.count(database, collection, criteria)),
         objects: this.node.find(database, collection, criteria, options),
+        path: publicReadPath(this.node.queryPath(database, collection, criteria, options)),
       };
     }
     if (targets.every((target) => target.local)) {
       return {
         count: countIfNeeded(options, () => this.node.count(database, collection, criteria)),
         objects: this.node.find(database, collection, criteria, options),
+        path: publicReadPath(this.node.queryPath(database, collection, criteria, options)),
       };
     }
 
     const all = [];
+    const paths = [];
     let count = options.includeCount ? 0 : undefined;
     const shardOptions = shardFetchOptions(options);
     const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
@@ -93,6 +97,7 @@ export class ShardRequestRouter {
       const local = this.findLocalShards(database, collection, criteria, shardOptions, localShards);
       if (options.includeCount) count += local.count;
       all.push(...local.objects);
+      if (local.path) paths.push(local.path);
     }
     for (const target of targets) {
       if (target.local) continue;
@@ -105,11 +110,14 @@ export class ShardRequestRouter {
       const objects = responseObjects(remote.body);
       if (options.includeCount) count += responseCount(remote.body, objects.length);
       all.push(...objects);
+      const remotePath = responseQueryPath(remote);
+      if (remotePath) paths.push(remotePath);
     }
 
     return {
       count,
       objects: paginate(sortObjects(all, options), options),
+      path: combineQueryPaths(paths),
     };
   }
 
@@ -118,25 +126,39 @@ export class ShardRequestRouter {
     if (targetShard) {
       this.assertOwnsTargetShard(targetShard);
       if (isObjectDbAggregateSpec(spec)) {
-        return this.node.aggregateShards(database, collection, criteria, spec, [targetShard]);
+        return {
+          rows: this.node.aggregateShards(database, collection, criteria, spec, [targetShard]),
+          path: publicAggregatePath(this.node.aggregatePathShards(database, collection, criteria, spec, [targetShard])),
+        };
       }
       const rows = this.findLocalShard(database, collection, criteria, {}, targetShard).objects;
-      return isPartialAggregateSpec(spec) ? aggregatePartialObjects(rows, spec) : aggregateObjects(rows, spec);
+      return {
+        rows: isPartialAggregateSpec(spec) ? aggregatePartialObjects(rows, spec) : aggregateObjects(rows, spec),
+        path: "aggregate-scan",
+      };
     }
 
     const targets = this.queryTargets(database, collection);
     if (targets.length === 1 && targets[0].local && targets[0].shard === null) {
-      return this.node.aggregate(database, collection, criteria, spec);
+      return {
+        rows: this.node.aggregate(database, collection, criteria, spec),
+        path: publicAggregatePath(this.node.aggregatePath(database, collection, criteria, spec)),
+      };
     }
     if (targets.every((target) => target.local)) {
-      return this.node.aggregate(database, collection, criteria, spec);
+      return {
+        rows: this.node.aggregate(database, collection, criteria, spec),
+        path: publicAggregatePath(this.node.aggregatePath(database, collection, criteria, spec)),
+      };
     }
 
     if (isObjectDbAggregateSpec(spec)) {
       const partials = [];
+      const paths = [];
       const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
       if (localShards.length) {
         partials.push(...this.node.aggregateShards(database, collection, criteria, partialAggregateSpec(spec), localShards));
+        paths.push(publicAggregatePath(this.node.aggregatePathShards(database, collection, criteria, partialAggregateSpec(spec), localShards)));
       }
       const partialSpec = partialAggregateSpec(spec);
       for (const target of targets) {
@@ -148,14 +170,22 @@ export class ShardRequestRouter {
         });
         if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote aggregate failed", remote.body);
         partials.push(...responseObjects(remote.body));
+        const remotePath = responseQueryPath(remote);
+        if (remotePath) paths.push(remotePath);
       }
-      return mergeAggregatePartials(partials, spec);
+      return {
+        rows: mergeAggregatePartials(partials, spec),
+        path: combineQueryPaths(paths),
+      };
     }
 
     const rows = [];
+    const paths = [];
     const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
     if (localShards.length) {
-      rows.push(...this.findLocalShards(database, collection, criteria, {}, localShards).objects);
+      const local = this.findLocalShards(database, collection, criteria, {}, localShards);
+      rows.push(...local.objects);
+      if (local.path) paths.push(`aggregate-${local.path}`);
     }
     for (const target of targets) {
       if (target.local) continue;
@@ -166,8 +196,13 @@ export class ShardRequestRouter {
       });
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote aggregate scan failed", remote.body);
       rows.push(...responseObjects(remote.body));
+      const remotePath = responseQueryPath(remote);
+      if (remotePath) paths.push(`aggregate-${remotePath}`);
     }
-    return aggregateObjects(rows, spec);
+    return {
+      rows: aggregateObjects(rows, spec),
+      path: combineQueryPaths(paths) || "aggregate-scan",
+    };
   }
 
   async vectorSearch(req, database, collection, criteria = {}, vector = {}, options = {}) {
@@ -223,6 +258,7 @@ export class ShardRequestRouter {
       return {
         count: countIfNeeded(options, () => this.node.count(database, collection, criteria)),
         objects: this.node.find(database, collection, criteria, options),
+        path: publicReadPath(this.node.queryPath(database, collection, criteria, options)),
       };
     }
     return this.findLocalShards(database, collection, criteria, options, [shard]);
@@ -234,11 +270,13 @@ export class ShardRequestRouter {
       return {
         count: countIfNeeded(options, () => this.node.count(database, collection, criteria)),
         objects: this.node.find(database, collection, criteria, options),
+        path: publicReadPath(this.node.queryPath(database, collection, criteria, options)),
       };
     }
     return {
       count: countIfNeeded(options, () => this.node.countShards(database, collection, criteria, [...shardSet])),
       objects: this.node.findShards(database, collection, criteria, options, [...shardSet]),
+      path: publicReadPath(this.node.queryPathShards(database, collection, criteria, options, [...shardSet])),
     };
   }
 
@@ -254,6 +292,8 @@ export class ShardRequestRouter {
     const includeId = shardSet.size
       ? (id) => shardSet.has(this.shardForObject(database, collection, id))
       : null;
+    if (includeId) this.node.assertVectorIndexReadyShards(database, collection, [...shardSet]);
+    else this.node.assertVectorIndexReady(database, collection);
 
     if (criteria && Object.keys(criteria).length > 0) {
       const rows = this.node.find(database, collection, criteria, includeId ? { includeId } : {});
@@ -342,6 +382,7 @@ export class ShardRequestRouter {
     return {
       status: response.status,
       body: text ? JSON.parse(text) : null,
+      headers: Object.fromEntries(response.headers),
     };
   }
 
@@ -489,6 +530,10 @@ function responseObjects(body) {
   if (Array.isArray(body)) return body;
   if (Array.isArray(body?.objects)) return body.objects;
   return [];
+}
+
+function responseQueryPath(response = {}) {
+  return response.headers?.[QUERY_PATH_HEADER] || response.headers?.[QUERY_PATH_HEADER.toLowerCase()] || null;
 }
 
 function responseCount(body, fallback) {

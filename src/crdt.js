@@ -31,6 +31,9 @@ export class CRDTNode {
     this.shardMap = new ShardMap(shardMap);
     this.syncBatchSize = syncBatchSize;
     this.changeListeners = new Set();
+    this.vectorWarmupEnabled = false;
+    this.vectorWarmupScheduled = false;
+    this.vectorWarmupPromise = Promise.resolve([]);
   }
 
   nextTs() {
@@ -68,6 +71,7 @@ export class CRDTNode {
     const logged = this._logOps(ops);
     const applied = this._applyOps(logged);
     this._notifyOps(applied);
+    if (applied.length) this._scheduleVectorIndexWarmup();
     return { ops: logged, applied };
   }
 
@@ -79,6 +83,7 @@ export class CRDTNode {
     }
     const applied = this._applyOps(incoming);
     this._notifyOps(applied);
+    if (applied.length) this._scheduleVectorIndexWarmup();
     this.lastSeen.set(cursorKey, Math.max(this.lastSeen.get(cursorKey) || 0, incoming.length ? incoming[incoming.length - 1].seq : 0));
     return applied.length;
   }
@@ -201,6 +206,15 @@ export class CRDTNode {
     return this.find(db, coll, query, includeId ? { ...options, includeId } : options);
   }
 
+  queryPath(db, coll, query = {}, options = {}) {
+    return this.db.queryPath(db, coll, query, options);
+  }
+
+  queryPathShards(db, coll, query = {}, options = {}, shards = []) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.queryPath(db, coll, query, includeId ? { ...options, includeId } : options);
+  }
+
   count(db, coll, query = {}, options = {}) {
     if (referenceDepthForQuery(query) > 0) return this._countWithReferences(db, coll, query, options);
     return this.db.collection(db, coll).count(query, options);
@@ -221,6 +235,15 @@ export class CRDTNode {
   aggregateShards(db, coll, query = {}, spec = {}, shards = []) {
     const includeId = this._includeShardId(db, coll, shards);
     return this.aggregate(db, coll, query, spec, includeId ? { includeId } : {});
+  }
+
+  aggregatePath(db, coll, query = {}, spec = {}, options = {}) {
+    return this.db.aggregatePath(db, coll, query, spec, options);
+  }
+
+  aggregatePathShards(db, coll, query = {}, spec = {}, shards = []) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.aggregatePath(db, coll, query, spec, includeId ? { includeId } : {});
   }
 
   expandReferences(database, object, depth = 1) {
@@ -291,6 +314,10 @@ export class CRDTNode {
     return this.db.collection(db, coll).indexStats();
   }
 
+  indexReadiness() {
+    return this.db.indexReadiness();
+  }
+
   awaitColumnIndexes(db, coll) {
     return this.db.awaitColumnIndexes(db, coll);
   }
@@ -306,6 +333,17 @@ export class CRDTNode {
       : options);
   }
 
+  assertVectorIndexReady(db, coll, options = {}) {
+    return this.db.assertVectorIndexReady(db, coll, options);
+  }
+
+  assertVectorIndexReadyShards(db, coll, shards = []) {
+    const includeId = this._includeShardId(db, coll, shards);
+    return this.assertVectorIndexReady(db, coll, includeId
+      ? { includeId, indexKey: vectorShardIndexKey(shards) }
+      : {});
+  }
+
   rankVectorRows(db, coll, rows, queryVec, limit = 20) {
     return this.db.rankVectorRows(db, coll, rows, queryVec, limit);
   }
@@ -316,6 +354,18 @@ export class CRDTNode {
 
   vectorStats() {
     return this.db.vectorStats();
+  }
+
+  startVectorIndexWarmup() {
+    this.vectorWarmupEnabled = true;
+    this.vectorWarmupPromise = this.db.warmVectorIndexes((database, collection) => this._vectorWarmupPlans(database, collection));
+    return this.vectorWarmupPromise;
+  }
+
+  async awaitVectorIndexes() {
+    this.vectorWarmupEnabled = true;
+    await this.startVectorIndexWarmup();
+    await this.db.awaitVectorIndexes();
   }
 
   async syncPeer(peer, scope) {
@@ -530,6 +580,7 @@ export class CRDTNode {
     this.shardMap.replace(shardMap);
     this.peers = this.shardMap.allPeers();
     this.db.clearVectorIndexes();
+    this._scheduleVectorIndexWarmup();
   }
 
   shardMapSnapshot() {
@@ -544,6 +595,32 @@ export class CRDTNode {
     const shardSet = new Set((shards || []).filter(Boolean));
     if (!shardSet.size) return null;
     return (id) => shardSet.has(this.shardForObject(database, collection, id));
+  }
+
+  _scheduleVectorIndexWarmup() {
+    if (!this.vectorWarmupEnabled || this.vectorWarmupScheduled) return;
+    this.vectorWarmupScheduled = true;
+    setImmediate(() => {
+      this.vectorWarmupScheduled = false;
+      this.startVectorIndexWarmup().catch(() => {});
+    });
+  }
+
+  _vectorWarmupPlans(database, collection) {
+    const shards = this.shardMap.shardsForCollection(database, collection).filter((shard) => this.ownsShard(shard));
+    const plans = this.url ? [] : [{ key: "all" }];
+    if (!shards.length) return plans.length ? plans : [{ key: "all" }];
+    plans.push({
+      key: vectorShardIndexKey(shards),
+      includeId: this._includeShardId(database, collection, shards),
+    });
+    for (const shard of shards) {
+      plans.push({
+        key: vectorShardIndexKey([shard]),
+        includeId: this._includeShardId(database, collection, [shard]),
+      });
+    }
+    return plans;
   }
 
   _needsReferenceRead(query = {}, options = {}) {

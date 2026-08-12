@@ -49,6 +49,9 @@ export async function startServer({
   state.server = server;
   state.port = server.address().port;
   state.router = router;
+  n.startVectorIndexWarmup().catch((err) => {
+    console.error(`vector index warmup failed: ${err.message}`);
+  });
   return state;
 }
 

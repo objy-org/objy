@@ -83,6 +83,10 @@ class ValueColumn {
     return cloneValue(this.values[this.codes[row]]);
   }
 
+  getForQuery(row) {
+    return this.values[this.codes[row]];
+  }
+
   clear(row) {
     const code = this.codes[row];
     if (!code) return;
@@ -182,6 +186,14 @@ export class Shape {
     return out;
   }
 
+  readForQuery(id) {
+    const row = this.rows.get(id);
+    if (row === undefined) return undefined;
+    const out = {};
+    for (const f of this.fields) out[f.name] = this.columns[f.name].getForQuery(row);
+    return out;
+  }
+
   bytes() {
     let total = 0;
     for (const f of this.fields) total += this.columns[f.name].bytes();
@@ -249,6 +261,12 @@ export class ShapeStore {
     const old = this.loc.get(id);
     if (!old) return undefined;
     return this.shapes.get(old.shapeId).read(id);
+  }
+
+  readForQuery(id) {
+    const old = this.loc.get(id);
+    if (!old) return undefined;
+    return this.shapes.get(old.shapeId).readForQuery(id);
   }
 
   shapeStats() {
