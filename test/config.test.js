@@ -166,6 +166,41 @@ test("rejects local WAL ack when the WAL is explicitly disabled", () => {
   );
 });
 
+test("infers Hetzner object storage region from the endpoint location", () => {
+  const config = normalizeConfig({
+    node: { id: "node-a" },
+    persistence: {
+      mode: "s3",
+      s3: {
+        bucket: "spread-db",
+        endpoint: "https://fsn1.your-objectstorage.com",
+        region: "us-east-1",
+      },
+    },
+    auth: TEST_AUTH,
+  });
+
+  assert.equal(config.persistence.s3.region, "fsn1");
+});
+
+test("rejects mismatched Hetzner object storage region and endpoint", () => {
+  assert.throws(
+    () => normalizeConfig({
+      node: { id: "node-a" },
+      persistence: {
+        mode: "s3",
+        s3: {
+          bucket: "spread-db",
+          endpoint: "https://fsn1.your-objectstorage.com",
+          region: "nbg1",
+        },
+      },
+      auth: TEST_AUTH,
+    }),
+    /persistence\.s3\.region must be fsn1/,
+  );
+});
+
 test("runtime pieces can be started from normalized config", async () => {
   const config = normalizeConfig({
     node: { id: "node-a", retainOps: 0, syncBatchSize: 128 },

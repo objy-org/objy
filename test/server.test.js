@@ -397,6 +397,129 @@ test("global users are password-hashed and can log in", async () => {
   }
 });
 
+test("database user permissions filter reads and guard writes", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const adminSession = await login(`http://localhost:${s.port}`);
+    const admin = api(`http://localhost:${s.port}`, adminSession.accessToken);
+    const db = "perm_app";
+
+    const user = await admin.post(`/api/${db}/users/object`, {
+      id: "reader",
+      username: "reader",
+      password: "secret",
+      permissions: [
+        { name: "own docs", query: { owner: "reader" }, perm: "crud" },
+      ],
+    });
+    assert.equal(user.status, 201, JSON.stringify(user.body));
+    assert.equal(user.body.password, undefined);
+    assert.deepEqual(user.body.permissions, [
+      { name: "own docs", query: { owner: "reader" }, perm: "crud" },
+    ]);
+
+    const docsBase = `/api/${db}/docs/object`;
+    assert.equal((await admin.post(docsBase, [
+      { id: "own", owner: "reader", status: "open", score: 2 },
+      { id: "other", owner: "other", status: "open", score: 5 },
+      { id: "bulk-a", owner: "reader", status: "bulk", score: 1 },
+      { id: "bulk-b", owner: "reader", status: "bulk", score: 1 },
+    ])).status, 201);
+
+    const readerSession = await login(`http://localhost:${s.port}`, "reader", "secret", db, "users");
+    const reader = api(`http://localhost:${s.port}`, readerSession.accessToken);
+
+    const list = await reader.get(`${docsBase}?sortBy=id`);
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.map((row) => row.id), ["bulk-a", "bulk-b", "own"]);
+
+    const aggregateQuery = encodeURIComponent(JSON.stringify({
+      $aggregate: { fields: { total: { $sum: "score" }, n: { $count: true } } },
+    }));
+    const aggregate = await reader.get(`${docsBase}?q=${aggregateQuery}`);
+    assert.equal(aggregate.status, 200, JSON.stringify(aggregate.body));
+    assert.deepEqual(aggregate.body, [{ total: 4, n: 3 }]);
+
+    assert.equal((await reader.get(`${docsBase}/own`)).status, 200);
+    assert.equal((await reader.get(`${docsBase}/other`)).status, 403);
+
+    const created = await reader.post(docsBase, { id: "new-own", owner: "reader", status: "new" });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal((await reader.post(docsBase, { id: "new-other", owner: "other" })).status, 403);
+
+    const patched = await reader.patch(`${docsBase}/own`, { status: "closed" });
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
+    assert.equal(patched.body.status, "closed");
+
+    const deniedPatch = await reader.patch(`${docsBase}/own`, { owner: "other" });
+    assert.equal(deniedPatch.status, 403);
+    assert.equal(s.node.get(db, "docs", "own").owner, "reader");
+
+    const deniedBulk = await reader.patch(docsBase, [
+      { id: "bulk-a", status: "changed" },
+      { id: "bulk-b", owner: "other" },
+    ]);
+    assert.equal(deniedBulk.status, 403);
+    assert.equal(s.node.get(db, "docs", "bulk-a").status, "bulk");
+    assert.equal(s.node.get(db, "docs", "bulk-b").owner, "reader");
+
+    assert.equal((await reader.del(`${docsBase}/own`)).status, 204);
+    assert.equal((await reader.del(`${docsBase}/other`)).status, 403);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("permissions are enforced by remote shard owners", async () => {
+  const { a, b, urlA, urlB } = await startRoutedTwoShardCluster();
+  try {
+    const adminSession = await login(urlA);
+    const admin = api(urlA, adminSession.accessToken);
+    const db = "perm_shards";
+    const userId = idForShard(a.node, db, "users", "shard-a", "reader");
+    const allowedId = idForShard(a.node, db, "docs", "shard-b", "allowed");
+    const deniedId = idForShard(a.node, db, "docs", "shard-b", "denied");
+    const docsBase = `/api/${db}/docs/object`;
+
+    assert.equal((await admin.post(`/api/${db}/users/object`, {
+      id: userId,
+      username: "reader",
+      password: "secret",
+      permissions: [
+        { name: "own remote docs", query: { owner: "reader" }, perm: "crud" },
+      ],
+    })).status, 201);
+    assert.equal((await admin.post(docsBase, [
+      { id: allowedId, owner: "reader", side: "b", value: 1 },
+      { id: deniedId, owner: "other", side: "b", value: 2 },
+    ])).status, 201);
+    assert.equal(b.node.get(db, "docs", allowedId).owner, "reader");
+    assert.equal(a.node.get(db, "docs", allowedId), undefined);
+
+    const readerSession = await login(urlA, "reader", "secret", db, "users");
+    const reader = api(urlA, readerSession.accessToken);
+
+    const allowed = await reader.get(`${docsBase}/${allowedId}`);
+    assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+    assert.equal(allowed.body.id, allowedId);
+    assert.equal((await reader.get(`${docsBase}/${deniedId}`)).status, 403);
+
+    const patched = await reader.patch(`${docsBase}/${allowedId}`, { value: 3 });
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
+    assert.equal(b.node.get(db, "docs", allowedId).value, 3);
+
+    const deniedPatch = await reader.patch(`${docsBase}/${allowedId}`, { owner: "other" });
+    assert.equal(deniedPatch.status, 403);
+    assert.equal(b.node.get(db, "docs", allowedId).owner, "reader");
+
+    const remoteStatus = await api(urlB, readerSession.accessToken).get(`${docsBase}/${allowedId}`);
+    assert.equal(remoteStatus.status, 200);
+  } finally {
+    a.server.close();
+    b.server.close();
+  }
+});
+
 test("REST CRUD lifecycle", async () => {
   const s = await startTestServer({ port: 0 });
   try {

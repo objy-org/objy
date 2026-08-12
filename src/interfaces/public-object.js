@@ -3,6 +3,14 @@ import { USERS_COLLECTION } from "../auth.js";
 import { aggregateObjects, isObjectDbAggregateSpec } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
 import { json, readJson } from "../http-router.js";
+import {
+  canCreate,
+  canDelete,
+  canRead,
+  canUpdate,
+  mergeReadPermissionQuery,
+  permissionError,
+} from "../permissions.js";
 import { compareSortValues, getPathValue, matchesQuery, splitQueryControls, stableKey } from "../query.js";
 import { QUERY_PATH_HEADER } from "../query-planner.js";
 import {
@@ -248,6 +256,7 @@ export function createPublicObjectInterface() {
           json(res, 404, { error: "not found" });
           return;
         }
+        assertReadAllowed(req, object);
         const expanded = await expandObjectForRead({
           req,
           node,
@@ -274,6 +283,7 @@ export function createPublicObjectInterface() {
           for (const group of routing.groupByShard(req, req.params.database, req.params.collection, items, (item) => item.id)) {
             if (group.local) {
               const prepared = auth.prepareWriteObjects(req.params.database, req.params.collection, group.items, { partial: false });
+              assertCreateAllowed(req, prepared);
               const localRows = node.insertMany(req.params.database, req.params.collection, prepared);
               rows.push(...localRows);
               inserted += localRows.length;
@@ -417,6 +427,7 @@ export function createPublicObjectInterface() {
             [{ ...(body || {}), id: req.params.id }],
             { partial: false },
           );
+          assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
           node.replace(req.params.database, req.params.collection, req.params.id, prepared);
           await afterLocalWrite(durability);
           const object = node.get(req.params.database, req.params.collection, req.params.id) || { id: req.params.id };
@@ -466,6 +477,7 @@ export function createPublicObjectInterface() {
             [{ ...(body || {}), id: req.params.id }],
             { partial: true },
           );
+          assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: true });
           node.update(req.params.database, req.params.collection, req.params.id, prepared);
           await afterLocalWrite(durability);
           const object = node.get(req.params.database, req.params.collection, req.params.id) || { id: req.params.id };
@@ -499,6 +511,9 @@ export function createPublicObjectInterface() {
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err));
         }
+        const existing = node.get(req.params.database, req.params.collection, req.params.id);
+        if (!existing) return json(res, 404, { error: "not found" });
+        assertDeleteAllowed(req, [existing]);
         const ok = node.remove(req.params.database, req.params.collection, req.params.id);
         if (!ok) return json(res, 404, { error: "not found" });
         await afterLocalWrite(durability);
@@ -514,12 +529,15 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
   const collection = req.params.collection;
 
   try {
+    const access = readCriteriaForRequest(req, criteria);
+    if (access.denied) return jsonWithQueryPath(res, 200, [], "permission-denied");
+    const securedCriteria = access.query;
     const options = queryOptions(req, controls);
     if (controls.$aggregate !== undefined) {
       if (controls.$vector !== undefined) {
         return json(res, 400, { error: "$aggregate and $vector are mutually exclusive" });
       }
-      const queryDepth = referenceDepthForQuery(criteria);
+      const queryDepth = referenceDepthForQuery(securedCriteria);
       const aggregateDepth = referenceDepthForAggregateSpec(controls.$aggregate);
       if (queryDepth > 0 || aggregateDepth > 0) {
         const rows = await findReferenceAwareRows({
@@ -528,21 +546,21 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
           routing,
           database,
           collection,
-          criteria,
+          criteria: securedCriteria,
           options: { refDepth: Math.max(queryDepth, aggregateDepth) },
         });
         return jsonWithQueryPath(res, 200, aggregateRows(rows.rows, controls.$aggregate), aggregateReferencePath(rows.path));
       }
-      const result = await routing.aggregate(req, database, collection, criteria, controls.$aggregate);
+      const result = await routing.aggregate(req, database, collection, securedCriteria, controls.$aggregate);
       return jsonWithQueryPath(res, 200, result.rows, result.path);
     }
 
     if (controls.$vector !== undefined) {
-      if (referenceDepthForQuery(criteria) > 0) {
+      if (referenceDepthForQuery(securedCriteria) > 0) {
         return json(res, 400, { error: "$vector cannot be combined with reference object paths yet" });
       }
       const vector = parseVectorSearch(controls.$vector);
-      const rows = await routing.vectorSearch(req, database, collection, criteria, vector, options);
+      const rows = await routing.vectorSearch(req, database, collection, securedCriteria, vector, options);
       const expanded = await expandObjectsForRead({
         req,
         node,
@@ -555,7 +573,7 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
         res,
         200,
         auth.redactObjects(database, collection, expanded),
-        Object.keys(criteria || {}).length > 0 ? "vector-filter" : "vector-index",
+        Object.keys(securedCriteria || {}).length > 0 ? "vector-filter" : "vector-index",
       );
     }
 
@@ -565,7 +583,7 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
       routing,
       database,
       collection,
-      criteria,
+      criteria: securedCriteria,
       options,
     });
     jsonWithQueryPath(res, 200, auth.redactObjects(database, collection, result.objects), result.path);
@@ -596,6 +614,7 @@ async function routedWriteMany({
     for (const group of routing.groupByShard(req, database, collection, objects, (item) => item.id)) {
       if (group.local) {
         const prepared = auth.prepareWriteObjects(database, collection, group.items, { partial });
+        assertUpsertAllowed(req, node, database, collection, prepared, { partial });
         const localResult = localWrite(prepared);
         total += Number(localResult[resultKey]) || 0;
         rows.push(...(localResult.items || []));
@@ -644,6 +663,8 @@ async function routedRemoveMany(req, routing, node, durability, database, collec
   try {
     for (const group of routing.groupByShard(req, database, collection, ids, (id) => id)) {
       if (group.local) {
+        const existing = existingObjectsForIds(node, database, collection, group.items);
+        assertDeleteAllowed(req, existing);
         const local = node.removeMany(database, collection, group.items);
         result.deleted += local.deleted;
         result.ids.push(...local.ids);
@@ -771,7 +792,11 @@ function createReferenceResolver({ req, node, routing }) {
 
 async function resolveReferencedObject({ req, node, routing, database, collection, id }) {
   const shard = routing.shardForObject(database, collection, id);
-  if (routing.ownsShard(shard)) return node.get(database, collection, id, { refDepth: 0 }) || null;
+  if (routing.ownsShard(shard)) {
+    const object = node.get(database, collection, id, { refDepth: 0 }) || null;
+    if (object) assertReadAllowed(req, object);
+    return object;
+  }
 
   const remote = await routing.forwardToObject(req, database, collection, id, objectPath(database, collection, id), {
     method: "GET",
@@ -882,6 +907,51 @@ function finishAggregateBucket(bucket, metrics) {
 function asArray(value) {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function permissionUser(req) {
+  return req.auth?.user || null;
+}
+
+function readCriteriaForRequest(req, criteria = {}) {
+  return mergeReadPermissionQuery(criteria, permissionUser(req));
+}
+
+function assertReadAllowed(req, object) {
+  if (!canRead(permissionUser(req), object)) throw permissionError("read", object?.id);
+}
+
+function assertCreateAllowed(req, objects = []) {
+  const user = permissionUser(req);
+  for (const object of objects || []) {
+    if (!canCreate(user, object)) throw permissionError("create", object?.id);
+  }
+}
+
+function assertUpsertAllowed(req, node, database, collection, objects = [], { partial = false } = {}) {
+  const user = permissionUser(req);
+  const existing = existingObjectMap(node, database, collection, objects.map((object) => object.id));
+  for (const object of objects || []) {
+    const before = existing.get(String(object.id));
+    const after = partial && before ? { ...before, ...object, id: object.id } : object;
+    const allowed = before ? canUpdate(user, before, after) : canCreate(user, after);
+    if (!allowed) throw permissionError(before ? "update" : "create", object?.id);
+  }
+}
+
+function assertDeleteAllowed(req, objects = []) {
+  const user = permissionUser(req);
+  for (const object of objects || []) {
+    if (!canDelete(user, object)) throw permissionError("delete", object?.id);
+  }
+}
+
+function existingObjectsForIds(node, database, collection, ids = []) {
+  return node.getMany(database, collection, ids);
+}
+
+function existingObjectMap(node, database, collection, ids = []) {
+  return new Map(existingObjectsForIds(node, database, collection, ids).map((object) => [String(object.id), object]));
 }
 
 function parseDatabaseAdminUser(body = {}) {

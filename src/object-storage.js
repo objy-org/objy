@@ -58,6 +58,7 @@ export class S3ObjectStorage {
   } = {}) {
     if (!bucket) throw new Error("S3 bucket is required");
     this.bucket = bucket;
+    this.region = region;
     this.ready = false;
     this.client = new S3Client({
       region,
@@ -75,7 +76,10 @@ export class S3ObjectStorage {
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (code !== 404 && err.name !== "NotFound" && err.name !== "NoSuchBucket") throw err;
-      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      await this.client.send(new CreateBucketCommand({
+        Bucket: this.bucket,
+        ...createBucketLocation(this.region),
+      }));
     }
     this.ready = true;
   }
@@ -147,6 +151,15 @@ export function createObjectStorage({ mode = "off", s3 = {} } = {}) {
   if (mode === "s3") return new S3ObjectStorage(s3);
   if (mode === "off" || mode === false) return null;
   throw new Error(`unsupported object storage mode: ${mode}`);
+}
+
+function createBucketLocation(region) {
+  if (!region || region === "us-east-1") return {};
+  return {
+    CreateBucketConfiguration: {
+      LocationConstraint: region,
+    },
+  };
 }
 
 async function bodyToString(body) {
