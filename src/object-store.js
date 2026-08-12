@@ -41,6 +41,10 @@ export class ObjectRowStore {
     return row ? cloneValue(row.value) : undefined;
   }
 
+  readForQuery(id) {
+    return this.rows.get(id)?.value;
+  }
+
   bytes() {
     let total = 0;
     for (const row of this.rows.values()) total += estimateValue(row.value);

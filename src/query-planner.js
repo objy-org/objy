@@ -7,6 +7,8 @@ export const READ_PATH = {
   SCAN: "scan",
 };
 
+export const QUERY_PATH_HEADER = "x-spread-db-query-path";
+
 export const AGGREGATE_PATH = {
   COLUMN_SUMMARY: "aggregate-column-summary",
   COLUMN_SCAN: "aggregate-column-scan",
@@ -14,6 +16,39 @@ export const AGGREGATE_PATH = {
   GROUP_COLUMN_SCAN: "aggregate-group-column-scan",
   SCAN: "aggregate-scan",
 };
+
+export function publicReadPath(path) {
+  switch (path) {
+    case READ_PATH.INDEX_EXACT:
+      return "index-full";
+    case READ_PATH.INDEX_PARTIAL:
+      return "index-partial";
+    case READ_PATH.ORDERED_INDEX:
+      return "ordered-index";
+    case READ_PATH.SCAN:
+      return "scan";
+    default:
+      return path ? String(path) : null;
+  }
+}
+
+export function publicAggregatePath(path) {
+  return path ? String(path) : null;
+}
+
+export function combineQueryPaths(paths = []) {
+  const out = [];
+  const seen = new Set();
+  for (const path of paths) {
+    for (const part of String(path || "").split(",")) {
+      const value = part.trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      out.push(value);
+    }
+  }
+  return out.join(",");
+}
 
 export function planRead(criteria = {}, options = {}, adapter) {
   const hasCriteria = hasObjectCriteria(criteria);

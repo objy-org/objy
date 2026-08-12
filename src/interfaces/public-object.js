@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { USERS_COLLECTION } from "../auth.js";
 import { aggregateObjects, isObjectDbAggregateSpec } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
 import { json, readJson } from "../http-router.js";
 import { compareSortValues, getPathValue, matchesQuery, splitQueryControls, stableKey } from "../query.js";
+import { QUERY_PATH_HEADER } from "../query-planner.js";
 import {
   baseCriteriaForReferenceQuery,
   expandReferences,
@@ -49,17 +51,68 @@ export function createPublicObjectInterface() {
         if (body.meta !== undefined && !isPlainObject(body.meta)) {
           return json(res, 400, { error: "body.meta must be a plain object" });
         }
+        let adminUser;
+        try {
+          adminUser = routing.isForwarded(req) ? null : parseDatabaseAdminUser(body);
+        } catch (err) {
+          return json(res, err.status || 400, errorBody(err));
+        }
         const created = node.getDatabaseMeta(name) === null;
         try {
           const meta = node.createDatabase(name, body.meta || {});
+          let adminResult = null;
+          let adminCollectionMeta = null;
+          if (adminUser) {
+            adminCollectionMeta = ensureAdminUserCollection(node, name, adminUser.collection);
+          }
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
-            const remote = await routing.forwardToAllPeers(req, "/api/databases", { method: "POST", body });
+            const remote = await routing.forwardToAllPeers(req, "/api/databases", { method: "POST", body: databaseCreateFanoutBody(name, body) });
             if (!ok(remote.status)) throw remoteError(remote, "database metadata fan-out failed");
+            if (adminUser) {
+              const collectionRemote = await routing.forwardToAllPeers(
+                req,
+                `/api/${encodeURIComponent(name)}/collections`,
+                {
+                  method: "POST",
+                  body: { name: adminUser.collection, meta: adminCollectionMeta },
+                },
+              );
+              if (!ok(collectionRemote.status)) throw remoteError(collectionRemote, "admin users collection metadata fan-out failed");
+            }
           }
-          json(res, created ? 201 : 200, { name, created, meta });
+          if (adminUser) {
+            await assertCanCreateDatabaseAdmin({ req, routing, database: name, adminUser });
+            const written = await routedWriteMany({
+              req,
+              routing,
+              auth,
+              node,
+              database: name,
+              collection: adminUser.collection,
+              objects: [adminUser.user],
+              method: "POST",
+              resultKey: "inserted",
+              partial: false,
+              localWrite: (items) => {
+                const rows = node.insertMany(name, adminUser.collection, items);
+                return { inserted: rows.length, items: rows };
+              },
+              durability,
+            });
+            adminResult = {
+              collection: adminUser.collection,
+              user: auth.redactObject(name, adminUser.collection, written.items[0]),
+            };
+          }
+          json(res, created ? 201 : 200, {
+            name,
+            created,
+            meta,
+            ...(adminResult ? { adminUser: adminResult } : {}),
+          });
         } catch (err) {
-          json(res, err.status || 400, errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err));
         }
       }));
 
@@ -478,9 +531,10 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
           criteria,
           options: { refDepth: Math.max(queryDepth, aggregateDepth) },
         });
-        return json(res, 200, aggregateRows(rows, controls.$aggregate));
+        return jsonWithQueryPath(res, 200, aggregateRows(rows.rows, controls.$aggregate), aggregateReferencePath(rows.path));
       }
-      return json(res, 200, await routing.aggregate(req, database, collection, criteria, controls.$aggregate));
+      const result = await routing.aggregate(req, database, collection, criteria, controls.$aggregate);
+      return jsonWithQueryPath(res, 200, result.rows, result.path);
     }
 
     if (controls.$vector !== undefined) {
@@ -497,10 +551,15 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
         objects: rows,
         refDepth: options.refDepth,
       });
-      return json(res, 200, auth.redactObjects(database, collection, expanded));
+      return jsonWithQueryPath(
+        res,
+        200,
+        auth.redactObjects(database, collection, expanded),
+        Object.keys(criteria || {}).length > 0 ? "vector-filter" : "vector-index",
+      );
     }
 
-    const objects = await findPublicObjects({
+    const result = await findPublicObjects({
       req,
       node,
       routing,
@@ -509,7 +568,7 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
       criteria,
       options,
     });
-    json(res, 200, auth.redactObjects(database, collection, objects));
+    jsonWithQueryPath(res, 200, auth.redactObjects(database, collection, result.objects), result.path);
   } catch (err) {
     json(res, err.status || 400, err.body || errorBody(err));
   }
@@ -615,19 +674,23 @@ async function routedRemoveMany(req, routing, node, durability, database, collec
 
 async function findPublicObjects({ req, node, routing, database, collection, criteria, options }) {
   if (referenceDepthForQuery(criteria) > 0 || pathHasReferenceObject(options.sortBy)) {
-    const pairs = await findReferenceAwarePairs({ req, node, routing, database, collection, criteria, options });
-    return expandObjectsForRead({
+    const result = await findReferenceAwarePairs({ req, node, routing, database, collection, criteria, options });
+    const objects = await expandObjectsForRead({
       req,
       node,
       routing,
       database,
-      objects: pairs.map(({ raw }) => raw),
+      objects: result.pairs.map(({ raw }) => raw),
       refDepth: options.refDepth,
     });
+    return {
+      objects,
+      path: referencePath(result.path),
+    };
   }
 
   const result = await routing.find(req, database, collection, criteria, { ...options, refDepth: 0 });
-  return expandObjectsForRead({
+  const objects = await expandObjectsForRead({
     req,
     node,
     routing,
@@ -635,11 +698,18 @@ async function findPublicObjects({ req, node, routing, database, collection, cri
     objects: result.objects,
     refDepth: options.refDepth,
   });
+  return {
+    objects,
+    path: result.path,
+  };
 }
 
 async function findReferenceAwareRows({ req, node, routing, database, collection, criteria, options = {} }) {
-  const pairs = await findReferenceAwarePairs({ req, node, routing, database, collection, criteria, options });
-  return pairs.map(({ matchObject }) => matchObject);
+  const result = await findReferenceAwarePairs({ req, node, routing, database, collection, criteria, options });
+  return {
+    rows: result.pairs.map(({ matchObject }) => matchObject),
+    path: result.path,
+  };
 }
 
 async function findReferenceAwarePairs({ req, node, routing, database, collection, criteria, options = {} }) {
@@ -662,7 +732,10 @@ async function findReferenceAwarePairs({ req, node, routing, database, collectio
     if (matchesQuery(matchObject, criteria)) pairs.push({ raw: compact, matchObject });
   }
 
-  return paginateReferencePairs(sortReferencePairs(pairs, options), options);
+  return {
+    pairs: paginateReferencePairs(sortReferencePairs(pairs, options), options),
+    path: result.path,
+  };
 }
 
 async function expandObjectForRead({ req, node, routing, database, object, refDepth }) {
@@ -811,6 +884,77 @@ function asArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
+function parseDatabaseAdminUser(body = {}) {
+  if (body?.adminUser === undefined) return null;
+  if (!isPlainObject(body.adminUser)) throw httpError(400, "body.adminUser must be a plain object");
+
+  const rawCollection = body.adminUser.collection;
+  const collection = rawCollection === undefined || rawCollection === null || rawCollection === ""
+    ? USERS_COLLECTION
+    : rawCollection;
+  if (typeof collection !== "string" || collection.length === 0) {
+    throw httpError(400, "body.adminUser.collection must be a non-empty string when provided");
+  }
+
+  if (typeof body.adminUser.username !== "string" || body.adminUser.username.length === 0) {
+    throw httpError(400, "body.adminUser.username must be a non-empty string");
+  }
+  if (typeof body.adminUser.password !== "string" || body.adminUser.password.length === 0) {
+    throw httpError(400, "body.adminUser.password must be a non-empty string");
+  }
+  if (
+    body.adminUser.id !== undefined &&
+    body.adminUser.id !== null &&
+    String(body.adminUser.id).length === 0
+  ) {
+    throw httpError(400, "body.adminUser.id must be a non-empty string when provided");
+  }
+
+  const { collection: _collection, ...user } = body.adminUser;
+  return {
+    collection,
+    user: {
+      ...user,
+      ...(user.id !== undefined && user.id !== null ? { id: String(user.id) } : { id: randomUUID() }),
+      admin: true,
+    },
+  };
+}
+
+function ensureAdminUserCollection(node, database, collection) {
+  const existing = node.getCollectionMeta(database, collection);
+  const meta = {
+    ...(existing || {}),
+    indexes: uniqueStrings([...(existing?.indexes || []), "username"]),
+  };
+  return existing === null
+    ? node.createCollection(database, collection, meta)
+    : node.setCollectionMeta(database, collection, meta);
+}
+
+async function assertCanCreateDatabaseAdmin({ req, routing, database, adminUser }) {
+  const existingAdmins = await routing.find(req, database, adminUser.collection, { admin: true }, { limit: 1 });
+  if ((existingAdmins.objects || []).length > 0) {
+    throw httpError(409, `database already has an admin user in ${adminUser.collection}`);
+  }
+
+  const existingUsername = await routing.find(req, database, adminUser.collection, { username: adminUser.user.username }, { limit: 1 });
+  if ((existingUsername.objects || []).length > 0) {
+    throw httpError(409, `username already exists in ${adminUser.collection}`);
+  }
+}
+
+function databaseCreateFanoutBody(name, body = {}) {
+  return {
+    name,
+    ...(body.meta !== undefined ? { meta: body.meta } : {}),
+  };
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
+
 async function afterLocalWrite(durability) {
   try {
     await durability?.afterWrite?.();
@@ -861,6 +1005,26 @@ function httpError(status, message) {
 
 function proxyJson(res, remote) {
   return json(res, remote.status, remote.body === null ? undefined : remote.body);
+}
+
+function jsonWithQueryPath(res, status, body, path) {
+  const value = normalizeQueryPath(path);
+  return json(res, status, body, value ? { [QUERY_PATH_HEADER]: value } : {});
+}
+
+function referencePath(path) {
+  const value = normalizeQueryPath(path);
+  return value ? `reference-${value}` : "reference-scan";
+}
+
+function aggregateReferencePath(path) {
+  const value = normalizeQueryPath(path);
+  return value ? `aggregate-reference-${value}` : "aggregate-reference-scan";
+}
+
+function normalizeQueryPath(path) {
+  const value = String(path || "").trim();
+  return value.length ? value : null;
 }
 
 function secureRoute(auth) {

@@ -12,9 +12,10 @@ import {
 import { HNSWIndex } from "./hnsw.js";
 import { compareSortValues, getPathValue, matchesQuery, stableKey, stripQueryControls } from "./query.js";
 import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from "./query-planner.js";
-import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity } from "./vector.js";
+import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
+const VECTOR_BUILD_BATCH_SIZE = 4096;
 
 class Collection {
   constructor(name, options = {}) {
@@ -24,6 +25,7 @@ class Collection {
     this.store = createPhysicalStore(options);
     this.vectors = new Map();
     this.vectorIndexes = new Map();
+    this.vectorBuilds = new Set();
     this.meta = new Map();
     this.indexes = new Map();
     this.columnIndexes = new Map();
@@ -61,14 +63,14 @@ class Collection {
     const m = this._ensureMeta(id);
     if (m.deleted && !gt(ts, m.deleted)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
-    const before = wasLive ? this.read(id) : undefined;
+    const before = wasLive ? this.readForQuery(id) : undefined;
     if (m.ts && !gt(ts, m.ts)) return false;
     const prepared = this._prepareStoredValue(value);
     m.ts = ts;
     m.deleted = null;
     this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "id"));
     this._applyVectorUpdate(id, prepared.vector);
-    const after = this.read(id);
+    const after = this.readForQuery(id);
     this._refreshIndexes(id, before, after);
     this._refreshColumnIndexes(id, after);
     if (!wasLive) this.liveCount++;
@@ -92,7 +94,7 @@ class Collection {
     const last = m.deleted || m.ts;
     if (last && !gt(ts, last)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
-    const before = wasLive ? this.read(id) : undefined;
+    const before = wasLive ? this.readForQuery(id) : undefined;
     m.deleted = ts;
     this.store.removeObject(id);
     this._removeVector(id);
@@ -106,6 +108,15 @@ class Collection {
     const m = this.meta.get(id);
     if (!m || m.deleted) return undefined;
     const vals = this.store.read(id) || {};
+    return { id, ...vals };
+  }
+
+  readForQuery(id) {
+    const m = this.meta.get(id);
+    if (!m || m.deleted) return undefined;
+    const vals = typeof this.store.readForQuery === "function"
+      ? this.store.readForQuery(id) || {}
+      : this.store.read(id) || {};
     return { id, ...vals };
   }
 
@@ -133,16 +144,19 @@ class Collection {
       if (limit <= 0) return [];
       const results = [];
       let skipped = 0;
+      const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
       for (const id of this._idsForPlan(plan.idPlan, criteria)) {
         if (includeId && !includeId(id)) continue;
-        const obj = this.read(id);
-        if (!obj || (plan.idPlan?.verify ? !matchesQuery(obj, criteria) : false)) continue;
-        if (!plan.idPlan?.verify && plan.path === READ_PATH.SCAN && !matchesQuery(obj, criteria)) continue;
+        if (verifyScan) {
+          const obj = this.readForQuery(id);
+          if (!obj || !matchesQuery(obj, criteria)) continue;
+        }
         if (skipped < offset) {
           skipped++;
           continue;
         }
-        results.push(obj);
+        const safe = this.read(id);
+        if (safe) results.push(safe);
         if (results.length >= limit) break;
       }
       return results;
@@ -151,17 +165,56 @@ class Collection {
     const indexed = plan.path === READ_PATH.ORDERED_INDEX ? this._findWithOrderedIndex(criteria, options, plan) : null;
     if (indexed) return indexed;
 
-    return sortObjects(
-      [...this._idsForPlan(plan.idPlan, criteria)]
-        .filter((id) => !includeId || includeId(id))
-        .map((id) => this.read(id))
-        .filter((obj) => obj && matchesQuery(obj, criteria)),
-      options,
-    ).slice(offset, offset + limit);
+    const matched = [];
+    for (const id of this._idsForPlan(plan.idPlan, criteria)) {
+      if (includeId && !includeId(id)) continue;
+      const obj = this.readForQuery(id);
+      if (obj && matchesQuery(obj, criteria)) matched.push(obj);
+    }
+    return sortObjects(matched, options)
+      .slice(offset, offset + limit)
+      .map((obj) => this.read(obj.id))
+      .filter(Boolean);
   }
 
   all(options = {}) {
     return this.find({}, options);
+  }
+
+  findForQuery(query = {}, options = {}) {
+    const criteria = stripQueryControls(query);
+    const offset = options.offset || 0;
+    const limit = options.limit ?? Infinity;
+    const includeId = typeof options.includeId === "function" ? options.includeId : null;
+    const plan = this._planRead(criteria, options);
+
+    if (!options.sortBy) {
+      if (limit <= 0) return [];
+      const results = [];
+      let skipped = 0;
+      const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
+      for (const id of this._idsForPlan(plan.idPlan, criteria)) {
+        if (includeId && !includeId(id)) continue;
+        const object = this.readForQuery(id);
+        if (!object) continue;
+        if (verifyScan && !matchesQuery(object, criteria)) continue;
+        if (skipped < offset) {
+          skipped++;
+          continue;
+        }
+        results.push(object);
+        if (results.length >= limit) break;
+      }
+      return results;
+    }
+
+    const matched = [];
+    for (const id of this._idsForPlan(plan.idPlan, criteria)) {
+      if (includeId && !includeId(id)) continue;
+      const object = this.readForQuery(id);
+      if (object && matchesQuery(object, criteria)) matched.push(object);
+    }
+    return sortObjects(matched, options).slice(offset, offset + limit);
   }
 
   count(query = {}, options = {}) {
@@ -184,10 +237,14 @@ class Collection {
     }
 
     let n = 0;
+    const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
     for (const id of this._idsForPlan(plan.idPlan, criteria)) {
       if (includeId && !includeId(id)) continue;
-      const obj = this.read(id);
-      if (obj && (!plan.idPlan?.verify || matchesQuery(obj, criteria)) && (plan.path !== READ_PATH.SCAN || matchesQuery(obj, criteria))) n++;
+      if (verifyScan) {
+        const obj = this.readForQuery(id);
+        if (!obj || !matchesQuery(obj, criteria)) continue;
+      }
+      n++;
     }
     return n;
   }
@@ -198,7 +255,7 @@ class Collection {
       const indexed = this._executeAggregatePlan(this._planAggregate(criteria, spec, options), criteria, spec, options);
       if (indexed) return indexed;
 
-      const rows = this.find(criteria, options);
+      const rows = this.findForQuery(criteria, options);
       return spec?.$partial === true ? aggregatePartialObjects(rows, spec) : aggregateObjects(rows, spec);
     }
 
@@ -206,7 +263,7 @@ class Collection {
     const metrics = normalizeMetrics(spec);
     const groups = new Map();
 
-    for (const object of this.find(query, options)) {
+    for (const object of this.findForQuery(query, options)) {
       const key = groupBy ? stableKey(getPathValue(object, groupBy)) : "__all__";
       let bucket = groups.get(key);
       if (!bucket) {
@@ -225,7 +282,7 @@ class Collection {
     const key = String(path);
     const index = new FieldIndex(key);
     for (const id of this._liveIds()) {
-      const object = this.read(id);
+      const object = this.readForQuery(id);
       index.add(object);
     }
     this.indexes.set(key, index);
@@ -324,7 +381,8 @@ class Collection {
 
   vectorSearch(queryVec, limit = 20, options = {}) {
     if (!this.vectorField || !isValidVector(queryVec)) return [];
-    const index = this._vectorIndex(options.indexKey || "all", options.includeId);
+    if (this.vectors.size === 0) return [];
+    const index = this._readyVectorIndex(options.indexKey || "all", options.includeId);
     const k = Math.max(0, Number.isFinite(limit) ? Math.floor(limit) : 20);
     if (k <= 0) return [];
     return index.search(queryVec, k, options.ef).map(({ id, dist }) => ({
@@ -344,17 +402,97 @@ class Collection {
 
   vectorStats() {
     let nodes = 0;
-    for (const index of this.vectorIndexes.values()) nodes += index.index.size;
+    const entries = [];
+    for (const [key, entry] of this.vectorIndexes) {
+      nodes += entry.index.size;
+      entries.push({
+        key,
+        status: entry.status,
+        nodes: entry.index.size,
+        scanned: entry.scanned,
+        inserted: entry.inserted,
+        ...(entry.startedAt ? { startedAt: entry.startedAt } : {}),
+        ...(entry.readyAt ? { readyAt: entry.readyAt } : {}),
+        ...(entry.error ? { error: entry.error } : {}),
+      });
+    }
     return {
       field: this.vectorField,
       stored: this.vectors.size,
       indexes: this.vectorIndexes.size,
       nodes,
+      status: this._vectorIndexStatus(),
+      indexStates: entries,
+    };
+  }
+
+  indexReadiness() {
+    const fieldIndexes = this.collectionMeta.indexes.map((path) => ({
+      path,
+      status: this.indexes.has(path) ? "ready" : "missing",
+    }));
+    const columnIndexes = this.collectionMeta.columnIndexes.map((path) => {
+      const index = this.columnIndexes.get(path);
+      return {
+        path,
+        status: index?.status || "missing",
+        pendingEntries: index?.pendingEntries || 0,
+        ...(index?.error ? { error: index.error } : {}),
+      };
+    });
+    const vector = this.vectorStats();
+    const workers = {
+      columnIndex: {
+        type: "worker_thread",
+        active: this.columnBuilds.size,
+        background: true,
+      },
+      vectorIndex: {
+        type: "same_thread_task",
+        active: this.vectorBuilds.size,
+        background: true,
+      },
+    };
+
+    return {
+      status: overallIndexStatus([
+        ...fieldIndexes.map((index) => index.status),
+        ...columnIndexes.map((index) => index.status),
+        vector.status,
+      ]),
+      fieldIndexes,
+      columnIndexes,
+      vector,
+      workers,
     };
   }
 
   clearVectorIndexes() {
     this.vectorIndexes.clear();
+    this.vectorBuilds.clear();
+  }
+
+  assertVectorIndexReady(key = "all", includeId = null) {
+    if (!this.vectorField || this.vectors.size === 0) return true;
+    this._readyVectorIndex(key, includeId);
+    return true;
+  }
+
+  warmVectorIndex(key = "all", includeId = null) {
+    if (!this.vectorField || this.vectors.size === 0) return Promise.resolve(null);
+    const indexKey = String(key || "all");
+    const current = this.vectorIndexes.get(indexKey);
+    if (current?.status === "ready") return Promise.resolve(current);
+    if (current?.status === "building" && current.promise) return current.promise;
+    return this._startVectorIndexWarmup(indexKey, includeId);
+  }
+
+  async awaitVectorIndexes() {
+    for (;;) {
+      const builds = [...this.vectorBuilds];
+      if (!builds.length) return;
+      await Promise.allSettled(builds);
+    }
   }
 
   snapshot(options = {}) {
@@ -379,6 +517,15 @@ class Collection {
 
   _planAggregate(criteria, spec, options = {}) {
     return planAggregate(criteria, spec, options, this._plannerAdapter());
+  }
+
+  readPath(criteria = {}, options = {}) {
+    return this._planRead(stripQueryControls(criteria), options).path;
+  }
+
+  aggregatePath(criteria = {}, spec = {}, options = {}) {
+    if (!isObjectDbAggregateSpec(spec)) return AGGREGATE_PATH.SCAN;
+    return this._planAggregate(stripQueryControls(criteria), spec, options).path;
   }
 
   _plannerAdapter() {
@@ -409,7 +556,7 @@ class Collection {
         yield id;
         continue;
       }
-      const object = this.read(id);
+      const object = this.readForQuery(id);
       if (object && matchesQuery(object, criteria)) yield id;
     }
   }
@@ -559,7 +706,7 @@ class Collection {
   _createIndexFromMeta(path) {
     const index = new FieldIndex(path);
     for (const id of this._liveIds()) {
-      const object = this.read(id);
+      const object = this.readForQuery(id);
       index.add(object);
     }
     this.indexes.set(path, index);
@@ -650,7 +797,7 @@ class Collection {
       for (let offset = 0; offset < ids.length; offset += COLUMN_BUILD_BATCH_SIZE) {
         const rows = [];
         for (const id of ids.slice(offset, offset + COLUMN_BUILD_BATCH_SIZE)) {
-          const object = this.read(id);
+          const object = this.readForQuery(id);
           if (!object) continue;
           rows.push(columnWorkerRow(object, paths));
         }
@@ -750,9 +897,9 @@ class Collection {
       desc: options.sort === "desc",
       offset: options.offset || 0,
       limit: options.limit ?? Infinity,
-      read: (id) => this.read(id),
+      read: (id) => this.readForQuery(id),
       matches: (object) => filterProven ? true : matchesQuery(object, criteria),
-    });
+    }).map((object) => this.read(object.id)).filter(Boolean);
   }
 
   _prepareStoredValue(value = {}) {
@@ -789,6 +936,7 @@ class Collection {
     const key = String(id);
     this.vectors.set(key, [...vector]);
     for (const entry of this.vectorIndexes.values()) {
+      if (entry.status === "failed") continue;
       if (!entry.includeId || entry.includeId(key)) entry.index.insert(key, vector);
     }
   }
@@ -796,25 +944,85 @@ class Collection {
   _removeVector(id) {
     const key = String(id);
     this.vectors.delete(key);
-    for (const entry of this.vectorIndexes.values()) entry.index.remove(key);
+    for (const entry of this.vectorIndexes.values()) {
+      if (entry.status !== "failed") entry.index.remove(key);
+    }
   }
 
-  _vectorIndex(key = "all", includeId = null) {
+  _readyVectorIndex(key = "all", includeId = null) {
     const indexKey = String(key || "all");
-    let entry = this.vectorIndexes.get(indexKey);
-    if (entry) return entry.index;
+    const entry = this.vectorIndexes.get(indexKey);
+    if (entry?.status === "ready") return entry.index;
+    if (!entry || entry.status === "failed") this._startVectorIndexWarmup(indexKey, includeId);
+    throw new VectorIndexWarmingError({
+      collection: this.name,
+      indexKey,
+      indexStatus: this.vectorIndexes.get(indexKey)?.status || "pending",
+    });
+  }
 
+  _startVectorIndexWarmup(key = "all", includeId = null) {
+    const indexKey = String(key || "all");
     const filter = typeof includeId === "function" ? includeId : null;
     const index = new HNSWIndex({
       ...this.vectorConfig.hnsw,
       getVec: (id) => this.vectors.get(String(id)) || null,
     });
-    entry = { index, includeId: filter };
+    const entry = {
+      index,
+      includeId: filter,
+      status: "building",
+      startedAt: new Date().toISOString(),
+      readyAt: null,
+      error: null,
+      scanned: 0,
+      inserted: 0,
+      promise: null,
+    };
     this.vectorIndexes.set(indexKey, entry);
-    for (const [id, vector] of this.vectors) {
-      if (!filter || filter(id)) index.insert(id, vector);
+    const build = this._runVectorIndexBuild(indexKey, entry);
+    entry.promise = build;
+    this.vectorBuilds.add(build);
+    build.then(
+      () => this.vectorBuilds.delete(build),
+      () => this.vectorBuilds.delete(build),
+    );
+    return build;
+  }
+
+  async _runVectorIndexBuild(indexKey, entry) {
+    await yieldToEventLoop();
+    try {
+      for (const [id, vector] of this.vectors) {
+        entry.scanned++;
+        if (!entry.includeId || entry.includeId(id)) {
+          entry.index.insert(id, vector);
+          entry.inserted++;
+        }
+        if (entry.scanned % VECTOR_BUILD_BATCH_SIZE === 0) await yieldToEventLoop();
+      }
+      if (this.vectorIndexes.get(indexKey) === entry) {
+        entry.status = "ready";
+        entry.readyAt = new Date().toISOString();
+      }
+      return entry;
+    } catch (error) {
+      if (this.vectorIndexes.get(indexKey) === entry) {
+        entry.status = "failed";
+        entry.error = error.message;
+      }
+      throw error;
     }
-    return index;
+  }
+
+  _vectorIndexStatus() {
+    if (!this.vectorField) return "disabled";
+    if (this.vectors.size === 0) return "ready";
+    const entries = [...this.vectorIndexes.values()];
+    if (!entries.length) return "pending";
+    if (entries.some((entry) => entry.status === "failed")) return "failed";
+    if (entries.some((entry) => entry.status === "building")) return "building";
+    return "ready";
   }
 }
 
@@ -1411,6 +1619,38 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function annotateVectorIndexError(err, database, collection) {
+  if (err?.code !== "VECTOR_INDEX_WARMING") return err;
+  err.body = {
+    ...(err.body || { error: err.message }),
+    database,
+    collection,
+  };
+  return err;
+}
+
+function overallIndexStatus(statuses = []) {
+  if (statuses.some((status) => status === "error" || status === "failed" || status === "missing")) return "error";
+  if (statuses.some((status) => status === "building" || status === "pending")) return "building";
+  return "ready";
+}
+
+function normalizeVectorWarmupPlans(plans = []) {
+  const source = Array.isArray(plans) && plans.length ? plans : [{ key: "all" }];
+  const out = [];
+  const seen = new Set();
+  for (const plan of source) {
+    const key = String(plan?.key || plan?.indexKey || "all");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      includeId: typeof plan?.includeId === "function" ? plan.includeId : null,
+    });
+  }
+  return out;
+}
+
 function normalizeMetrics(spec) {
   return {
     sum: asArray(spec.sum),
@@ -1427,7 +1667,7 @@ function asArray(value) {
 
 function makeBucket(key, metrics) {
   const bucket = {
-    key,
+    key: cloneAggregateResultValue(key),
     count: 0,
     sum: Object.fromEntries(metrics.sum.map((field) => [field, 0])),
     avg: Object.fromEntries(metrics.avg.map((field) => [field, { sum: 0, count: 0 }])),
@@ -1453,29 +1693,34 @@ function addToBucket(bucket, object, metrics) {
   for (const field of metrics.min) {
     const value = getPathValue(object, field);
     if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
-      bucket.min[field] = value;
+      bucket.min[field] = cloneAggregateResultValue(value);
     }
   }
   for (const field of metrics.max) {
     const value = getPathValue(object, field);
     if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
-      bucket.max[field] = value;
+      bucket.max[field] = cloneAggregateResultValue(value);
     }
   }
 }
 
 function finishBucket(bucket, metrics) {
   const out = { count: bucket.count };
-  if (bucket.key !== undefined) out.key = bucket.key;
+  if (bucket.key !== undefined) out.key = cloneAggregateResultValue(bucket.key);
   if (metrics.sum.length) out.sum = bucket.sum;
   if (metrics.avg.length) {
     out.avg = Object.fromEntries(
       Object.entries(bucket.avg).map(([field, state]) => [field, state.count ? state.sum / state.count : null]),
     );
   }
-  if (metrics.min.length) out.min = bucket.min;
-  if (metrics.max.length) out.max = bucket.max;
+  if (metrics.min.length) out.min = cloneAggregateResultValue(bucket.min);
+  if (metrics.max.length) out.max = cloneAggregateResultValue(bucket.max);
   return out;
+}
+
+function cloneAggregateResultValue(value) {
+  if (value === null || typeof value !== "object") return value;
+  return structuredClone(value);
 }
 
 class Database {
@@ -1627,6 +1872,14 @@ export class Store {
     return this.collection(dbName, collName).readObjects(ids);
   }
 
+  queryPath(dbName, collName, criteria = {}, options = {}) {
+    return this.collection(dbName, collName).readPath(criteria, options);
+  }
+
+  aggregatePath(dbName, collName, criteria = {}, spec = {}, options = {}) {
+    return this.collection(dbName, collName).aggregatePath(criteria, spec, options);
+  }
+
   validateWriteValue(dbName, collName, value = {}) {
     return this.collection(dbName, collName).validateWriteValue(value);
   }
@@ -1640,7 +1893,19 @@ export class Store {
   }
 
   vectorSearch(dbName, collName, queryVec, limit = 20, options = {}) {
-    return this.collection(dbName, collName).vectorSearch(queryVec, limit, options);
+    try {
+      return this.collection(dbName, collName).vectorSearch(queryVec, limit, options);
+    } catch (err) {
+      throw annotateVectorIndexError(err, dbName, collName);
+    }
+  }
+
+  assertVectorIndexReady(dbName, collName, options = {}) {
+    try {
+      return this.collection(dbName, collName).assertVectorIndexReady(options.indexKey || "all", options.includeId);
+    } catch (err) {
+      throw annotateVectorIndexError(err, dbName, collName);
+    }
   }
 
   rankVectorRows(dbName, collName, rows, queryVec, limit = 20) {
@@ -1659,9 +1924,76 @@ export class Store {
     return out;
   }
 
+  indexReadiness() {
+    const collections = [];
+    const workers = {
+      columnIndex: {
+        type: "worker_thread",
+        active: 0,
+        background: true,
+      },
+      vectorIndex: {
+        type: "same_thread_task",
+        active: 0,
+        background: true,
+      },
+    };
+
+    for (const [dbName, db] of this.dbs) {
+      for (const [collName, collection] of db.collections) {
+        const readiness = collection.indexReadiness();
+        workers.columnIndex.active += readiness.workers.columnIndex.active;
+        workers.vectorIndex.active += readiness.workers.vectorIndex.active;
+        collections.push({
+          database: dbName,
+          collection: collName,
+          ...readiness,
+        });
+      }
+    }
+
+    return {
+      status: overallIndexStatus(collections.map((collection) => collection.status)),
+      workers,
+      collections,
+    };
+  }
+
   clearVectorIndexes() {
     for (const db of this.dbs.values()) {
       for (const collection of db.collections.values()) collection.clearVectorIndexes();
+    }
+  }
+
+  warmVectorIndexes(plansForCollection = null) {
+    const builds = [];
+    for (const [dbName, db] of this.dbs) {
+      for (const [collName, collection] of db.collections) {
+        const plans = normalizeVectorWarmupPlans(
+          typeof plansForCollection === "function"
+            ? plansForCollection(dbName, collName)
+            : [{ key: "all" }],
+        );
+        for (const plan of plans) builds.push(collection.warmVectorIndex(plan.key, plan.includeId));
+      }
+    }
+    return Promise.all(builds);
+  }
+
+  async awaitVectorIndexes() {
+    for (;;) {
+      const waits = [];
+      for (const db of this.dbs.values()) {
+        for (const collection of db.collections.values()) waits.push(collection.awaitVectorIndexes());
+      }
+      await Promise.allSettled(waits);
+      const stillBuilding = [];
+      for (const db of this.dbs.values()) {
+        for (const collection of db.collections.values()) {
+          if (collection.vectorBuilds.size) stillBuilding.push(collection);
+        }
+      }
+      if (!stillBuilding.length) return;
     }
   }
 

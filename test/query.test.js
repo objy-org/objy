@@ -36,6 +36,17 @@ function seedUsers(n) {
   });
 }
 
+const storageEngines = [
+  { name: "shape", storage: { engine: "shape" } },
+  {
+    name: "object",
+    storage: {
+      engine: "object",
+      object: { valueDirectory: { enabled: false } },
+    },
+  },
+];
+
 test("find supports object-db query operators and nested paths", () => {
   const n = new CRDTNode({ id: "a" });
   seedUsers(n);
@@ -268,6 +279,10 @@ test("queries can follow live reference objects", () => {
 
   assert.equal(n.get("db", "posts", "p1").author.object, undefined);
   assert.equal(n.get("db", "posts", "p1", { refDepth: 1 }).author.object.name, "Alice");
+  const expanded = n.get("db", "posts", "p1", { refDepth: 1 });
+  expanded.author.object.name = "Changed";
+  assert.equal(n.get("db", "authors", "alice").name, "Alice");
+  assert.equal(n.get("db", "posts", "p1").author.object, undefined);
   assert.deepEqual(
     n.find("db", "posts", { "author.object.name": "Alice" }).map((post) => post.id),
     ["p1"],
@@ -297,6 +312,84 @@ test("queries can follow live reference objects", () => {
     ],
   );
 });
+
+for (const { name, storage } of storageEngines) {
+  test(`query scans use fast reads and return isolated objects with ${name} storage`, () => {
+    const n = new CRDTNode({ id: `query-${name}`, storage });
+    n.insertMany("db", "items", [
+      { id: "a", status: "hot", score: 10, tags: ["x"], nested: { flag: true } },
+      { id: "b", status: "cold", score: 20, tags: ["y"], nested: { flag: false } },
+    ]);
+
+    const collection = n.db.collection("db", "items");
+    const originalRead = collection.read.bind(collection);
+    const originalReadForQuery = collection.readForQuery.bind(collection);
+    let safeReads = 0;
+    let queryReads = 0;
+    collection.read = (id) => {
+      safeReads++;
+      return originalRead(id);
+    };
+    collection.readForQuery = (id) => {
+      queryReads++;
+      return originalReadForQuery(id);
+    };
+
+    const rows = n.find("db", "items", { "nested.flag": true }, { limit: 1 });
+
+    collection.read = originalRead;
+    collection.readForQuery = originalReadForQuery;
+    assert.deepEqual(rows.map((row) => row.id), ["a"]);
+    assert.equal(safeReads, 1);
+    assert.equal(queryReads, 1);
+
+    rows[0].nested.flag = false;
+    rows[0].tags.push("mutated");
+    assert.equal(n.get("db", "items", "a").nested.flag, true);
+    assert.deepEqual(n.get("db", "items", "a").tags, ["x"]);
+  });
+
+  test(`fallback aggregates use fast reads and return isolated values with ${name} storage`, () => {
+    const n = new CRDTNode({ id: `aggregate-${name}`, storage });
+    n.insertMany("db", "items", [
+      { id: "a", bucket: { name: "one" }, payload: { rank: 1 }, score: 10 },
+      { id: "b", bucket: { name: "two" }, payload: { rank: 2 }, score: 20 },
+    ]);
+
+    const collection = n.db.collection("db", "items");
+    const originalRead = collection.read.bind(collection);
+    const originalReadForQuery = collection.readForQuery.bind(collection);
+    let safeReads = 0;
+    let queryReads = 0;
+    collection.read = (id) => {
+      safeReads++;
+      return originalRead(id);
+    };
+    collection.readForQuery = (id) => {
+      queryReads++;
+      return originalReadForQuery(id);
+    };
+
+    const grouped = n.aggregate("db", "items", {}, {
+      groupBy: "bucket",
+      fields: { n: { $count: true } },
+    });
+    const legacy = n.aggregate("db", "items", {}, { min: "payload" });
+
+    collection.read = originalRead;
+    collection.readForQuery = originalReadForQuery;
+    assert.equal(safeReads, 0);
+    assert.ok(queryReads >= 4);
+
+    const one = grouped.find((row) => row.bucket.name === "one");
+    assert.ok(one);
+    one.bucket.name = "changed";
+    legacy.min.payload.rank = 999;
+
+    assert.equal(n.get("db", "items", "a").bucket.name, "one");
+    assert.equal(n.get("db", "items", "a").payload.rank, 1);
+  });
+}
 
 test("aggregate uses the same query matcher", () => {
   const n = new CRDTNode({ id: "a" });
