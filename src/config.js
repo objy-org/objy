@@ -112,15 +112,40 @@ function normalizePersistenceConfig(config = {}) {
     restoreScopes: Array.isArray(config.restoreScopes) ? config.restoreScopes : undefined,
     ack,
     localWal: normalizeLocalWalConfig(config.localWal, ack),
-    s3: {
-      bucket: config.s3?.bucket || "spread-db",
-      endpoint: config.s3?.endpoint,
-      region: config.s3?.region || "us-east-1",
-      accessKeyId: config.s3?.accessKeyId,
-      secretAccessKey: config.s3?.secretAccessKey,
-      forcePathStyle: config.s3?.forcePathStyle,
-    },
+    s3: normalizeS3Config(config.s3),
   };
+}
+
+function normalizeS3Config(config = {}) {
+  const endpoint = config.endpoint;
+  const endpointLocation = typeof endpoint === "string" ? hetznerLocationFromEndpoint(endpoint) : null;
+  const configuredRegion = typeof config.region === "string" && config.region.trim()
+    ? config.region.trim()
+    : null;
+  const region = normalizeS3Region(configuredRegion, endpointLocation);
+  if (endpointLocation && region !== endpointLocation) {
+    throw new Error(`persistence.s3.region must be ${endpointLocation} for endpoint ${endpoint}`);
+  }
+  return {
+    bucket: config.bucket || "spread-db",
+    endpoint,
+    region,
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    forcePathStyle: config.forcePathStyle,
+  };
+}
+
+function normalizeS3Region(region, endpointLocation) {
+  if (!endpointLocation) return region || "us-east-1";
+  if (!region || region === "us-east-1" || region === "US") return endpointLocation;
+  return region;
+}
+
+function hetznerLocationFromEndpoint(endpoint) {
+  const host = endpoint.replace(/^https?:\/\//, "").split("/")[0].toLowerCase();
+  const match = host.match(/^(fsn1|nbg1|hel1)\.your-objectstorage\.com$/);
+  return match?.[1] || null;
 }
 
 function configPathFromArgs(argv) {

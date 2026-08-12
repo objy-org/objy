@@ -1,0 +1,80 @@
+{
+  "ssh": {
+    "host": "root@123.123.123.123",
+    "port": 22,
+    "sudo": false,
+    "multiplex": true,
+    "controlPersist": "10m",
+    "opts": []
+  },
+  "remote": {
+    "root": "/opt/spread-db",
+    "service": "spread-db",
+    "installNode": true,
+    "nodeMajor": 22
+  },
+  "node": {
+    "id": "hetzner-1",
+    "url": "http://123.123.123.123:8080",
+    "port": 8080,
+    "retainOps": 256,
+    "syncBatchSize": 50000
+  },
+  "storage": {
+    "engine": "object",
+    "object": {
+      "valueDirectory": {
+        "enabled": true,
+        "minRefs": 2,
+        "maxEntries": 100000,
+        "maxCandidates": 4096,
+        "maxCandidatesPerPath": 256,
+        "maxPaths": 1024,
+        "maxStringLength": 256,
+        "maxKeyBytes": 512
+      }
+    }
+  },
+  "cluster": {
+    "syncMs": 1000,
+    "shardMapPrefix": "spread-db",
+    "shardMapKey": "cluster/shard-map.json",
+    "shardName": "shard-0"
+  },
+  "auth": {
+    "jwtSecret": "replace-with-a-long-random-secret",
+    "accessTokenTtlSeconds": 900,
+    "refreshTokenTtlSeconds": 1209600,
+    "users": [
+      {
+        "id": "admin",
+        "username": "admin",
+        "password": "123",
+        "role": "admin",
+        "admin": true
+      }
+    ]
+  },
+  "persistence": {
+    "prefix": "spread-db",
+    "flushMs": 1000,
+    "opBatchSize": 10000,
+    "snapshotMs": 3600000,
+    "snapshotRole": "primary",
+    "segmentBytes": 16777216,
+    "compactJournals": true,
+    "restoreMode": "reshard",
+    "localWal": {
+      "fsync": true,
+      "flushMs": 1000
+    }
+  },
+  "s3": {
+    "bucket": "spread-db",
+    "endpoint": "https://fsn1.your-objectstorage.com",
+    "region": "fsn1",
+    "accessKeyId": "replace-me",
+    "secretAccessKey": "replace-me",
+    "forcePathStyle": true
+  }
+}

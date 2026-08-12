@@ -33,7 +33,30 @@ test("S3 persistence adapter stores journals through an S3-compatible API", asyn
   }
 });
 
-function createMockS3Server() {
+test("S3 adapter creates non-us-east-1 buckets with a location constraint", async () => {
+  const mock = createMockS3Server({ bucketExists: false });
+  const port = await mock.start();
+  try {
+    const storage = new S3ObjectStorage({
+      bucket: "spread-db-test",
+      endpoint: `http://127.0.0.1:${port}`,
+      region: "fsn1",
+      accessKeyId: "test",
+      secretAccessKey: "test",
+      forcePathStyle: true,
+    });
+
+    await storage.put("probe.json", "{}");
+
+    const createBucket = mock.log.find((entry) => entry.method === "PUT" && entry.path.replace(/\/$/, "") === "/spread-db-test");
+    assert.ok(createBucket);
+    assert.match(createBucket.body, /<LocationConstraint>fsn1<\/LocationConstraint>/);
+  } finally {
+    await mock.stop();
+  }
+});
+
+function createMockS3Server({ bucketExists = true } = {}) {
   const objects = new Map();
   const log = [];
 
@@ -41,8 +64,6 @@ function createMockS3Server() {
     const url = new URL(req.url, "http://localhost");
     const parts = url.pathname.replace(/^\//, "").split("/");
     const key = parts.slice(1).join("/");
-    log.push({ method: req.method, path: url.pathname, search: url.search });
-
     const readBody = () => new Promise((resolve) => {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
@@ -50,13 +71,23 @@ function createMockS3Server() {
     });
 
     if (req.method === "HEAD" && !key) {
-      res.writeHead(200);
+      res.writeHead(bucketExists ? 200 : 404, { "content-type": "application/xml" });
       res.end();
+      return;
+    }
+
+    if (req.method === "PUT" && !key) {
+      readBody().then((body) => {
+        log.push({ method: req.method, path: url.pathname, search: url.search, body });
+        res.writeHead(200, { "content-type": "application/xml" });
+        res.end();
+      });
       return;
     }
 
     if (req.method === "PUT" && key) {
       readBody().then((body) => {
+        log.push({ method: req.method, path: url.pathname, search: url.search, body });
         objects.set(key, body);
         res.writeHead(200, { ETag: "\"mock\"" });
         res.end();
@@ -65,6 +96,7 @@ function createMockS3Server() {
     }
 
     if (req.method === "GET" && url.searchParams.get("list-type") === "2") {
+      log.push({ method: req.method, path: url.pathname, search: url.search });
       const prefix = url.searchParams.get("prefix") || "";
       const contents = [...objects.keys()]
         .filter((objectKey) => objectKey.startsWith(prefix))
@@ -83,6 +115,7 @@ function createMockS3Server() {
     }
 
     if (req.method === "GET" && key) {
+      log.push({ method: req.method, path: url.pathname, search: url.search });
       if (!objects.has(key)) {
         res.writeHead(404, { "content-type": "application/xml" });
         res.end(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`);
@@ -93,6 +126,7 @@ function createMockS3Server() {
       return;
     }
 
+    log.push({ method: req.method, path: url.pathname, search: url.search });
     res.writeHead(404, { "content-type": "application/xml" });
     res.end(`<?xml version="1.0"?><Error><Code>NotFound</Code></Error>`);
   });

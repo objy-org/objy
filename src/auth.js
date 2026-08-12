@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { normalizePermissions } from "./permissions.js";
 
 const require = createRequire(import.meta.url);
 const JWT = require("./lib/jwt.cjs");
@@ -10,7 +11,7 @@ export const USERS_COLLECTION = "users";
 const DEFAULT_ACCESS_TTL_SECONDS = 15 * 60;
 const DEFAULT_REFRESH_TTL_SECONDS = 14 * 24 * 60 * 60;
 const DEFAULT_BOOTSTRAP_USERS = Object.freeze([
-  { id: "admin", username: "admin", password: "123", role: "admin" },
+  { id: "admin", username: "admin", password: "123", role: "admin", admin: true },
 ]);
 
 export function normalizeAuthConfig(config = {}) {
@@ -168,11 +169,14 @@ export class AuthService {
 
   issueToken(database, collection, user, type, ttlSeconds, sessionId) {
     const now = Math.floor(Date.now() / 1000);
+    const permissions = normalizePermissions(user.permissions);
     return JWT.sign({
       typ: type,
       sub: user.id,
       username: user.username,
       role: user.role || "user",
+      admin: user.admin === true || user.role === "admin",
+      permissions,
       database,
       collection,
       globalUser: this.isGlobalUsersCollection(database, collection),
@@ -208,6 +212,8 @@ export class AuthService {
           id: claims.sub,
           username: claims.username,
           role: claims.role || "user",
+          admin: claims.admin === true,
+          permissions: normalizePermissions(claims.permissions),
           database: claims.database,
           collection: claims.collection,
         },
@@ -247,6 +253,7 @@ export class AuthService {
       if (!isPasswordHash(next.password)) next.password = hashPassword(next.password);
     }
     if (next.tokenVersion !== undefined) next.tokenVersion = positiveInt(next.tokenVersion, 0);
+    if (next.permissions !== undefined) next.permissions = normalizePermissions(next.permissions);
     return next;
   }
 
@@ -288,6 +295,7 @@ export class AuthService {
   redactUser(user) {
     if (!user) return user;
     const { password, ...safe } = user;
+    if (safe.permissions !== undefined) safe.permissions = normalizePermissions(safe.permissions);
     return safe;
   }
 
