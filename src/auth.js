@@ -11,7 +11,7 @@ export const USERS_COLLECTION = "users";
 const DEFAULT_ACCESS_TTL_SECONDS = 15 * 60;
 const DEFAULT_REFRESH_TTL_SECONDS = 14 * 24 * 60 * 60;
 const DEFAULT_BOOTSTRAP_USERS = Object.freeze([
-  { id: "admin", username: "admin", password: "123", role: "admin", admin: true },
+  { _id: "admin", username: "admin", password: "123", role: "admin", admin: true },
 ]);
 
 export function normalizeAuthConfig(config = {}) {
@@ -73,12 +73,13 @@ export class AuthService {
   }
 
   ensureBootstrapUser(user) {
+    const { id: _ignoredId, _id, ...rest } = user;
     const prepared = this.prepareUserObject({
-      id: user.id || user.username,
       role: "user",
-      ...user,
+      ...rest,
+      _id: _id || user.username,
     }, { partial: false });
-    const existingById = this.node.get(GLOBAL_DATABASE, USERS_COLLECTION, prepared.id);
+    const existingById = this.node.get(GLOBAL_DATABASE, USERS_COLLECTION, prepared._id);
     const existingByUsername = this.findUserByUsername(GLOBAL_DATABASE, USERS_COLLECTION, prepared.username);
     if (existingById || existingByUsername) return null;
     return this.node.insertMany(GLOBAL_DATABASE, USERS_COLLECTION, [prepared])[0];
@@ -172,7 +173,7 @@ export class AuthService {
     const permissions = normalizePermissions(user.permissions);
     return JWT.sign({
       typ: type,
-      sub: user.id,
+      sub: user._id,
       username: user.username,
       role: user.role || "user",
       admin: user.admin === true || user.role === "admin",
@@ -225,15 +226,28 @@ export class AuthService {
   }
 
   prepareWriteObjects(database, collection, objects, { partial = false } = {}) {
-    const prepared = objects.map((object) => this.prepareUserObject(object, { partial }));
+    const prepared = objects.map((object) => {
+      const existing = !partial &&
+        object?.password === undefined &&
+        object?.username !== undefined &&
+        object?._id !== undefined &&
+        object?._id !== null
+        ? this.node.get(database, collection, String(object._id))
+        : null;
+      return this.prepareUserObject(object, { partial, existing });
+    });
     this.assertUniqueUsernames(database, collection, prepared);
     return prepared;
   }
 
-  prepareUserObject(object, { partial = false } = {}) {
+  prepareUserObject(object, { partial = false, existing = null } = {}) {
     if (!isPlainObject(object)) throw httpError(400, "user object must be a plain object");
 
     const next = { ...object };
+    if (!partial && next.password === undefined && existing?.password !== undefined) {
+      next.password = existing.password;
+    }
+
     if (!partial && next.password !== undefined) {
       if (typeof next.username !== "string" || next.username.length === 0) {
         throw httpError(400, "user.username must be a non-empty string");
@@ -261,13 +275,13 @@ export class AuthService {
     const seen = new Map();
     for (const object of objects) {
       if (object.password === undefined || !object.username) continue;
-      const id = object.id === undefined || object.id === null ? null : String(object.id);
+      const id = object._id === undefined || object._id === null ? null : String(object._id);
       if (seen.has(object.username)) throw httpError(409, `username already exists: ${object.username}`);
       seen.set(object.username, id);
 
       const matches = this.node.find(database, collection, { username: object.username });
       for (const existing of matches) {
-        if (!id || existing.id !== id) throw httpError(409, `username already exists: ${object.username}`);
+        if (!id || existing._id !== id) throw httpError(409, `username already exists: ${object.username}`);
       }
     }
   }

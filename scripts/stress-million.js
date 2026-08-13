@@ -87,7 +87,7 @@ await timed("insert writer objects", () => {
   for (let i = 0; i < OBJECTS; i++) {
     const id = idAt(i);
     expectedCounts.set(writer.shardForObject("app", "events", id), expectedCounts.get(writer.shardForObject("app", "events", id)) + 1);
-    writer.insert("app", "events", { id, v: i });
+    writer.insert("app", "events", { _id: id, v: i });
   }
 });
 

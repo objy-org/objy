@@ -1,16 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, httpPeer } from "../src/server.js";
 import { CRDTNode } from "../src/crdt.js";
+import { createMemoryGuard } from "../src/memory-guard.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { ShardRequestRouter } from "../src/shard-router.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
 
 const TEST_AUTH = { jwtSecret: "test-jwt-secret" };
+const TEST_CLUSTER_SECRET = TEST_AUTH.jwtSecret;
 
 function startTestServer(options = {}) {
   return startServer({ auth: TEST_AUTH, ...options });
@@ -22,8 +26,8 @@ async function login(base, username = "admin", password = "123", database = "_gl
   return result.body;
 }
 
-function api(base, token = null) {
-  const authHeaders = token ? { authorization: `Bearer ${token}` } : {};
+function api(base, token = null, extraHeaders = {}) {
+  const authHeaders = { ...(token ? { authorization: `Bearer ${token}` } : {}), ...extraHeaders };
   const result = async (r) => ({ status: r.status, headers: r.headers, body: await r.json().catch(() => null) });
   return {
     post: async (path, body) => {
@@ -65,6 +69,10 @@ function api(base, token = null) {
   };
 }
 
+function clusterHeaders() {
+  return { "x-spread-db-cluster-secret": TEST_CLUSTER_SECRET };
+}
+
 async function freePort() {
   const server = createNetServer();
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -73,7 +81,20 @@ async function freePort() {
   return port;
 }
 
-async function startRoutedTwoShardCluster() {
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(check, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await wait(10);
+  }
+  assert.ok(check(), "condition did not become true before timeout");
+}
+
+async function startRoutedTwoShardCluster(options = {}) {
   const portA = await freePort();
   const portB = await freePort();
   const urlA = `http://localhost:${portA}`;
@@ -88,11 +109,13 @@ async function startRoutedTwoShardCluster() {
     port: portA,
     node: new CRDTNode({ id: "route-a", url: urlA }),
     shardMap,
+    ...(options.a || {}),
   });
   const b = await startTestServer({
     port: portB,
     node: new CRDTNode({ id: "route-b", url: urlB }),
     shardMap,
+    ...(options.b || {}),
   });
   return { a, b, urlA, urlB };
 }
@@ -122,6 +145,23 @@ async function startMultiOwnedShardCluster() {
   return { a, b, urlA, urlB };
 }
 
+async function startReplicatedTwoShardCluster() {
+  const ports = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
+  const urls = ports.map((port) => `http://localhost:${port}`);
+  const shardMap = {
+    shards: {
+      "shard-a": { peers: [{ url: urls[0] }, { url: urls[1] }] },
+      "shard-b": { peers: [{ url: urls[2] }, { url: urls[3] }] },
+    },
+  };
+  const servers = await Promise.all(urls.map((url, index) => startTestServer({
+    port: ports[index],
+    node: new CRDTNode({ id: `replica-${index}`, url }),
+    shardMap,
+  })));
+  return { servers, urlA: urls[0] };
+}
+
 function idForShard(node, database, collection, shard, prefix) {
   for (let i = 0; i < 10_000; i++) {
     const id = `${prefix}-${i}`;
@@ -129,6 +169,74 @@ function idForShard(node, database, collection, shard, prefix) {
   }
   throw new Error(`could not find id for shard ${shard}`);
 }
+
+test("forwarded shard requests time out", async () => {
+  const slow = createHttpServer(() => {});
+  await new Promise((resolve) => slow.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = slow.address().port;
+    const router = new ShardRequestRouter({
+      node: {
+        routingPeersForShard: () => [{ url: `http://127.0.0.1:${port}` }],
+      },
+      forwardTimeoutMs: 25,
+    });
+
+    const response = await router.forwardToShard({ headers: {} }, "shard-a", "/never");
+    assert.equal(response.status, 504);
+    assert.match(response.body.error, /forward timeout after 25ms/);
+  } finally {
+    slow.closeAllConnections?.();
+    await new Promise((resolve) => slow.close(resolve));
+  }
+});
+
+test("sharded reads fan out to remote shards in parallel", async () => {
+  const router = new ShardRequestRouter({
+    node: {
+      shardMap: { shardsForCollection: () => ["shard-a", "shard-b"] },
+      ownsShard: () => false,
+    },
+  });
+  let active = 0;
+  let maxActive = 0;
+  router.forwardToShard = async (_req, shard) => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await wait(20);
+    active -= 1;
+    return { status: 200, body: [{ _id: shard }], headers: {} };
+  };
+
+  const result = await router.find({ headers: {} }, "db", "items", {}, { limit: 10 });
+
+  assert.equal(maxActive, 2);
+  assert.deepEqual(result.objects.map((object) => object._id), ["shard-a", "shard-b"]);
+});
+
+test("all-peer fan-out runs in parallel", async () => {
+  const router = new ShardRequestRouter({
+    node: {
+      shardMap: { allPeers: () => [{ url: "http://peer-a" }, { url: "http://peer-b" }] },
+      _isSelfPeer: () => false,
+    },
+  });
+  let active = 0;
+  let maxActive = 0;
+  router.forwardJson = async () => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await wait(20);
+    active -= 1;
+    return { status: 200, body: { ok: true }, headers: {} };
+  };
+
+  const response = await router.forwardToAllPeers({ headers: {} }, "/api/databases", { method: "POST" });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, { ok: true, peers: 2 });
+  assert.equal(maxActive, 2);
+});
 
 test("auth issues and renews global user JWTs", async () => {
   const s = await startTestServer({ port: 0 });
@@ -159,6 +267,21 @@ test("auth issues and renews global user JWTs", async () => {
     assert.equal(config.status, 200);
     assert.deepEqual(config.body.shards.map((shard) => shard.name), ["default"]);
     assert.ok(config.body.nodes[0].memory.rss > 0);
+    assert.ok(config.body.nodes[0].memory.systemTotal > config.body.nodes[0].memory.rss);
+    assert.ok(config.body.nodes[0].memory.systemFree >= 0);
+    assert.ok(config.body.nodes[0].memory.rssSystemPercent > 0);
+    assert.ok(config.body.rss.cluster.rss > 0);
+    assert.ok(config.body.rss.cluster.totalMemory > config.body.rss.cluster.rss);
+    assert.ok(config.body.rss.cluster.freeMemory >= 0);
+    assert.ok(config.body.rss.cluster.rssPercent > 0);
+    assert.equal(config.body.rss.cluster.nodeCount, 1);
+    assert.equal(config.body.rss.cluster.totalMemory, config.body.rss.logical.totalMemory);
+    assert.equal(config.body.rss.cluster.totalMemory, config.body.rss.physical.totalMemory);
+    assert.equal(config.body.rss.nodes[0].nodeId, s.node.id);
+    assert.ok(config.body.rss.nodes[0].rss > 0);
+    assert.ok(config.body.rss.nodes[0].totalMemory > config.body.rss.nodes[0].rss);
+    assert.ok(config.body.rss.nodes[0].freeMemory >= 0);
+    assert.ok(config.body.rss.nodes[0].rssPercent > 0);
 
     const renewed = await anonymous.post("/api/_global/users/renew", { refreshToken: session.body.refreshToken });
     assert.equal(renewed.status, 200);
@@ -192,8 +315,32 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.equal(remote.reachable, true);
     assert.ok(local.memory.rss > 0);
     assert.ok(remote.memory.rss > 0);
+    assert.ok(local.memory.systemTotal > local.memory.rss);
+    assert.ok(remote.memory.systemTotal > remote.memory.rss);
+    assert.equal(status.body.rss.cluster.nodeCount, 2);
+    assert.equal(status.body.rss.cluster.onlineNodeCount, 2);
+    assert.equal(status.body.rss.cluster.offlineNodeCount, 0);
+    assert.equal(status.body.rss.nodes.length, 2);
+    assert.ok(status.body.rss.nodes.some((entry) => entry.nodeId === "route-a" && entry.rss > 0));
+    assert.ok(status.body.rss.nodes.some((entry) => entry.nodeId === "route-b" && entry.rss > 0));
+    assert.equal(
+      status.body.rss.cluster.rss,
+      status.body.rss.nodes.reduce((sum, entry) => sum + entry.rss, 0),
+    );
+    assert.equal(
+      status.body.rss.cluster.totalMemory,
+      status.body.rss.nodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
+    );
+    assert.equal(status.body.rss.cluster.totalMemory, status.body.rss.logical.totalMemory);
+    assert.equal(status.body.rss.physical.totalMemory, status.body.rss.nodes.reduce((sum, entry) => sum + entry.totalMemory, 0));
+    assert.ok(status.body.rss.cluster.rssPercent > 0);
+    assert.ok(status.body.peers.every((peer) => peer.totalMemory > peer.rss));
     assert.deepEqual(local.ownedShards, ["shard-a"]);
     assert.deepEqual(remote.ownedShards, ["shard-b"]);
+    assert.equal(local.replication.scheduler.mode, "hinted-pull");
+    assert.equal(local.replication.scheduler.enabled, true);
+    assert.equal(local.replication.scheduler.hintsEnabled, true);
+    assert.equal(Number.isInteger(local.replication.scheduler.inflightPulls), true);
     assert.equal(local.indexes.status, "ready");
     assert.equal(local.indexes.workers.columnIndex.type, "worker_thread");
     assert.equal(local.indexes.workers.vectorIndex.type, "same_thread_task");
@@ -211,6 +358,75 @@ test("api config reports cluster shards peers and node RSS", async () => {
   }
 });
 
+test("api config reports logical memory without counting replicas", async () => {
+  const { servers, urlA } = await startReplicatedTwoShardCluster();
+  try {
+    const session = await login(urlA);
+    const status = await api(urlA, session.accessToken).get("/api/config");
+
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.body.rss.nodes.length, 4);
+    assert.equal(status.body.rss.physical.nodeCount, 4);
+    assert.equal(status.body.rss.logical.shardCount, 2);
+    assert.equal(status.body.rss.logical.coveredShardCount, 2);
+    assert.equal(status.body.rss.logical.missingShardCount, 0);
+    assert.equal(status.body.rss.logical.nodeCount, 2);
+    assert.equal(status.body.rss.cluster.totalMemory, status.body.rss.logical.totalMemory);
+    assert.equal(
+      status.body.rss.physical.totalMemory,
+      status.body.rss.nodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
+    );
+
+    const selectedNodeIds = new Set(status.body.rss.logical.selectedReplicas.map((replica) => replica.nodeId));
+    const selectedNodes = status.body.rss.nodes.filter((entry) => selectedNodeIds.has(entry.nodeId));
+    assert.deepEqual([...selectedNodeIds].sort(), ["replica-0", "replica-2"]);
+    assert.equal(
+      status.body.rss.logical.totalMemory,
+      selectedNodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
+    );
+    assert.ok(status.body.rss.logical.totalMemory < status.body.rss.physical.totalMemory);
+  } finally {
+    for (const server of servers) server.server.close();
+  }
+});
+
+test("memory guard rejects local writes but still allows remote shard forwarding", async () => {
+  const rejectingGuard = createMemoryGuard({
+    enabled: true,
+    limitMb: 1,
+    rejectWritesPercent: 1,
+    resumeWritesPercent: 0,
+    checkMs: 0,
+  });
+  const { a, b, urlA } = await startRoutedTwoShardCluster({ a: { memoryGuard: rejectingGuard } });
+  try {
+    const session = await login(urlA);
+    const c = api(urlA, session.accessToken);
+    const db = "app";
+    const coll = "guarded";
+    const localId = idForShard(a.node, db, coll, "shard-a", "local");
+    const remoteId = idForShard(a.node, db, coll, "shard-b", "remote");
+
+    const remote = await c.post(`/api/${db}/${coll}/object`, { _id: remoteId, value: "remote" });
+    assert.equal(remote.status, 201, JSON.stringify(remote.body));
+    assert.equal(b.node.get(db, coll, remoteId).value, "remote");
+    assert.equal(a.node.get(db, coll, remoteId), undefined);
+
+    const local = await c.post(`/api/${db}/${coll}/object`, { _id: localId, value: "local" });
+    assert.equal(local.status, 507, JSON.stringify(local.body));
+    assert.equal(local.body.error, "peer memory limit exceeded");
+    assert.equal(local.headers.get("retry-after"), "5");
+    assert.equal(a.node.get(db, coll, localId), undefined);
+
+    const status = await c.get("/api/config");
+    const localStatus = status.body.nodes.find((nodeStatus) => nodeStatus.node.id === "route-a");
+    assert.equal(localStatus.memoryGuard.writeState, "rejecting");
+  } finally {
+    a.server.close();
+    b.server.close();
+  }
+});
+
 test("auth works from any database collection and limits tokens to that database", async () => {
   const s = await startTestServer({ port: 0 });
   try {
@@ -222,7 +438,7 @@ test("auth works from any database collection and limits tokens to that database
     assert.equal((await admin.post("/api/other/collections", { name: "docs" })).status, 201);
 
     const created = await admin.post("/api/app/users/object", {
-      id: "reader",
+      _id: "reader",
       username: "reader",
       password: "reader-secret",
     });
@@ -239,7 +455,7 @@ test("auth works from any database collection and limits tokens to that database
 
     const appUser = api(base, session.body.accessToken);
     assert.deepEqual((await appUser.get("/api/databases")).body.databases, ["app"]);
-    assert.equal((await appUser.get("/api/app/collections")).status, 200);
+    assert.equal((await appUser.get("/api/app/collections")).status, 403);
     assert.equal((await appUser.get("/api/other/collections")).status, 403);
     assert.equal((await appUser.post("/api/databases", { name: "blocked" })).status, 403);
 
@@ -250,6 +466,66 @@ test("auth works from any database collection and limits tokens to that database
     assert.equal((await api(base, null).post("/api/_global/users/renew", {
       refreshToken: session.body.refreshToken,
     })).status, 403);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("context endpoints require global or database admin tokens", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const base = `http://localhost:${s.port}`;
+    const root = await login(base);
+    const admin = api(base, root.accessToken);
+    const db = "secure_app";
+
+    assert.equal((await admin.post("/api/databases", { name: db })).status, 201);
+    assert.equal((await admin.post(`/api/${db}/collections`, { name: "users", indexes: ["username"] })).status, 201);
+    assert.equal((await admin.post(`/api/${db}/collections`, { name: "docs", indexes: ["owner"] })).status, 201);
+
+    assert.equal((await admin.post("/api/_global/users/object", {
+      _id: "global-reader",
+      username: "global-reader",
+      password: "secret",
+    })).status, 201);
+    const globalReaderSession = await login(base, "global-reader", "secret");
+    const globalReader = api(base, globalReaderSession.accessToken);
+    assert.deepEqual((await globalReader.get("/api/databases")).body.databases, ["_global"]);
+    assert.equal((await globalReader.get("/api/config")).status, 403);
+    assert.equal((await globalReader.post("/api/databases", { name: "blocked_global" })).status, 403);
+    assert.equal((await globalReader.get(`/api/${db}/collections`)).status, 403);
+
+    assert.equal((await admin.post(`/api/${db}/users/object`, {
+      _id: "reader",
+      username: "reader",
+      password: "secret",
+      permissions: [{ name: "own docs", query: { owner: "reader" }, perm: "r" }],
+    })).status, 201);
+    assert.equal((await admin.post(`/api/${db}/users/object`, {
+      _id: "db-admin",
+      username: "db-admin",
+      password: "secret",
+      admin: true,
+    })).status, 201);
+    assert.equal((await admin.post(`/api/${db}/docs/object`, { _id: "own", owner: "reader" })).status, 201);
+
+    const readerSession = await login(base, "reader", "secret", db, "users");
+    const reader = api(base, readerSession.accessToken);
+    assert.deepEqual((await reader.get("/api/databases")).body.databases, [db]);
+    assert.equal((await reader.get(`/api/${db}/docs/object/own`)).status, 200);
+    assert.equal((await reader.get(`/api/${db}/collections`)).status, 403);
+    assert.equal((await reader.post(`/api/${db}/collections`, { name: "blocked" })).status, 403);
+    assert.equal((await reader.get(`/api/${db}/docs/meta`)).status, 403);
+    assert.equal((await reader.put(`/api/${db}/docs/meta`, { indexes: [] })).status, 403);
+    assert.equal((await reader.del(`/api/${db}/collections/docs`)).status, 403);
+
+    const dbAdminSession = await login(base, "db-admin", "secret", db, "users");
+    const dbAdmin = api(base, dbAdminSession.accessToken);
+    assert.equal((await dbAdmin.post("/api/databases", { name: "blocked_db_admin" })).status, 403);
+    assert.deepEqual((await dbAdmin.get(`/api/${db}/collections`)).body.collections, ["docs", "users"]);
+    assert.equal((await dbAdmin.put(`/api/${db}/docs/meta`, { indexes: ["owner", "status"] })).status, 200);
+    assert.equal((await dbAdmin.post(`/api/${db}/collections`, { name: "managed" })).status, 201);
+    assert.equal((await dbAdmin.del(`/api/${db}/collections/managed`)).status, 204);
   } finally {
     s.server.close();
   }
@@ -266,7 +542,7 @@ test("auth routes database users to the owning shard", async () => {
 
     assert.equal((await admin.post(`/api/${db}/collections`, { name: coll, indexes: ["username"] })).status, 201);
     const created = await admin.post(`/api/${db}/${coll}/object`, {
-      id: remoteUserId,
+      _id: remoteUserId,
       username: "reader",
       password: "reader-secret",
       role: "reader",
@@ -280,14 +556,14 @@ test("auth routes database users to the owning shard", async () => {
       password: "reader-secret",
     });
     assert.equal(session.status, 200, JSON.stringify(session.body));
-    assert.equal(session.body.user.id, remoteUserId);
+    assert.equal(session.body.user._id, remoteUserId);
     assert.equal(session.body.user.password, undefined);
 
     const renewed = await api(urlA, null).post(`/api/${db}/${coll}/renew`, {
       refreshToken: session.body.refreshToken,
     });
     assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
-    assert.equal(renewed.body.user.id, remoteUserId);
+    assert.equal(renewed.body.user._id, remoteUserId);
   } finally {
     a.server.close();
     b.server.close();
@@ -306,7 +582,7 @@ test("database creation can bootstrap a routed admin user", async () => {
     const created = await admin.post("/api/databases", {
       name: db,
       adminUser: {
-        id: remoteAdminId,
+        _id: remoteAdminId,
         username: "owner",
         password: "owner-secret",
       },
@@ -315,7 +591,7 @@ test("database creation can bootstrap a routed admin user", async () => {
     assert.equal(created.body.name, db);
     assert.equal(created.body.created, true);
     assert.equal(created.body.adminUser.collection, coll);
-    assert.equal(created.body.adminUser.user.id, remoteAdminId);
+    assert.equal(created.body.adminUser.user._id, remoteAdminId);
     assert.equal(created.body.adminUser.user.username, "owner");
     assert.equal(created.body.adminUser.user.admin, true);
     assert.equal(created.body.adminUser.user.password, undefined);
@@ -357,7 +633,7 @@ test("global users are password-hashed and can log in", async () => {
     const authed = api(base, root.accessToken);
 
     const created = await authed.post("/api/_global/users/object", {
-      id: "ada",
+      _id: "ada",
       username: "ada",
       password: "s3cret",
       role: "user",
@@ -369,7 +645,7 @@ test("global users are password-hashed and can log in", async () => {
     assert.match(stored.password, /^pbkdf2\$sha256\$/);
 
     const duplicate = await authed.post("/api/_global/users/object", {
-      id: "ada-2",
+      _id: "ada-2",
       username: "ada",
       password: "other",
     });
@@ -384,6 +660,37 @@ test("global users are password-hashed and can log in", async () => {
     const session = await api(base, null).post("/api/_global/users/auth", { username: "ada", password: "s3cret" });
     assert.equal(session.status, 200);
     assert.equal(session.body.user.password, undefined);
+
+    const fetched = await authed.get("/api/_global/users/object/ada");
+    assert.equal(fetched.status, 200);
+    assert.equal(fetched.body.password, undefined);
+    const previousHash = s.node.get("_global", "users", "ada").password;
+    const replacedRedacted = await authed.put("/api/_global/users/object/ada", {
+      ...fetched.body,
+      displayName: "Ada Lovelace",
+    });
+    assert.equal(replacedRedacted.status, 200);
+    assert.equal(replacedRedacted.body.password, undefined);
+    assert.equal(s.node.get("_global", "users", "ada").password, previousHash);
+    assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "ada", password: "s3cret" })).status, 200);
+
+    const bulkResponse = await fetch(`${base}/api/_global/users/object`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${root.accessToken}`,
+        "content-type": "application/json",
+        prefer: "return=minimal",
+      },
+      body: JSON.stringify([
+        { _id: "bulk-user", username: "bulk-user", password: "bulk-secret" },
+        { _id: "bulk-note", kind: "not-auth" },
+      ]),
+    });
+    const bulkBody = await bulkResponse.json();
+    assert.equal(bulkResponse.status, 201);
+    assert.deepEqual(bulkBody, { inserted: 2 });
+    assert.match(s.node.get("_global", "users", "bulk-user").password, /^pbkdf2\$sha256\$/);
+    assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "bulk-user", password: "bulk-secret" })).status, 200);
 
     const patched = await authed.patch("/api/_global/users/object/ada", { password: "new-secret" });
     assert.equal(patched.status, 200);
@@ -405,7 +712,7 @@ test("database user permissions filter reads and guard writes", async () => {
     const db = "perm_app";
 
     const user = await admin.post(`/api/${db}/users/object`, {
-      id: "reader",
+      _id: "reader",
       username: "reader",
       password: "secret",
       permissions: [
@@ -420,18 +727,18 @@ test("database user permissions filter reads and guard writes", async () => {
 
     const docsBase = `/api/${db}/docs/object`;
     assert.equal((await admin.post(docsBase, [
-      { id: "own", owner: "reader", status: "open", score: 2 },
-      { id: "other", owner: "other", status: "open", score: 5 },
-      { id: "bulk-a", owner: "reader", status: "bulk", score: 1 },
-      { id: "bulk-b", owner: "reader", status: "bulk", score: 1 },
+      { _id: "own", owner: "reader", status: "open", score: 2 },
+      { _id: "other", owner: "other", status: "open", score: 5 },
+      { _id: "bulk-a", owner: "reader", status: "bulk", score: 1 },
+      { _id: "bulk-b", owner: "reader", status: "bulk", score: 1 },
     ])).status, 201);
 
     const readerSession = await login(`http://localhost:${s.port}`, "reader", "secret", db, "users");
     const reader = api(`http://localhost:${s.port}`, readerSession.accessToken);
 
-    const list = await reader.get(`${docsBase}?sortBy=id`);
+    const list = await reader.get(`${docsBase}?sortBy=_id`);
     assert.equal(list.status, 200);
-    assert.deepEqual(list.body.map((row) => row.id), ["bulk-a", "bulk-b", "own"]);
+    assert.deepEqual(list.body.map((row) => row._id), ["bulk-a", "bulk-b", "own"]);
 
     const aggregateQuery = encodeURIComponent(JSON.stringify({
       $aggregate: { fields: { total: { $sum: "score" }, n: { $count: true } } },
@@ -443,9 +750,9 @@ test("database user permissions filter reads and guard writes", async () => {
     assert.equal((await reader.get(`${docsBase}/own`)).status, 200);
     assert.equal((await reader.get(`${docsBase}/other`)).status, 403);
 
-    const created = await reader.post(docsBase, { id: "new-own", owner: "reader", status: "new" });
+    const created = await reader.post(docsBase, { _id: "new-own", owner: "reader", status: "new" });
     assert.equal(created.status, 201, JSON.stringify(created.body));
-    assert.equal((await reader.post(docsBase, { id: "new-other", owner: "other" })).status, 403);
+    assert.equal((await reader.post(docsBase, { _id: "new-other", owner: "other" })).status, 403);
 
     const patched = await reader.patch(`${docsBase}/own`, { status: "closed" });
     assert.equal(patched.status, 200, JSON.stringify(patched.body));
@@ -456,8 +763,8 @@ test("database user permissions filter reads and guard writes", async () => {
     assert.equal(s.node.get(db, "docs", "own").owner, "reader");
 
     const deniedBulk = await reader.patch(docsBase, [
-      { id: "bulk-a", status: "changed" },
-      { id: "bulk-b", owner: "other" },
+      { _id: "bulk-a", status: "changed" },
+      { _id: "bulk-b", owner: "other" },
     ]);
     assert.equal(deniedBulk.status, 403);
     assert.equal(s.node.get(db, "docs", "bulk-a").status, "bulk");
@@ -482,7 +789,7 @@ test("permissions are enforced by remote shard owners", async () => {
     const docsBase = `/api/${db}/docs/object`;
 
     assert.equal((await admin.post(`/api/${db}/users/object`, {
-      id: userId,
+      _id: userId,
       username: "reader",
       password: "secret",
       permissions: [
@@ -490,8 +797,8 @@ test("permissions are enforced by remote shard owners", async () => {
       ],
     })).status, 201);
     assert.equal((await admin.post(docsBase, [
-      { id: allowedId, owner: "reader", side: "b", value: 1 },
-      { id: deniedId, owner: "other", side: "b", value: 2 },
+      { _id: allowedId, owner: "reader", side: "b", value: 1 },
+      { _id: deniedId, owner: "other", side: "b", value: 2 },
     ])).status, 201);
     assert.equal(b.node.get(db, "docs", allowedId).owner, "reader");
     assert.equal(a.node.get(db, "docs", allowedId), undefined);
@@ -501,7 +808,7 @@ test("permissions are enforced by remote shard owners", async () => {
 
     const allowed = await reader.get(`${docsBase}/${allowedId}`);
     assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
-    assert.equal(allowed.body.id, allowedId);
+    assert.equal(allowed.body._id, allowedId);
     assert.equal((await reader.get(`${docsBase}/${deniedId}`)).status, 403);
 
     const patched = await reader.patch(`${docsBase}/${allowedId}`, { value: 3 });
@@ -529,19 +836,23 @@ test("REST CRUD lifecycle", async () => {
 
     const ins = await c.post(base, { name: "ada", age: 36 });
     assert.equal(ins.status, 201);
-    const id = ins.body.id;
+    const id = ins.body._id;
+
+    const duplicate = await c.post(base, { _id: id, name: "other" });
+    assert.equal(duplicate.status, 409);
+    assert.match(duplicate.body.error, /object already exists/);
 
     const got = await c.get(`${base}/${id}`);
-    assert.deepEqual(got.body, { id, name: "ada", age: 36 });
+    assert.deepEqual(got.body, { _id: id, name: "ada", age: 36 });
 
     const patched = await c.patch(`${base}/${id}`, { age: 37 });
     assert.equal(patched.body.age, 37);
 
     const replaced = await c.put(`${base}/${id}`, { name: "ada", active: true });
-    assert.deepEqual(replaced.body, { id, name: "ada", active: true });
+    assert.deepEqual(replaced.body, { _id: id, name: "ada", active: true });
 
     const list = await c.get(base);
-    assert.deepEqual(list.body.map((item) => item.id), [id]);
+    assert.deepEqual(list.body.map((item) => item._id), [id]);
 
     const del = await c.del(`${base}/${id}`);
     assert.equal(del.status, 204);
@@ -564,19 +875,19 @@ test("public object interface supports bulk CRUD", async () => {
     const base = "/api/app/events/object";
 
     const created = await c.post(base, [
-      { id: "e1", type: "signup", count: 1 },
-      { id: "e2", type: "purchase", count: 2 },
+      { _id: "e1", type: "signup", count: 1 },
+      { _id: "e2", type: "purchase", count: 2 },
     ]);
     assert.equal(created.status, 201);
     assert.equal(created.body.inserted, 2);
 
-    const q = encodeURIComponent(JSON.stringify({ id: { $in: ["e1", "e2"] } }));
-    const listed = await c.get(`${base}?q=${q}&sortBy=id`);
-    assert.deepEqual(listed.body.map((item) => item.id), ["e1", "e2"]);
+    const q = encodeURIComponent(JSON.stringify({ _id: { $in: ["e1", "e2"] } }));
+    const listed = await c.get(`${base}?q=${q}&sortBy=_id`);
+    assert.deepEqual(listed.body.map((item) => item._id), ["e1", "e2"]);
 
     const patched = await c.patch(base, [
-      { id: "e1", count: 10 },
-      { id: "e2", extra: true },
+      { _id: "e1", count: 10 },
+      { _id: "e2", extra: true },
     ]);
     assert.equal(patched.status, 200);
     assert.equal(patched.body.updated, 2);
@@ -584,12 +895,12 @@ test("public object interface supports bulk CRUD", async () => {
     assert.equal((await c.get(`${base}/e2`)).body.extra, true);
 
     const replaced = await c.put(base, [
-      { id: "e1", done: true },
-      { id: "e2", done: false },
+      { _id: "e1", done: true },
+      { _id: "e2", done: false },
     ]);
     assert.equal(replaced.status, 200);
     assert.equal(replaced.body.replaced, 2);
-    assert.deepEqual((await c.get(`${base}/e1`)).body, { id: "e1", done: true });
+    assert.deepEqual((await c.get(`${base}/e1`)).body, { _id: "e1", done: true });
 
     const removed = await c.del(base, { ids: ["e1", "e2", "missing"] });
     assert.equal(removed.status, 200);
@@ -601,7 +912,46 @@ test("public object interface supports bulk CRUD", async () => {
   }
 });
 
-test("public bulk object routes reject duplicate ids", async () => {
+test("public minimal bulk insert skips object readback", async () => {
+  const node = new CRDTNode({ id: "minimal-bulk" });
+  const s = await startTestServer({ port: 0, node });
+  const baseUrl = `http://localhost:${s.port}`;
+  const originalGet = node.get.bind(node);
+  let getCalls = 0;
+
+  try {
+    const session = await login(baseUrl);
+    node.get = (...args) => {
+      getCalls++;
+      return originalGet(...args);
+    };
+
+    const response = await fetch(`${baseUrl}/api/app/events/object`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        "content-type": "application/json",
+        prefer: "return=minimal",
+      },
+      body: JSON.stringify([
+        { _id: "e1", type: "signup", count: 1 },
+        { _id: "e2", type: "purchase", count: 2 },
+      ]),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(body, { inserted: 2 });
+    assert.equal(getCalls, 0);
+    node.get = originalGet;
+    assert.deepEqual(node.get("app", "events", "e1"), { _id: "e1", type: "signup", count: 1 });
+  } finally {
+    node.get = originalGet;
+    s.server.close();
+  }
+});
+
+test("public bulk object routes reject duplicate _ids", async () => {
   const s = await startTestServer({ port: 0 });
   try {
     const session = await login(`http://localhost:${s.port}`);
@@ -609,31 +959,44 @@ test("public bulk object routes reject duplicate ids", async () => {
     const base = "/api/app/events/object";
 
     const duplicatePost = await c.post(base, [
-      { id: "e1", value: 1 },
-      { id: "e1", value: 2 },
+      { _id: "e1", value: 1 },
+      { _id: "e1", value: 2 },
     ]);
     assert.equal(duplicatePost.status, 400);
-    assert.match(duplicatePost.body.error, /duplicate id in bulk request: e1/);
+    assert.match(duplicatePost.body.error, /duplicate _id in bulk request: e1/);
 
-    assert.equal((await c.post(base, { id: "e1", value: 1 })).status, 201);
+    assert.equal((await c.post(base, { _id: "e1", value: 1 })).status, 201);
+
+    const existingPost = await c.post(base, { _id: "e1", value: 2 });
+    assert.equal(existingPost.status, 409);
+    assert.match(existingPost.body.error, /object already exists: e1/);
+    assert.equal((await c.get(`${base}/e1`)).body.value, 1);
+
+    const existingBulkPost = await c.post(base, [
+      { _id: "e1", value: 2 },
+      { _id: "e2", value: 3 },
+    ]);
+    assert.equal(existingBulkPost.status, 409);
+    assert.match(existingBulkPost.body.error, /object already exists: e1/);
+    assert.equal((await c.get(`${base}/e2`)).status, 404);
 
     const duplicatePatch = await c.patch(base, [
-      { id: "e1", value: 2 },
-      { id: "e1", other: true },
+      { _id: "e1", value: 2 },
+      { _id: "e1", other: true },
     ]);
     assert.equal(duplicatePatch.status, 400);
-    assert.match(duplicatePatch.body.error, /duplicate id in bulk request: e1/);
+    assert.match(duplicatePatch.body.error, /duplicate _id in bulk request: e1/);
 
     const duplicatePut = await c.put(base, [
-      { id: "e1", value: 3 },
-      { id: "e1", value: 4 },
+      { _id: "e1", value: 3 },
+      { _id: "e1", value: 4 },
     ]);
     assert.equal(duplicatePut.status, 400);
-    assert.match(duplicatePut.body.error, /duplicate id in bulk request: e1/);
+    assert.match(duplicatePut.body.error, /duplicate _id in bulk request: e1/);
 
     const duplicateDelete = await c.del(base, { ids: ["e1", "e1"] });
     assert.equal(duplicateDelete.status, 400);
-    assert.match(duplicateDelete.body.error, /duplicate id in bulk request: e1/);
+    assert.match(duplicateDelete.body.error, /duplicate _id in bulk request: e1/);
   } finally {
     s.server.close();
   }
@@ -658,8 +1021,8 @@ test("public object writes ack after local WAL flush", async () => {
     const session = await login(`http://localhost:${s.port}`);
     const c = api(`http://localhost:${s.port}`, session.accessToken);
     const created = await c.post("/api/app/events/object", [
-      { id: "e1", value: 1 },
-      { id: "e2", value: 2 },
+      { _id: "e1", value: 1 },
+      { _id: "e2", value: 2 },
     ]);
     assert.equal(created.status, 201);
     assert.equal(persistence.getStats().localWal.pendingRecords, 0);
@@ -675,8 +1038,8 @@ test("public object writes ack after local WAL flush", async () => {
     }).restore();
 
     assert.ok(restored.localWalOps >= 2);
-    assert.deepEqual(fresh.get("app", "events", "e1"), { id: "e1", value: 1 });
-    assert.deepEqual(fresh.get("app", "events", "e2"), { id: "e2", value: 2 });
+    assert.deepEqual(fresh.get("app", "events", "e1"), { _id: "e1", value: 1 });
+    assert.deepEqual(fresh.get("app", "events", "e2"), { _id: "e2", value: 2 });
   } finally {
     await persistence.stop().catch(() => {});
     s.server.close();
@@ -696,18 +1059,18 @@ test("public CRUD routes object writes to the owning shard peer", async () => {
     const remoteId = idForShard(a.node, db, coll, "shard-b", "remote");
 
     const created = await c.post(base, [
-      { id: localId, side: "a", value: 1 },
-      { id: remoteId, side: "b", value: 2 },
+      { _id: localId, side: "a", value: 1 },
+      { _id: remoteId, side: "b", value: 2 },
     ]);
     assert.equal(created.status, 201);
     assert.equal(created.body.inserted, 2);
-    assert.deepEqual(a.node.get(db, coll, localId), { id: localId, side: "a", value: 1 });
+    assert.deepEqual(a.node.get(db, coll, localId), { _id: localId, side: "a", value: 1 });
     assert.equal(a.node.get(db, coll, remoteId), undefined);
-    assert.deepEqual(b.node.get(db, coll, remoteId), { id: remoteId, side: "b", value: 2 });
+    assert.deepEqual(b.node.get(db, coll, remoteId), { _id: remoteId, side: "b", value: 2 });
 
     const remoteRead = await c.get(`${base}/${remoteId}`);
     assert.equal(remoteRead.status, 200);
-    assert.deepEqual(remoteRead.body, { id: remoteId, side: "b", value: 2 });
+    assert.deepEqual(remoteRead.body, { _id: remoteId, side: "b", value: 2 });
 
     const patched = await c.patch(`${base}/${remoteId}`, { value: 3 });
     assert.equal(patched.status, 200);
@@ -716,12 +1079,12 @@ test("public CRUD routes object writes to the owning shard peer", async () => {
 
     const replaced = await c.put(`${base}/${remoteId}`, { side: "b2", value: 4 });
     assert.equal(replaced.status, 200);
-    assert.deepEqual(b.node.get(db, coll, remoteId), { id: remoteId, side: "b2", value: 4 });
+    assert.deepEqual(b.node.get(db, coll, remoteId), { _id: remoteId, side: "b2", value: 4 });
 
     const removed = await c.del(`${base}/${remoteId}`);
     assert.equal(removed.status, 204);
     assert.equal(b.node.get(db, coll, remoteId), undefined);
-    assert.deepEqual(a.node.get(db, coll, localId), { id: localId, side: "a", value: 1 });
+    assert.deepEqual(a.node.get(db, coll, localId), { _id: localId, side: "a", value: 1 });
   } finally {
     a.server.close();
     b.server.close();
@@ -741,20 +1104,20 @@ test("public queries resolve live references across shard owners", async () => {
     const authorId = idForShard(a.node, db, authorColl, "shard-b", "author");
     const postId = idForShard(a.node, db, postColl, "shard-a", "post");
 
-    const author = await c.post(authorBase, { id: authorId, name: "Alice", score: 10 });
+    const author = await c.post(authorBase, { _id: authorId, name: "Alice", score: 10 });
     assert.equal(author.status, 201);
     assert.equal(a.node.get(db, authorColl, authorId), undefined);
     assert.equal(b.node.get(db, authorColl, authorId).name, "Alice");
 
     const created = await c.post(postBase, {
-      id: postId,
+      _id: postId,
       title: "Reference post",
       author: {
         type: "reference",
         database: db,
         collection: authorColl,
         value: authorId,
-        object: { id: authorId, name: "stale payload should not be stored" },
+        object: { _id: authorId, name: "stale payload should not be stored" },
       },
     });
     assert.equal(created.status, 201);
@@ -772,20 +1135,20 @@ test("public queries resolve live references across shard owners", async () => {
     const qAlice = encodeURIComponent(JSON.stringify({ "author.object.name": "Alice" }));
     const alice = await c.get(`${postBase}?q=${qAlice}`);
     assert.equal(alice.status, 200, JSON.stringify(alice.body));
-    assert.deepEqual(alice.body.map((post) => post.id), [postId]);
+    assert.deepEqual(alice.body.map((post) => post._id), [postId]);
 
     const patched = await c.patch(`${authorBase}/${authorId}`, { name: "Ada" });
     assert.equal(patched.status, 200);
     const qAda = encodeURIComponent(JSON.stringify({ "author.object.name": "Ada" }));
     const ada = await c.get(`${postBase}?q=${qAda}`);
-    assert.deepEqual(ada.body.map((post) => post.id), [postId]);
+    assert.deepEqual(ada.body.map((post) => post._id), [postId]);
 
     const missingBeforeDelete = await c.get(`${postBase}?q=${encodeURIComponent(JSON.stringify({ "author.object": null }))}`);
     assert.deepEqual(missingBeforeDelete.body, []);
 
     assert.equal((await c.del(`${authorBase}/${authorId}`)).status, 204);
     const missing = await c.get(`${postBase}?q=${encodeURIComponent(JSON.stringify({ "author.object": null }))}`);
-    assert.deepEqual(missing.body.map((post) => post.id), [postId]);
+    assert.deepEqual(missing.body.map((post) => post._id), [postId]);
   } finally {
     a.server.close();
     b.server.close();
@@ -805,13 +1168,13 @@ test("bulk CRUD splits batches by shard and read routes fan out", async () => {
 
     const generated = await c.post(base, { side: "generated", value: 7 });
     assert.equal(generated.status, 201);
-    const generatedShard = a.node.shardForObject(db, coll, generated.body.id);
+    const generatedShard = a.node.shardForObject(db, coll, generated.body._id);
     const generatedOwner = generatedShard === "shard-a" ? a.node : b.node;
-    assert.deepEqual(generatedOwner.get(db, coll, generated.body.id), generated.body);
+    assert.deepEqual(generatedOwner.get(db, coll, generated.body._id), generated.body);
 
     const created = await c.post(base, [
-      { id: idA, side: "a", value: 10 },
-      { id: idB, side: "b", value: 20 },
+      { _id: idA, side: "a", value: 10 },
+      { _id: idB, side: "b", value: 20 },
     ]);
     assert.equal(created.status, 201);
     assert.equal(created.body.inserted, 2);
@@ -821,8 +1184,8 @@ test("bulk CRUD splits batches by shard and read routes fan out", async () => {
     assert.equal(b.node.get(db, coll, idA), undefined);
 
     const patched = await c.patch(base, [
-      { id: idA, value: 11 },
-      { id: idB, value: 21 },
+      { _id: idA, value: 11 },
+      { _id: idB, value: 21 },
     ]);
     assert.equal(patched.status, 200);
     assert.equal(patched.body.updated, 2);
@@ -852,13 +1215,13 @@ test("bulk CRUD splits batches by shard and read routes fan out", async () => {
     assert.deepEqual(aggregate.body.map((row) => row.side), ["b", "a", "generated"]);
 
     const replaced = await c.put(base, [
-      { id: idA, side: "a2", value: 100 },
-      { id: idB, side: "b2", value: 200 },
+      { _id: idA, side: "a2", value: 100 },
+      { _id: idB, side: "b2", value: 200 },
     ]);
     assert.equal(replaced.status, 200);
     assert.equal(replaced.body.replaced, 2);
-    assert.deepEqual(a.node.get(db, coll, idA), { id: idA, side: "a2", value: 100 });
-    assert.deepEqual(b.node.get(db, coll, idB), { id: idB, side: "b2", value: 200 });
+    assert.deepEqual(a.node.get(db, coll, idA), { _id: idA, side: "a2", value: 100 });
+    assert.deepEqual(b.node.get(db, coll, idB), { _id: idB, side: "b2", value: 200 });
 
     const deleted = await c.del(base, { ids: [idA, idB, "missing"] });
     assert.equal(deleted.status, 200);
@@ -884,8 +1247,8 @@ test("public sharded list does not count shards for array responses", async () =
     const idB = idForShard(a.node, db, coll, "shard-b", "b");
 
     assert.equal((await c.post(base, [
-      { id: idA, value: 1 },
-      { id: idB, value: 2 },
+      { _id: idA, value: 1 },
+      { _id: idB, value: 2 },
     ])).status, 201);
 
     a.node.count = a.node.countShards = () => {
@@ -919,10 +1282,10 @@ test("query router pages and aggregates correctly when one node owns multiple sh
     const idC = idForShard(a.node, db, coll, "shard-c", "c");
 
     const created = await c.post(base, [
-      { id: idA1, bucket: "local-a", value: 1 },
-      { id: idB, bucket: "local-b", value: 2 },
-      { id: idC, bucket: "remote-c", value: 3 },
-      { id: idA2, bucket: "local-a", value: 4 },
+      { _id: idA1, bucket: "local-a", value: 1 },
+      { _id: idB, bucket: "local-b", value: 2 },
+      { _id: idC, bucket: "remote-c", value: 3 },
+      { _id: idA2, bucket: "local-a", value: 4 },
     ]);
     assert.equal(created.status, 201);
     assert.equal(a.node.count(db, coll), 3);
@@ -963,7 +1326,7 @@ test("collection metadata fan-out builds indexes on shard peers", async () => {
     assert.equal(created.status, 201);
     assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["value"], columnIndexes: [] });
 
-    await c.post(base, { id: idB, value: 3 });
+    await c.post(base, { _id: idB, value: 3 });
     assert.equal(b.node.indexStats(db, coll)[0].orderedEntries, 1);
 
     const updated = await c.put(`/api/${db}/${coll}/meta`, { indexes: ["value", "id"] });
@@ -987,9 +1350,9 @@ test("public object interface returns old aggregate rows from the object route",
     const base = "/api/app/events/object";
 
     await c.post(base, [
-      { id: "e1", type: "signup", count: 1 },
-      { id: "e2", type: "signup", count: 2 },
-      { id: "e3", type: "purchase", count: 5 },
+      { _id: "e1", type: "signup", count: 1 },
+      { _id: "e2", type: "signup", count: 2 },
+      { _id: "e3", type: "purchase", count: 5 },
     ]);
 
     const q = encodeURIComponent(JSON.stringify({
@@ -1030,9 +1393,9 @@ test("public query responses expose planner path headers", async () => {
     });
     assert.equal(createdCollection.status, 201);
     assert.equal((await c.post(base, [
-      { id: "a", status: "active", score: 1 },
-      { id: "b", status: "active", score: 2 },
-      { id: "c", status: "archived", score: 3 },
+      { _id: "a", status: "active", score: 1 },
+      { _id: "b", status: "active", score: 2 },
+      { _id: "c", status: "archived", score: 3 },
     ])).status, 201);
 
     const listed = await c.get(`${base}?limit=2`);
@@ -1087,10 +1450,10 @@ test("sharded object-db aggregate merges shard partials without fetching raw obj
     const idB2 = idForShard(a.node, db, coll, "shard-b", "b2");
 
     assert.equal((await c.post(base, [
-      { id: idA1, status: "new", score: 1 },
-      { id: idA2, status: "done", score: 10 },
-      { id: idB1, status: "new", score: 2 },
-      { id: idB2, status: "done", score: 20 },
+      { _id: idA1, status: "new", score: 1 },
+      { _id: idA2, status: "done", score: 10 },
+      { _id: idB1, status: "new", score: 2 },
+      { _id: idB2, status: "done", score: 20 },
     ])).status, 201);
     assert.equal(a.node.indexStats(db, coll).find((entry) => entry.type === "column" && entry.path === "score").entries, 2);
     assert.equal(b.node.indexStats(db, coll).find((entry) => entry.type === "column" && entry.path === "score").entries, 2);
@@ -1140,9 +1503,9 @@ test("public vector search supports GET query syntax and POST body payloads", as
     const base = "/api/app/docs/object";
 
     const created = await c.post(base, [
-      { id: "near", title: "near", status: "active", rank: 2, _vec: [1, 0, 0] },
-      { id: "mid", title: "mid", status: "active", rank: 1, _vec: [0.8, 0.2, 0] },
-      { id: "far", title: "far", status: "archived", rank: 3, _vec: [0, 1, 0] },
+      { _id: "near", title: "near", status: "active", rank: 2, _vec: [1, 0, 0] },
+      { _id: "mid", title: "mid", status: "active", rank: 1, _vec: [0.8, 0.2, 0] },
+      { _id: "far", title: "far", status: "archived", rank: 3, _vec: [0, 1, 0] },
     ]);
     assert.equal(created.status, 201);
     assert.equal(created.body.items[0]._vec, undefined);
@@ -1166,7 +1529,7 @@ test("public vector search supports GET query syntax and POST body payloads", as
 
     const getSearch = await c.get(`${base}?q=${q}`);
     assert.equal(getSearch.status, 200, JSON.stringify(getSearch.body));
-    assert.deepEqual(getSearch.body.map((row) => row.id), ["near", "mid"]);
+    assert.deepEqual(getSearch.body.map((row) => row._id), ["near", "mid"]);
     assert.equal(getSearch.body.every((row) => typeof row._score === "number" && row._vec === undefined), true);
 
     const bodySearch = await c.post("/api/app/docs/search", {
@@ -1174,7 +1537,7 @@ test("public vector search supports GET query syntax and POST body payloads", as
       $sort: { rank: -1 },
     });
     assert.equal(bodySearch.status, 200, JSON.stringify(bodySearch.body));
-    assert.deepEqual(bodySearch.body.map((row) => row.id), ["far", "near", "mid"]);
+    assert.deepEqual(bodySearch.body.map((row) => row._id), ["far", "near", "mid"]);
 
     const badAggregate = await c.post("/api/app/docs/search", {
       $vector: { vector: [1, 0, 0] },
@@ -1211,8 +1574,8 @@ test("sharded vector search fans out with POST bodies and merges scores", async 
     const idB = idForShard(a.node, db, coll, "shard-b", "remote");
 
     const created = await c.post(base, [
-      { id: idA, side: "a", _vec: [1, 0] },
-      { id: idB, side: "b", _vec: [0, 1] },
+      { _id: idA, side: "a", _vec: [1, 0] },
+      { _id: idB, side: "b", _vec: [0, 1] },
     ]);
     assert.equal(created.status, 201);
     assert.equal(a.node.get(db, coll, idA).side, "a");
@@ -1236,7 +1599,7 @@ test("sharded vector search fans out with POST bodies and merges scores", async 
       $vector: { vector: [0, 1], limit: 2 },
     });
     assert.equal(searched.status, 200, JSON.stringify(searched.body));
-    assert.deepEqual(searched.body.map((row) => row.id), [idB, idA]);
+    assert.deepEqual(searched.body.map((row) => row._id), [idB, idA]);
     assert.equal(searched.body.some((row) => row._vec !== undefined), false);
 
     const searchForward = forwarded.find((entry) => entry.method === "POST" && entry.url.endsWith(`/api/${db}/${coll}/search`));
@@ -1274,7 +1637,7 @@ test("public interface lists databases, collections, and collection meta", async
       meta: { indexes: ["status"], columnIndexes: [], owner: "events-team" },
     });
 
-    await c.post("/api/app/users/object", { id: "u1", name: "Ada" });
+    await c.post("/api/app/users/object", { _id: "u1", name: "Ada" });
 
     assert.deepEqual((await c.get("/api/databases")).body.databases, ["_global", "app"]);
     assert.deepEqual((await c.get("/api/app/collections")).body.collections, ["orders", "users"]);
@@ -1285,7 +1648,7 @@ test("public interface lists databases, collections, and collection meta", async
     });
     assert.deepEqual((await c.get("/api/app/users/meta")).body, { indexes: [], columnIndexes: [] });
 
-    await c.post("/api/app/orders/object", { id: "o1", status: "paid" });
+    await c.post("/api/app/orders/object", { _id: "o1", status: "paid" });
     const indexStats = s.node.indexStats("app", "orders");
     assert.equal(indexStats.length, 1);
     assert.equal(indexStats[0].path, "status");
@@ -1325,24 +1688,26 @@ test("retention + snapshot recovery over HTTP", async () => {
   const { CRDTNode } = await import("../src/crdt.js");
   const a = await startTestServer({ port: 0, node: new CRDTNode({ retainOps: 0 }) });
   const b = await startTestServer({ port: 0 });
-  a.node.addPeer(httpPeer(`http://localhost:${b.port}`, a.node.id));
-  b.node.addPeer(httpPeer(`http://localhost:${a.port}`, b.node.id));
+  a.node.addPeer(httpPeer(`http://localhost:${b.port}`, a.node.id, { secret: TEST_CLUSTER_SECRET }));
+  b.node.addPeer(httpPeer(`http://localhost:${a.port}`, b.node.id, { secret: TEST_CLUSTER_SECRET }));
   try {
     const session = await login(`http://localhost:${a.port}`);
     const ca = api(`http://localhost:${a.port}`, session.accessToken);
     for (let i = 0; i < 20; i++) {
-      await ca.post("/api/app/items/object", { id: `i${i}`, v: i });
+      await ca.post("/api/app/items/object", { _id: `i${i}`, v: i });
     }
     await b.node.syncAll();
     assert.equal(b.node.count("app", "items"), 20);
     assert.equal(a.node.trimmed, a.node.seq, "acked log pruned to zero");
 
-    const pull = await fetch(`http://localhost:${a.port}/replicate?after=0`);
+    const deniedPull = await fetch(`http://localhost:${a.port}/replicate?after=0`);
+    assert.equal(deniedPull.status, 401);
+    const pull = await fetch(`http://localhost:${a.port}/replicate?after=0`, { headers: clusterHeaders() });
     assert.equal(pull.status, 410);
 
     const fresh = await startTestServer({ port: 0 });
     try {
-      fresh.node.addPeer(httpPeer(`http://localhost:${a.port}`, fresh.node.id));
+      fresh.node.addPeer(httpPeer(`http://localhost:${a.port}`, fresh.node.id, { secret: TEST_CLUSTER_SECRET }));
       await fresh.node.syncAll();
       const freshSession = await login(`http://localhost:${fresh.port}`);
       const items = (await api(`http://localhost:${fresh.port}`, freshSession.accessToken).get("/api/app/items/object")).body;
@@ -1397,30 +1762,110 @@ test("replication across two HTTP nodes", async () => {
   const a = await startTestServer({ port: 0 });
   const b = await startTestServer({ port: 0 });
   try {
-    a.node.addPeer(httpPeer(`http://localhost:${b.port}`, a.node.id));
-    b.node.addPeer(httpPeer(`http://localhost:${a.port}`, b.node.id));
+    a.node.addPeer(httpPeer(`http://localhost:${b.port}`, a.node.id, { secret: TEST_CLUSTER_SECRET }));
+    b.node.addPeer(httpPeer(`http://localhost:${a.port}`, b.node.id, { secret: TEST_CLUSTER_SECRET }));
     const sessionA = await login(`http://localhost:${a.port}`);
     const sessionB = await login(`http://localhost:${b.port}`);
     const ca = api(`http://localhost:${a.port}`, sessionA.accessToken);
     const cb = api(`http://localhost:${b.port}`, sessionB.accessToken);
 
-    const ins = await ca.post("/api/app/items/object", { id: "i1", qty: 5 });
+    const ins = await ca.post("/api/app/items/object", { _id: "i1", qty: 5 });
     assert.equal(ins.status, 201);
 
     await b.node.syncAll();
     const onB = await cb.get("/api/app/items/object/i1");
     assert.equal(onB.status, 200);
-    assert.deepEqual(onB.body, { id: "i1", qty: 5 });
+    assert.deepEqual(onB.body, { _id: "i1", qty: 5 });
 
     await cb.patch("/api/app/items/object/i1", { qty: 6 });
     await a.node.syncAll();
     const onA = await ca.get("/api/app/items/object/i1");
     assert.equal(onA.body.qty, 6);
 
-    const pull = await fetch(`http://localhost:${a.port}/replicate?after=0`);
+    const pull = await fetch(`http://localhost:${a.port}/replicate?after=0`, { headers: clusterHeaders() });
     const payload = await pull.json();
     assert.equal(payload.node, a.node.id);
     assert.ok(Array.isArray(payload.ops));
+  } finally {
+    a.server.close();
+    b.server.close();
+  }
+});
+
+test("replication hints wake shard replicas through the existing pull path", async () => {
+  const portA = await freePort();
+  const portB = await freePort();
+  const urlA = `http://localhost:${portA}`;
+  const urlB = `http://localhost:${portB}`;
+  const shardMap = {
+    shards: {
+      default: { peers: [{ url: urlA }, { url: urlB }] },
+    },
+  };
+  const a = await startTestServer({
+    port: portA,
+    node: new CRDTNode({ id: "hint-a", url: urlA }),
+    shardMap,
+    replicationHints: { debounceMs: 0 },
+  });
+  const b = await startTestServer({
+    port: portB,
+    node: new CRDTNode({ id: "hint-b", url: urlB }),
+    shardMap,
+    replicationHints: { debounceMs: 0 },
+  });
+
+  try {
+    const session = await login(urlA);
+    const client = api(urlA, session.accessToken);
+    const created = await client.post("/api/app/events/object", { _id: "e1", value: 1 });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+
+    await waitFor(() => b.node.get("app", "events", "e1")?.value === 1);
+    assert.equal(a.replication.status().hintsSent, 1);
+    assert.equal(b.replication.status().hintsReceived, 1);
+    assert.equal(b.replication.status().pullSyncs, 1);
+  } finally {
+    a.server.close();
+    b.server.close();
+  }
+});
+
+test("replication hint route requires cluster secret and known shard peer", async () => {
+  const portA = await freePort();
+  const portB = await freePort();
+  const urlA = `http://localhost:${portA}`;
+  const urlB = `http://localhost:${portB}`;
+  const shardMap = {
+    shards: {
+      default: { peers: [{ url: urlA }, { url: urlB }] },
+    },
+  };
+  const a = await startTestServer({
+    port: portA,
+    node: new CRDTNode({ id: "hint-auth-a", url: urlA }),
+    shardMap,
+  });
+  const b = await startTestServer({
+    port: portB,
+    node: new CRDTNode({ id: "hint-auth-b", url: urlB }),
+    shardMap,
+  });
+
+  try {
+    const anonymous = await fetch(`${urlB}/replicate/hint`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ node: "hint-auth-a", url: urlA, scopes: [{ shard: "default" }] }),
+    });
+    assert.equal(anonymous.status, 401);
+
+    const unknown = await fetch(`${urlB}/replicate/hint`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...clusterHeaders() },
+      body: JSON.stringify({ node: "unknown", url: "http://localhost:1", scopes: [{ shard: "default" }] }),
+    });
+    assert.equal(unknown.status, 403);
   } finally {
     a.server.close();
     b.server.close();
@@ -1432,19 +1877,19 @@ test("HTTP peers learn node ids and sync incrementally", async () => {
   const a = await startTestServer({ port: 0, node: new CRDTNode({ id: "a", syncBatchSize: 3 }) });
   const b = await startTestServer({ port: 0, node: new CRDTNode({ id: "b", syncBatchSize: 3 }) });
   try {
-    const peerToA = httpPeer(`http://localhost:${a.port}`, b.node.id);
+    const peerToA = httpPeer(`http://localhost:${a.port}`, b.node.id, { secret: TEST_CLUSTER_SECRET });
     b.node.addPeer(peerToA);
 
     const session = await login(`http://localhost:${a.port}`);
     const ca = api(`http://localhost:${a.port}`, session.accessToken);
-    for (let i = 0; i < 5; i++) await ca.post("/api/app/items/object", { id: `i${i}`, v: i });
+    for (let i = 0; i < 5; i++) await ca.post("/api/app/items/object", { _id: `i${i}`, v: i });
 
     await b.node.syncAll();
     assert.equal(peerToA.nodeId, "a");
     assert.equal(b.node.lastSeen.get("a"), a.node.seq);
     assert.equal(b.node.count("app", "items"), 5);
 
-    await ca.post("/api/app/items/object", { id: "i5", v: 5 });
+    await ca.post("/api/app/items/object", { _id: "i5", v: 5 });
     await b.node.syncAll();
     assert.equal(b.node.lastSeen.get("a"), a.node.seq);
     assert.equal(b.node.count("app", "items"), 6);
@@ -1490,7 +1935,7 @@ test("cluster peer updates persist shard map when a shard map store is configure
   });
 
   try {
-    const c = api(`http://localhost:${s.port}`);
+    const c = api(`http://localhost:${s.port}`, null, clusterHeaders());
     const res = await c.post("/cluster/peers", {
       database: "app",
       collection: "events",

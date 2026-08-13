@@ -9,7 +9,15 @@
     "port": 8080
   },
   "cluster": {
-    "syncMs": 1000,
+    "syncMs": 2500,
+    "forwardTimeoutMs": 60000,
+    "replicationTimeoutMs": 60000,
+    "hints": {
+      "enabled": true,
+      "debounceMs": 25,
+      "maxScopesPerHint": 128
+    },
+    "secret": "local-dev-cluster-secret-change-me",
     "shardMapStore": {
       "mode": "off",
       "prefix": "spread-db",
@@ -22,7 +30,7 @@
     "refreshTokenTtlSeconds": 1209600,
     "users": [
       {
-        "id": "admin",
+        "_id": "admin",
         "username": "admin",
         "password": "123",
         "role": "admin"

@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test",
-    "deploy:hetzner": "node scripts/deploy-hetzner.js"
+    "deploy:hetzner": "node scripts/deploy-hetzner.js",
+    "deploy:hetzner:cluster": "node scripts/deploy-hetzner-cluster.js"
   },
   "engines": {
     "node": ">=18.17"

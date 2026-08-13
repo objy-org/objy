@@ -70,7 +70,7 @@ oldWriter.replaceShardMap(shardMapFor(oldShardNames));
 await timed("insert old cluster objects", () => {
   for (let i = 0; i < OBJECTS; i++) {
     oldWriter.insert("app", "events", {
-      id: idAt(i),
+      _id: idAt(i),
       kind: i % 17,
       value: i,
       payload: { bucket: i % 257 },

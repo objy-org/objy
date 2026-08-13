@@ -4,9 +4,17 @@ import { CRDTNode, localPeer } from "../src/crdt.js";
 import { startServer } from "../src/server.js";
 
 const TEST_AUTH = { jwtSecret: "test-jwt-secret" };
+const TEST_CLUSTER_SECRET = TEST_AUTH.jwtSecret;
 
 function startTestServer(options = {}) {
   return startServer({ auth: TEST_AUTH, ...options });
+}
+
+function clusterHeaders(hasBody = false) {
+  return {
+    ...(hasBody ? { "content-type": "application/json" } : {}),
+    "x-spread-db-cluster-secret": TEST_CLUSTER_SECRET,
+  };
 }
 
 async function tokenFor(port) {
@@ -141,12 +149,12 @@ test("dynamic HTTP peer add updates the shard map and syncs", async () => {
     await fetch(`http://localhost:${a.port}/api/app/users/object`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id: "u1", name: "Ada" }),
+      body: JSON.stringify({ _id: "u1", name: "Ada" }),
     });
 
     const add = await fetch(`http://localhost:${b.port}/cluster/peers`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: clusterHeaders(true),
       body: JSON.stringify({
         shard: "shard-0",
         url: `http://localhost:${a.port}`,
@@ -154,11 +162,14 @@ test("dynamic HTTP peer add updates the shard map and syncs", async () => {
     });
     assert.equal(add.status, 201);
 
-    const map = await (await fetch(`http://localhost:${b.port}/cluster/shards`)).json();
+    const denied = await fetch(`http://localhost:${b.port}/cluster/shards`);
+    assert.equal(denied.status, 401);
+
+    const map = await (await fetch(`http://localhost:${b.port}/cluster/shards`, { headers: clusterHeaders() })).json();
     assert.equal(map.shardMap.shards["shard-0"].peers[0].url, `http://localhost:${a.port}`);
 
     await b.node.syncAll();
-    assert.deepEqual(b.node.get("app", "users", "u1"), { id: "u1", name: "Ada" });
+    assert.deepEqual(b.node.get("app", "users", "u1"), { _id: "u1", name: "Ada" });
   } finally {
     a.server.close();
     b.server.close();
@@ -226,7 +237,7 @@ test("large object-sharded dataset replicates only to owning shard nodes", async
     const shard = writer.shardForObject("app", "events", id);
     expected.get(shard).push(id);
     writer.insert("app", "events", {
-      id,
+      _id: id,
       kind: i % 5,
       payload: { bucket: i % 97 },
     });
@@ -240,7 +251,7 @@ test("large object-sharded dataset replicates only to owning shard nodes", async
     assert.equal(replica.count("app", "events"), expected.get(shard).length);
 
     for (const id of expected.get(shard).slice(0, 5)) {
-      assert.equal(replica.get("app", "events", id).id, id);
+      assert.equal(replica.get("app", "events", id)._id, id);
     }
 
     const foreignShard = `events-${(i + 1) % shardCount}`;
@@ -269,7 +280,7 @@ test("new shard replica recovers only its shard by scoped snapshot", async () =>
     const id = `event-${i}`;
     const shard = writer.shardForObject("app", "events", id);
     byShard.get(shard).push(id);
-    writer.insert("app", "events", { id, value: i });
+    writer.insert("app", "events", { _id: id, value: i });
   }
 
   await Promise.all(initialReplicas.map((replica) => replica.syncAll()));
@@ -282,7 +293,7 @@ test("new shard replica recovers only its shard by scoped snapshot", async () =>
   assert.equal(fresh.count("app", "events"), byShard.get("events-0").length);
 
   for (const id of byShard.get("events-0").slice(0, 10)) {
-    assert.equal(fresh.get("app", "events", id).id, id);
+    assert.equal(fresh.get("app", "events", id)._id, id);
   }
 
   const foreignId = byShard.get("events-1")[0];

@@ -2,6 +2,7 @@ import { shardMapFromHttp, startServer } from "./server.js";
 import { CRDTNode } from "./crdt.js";
 import { loadConfig } from "./config.js";
 import { createPersistence } from "./persistence.js";
+import { createReplicationScheduler } from "./replication-scheduler.js";
 import { createShardMapStore } from "./shard-map-store.js";
 
 const config = loadConfig();
@@ -18,8 +19,18 @@ const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.p
 const storedShardMap = await shardMapStore?.load();
 const configuredShardMap = storedShardMap || config.cluster.shardMap;
 if (configuredShardMap) {
-  node.replaceShardMap(shardMapFromHttp(configuredShardMap, node.id));
+  node.replaceShardMap(shardMapFromHttp(configuredShardMap, node.id, {
+    secret: config.cluster.secret,
+    timeoutMs: config.cluster.replicationTimeoutMs,
+  }));
 }
+const replication = createReplicationScheduler({
+  node,
+  hintsEnabled: config.cluster.hints.enabled,
+  antiEntropyMs: config.cluster.syncMs,
+  debounceMs: config.cluster.hints.debounceMs,
+  maxScopesPerHint: config.cluster.hints.maxScopesPerHint,
+});
 const persistence = createPersistence(node, config.persistence);
 if (persistence) {
   const restored = await persistence.restore();
@@ -33,26 +44,21 @@ const state = await startServer({
   shardMapStore,
   auth: config.auth,
   persistence,
+  memoryGuard: config.memoryGuard,
+  clusterSecret: config.cluster.secret,
+  forwardTimeoutMs: config.cluster.forwardTimeoutMs,
+  replicationTimeoutMs: config.cluster.replicationTimeoutMs,
+  replication,
 });
+replication.start();
 console.log(`spread-db node ${state.node.id} listening on http://localhost:${state.port}`);
-
-let syncing = false;
-const timer = setInterval(() => {
-  if (syncing) return;
-  syncing = true;
-  state.node.syncAll()
-    .catch((err) => console.error(`replication sync failed: ${err.message}`))
-    .finally(() => {
-      syncing = false;
-    });
-}, config.cluster.syncMs);
 
 let shuttingDown = false;
 
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
-  clearInterval(timer);
+  await replication.stop();
   await new Promise((resolve) => state.server.close(resolve));
   try {
     await persistence?.stop();

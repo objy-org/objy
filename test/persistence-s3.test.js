@@ -20,14 +20,14 @@ test("S3 persistence adapter stores journals through an S3-compatible API", asyn
     const node = new CRDTNode({ id: "n1" });
     const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
     persistence.start();
-    node.insert("app", "users", { id: "u1", name: "Ada" });
+    node.insert("app", "users", { _id: "u1", name: "Ada" });
     await persistence.stop();
 
     assert.ok([...mock.objects.keys()].some((key) => key.startsWith("spread-db/db/app/collection/users/shard/default/journal/n1/")));
 
     const fresh = new CRDTNode({ id: "fresh" });
     await new PersistenceManager({ node: fresh, storage }).restore();
-    assert.deepEqual(fresh.get("app", "users", "u1"), { id: "u1", name: "Ada" });
+    assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada" });
   } finally {
     await mock.stop();
   }

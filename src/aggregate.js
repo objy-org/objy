@@ -10,6 +10,30 @@ export function aggregateObjects(rows, spec) {
   return mergeAggregatePartials(aggregatePartialObjects(rows, spec), spec);
 }
 
+export function aggregateRows(rows, spec = {}) {
+  return isObjectDbAggregateSpec(spec) ? aggregateObjects(rows, spec) : aggregateLegacyObjects(rows, spec);
+}
+
+export function aggregateLegacyObjects(rows, spec = {}) {
+  const groupBy = spec.groupBy;
+  const metrics = normalizeLegacyMetrics(spec);
+  const groups = new Map();
+
+  for (const object of rows || []) {
+    const groupValue = groupBy ? getPathValue(object, groupBy) : undefined;
+    const key = groupBy ? stableKey(groupValue) : "__all__";
+    let bucket = groups.get(key);
+    if (!bucket) {
+      bucket = makeLegacyBucket(groupValue, metrics);
+      groups.set(key, bucket);
+    }
+    stepLegacyBucket(bucket, object, metrics);
+  }
+
+  if (!groupBy) return finishLegacyBucket(groups.get("__all__") || makeLegacyBucket(undefined, metrics), metrics);
+  return [...groups.values()].map((bucket) => finishLegacyBucket(bucket, metrics));
+}
+
 export function aggregatePartialObjects(rows, spec) {
   const normalized = normalizeAggregateSpec(spec);
   const buckets = new Map();
@@ -357,4 +381,70 @@ function makeComparator(sort) {
     }
     return 0;
   };
+}
+
+function normalizeLegacyMetrics(spec = {}) {
+  return {
+    sum: asArray(spec.sum),
+    avg: asArray(spec.avg),
+    min: asArray(spec.min),
+    max: asArray(spec.max),
+  };
+}
+
+function makeLegacyBucket(key, metrics) {
+  return {
+    key: cloneResultValue(key),
+    count: 0,
+    sum: Object.fromEntries(metrics.sum.map((field) => [field, 0])),
+    avg: Object.fromEntries(metrics.avg.map((field) => [field, { sum: 0, count: 0 }])),
+    min: Object.fromEntries(metrics.min.map((field) => [field, undefined])),
+    max: Object.fromEntries(metrics.max.map((field) => [field, undefined])),
+  };
+}
+
+function stepLegacyBucket(bucket, object, metrics) {
+  bucket.count++;
+  for (const field of metrics.sum) {
+    const value = getPathValue(object, field);
+    if (typeof value === "number") bucket.sum[field] += value;
+  }
+  for (const field of metrics.avg) {
+    const value = getPathValue(object, field);
+    if (typeof value === "number") {
+      bucket.avg[field].sum += value;
+      bucket.avg[field].count++;
+    }
+  }
+  for (const field of metrics.min) {
+    const value = getPathValue(object, field);
+    if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
+      bucket.min[field] = cloneResultValue(value);
+    }
+  }
+  for (const field of metrics.max) {
+    const value = getPathValue(object, field);
+    if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
+      bucket.max[field] = cloneResultValue(value);
+    }
+  }
+}
+
+function finishLegacyBucket(bucket, metrics) {
+  const out = { count: bucket.count };
+  if (bucket.key !== undefined) out.key = cloneResultValue(bucket.key);
+  if (metrics.sum.length) out.sum = bucket.sum;
+  if (metrics.avg.length) {
+    out.avg = Object.fromEntries(
+      Object.entries(bucket.avg).map(([field, state]) => [field, state.count ? state.sum / state.count : null]),
+    );
+  }
+  if (metrics.min.length) out.min = cloneResultValue(bucket.min);
+  if (metrics.max.length) out.max = cloneResultValue(bucket.max);
+  return out;
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
 }

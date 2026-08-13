@@ -44,7 +44,7 @@ console.log(`start: ${formatMem()}`);
 persistence.start();
 for (let i = 0; i < count; i++) {
   writer.insert("app", "events", {
-    id: `event-${i}`,
+    _id: `event-${i}`,
     kind: i % 17,
     value: i,
     active: i % 3 !== 0,

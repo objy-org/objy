@@ -6,6 +6,8 @@ import { createAuthInterface } from "./interfaces/auth.js";
 import { createClusterInterface, httpPeer, shardMapFromHttp } from "./interfaces/cluster.js";
 import { createPublicObjectInterface } from "./interfaces/public-object.js";
 import { createUiInterface } from "./interfaces/ui.js";
+import { createMemoryGuard } from "./memory-guard.js";
+import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
 
 export { httpPeer, shardMapFromHttp };
@@ -18,18 +20,36 @@ export async function startServer({
   shardMapStore,
   auth,
   persistence,
+  memoryGuard,
+  clusterSecret,
+  forwardTimeoutMs,
+  replicationTimeoutMs,
+  replication,
+  replicationHints,
   interfaces = [],
   useDefaultInterfaces = true,
 } = {}) {
   const n = node || new CRDTNode();
   const authService = createAuthService(n, auth);
-  const state = { node: n, auth: authService, server: null, port, router: null };
+  const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret);
+  const guard = createMemoryGuard(memoryGuard);
+  const scheduler = replication || createReplicationScheduler({ node: n, ...normalizeReplicationHintOptions(replicationHints) });
+  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler };
 
-  if (shardMap) n.replaceShardMap(shardMapFromHttp(shardMap, n.id));
-  for (const peer of peers) n.addPeer(httpPeer(peer, n.id));
+  if (shardMap) n.replaceShardMap(shardMapFromHttp(shardMap, n.id, { secret, timeoutMs: replicationTimeoutMs }));
+  for (const peer of peers) n.addPeer(httpPeer(peer, n.id, { secret, timeoutMs: replicationTimeoutMs }));
 
   const router = new HttpRouter();
-  const context = createInterfaceContext({ node: n, shardMapStore, auth: authService, persistence });
+  const context = createInterfaceContext({
+    node: n,
+    shardMapStore,
+    auth: authService,
+    persistence,
+    memoryGuard: guard,
+    clusterSecret: secret,
+    forwardTimeoutMs,
+    replicationScheduler: scheduler,
+  });
   const activeInterfaces = [
     ...(useDefaultInterfaces ? defaultInterfaces() : []),
     ...interfaces,
@@ -64,14 +84,35 @@ export function defaultInterfaces() {
   ];
 }
 
-export function createInterfaceContext({ node, shardMapStore, auth, persistence, durability }) {
+export function createInterfaceContext({
+  node,
+  shardMapStore,
+  auth,
+  persistence,
+  durability,
+  memoryGuard,
+  clusterSecret,
+  forwardTimeoutMs,
+  replicationScheduler,
+}) {
+  const durableWrite = durability || {
+    afterWrite: () => persistence?.afterWrite?.() || Promise.resolve({ records: 0, ops: 0 }),
+  };
   return {
     node,
     shardMapStore,
     auth,
-    routing: new ShardRequestRouter({ node }),
-    durability: durability || {
-      afterWrite: () => persistence?.afterWrite?.() || Promise.resolve({ records: 0, ops: 0 }),
+    clusterSecret,
+    memoryGuard,
+    routing: new ShardRequestRouter({ node, forwardTimeoutMs }),
+    replicationScheduler,
+    durability: {
+      ...durableWrite,
+      afterWrite: async () => {
+        const result = await durableWrite.afterWrite();
+        replicationScheduler?.afterLocalWrite?.();
+        return result;
+      },
     },
     data: {
       node,
@@ -85,6 +126,18 @@ export function createInterfaceContext({ node, shardMapStore, auth, persistence,
       shardMapStore,
       shardMapFromHttp,
     },
+  };
+}
+
+function normalizeClusterSecret(secret) {
+  return typeof secret === "string" && secret.length > 0 ? secret : null;
+}
+
+function normalizeReplicationHintOptions(options = {}) {
+  const { enabled, ...rest } = options || {};
+  return {
+    ...rest,
+    ...(enabled !== undefined ? { hintsEnabled: enabled } : {}),
   };
 }
 

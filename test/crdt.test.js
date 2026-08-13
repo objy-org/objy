@@ -41,13 +41,13 @@ test("replication propagates writes in both directions", async () => {
   const { a, b } = pair();
   const id = a.insert("db", "c", { v: 1 });
   await b.syncAll();
-  assert.deepEqual(b.get("db", "c", id), { id, v: 1 });
+  assert.deepEqual(b.get("db", "c", id), { _id: id, v: 1 });
 
   a.update("db", "c", id, { v: 2 });
   await b.syncAll();
   assert.equal(b.get("db", "c", id).v, 2);
 
-  b.insert("db", "c", { id: "from-b", v: 9 });
+  b.insert("db", "c", { _id: "from-b", v: 9 });
   await a.syncAll();
   assert.equal(a.get("db", "c", "from-b").v, 9);
 });
@@ -60,9 +60,9 @@ test("three nodes converge through pairwise sync", async () => {
     x.addPeer(localPeer(y));
     y.addPeer(localPeer(x));
   }
-  a.insert("db", "c", { id: "x", v: 1 });
-  b.insert("db", "c", { id: "y", v: 2 });
-  c.insert("db", "c", { id: "z", v: 3 });
+  a.insert("db", "c", { _id: "x", v: 1 });
+  b.insert("db", "c", { _id: "y", v: 2 });
+  c.insert("db", "c", { _id: "z", v: 3 });
   for (let i = 0; i < 3; i++) {
     await a.syncAll();
     await b.syncAll();
@@ -70,18 +70,18 @@ test("three nodes converge through pairwise sync", async () => {
   }
   for (const n of [a, b, c]) {
     assert.equal(n.count("db", "c"), 3);
-    assert.deepEqual(n.list("db", "c").sort((p, q) => p.id.localeCompare(q.id)), [
-      { id: "x", v: 1 },
-      { id: "y", v: 2 },
-      { id: "z", v: 3 },
+    assert.deepEqual(n.list("db", "c").sort((p, q) => p._id.localeCompare(q._id)), [
+      { _id: "x", v: 1 },
+      { _id: "y", v: 2 },
+      { _id: "z", v: 3 },
     ]);
   }
 });
 
 test("concurrent writes to the same object converge deterministically", async () => {
   const { a, b } = pair();
-  a.insert("db", "c", { id: "o", v: 1 });
-  b.insert("db", "c", { id: "o", v: 2 });
+  a.insert("db", "c", { _id: "o", v: 1 });
+  b.insert("db", "c", { _id: "o", v: 2 });
   await a.syncAll();
   await b.syncAll();
   const gotA = a.get("db", "c", "o").v;
@@ -96,8 +96,8 @@ test("last-write-wins on whole objects, higher counter wins", async () => {
   logged(b, "putObj", "o", { value: { v: 2, from: "b" }, ts: { c: 2, n: "z" } });
   await a.syncAll();
   await b.syncAll();
-  assert.deepEqual(a.get("db", "c", "o"), { id: "o", v: 2, from: "b" });
-  assert.deepEqual(b.get("db", "c", "o"), { id: "o", v: 2, from: "b" });
+  assert.deepEqual(a.get("db", "c", "o"), { _id: "o", v: 2, from: "b" });
+  assert.deepEqual(b.get("db", "c", "o"), { _id: "o", v: 2, from: "b" });
 });
 
 test("stale writes are ignored and never regress through sync", async () => {
@@ -118,8 +118,8 @@ test("delete vs concurrent update: newer timestamp wins either way", async () =>
     await a.syncAll();
     await b.syncAll();
   }
-  assert.deepEqual(a.get("db", "c", "o"), { id: "o", v: 2 }, "update wins over older delete");
-  assert.deepEqual(b.get("db", "c", "o"), { id: "o", v: 2 });
+  assert.deepEqual(a.get("db", "c", "o"), { _id: "o", v: 2 }, "update wins over older delete");
+  assert.deepEqual(b.get("db", "c", "o"), { _id: "o", v: 2 });
 
   const { a: a2, b: b2 } = pair();
   logged(a2, "putObj", "o", { value: { v: 1 }, ts: { c: 1, n: "z" } });
@@ -141,7 +141,7 @@ test("re-applying the same ops is idempotent", async () => {
   ];
   a.applyRemote("seed", ops);
   a.applyRemote("seed", ops);
-  assert.deepEqual(a.get("db", "c", "o"), { id: "o", w: "s" });
+  assert.deepEqual(a.get("db", "c", "o"), { _id: "o", w: "s" });
 });
 
 test("concurrent object writes do not merge independent fields", async () => {
@@ -150,8 +150,8 @@ test("concurrent object writes do not merge independent fields", async () => {
   logged(b, "putObj", "o", { value: { bOnly: true }, ts: { c: 1, n: "b" } });
   await a.syncAll();
   await b.syncAll();
-  assert.deepEqual(a.get("db", "c", "o"), { id: "o", bOnly: true });
-  assert.deepEqual(b.get("db", "c", "o"), { id: "o", bOnly: true });
+  assert.deepEqual(a.get("db", "c", "o"), { _id: "o", bOnly: true });
+  assert.deepEqual(b.get("db", "c", "o"), { _id: "o", bOnly: true });
 });
 
 test("sync only transfers ops not yet seen", async () => {
@@ -165,10 +165,10 @@ test("sync only transfers ops not yet seen", async () => {
       return { nodeId: b.id, lastSeq: b.log.length, ops: b.log.slice(after) };
     },
   });
-  b.insert("db", "c", { id: "o", v: 1 });
+  b.insert("db", "c", { _id: "o", v: 1 });
   await a.syncAll();
   assert.equal(a.count("db", "c"), 1);
-  b.insert("db", "c", { id: "p", v: 2 });
+  b.insert("db", "c", { _id: "p", v: 2 });
   await a.syncAll();
   assert.equal(a.count("db", "c"), 2);
   assert.equal(pulled, 2, "after cursor reused for incremental pull");
@@ -198,7 +198,7 @@ test("large replication catches up through bounded batches", async () => {
 
   for (let i = 0; i < 2000; i++) {
     source.insert("db", "events", {
-      id: `e${i}`,
+      _id: `e${i}`,
       kind: i % 2 ? "odd" : "even",
       value: i,
       payload: { bucket: i % 10 },
@@ -220,7 +220,7 @@ test("field type change replicates cleanly", async () => {
   await b.syncAll();
   a.replace("db", "c", id, { v: "now a string" });
   await b.syncAll();
-  assert.deepEqual(b.get("db", "c", id), { id, v: "now a string" });
+  assert.deepEqual(b.get("db", "c", id), { _id: id, v: "now a string" });
 });
 
 test("replication receive updates declared field indexes", async () => {
@@ -228,13 +228,13 @@ test("replication receive updates declared field indexes", async () => {
   b.createCollection("db", "events", { indexes: ["value"] });
 
   a.insertMany("db", "events", [
-    { id: "e1", value: 2 },
-    { id: "e2", value: 1 },
+    { _id: "e1", value: 2 },
+    { _id: "e2", value: 1 },
   ]);
   await b.syncAll();
 
   assert.deepEqual(
-    b.find("db", "events", {}, { sortBy: "value", limit: 2 }).map((event) => event.id),
+    b.find("db", "events", {}, { sortBy: "value", limit: 2 }).map((event) => event._id),
     ["e2", "e1"],
   );
   assert.equal(b.indexStats("db", "events")[0].orderedEntries, 2);
@@ -242,7 +242,7 @@ test("replication receive updates declared field indexes", async () => {
   a.update("db", "events", "e1", { value: 0 });
   await b.syncAll();
   assert.deepEqual(
-    b.find("db", "events", {}, { sortBy: "value", limit: 2 }).map((event) => event.id),
+    b.find("db", "events", {}, { sortBy: "value", limit: 2 }).map((event) => event._id),
     ["e1", "e2"],
   );
 });
@@ -252,7 +252,7 @@ test("retention prunes ops once acked", async () => {
   const b = new CRDTNode({ id: "b" });
   a.addPeer(localPeer(b));
   b.addPeer(localPeer(a));
-  for (let i = 0; i < 50; i++) a.insert("db", "c", { id: `o${i}`, v: i });
+  for (let i = 0; i < 50; i++) a.insert("db", "c", { _id: `o${i}`, v: i });
   assert.equal(a.log.length, 50);
   await b.syncAll();
   assert.equal(b.count("db", "c"), 50);
@@ -265,7 +265,7 @@ test("scoped replication snapshots only when that scope was trimmed", () => {
   const source = new CRDTNode({ id: "source", retainOps: 0 });
   source.replaceShardMap(shardMapFor(["shard-0", "shard-1"]));
 
-  source.insert("app", "events", { id: idForShard(source, "shard-0"), value: 1 });
+  source.insert("app", "events", { _id: idForShard(source, "shard-0"), value: 1 });
   source.receiveAck("replica", source.seq, { database: "*", collection: "*", shard: "shard-0" });
 
   assert.equal(source.trimmed, 1);
@@ -281,10 +281,10 @@ test("retention keeps ops for a peer that acked but fell behind", async () => {
   a.addPeer(localPeer(c));
   b.addPeer(localPeer(a));
   c.addPeer(localPeer(a));
-  for (let i = 0; i < 10; i++) a.insert("db", "c", { id: `o${i}`, v: i });
+  for (let i = 0; i < 10; i++) a.insert("db", "c", { _id: `o${i}`, v: i });
   await c.syncAll();
   await b.syncAll();
-  for (let i = 10; i < 20; i++) a.insert("db", "c", { id: `o${i}`, v: i });
+  for (let i = 10; i < 20; i++) a.insert("db", "c", { _id: `o${i}`, v: i });
   await b.syncAll();
   assert.equal(a.trimmed, 10, "c's old ack protects ops 11..20");
   assert.equal(a.log.length, 10);
@@ -298,7 +298,7 @@ test("retention buffer keeps ops beyond the ack watermark", async () => {
   const b = new CRDTNode({ id: "b" });
   a.addPeer(localPeer(b));
   b.addPeer(localPeer(a));
-  for (let i = 0; i < 20; i++) a.insert("db", "c", { id: `o${i}`, v: i });
+  for (let i = 0; i < 20; i++) a.insert("db", "c", { _id: `o${i}`, v: i });
   await b.syncAll();
   assert.equal(a.trimmed, 15, "kept 5 most recent acked ops");
   assert.equal(a.log.length, 5);
@@ -309,7 +309,7 @@ test("far-behind peer recovers via snapshot after 410", async () => {
   const b = new CRDTNode({ id: "b" });
   a.addPeer(localPeer(b));
   b.addPeer(localPeer(a));
-  for (let i = 0; i < 30; i++) a.insert("db", "c", { id: `o${i}`, v: i });
+  for (let i = 0; i < 30; i++) a.insert("db", "c", { _id: `o${i}`, v: i });
   await b.syncAll();
   a.remove("db", "c", "o5");
   await b.syncAll();
@@ -333,8 +333,8 @@ test("empty objects survive snapshot recovery", async () => {
   a.addPeer(localPeer(b));
   b.addPeer(localPeer(a));
 
-  a.insert("db", "c", { id: "empty" });
-  a.insert("db", "c", { id: "filled", v: 1 });
+  a.insert("db", "c", { _id: "empty" });
+  a.insert("db", "c", { _id: "filled", v: 1 });
   await b.syncAll();
   assert.equal(a.trimmed, 2);
 
@@ -342,8 +342,8 @@ test("empty objects survive snapshot recovery", async () => {
   fresh.addPeer(localPeer(a));
   await fresh.syncAll();
 
-  assert.deepEqual(fresh.get("db", "c", "empty"), { id: "empty" });
-  assert.deepEqual(fresh.get("db", "c", "filled"), { id: "filled", v: 1 });
+  assert.deepEqual(fresh.get("db", "c", "empty"), { _id: "empty" });
+  assert.deepEqual(fresh.get("db", "c", "filled"), { _id: "filled", v: 1 });
 });
 
 test("snapshot never overwrites newer local writes (LWW)", async () => {
@@ -361,7 +361,7 @@ test("snapshot never overwrites newer local writes (LWW)", async () => {
 
 test("snapshot advances the local clock before new writes", () => {
   const source = new CRDTNode({ id: "source" });
-  source.insert("db", "c", { id: "o", v: 1 });
+  source.insert("db", "c", { _id: "o", v: 1 });
   for (let i = 0; i < 50; i++) source.update("db", "c", "o", { v: i + 2 });
 
   const fresh = new CRDTNode({ id: "fresh" });

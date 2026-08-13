@@ -35,8 +35,13 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
     },
     storage: normalizeStorageConfig(config.storage),
     vector: normalizeVectorConfig(config.vector),
+    memoryGuard: normalizeMemoryGuardConfig(config.memoryGuard),
     cluster: {
-      syncMs: positiveInt(config.cluster?.syncMs, 1000),
+      syncMs: positiveInt(config.cluster?.syncMs, 2500),
+      forwardTimeoutMs: positiveInt(config.cluster?.forwardTimeoutMs, 60_000),
+      replicationTimeoutMs: positiveInt(config.cluster?.replicationTimeoutMs, 60_000),
+      hints: normalizeReplicationHintsConfig(config.cluster?.hints),
+      secret: clusterSecret(config.cluster, config.auth),
       shardMap: config.cluster?.shardMap,
       shardMapStore: normalizeShardMapStoreConfig(config.cluster?.shardMapStore, config.persistence),
     },
@@ -75,6 +80,30 @@ function normalizeValueDirectoryConfig(config = {}) {
   };
 }
 
+function normalizeMemoryGuardConfig(config = {}) {
+  const enabled = config.enabled === true;
+  const rejectWritesPercent = percent(config.rejectWritesPercent ?? config.maxRssPercent, 85);
+  const resumeWritesPercent = percent(config.resumeWritesPercent, Math.min(78, rejectWritesPercent));
+  if (resumeWritesPercent > rejectWritesPercent) {
+    throw new Error("memoryGuard.resumeWritesPercent must be <= memoryGuard.rejectWritesPercent");
+  }
+  return {
+    enabled,
+    limitMb: positiveNumber(config.limitMb, null),
+    rejectWritesPercent,
+    resumeWritesPercent,
+    checkMs: positiveInt(config.checkMs, 1000),
+  };
+}
+
+function normalizeReplicationHintsConfig(config = {}) {
+  return {
+    enabled: config.enabled !== false,
+    debounceMs: positiveInt(config.debounceMs, 25),
+    maxScopesPerHint: positiveInt(config.maxScopesPerHint, 128),
+  };
+}
+
 function normalizeShardMapStoreConfig(config = {}, persistenceConfig = {}) {
   const mode = config.mode || "off";
   if (!["off", "memory", "s3"].includes(mode)) {
@@ -106,9 +135,12 @@ function normalizePersistenceConfig(config = {}) {
     snapshotMs: positiveInt(config.snapshotMs, 60_000),
     segmentBytes: positiveInt(config.segmentBytes, 16 * 1024 * 1024),
     compactJournals: config.compactJournals !== false,
+    snapshotRetention: normalizeRetentionConfig(config.snapshotRetention),
+    journalRetention: normalizeRetentionConfig(config.journalRetention),
     snapshotDirtyOnly: config.snapshotDirtyOnly !== false,
     snapshotRole: snapshotRole(config.snapshotRole),
     restoreMode: config.restoreMode || "scoped",
+    restoreSnapshotId: optionalString(config.restoreSnapshotId),
     restoreScopes: Array.isArray(config.restoreScopes) ? config.restoreScopes : undefined,
     ack,
     localWal: normalizeLocalWalConfig(config.localWal, ack),
@@ -202,6 +234,16 @@ function positiveInt(value, fallback) {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }
 
+function positiveNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function percent(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : fallback;
+}
+
 function snapshotRole(value) {
   const role = value || "primary";
   if (role === "primary" || role === "all" || role === "none") return role;
@@ -228,4 +270,19 @@ function normalizeLocalWalConfig(config = {}, ack = "memory") {
     fsync: config.fsync !== false,
     flushMs: positiveInt(config.flushMs, 0),
   };
+}
+
+function normalizeRetentionConfig(config = {}) {
+  return {
+    keepLatest: positiveInt(config.keepLatest, 0),
+    keepForMs: positiveInt(config.keepForMs, 0),
+  };
+}
+
+function optionalString(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function clusterSecret(cluster = {}, auth = {}) {
+  return optionalString(cluster?.secret) || optionalString(cluster?.clusterSecret) || optionalString(auth?.jwtSecret);
 }

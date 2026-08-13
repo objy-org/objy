@@ -5,7 +5,7 @@ import { AGGREGATE_PATH, READ_PATH } from "../src/query-planner.js";
 
 function seedUsers(n) {
   n.insert("db", "users", {
-    id: "ada",
+    _id: "ada",
     email: "ada@example.com",
     name: "Ada Lovelace",
     age: 36,
@@ -15,7 +15,7 @@ function seedUsers(n) {
     profile: { city: "London" },
   });
   n.insert("db", "users", {
-    id: "grace",
+    _id: "grace",
     email: "grace@example.com",
     name: "Grace Hopper",
     age: 85,
@@ -25,7 +25,7 @@ function seedUsers(n) {
     profile: { city: "Arlington" },
   });
   n.insert("db", "users", {
-    id: "linus",
+    _id: "linus",
     email: "linus@example.com",
     name: "Linus Torvalds",
     age: "unknown",
@@ -52,23 +52,23 @@ test("find supports object-db query operators and nested paths", () => {
   seedUsers(n);
 
   assert.deepEqual(
-    n.find("db", "users", { "profile.city": "London" }).map((o) => o.id),
+    n.find("db", "users", { "profile.city": "London" }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { age: { $gte: 40 } }).map((o) => o.id),
+    n.find("db", "users", { age: { $gte: 40 } }).map((o) => o._id),
     ["grace"],
   );
   assert.deepEqual(
-    n.find("db", "users", { tags: { $contains: "admin" } }).map((o) => o.id),
+    n.find("db", "users", { tags: { $contains: "admin" } }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { name: { $regex: { pattern: "hopper", flags: "i" } } }).map((o) => o.id),
+    n.find("db", "users", { name: { $regex: { pattern: "hopper", flags: "i" } } }).map((o) => o._id),
     ["grace"],
   );
   assert.deepEqual(
-    n.find("db", "users", { status: { $in: ["inactive"] } }).map((o) => o.id),
+    n.find("db", "users", { status: { $in: ["inactive"] } }).map((o) => o._id),
     ["linus"],
   );
   assert.equal(n.count("db", "users", { missing: { $exists: false } }), 3);
@@ -79,15 +79,15 @@ test("find supports old logical and scalar query operators", () => {
   seedUsers(n);
 
   assert.deepEqual(
-    n.find("db", "users", { $or: [{ status: "inactive" }, { "profile.city": "London" }] }).map((o) => o.id),
+    n.find("db", "users", { $or: [{ status: "inactive" }, { "profile.city": "London" }] }).map((o) => o._id),
     ["ada", "linus"],
   );
   assert.deepEqual(
-    n.find("db", "users", { $and: [{ status: "active" }, { age: { $lt: 40 } }] }).map((o) => o.id),
+    n.find("db", "users", { $and: [{ status: "active" }, { age: { $lt: 40 } }] }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { $not: { status: "active" } }).map((o) => o.id),
+    n.find("db", "users", { $not: { status: "active" } }).map((o) => o._id),
     ["linus"],
   );
   assert.deepEqual(
@@ -95,31 +95,31 @@ test("find supports old logical and scalar query operators", () => {
     [],
   );
   assert.deepEqual(
-    n.find("db", "users", { status: ["active", "inactive"] }).map((o) => o.id),
+    n.find("db", "users", { status: ["active", "inactive"] }).map((o) => o._id),
     ["ada", "grace", "linus"],
   );
   assert.deepEqual(
-    n.find("db", "users", { status: { $nin: ["active"] } }).map((o) => o.id),
+    n.find("db", "users", { status: { $nin: ["active"] } }).map((o) => o._id),
     ["linus"],
   );
   assert.deepEqual(
-    n.find("db", "users", { name: { $likeI: "hopper" } }).map((o) => o.id),
+    n.find("db", "users", { name: { $likeI: "hopper" } }).map((o) => o._id),
     ["grace"],
   );
   assert.deepEqual(
-    n.find("db", "users", { name: { $startsWith: "Ada" } }).map((o) => o.id),
+    n.find("db", "users", { name: { $startsWith: "Ada" } }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { name: { $endsWith: "Torvalds" } }).map((o) => o.id),
+    n.find("db", "users", { name: { $endsWith: "Torvalds" } }).map((o) => o._id),
     ["linus"],
   );
   assert.deepEqual(
-    n.find("db", "users", { age: { $type: "number", $between: [30, 40] } }).map((o) => o.id),
+    n.find("db", "users", { age: { $type: "number", $between: [30, 40] } }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { score: { $mod: [10, 0] } }).map((o) => o.id),
+    n.find("db", "users", { score: { $mod: [10, 0] } }).map((o) => o._id),
     ["ada", "grace"],
   );
 });
@@ -128,7 +128,7 @@ test("find supports old null and array-object operators", () => {
   const n = new CRDTNode({ id: "a" });
   seedUsers(n);
   n.insert("db", "users", {
-    id: "nulls",
+    _id: "nulls",
     name: "",
     status: null,
     aliases: [{ kind: "primary", value: "n/a" }],
@@ -136,23 +136,23 @@ test("find supports old null and array-object operators", () => {
   });
 
   assert.deepEqual(
-    n.find("db", "users", { tags: "admin" }).map((o) => o.id),
+    n.find("db", "users", { tags: "admin" }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { status: null }).map((o) => o.id),
+    n.find("db", "users", { status: null }).map((o) => o._id),
     ["nulls"],
   );
   assert.deepEqual(
-    n.find("db", "users", { emptyTags: { $exists: true, $null: true } }).map((o) => o.id),
+    n.find("db", "users", { emptyTags: { $exists: true, $null: true } }).map((o) => o._id),
     ["nulls"],
   );
   assert.deepEqual(
-    n.find("db", "users", { aliases: { $elemMatch: { kind: "primary" } } }).map((o) => o.id),
+    n.find("db", "users", { aliases: { $elemMatch: { kind: "primary" } } }).map((o) => o._id),
     ["nulls"],
   );
   assert.deepEqual(
-    n.find("db", "users", { tags: { $size: 2 } }).map((o) => o.id),
+    n.find("db", "users", { tags: { $size: 2 } }).map((o) => o._id),
     ["ada"],
   );
 });
@@ -162,11 +162,11 @@ test("find supports sorting, limits, and offsets", () => {
   seedUsers(n);
 
   assert.deepEqual(
-    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o.id),
+    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o._id),
     ["grace", "ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", {}, { sortBy: "name", offset: 1, limit: 1 }).map((o) => o.id),
+    n.find("db", "users", {}, { sortBy: "name", offset: 1, limit: 1 }).map((o) => o._id),
     ["grace"],
   );
 });
@@ -177,14 +177,14 @@ test("equality indexes are maintained across updates and deletes", () => {
   n.createIndex("db", "users", "email");
 
   assert.deepEqual(
-    n.find("db", "users", { email: "ada@example.com" }).map((o) => o.id),
+    n.find("db", "users", { email: "ada@example.com" }).map((o) => o._id),
     ["ada"],
   );
 
   n.update("db", "users", "ada", { email: "ada@history.example" });
   assert.deepEqual(n.find("db", "users", { email: "ada@example.com" }), []);
   assert.deepEqual(
-    n.find("db", "users", { email: "ada@history.example" }).map((o) => o.id),
+    n.find("db", "users", { email: "ada@history.example" }).map((o) => o._id),
     ["ada"],
   );
 
@@ -200,20 +200,20 @@ test("field indexes also drive sorted paging and stay fresh", () => {
   n.createIndex("db", "users", "score");
 
   assert.deepEqual(
-    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o.id),
+    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o._id),
     ["grace", "ada"],
   );
   assert.equal(n.indexStats("db", "users")[0].orderedEntries, 3);
 
   n.update("db", "users", "linus", { score: 30 });
   assert.deepEqual(
-    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o.id),
+    n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o._id),
     ["linus", "grace"],
   );
 
   n.remove("db", "users", "linus");
   assert.deepEqual(
-    n.find("db", "users", {}, { sortBy: "score", sort: "asc", limit: 3 }).map((o) => o.id),
+    n.find("db", "users", {}, { sortBy: "score", sort: "asc", limit: 3 }).map((o) => o._id),
     ["ada", "grace"],
   );
 });
@@ -221,19 +221,19 @@ test("field indexes also drive sorted paging and stay fresh", () => {
 test("ordered index verifies filters it cannot prove", () => {
   const n = new CRDTNode({ id: "a" });
   n.insertMany("db", "items", [
-    { id: "a", bucket: "b1", score: 1 },
-    { id: "b", score: 2 },
-    { id: "c", bucket: "b2", score: 3 },
+    { _id: "a", bucket: "b1", score: 1 },
+    { _id: "b", score: 2 },
+    { _id: "c", bucket: "b2", score: 3 },
   ]);
-  n.createIndex("db", "items", "id");
+  n.createIndex("db", "items", "_id");
 
   assert.deepEqual(
-    n.find("db", "items", { bucket: { $exists: false } }, { sortBy: "id", sort: "asc" }).map((o) => o.id),
+    n.find("db", "items", { bucket: { $exists: false } }, { sortBy: "_id", sort: "asc" }).map((o) => o._id),
     ["b"],
   );
 });
 
-test("reverse indexes narrow old equality, in, logical, array, and id queries", () => {
+test("reverse indexes narrow old equality, in, logical, array, and _id queries", () => {
   const n = new CRDTNode({ id: "a" });
   seedUsers(n);
   n.createIndex("db", "users", "status");
@@ -241,26 +241,26 @@ test("reverse indexes narrow old equality, in, logical, array, and id queries", 
 
   assert.equal(n.count("db", "users", { status: "active" }), 2);
   assert.deepEqual(
-    n.find("db", "users", { status: { $in: ["inactive"] } }).map((o) => o.id),
+    n.find("db", "users", { status: { $in: ["inactive"] } }).map((o) => o._id),
     ["linus"],
   );
   assert.deepEqual(
-    n.find("db", "users", { tags: "admin" }).map((o) => o.id),
+    n.find("db", "users", { tags: "admin" }).map((o) => o._id),
     ["ada"],
   );
   assert.deepEqual(
-    n.find("db", "users", { $or: [{ status: "inactive" }, { tags: "compiler" }] }).map((o) => o.id),
+    n.find("db", "users", { $or: [{ status: "inactive" }, { tags: "compiler" }] }).map((o) => o._id),
     ["linus", "grace"],
   );
   assert.deepEqual(
-    n.find("db", "users", { _id: { $in: ["ada", "missing"] } }).map((o) => o.id),
+    n.find("db", "users", { _id: { $in: ["ada", "missing"] } }).map((o) => o._id),
     ["ada"],
   );
 
   n.update("db", "users", "ada", { tags: ["history"] });
   assert.deepEqual(n.find("db", "users", { tags: "admin" }), []);
   assert.deepEqual(
-    n.find("db", "users", { tags: "history" }).map((o) => o.id),
+    n.find("db", "users", { tags: "history" }).map((o) => o._id),
     ["ada"],
   );
 });
@@ -268,13 +268,13 @@ test("reverse indexes narrow old equality, in, logical, array, and id queries", 
 test("queries can follow live reference objects", () => {
   const n = new CRDTNode({ id: "a" });
   n.insertMany("db", "authors", [
-    { id: "alice", name: "Alice", score: 10 },
-    { id: "bob", name: "Bob", score: 20 },
+    { _id: "alice", name: "Alice", score: 10 },
+    { _id: "bob", name: "Bob", score: 20 },
   ]);
   n.insertMany("db", "posts", [
-    { id: "p1", title: "One", author: { type: "reference", collection: "authors", value: "alice" } },
-    { id: "p2", title: "Two", author: { type: "reference", collection: "authors", value: "bob" } },
-    { id: "p3", title: "Missing", author: { type: "reference", collection: "authors", value: "missing" } },
+    { _id: "p1", title: "One", author: { type: "reference", collection: "authors", value: "alice" } },
+    { _id: "p2", title: "Two", author: { type: "reference", collection: "authors", value: "bob" } },
+    { _id: "p3", title: "Missing", author: { type: "reference", collection: "authors", value: "missing" } },
   ]);
 
   assert.equal(n.get("db", "posts", "p1").author.object, undefined);
@@ -284,22 +284,22 @@ test("queries can follow live reference objects", () => {
   assert.equal(n.get("db", "authors", "alice").name, "Alice");
   assert.equal(n.get("db", "posts", "p1").author.object, undefined);
   assert.deepEqual(
-    n.find("db", "posts", { "author.object.name": "Alice" }).map((post) => post.id),
+    n.find("db", "posts", { "author.object.name": "Alice" }).map((post) => post._id),
     ["p1"],
   );
 
   n.update("db", "authors", "alice", { name: "Ada" });
   assert.deepEqual(
-    n.find("db", "posts", { "author.object.name": "Ada" }).map((post) => post.id),
+    n.find("db", "posts", { "author.object.name": "Ada" }).map((post) => post._id),
     ["p1"],
   );
   assert.deepEqual(
-    n.find("db", "posts", { "author.object": null }).map((post) => post.id),
+    n.find("db", "posts", { "author.object": null }).map((post) => post._id),
     ["p3"],
   );
 
   const sorted = n.find("db", "posts", {}, { sortBy: "author.object.score", sort: "asc" });
-  assert.deepEqual(sorted.map((post) => post.id), ["p1", "p2", "p3"]);
+  assert.deepEqual(sorted.map((post) => post._id), ["p1", "p2", "p3"]);
 
   assert.deepEqual(
     n.aggregate("db", "posts", { "author.object": { $ne: null } }, {
@@ -317,8 +317,8 @@ for (const { name, storage } of storageEngines) {
   test(`query scans use fast reads and return isolated objects with ${name} storage`, () => {
     const n = new CRDTNode({ id: `query-${name}`, storage });
     n.insertMany("db", "items", [
-      { id: "a", status: "hot", score: 10, tags: ["x"], nested: { flag: true } },
-      { id: "b", status: "cold", score: 20, tags: ["y"], nested: { flag: false } },
+      { _id: "a", status: "hot", score: 10, tags: ["x"], nested: { flag: true } },
+      { _id: "b", status: "cold", score: 20, tags: ["y"], nested: { flag: false } },
     ]);
 
     const collection = n.db.collection("db", "items");
@@ -339,7 +339,7 @@ for (const { name, storage } of storageEngines) {
 
     collection.read = originalRead;
     collection.readForQuery = originalReadForQuery;
-    assert.deepEqual(rows.map((row) => row.id), ["a"]);
+    assert.deepEqual(rows.map((row) => row._id), ["a"]);
     assert.equal(safeReads, 1);
     assert.equal(queryReads, 1);
 
@@ -352,8 +352,8 @@ for (const { name, storage } of storageEngines) {
   test(`fallback aggregates use fast reads and return isolated values with ${name} storage`, () => {
     const n = new CRDTNode({ id: `aggregate-${name}`, storage });
     n.insertMany("db", "items", [
-      { id: "a", bucket: { name: "one" }, payload: { rank: 1 }, score: 10 },
-      { id: "b", bucket: { name: "two" }, payload: { rank: 2 }, score: 20 },
+      { _id: "a", bucket: { name: "one" }, payload: { rank: 1 }, score: 10 },
+      { _id: "b", bucket: { name: "two" }, payload: { rank: 2 }, score: 20 },
     ]);
 
     const collection = n.db.collection("db", "items");
@@ -545,12 +545,42 @@ test("query planner chooses old index-style read and aggregate paths", async () 
   }).path, AGGREGATE_PATH.SCAN);
 });
 
+test("unfiltered limited reads and column builds stream live ids", async () => {
+  const n = new CRDTNode({ id: "a" });
+  const rows = [];
+  for (let i = 0; i < 64; i++) {
+    rows.push({ _id: `e${i}`, score: i });
+  }
+  n.insertMany("db", "events", rows);
+
+  const collection = n.db.collection("db", "events");
+  collection._liveIds = () => {
+    throw new Error("live ids were materialized");
+  };
+
+  assert.deepEqual(
+    n.find("db", "events", {}, { limit: 5 }).map((row) => row._id),
+    ["e0", "e1", "e2", "e3", "e4"],
+  );
+
+  n.createIndex("db", "events", "score");
+  n.setCollectionMeta("db", "events", {
+    indexes: ["score"],
+    columnIndexes: ["score"],
+  });
+  await n.awaitColumnIndexes("db", "events");
+
+  const scoreColumn = n.indexStats("db", "events").find((entry) => entry.type === "column" && entry.path === "score");
+  assert.equal(scoreColumn.status, "ready");
+  assert.equal(scoreColumn.entries, 64);
+});
+
 test("column indexes build in the background and absorb live deltas", async () => {
   const n = new CRDTNode({ id: "a" });
   const objects = [];
   for (let i = 0; i < 512; i++) {
     objects.push({
-      id: `e${i}`,
+      _id: `e${i}`,
       status: i % 2 === 0 ? "hot" : "cold",
       score: i,
       payload: { bucket: i % 8 },

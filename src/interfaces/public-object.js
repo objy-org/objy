@@ -1,26 +1,30 @@
-import { randomUUID } from "node:crypto";
 import { USERS_COLLECTION } from "../auth.js";
-import { aggregateObjects, isObjectDbAggregateSpec } from "../aggregate.js";
+import { aggregateRows } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
 import { json, readJson } from "../http-router.js";
+import { createObjectId } from "../object-id.js";
 import {
   canCreate,
   canDelete,
   canRead,
   canUpdate,
+  isPermissionBypass,
   mergeReadPermissionQuery,
   permissionError,
 } from "../permissions.js";
-import { compareSortValues, getPathValue, matchesQuery, splitQueryControls, stableKey } from "../query.js";
+import { matchesQuery, splitQueryControls } from "../query.js";
 import { QUERY_PATH_HEADER } from "../query-planner.js";
 import {
   baseCriteriaForReferenceQuery,
   expandReferences,
   normalizeRefDepth,
+  paginateReferencePairs,
   pathHasReferenceObject,
   prepareReferenceValue,
   referenceDepthForAggregateSpec,
   referenceDepthForQuery,
+  referenceReadPlan,
+  sortReferencePairs,
   stripReferenceObjects,
 } from "../references.js";
 import { objectPath, ok } from "../shard-router.js";
@@ -29,28 +33,25 @@ import { isValidVector } from "../vector.js";
 export function createPublicObjectInterface() {
   return {
     name: "public-object",
-    register(router, { node, auth, routing, durability }) {
+    register(router, { node, auth, routing, durability, memoryGuard, replicationScheduler }) {
       const secure = secureRoute(auth);
 
       router.get("/api/databases", secure((req, res) => {
         const databases = node.listDatabases().sort();
-        if (auth.enabled && req.auth?.claims?.globalUser !== true) {
+        if (auth.enabled && !isGlobalAdminRequest(req, auth)) {
           return json(res, 200, { databases: databases.filter((database) => database === req.auth?.claims?.database) });
         }
         json(res, 200, { databases });
       }));
 
       router.get("/api/config", secure(async (req, res) => {
-        if (auth.enabled && req.auth?.claims?.globalUser !== true) {
-          return json(res, 403, { error: "global user token required" });
-        }
-        json(res, 200, await collectClusterStatus(node));
+        if (rejectUnlessGlobalAdmin(req, res, auth)) return;
+        json(res, 200, await collectClusterStatus(node, { memoryGuard, replicationScheduler }));
       }));
 
       router.post("/api/databases", secure(async (req, res) => {
-        if (auth.enabled && req.auth?.claims?.globalUser !== true) {
-          return json(res, 403, { error: "global user token required" });
-        }
+        if (rejectUnlessGlobalAdmin(req, res, auth)) return;
+        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const body = await readJson(req);
         const name = body?.name;
         if (typeof name !== "string" || name.length === 0) {
@@ -63,7 +64,7 @@ export function createPublicObjectInterface() {
         try {
           adminUser = routing.isForwarded(req) ? null : parseDatabaseAdminUser(body);
         } catch (err) {
-          return json(res, err.status || 400, errorBody(err));
+          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
         const created = node.getDatabaseMeta(name) === null;
         try {
@@ -107,6 +108,7 @@ export function createPublicObjectInterface() {
                 return { inserted: rows.length, items: rows };
               },
               durability,
+              memoryGuard,
             });
             adminResult = {
               collection: adminUser.collection,
@@ -120,11 +122,12 @@ export function createPublicObjectInterface() {
             ...(adminResult ? { adminUser: adminResult } : {}),
           });
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
       router.get("/api/:database/collections", secure((req, res) => {
+        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         json(res, 200, {
           database: req.params.database,
           collections: node.listCollections(req.params.database).sort(),
@@ -132,6 +135,8 @@ export function createPublicObjectInterface() {
       }));
 
       router.post("/api/:database/collections", secure(async (req, res) => {
+        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
+        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const body = await readJson(req);
         const name = body?.name;
         if (typeof name !== "string" || name.length === 0) {
@@ -151,11 +156,13 @@ export function createPublicObjectInterface() {
           }
           json(res, created ? 201 : 200, { name, created, meta });
         } catch (err) {
-          json(res, err.status || 400, errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
       router.delete("/api/:database/collections/:collection", secure(async (req, res) => {
+        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
+        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         try {
           const removed = node.removeCollection(req.params.database, req.params.collection);
           if (!removed) {
@@ -174,11 +181,12 @@ export function createPublicObjectInterface() {
           }
           json(res, 204);
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
       router.get("/api/:database/:collection/meta", secure((req, res) => {
+        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         const meta = node.getCollectionMeta(req.params.database, req.params.collection);
         if (!meta) {
           json(res, 404, { error: "collection not found" });
@@ -188,6 +196,8 @@ export function createPublicObjectInterface() {
       }));
 
       router.put("/api/:database/:collection/meta", secure(async (req, res) => {
+        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
+        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const body = await readJson(req);
         if (!isPlainObject(body)) return json(res, 400, { error: "collection meta must be a plain object" });
         try {
@@ -203,7 +213,7 @@ export function createPublicObjectInterface() {
           }
           json(res, 200, meta);
         } catch (err) {
-          json(res, err.status || 400, errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
@@ -248,7 +258,7 @@ export function createPublicObjectInterface() {
             return json(res, 200, auth.redactObject(req.params.database, req.params.collection, object));
           }
         } catch (err) {
-          return json(res, err.status || 400, err.body || errorBody(err));
+          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
 
         const object = node.get(req.params.database, req.params.collection, req.params.id);
@@ -274,19 +284,37 @@ export function createPublicObjectInterface() {
         const rawItems = isBulk ? body : [body || {}];
         const error = validatePlainObjects(rawItems);
         if (error) return json(res, 400, error);
-        const items = withInsertIds(rawItems);
+        const items = withObjectIds(rawItems);
+        const minimalBulkReturn = isBulk && prefersMinimalReturn(req);
+        let groups;
+        const preparedByGroup = new Map();
+        try {
+          groups = routing.groupByShard(req, req.params.database, req.params.collection, items, (item) => item._id);
+          for (const group of groups) {
+            if (!group.local) continue;
+            const prepared = auth.prepareWriteObjects(req.params.database, req.params.collection, group.items, { partial: false });
+            assertCreateAllowed(req, prepared);
+            preparedByGroup.set(group, prepared);
+          }
+          if (preparedByGroup.size && rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
+        } catch (err) {
+          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+        }
 
         const rows = [];
         let inserted = 0;
         let wroteLocally = false;
         try {
-          for (const group of routing.groupByShard(req, req.params.database, req.params.collection, items, (item) => item.id)) {
+          for (const group of groups) {
             if (group.local) {
-              const prepared = auth.prepareWriteObjects(req.params.database, req.params.collection, group.items, { partial: false });
-              assertCreateAllowed(req, prepared);
-              const localRows = node.insertMany(req.params.database, req.params.collection, prepared);
-              rows.push(...localRows);
-              inserted += localRows.length;
+              const prepared = preparedByGroup.get(group);
+              if (minimalBulkReturn) {
+                inserted += node.insertManyCount(req.params.database, req.params.collection, prepared);
+              } else {
+                const localRows = node.insertMany(req.params.database, req.params.collection, prepared);
+                rows.push(...localRows);
+                inserted += localRows.length;
+              }
               wroteLocally = true;
               continue;
             }
@@ -311,10 +339,10 @@ export function createPublicObjectInterface() {
           if (wroteLocally) await afterLocalWrite(durability).catch((flushErr) => {
             err = flushErr;
           });
-          return json(res, err.status || 400, err.body || errorBody(err));
+          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
 
-        if (isBulk && prefersMinimalReturn(req)) {
+        if (minimalBulkReturn) {
           return json(res, 201, { inserted });
         }
         const expandedRows = await expandObjectsForRead({
@@ -331,7 +359,7 @@ export function createPublicObjectInterface() {
 
       router.put("/api/:database/:collection/object", secure(async (req, res) => {
         const body = await readJson(req);
-        if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with id" });
+        if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
         if (error) return json(res, 400, error);
         try {
@@ -348,16 +376,17 @@ export function createPublicObjectInterface() {
             partial: false,
             localWrite: (prepared) => node.replaceMany(req.params.database, req.params.collection, prepared),
             durability,
+            memoryGuard,
           });
           json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
       router.patch("/api/:database/:collection/object", secure(async (req, res) => {
         const body = await readJson(req);
-        if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with id" });
+        if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
         if (error) return json(res, 400, error);
         try {
@@ -374,10 +403,11 @@ export function createPublicObjectInterface() {
             partial: true,
             localWrite: (prepared) => node.updateMany(req.params.database, req.params.collection, prepared),
             durability,
+            memoryGuard,
           });
           json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
@@ -389,9 +419,9 @@ export function createPublicObjectInterface() {
           return json(res, 400, errorBody(err));
         }
         try {
-          json(res, 200, await routedRemoveMany(req, routing, node, durability, req.params.database, req.params.collection, ids));
+          json(res, 200, await routedRemoveMany(req, routing, node, durability, memoryGuard, req.params.database, req.params.collection, ids));
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
@@ -424,13 +454,14 @@ export function createPublicObjectInterface() {
           const [prepared] = auth.prepareWriteObjects(
             req.params.database,
             req.params.collection,
-            [{ ...(body || {}), id: req.params.id }],
+            [{ ...(body || {}), _id: req.params.id }],
             { partial: false },
           );
           assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
+          assertMemoryGuardAcceptsWrites(memoryGuard);
           node.replace(req.params.database, req.params.collection, req.params.id, prepared);
           await afterLocalWrite(durability);
-          const object = node.get(req.params.database, req.params.collection, req.params.id) || { id: req.params.id };
+          const object = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
           const expanded = await expandObjectForRead({
             req,
             node,
@@ -441,7 +472,7 @@ export function createPublicObjectInterface() {
           });
           json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
@@ -474,13 +505,14 @@ export function createPublicObjectInterface() {
           const [prepared] = auth.prepareWriteObjects(
             req.params.database,
             req.params.collection,
-            [{ ...(body || {}), id: req.params.id }],
+            [{ ...(body || {}), _id: req.params.id }],
             { partial: true },
           );
           assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: true });
+          assertMemoryGuardAcceptsWrites(memoryGuard);
           node.update(req.params.database, req.params.collection, req.params.id, prepared);
           await afterLocalWrite(durability);
-          const object = node.get(req.params.database, req.params.collection, req.params.id) || { id: req.params.id };
+          const object = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
           const expanded = await expandObjectForRead({
             req,
             node,
@@ -491,7 +523,7 @@ export function createPublicObjectInterface() {
           });
           json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
         } catch (err) {
-          json(res, err.status || 400, err.body || errorBody(err));
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
@@ -509,11 +541,12 @@ export function createPublicObjectInterface() {
             return proxyJson(res, remote);
           }
         } catch (err) {
-          return json(res, err.status || 400, err.body || errorBody(err));
+          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
         const existing = node.get(req.params.database, req.params.collection, req.params.id);
         if (!existing) return json(res, 404, { error: "not found" });
         assertDeleteAllowed(req, [existing]);
+        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const ok = node.remove(req.params.database, req.params.collection, req.params.id);
         if (!ok) return json(res, 404, { error: "not found" });
         await afterLocalWrite(durability);
@@ -588,7 +621,7 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
     });
     jsonWithQueryPath(res, 200, auth.redactObjects(database, collection, result.objects), result.path);
   } catch (err) {
-    json(res, err.status || 400, err.body || errorBody(err));
+    json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
   }
 }
 
@@ -605,16 +638,25 @@ async function routedWriteMany({
   partial,
   localWrite,
   durability,
+  memoryGuard,
 }) {
   const rows = [];
   let total = 0;
   let wroteLocally = false;
+  const groups = routing.groupByShard(req, database, collection, objects, (item) => item._id);
+  const preparedByGroup = new Map();
+  for (const group of groups) {
+    if (!group.local) continue;
+    const prepared = auth.prepareWriteObjects(database, collection, group.items, { partial });
+    assertUpsertAllowed(req, node, database, collection, prepared, { partial });
+    preparedByGroup.set(group, prepared);
+  }
+  if (preparedByGroup.size) assertMemoryGuardAcceptsWrites(memoryGuard);
 
   try {
-    for (const group of routing.groupByShard(req, database, collection, objects, (item) => item.id)) {
+    for (const group of groups) {
       if (group.local) {
-        const prepared = auth.prepareWriteObjects(database, collection, group.items, { partial });
-        assertUpsertAllowed(req, node, database, collection, prepared, { partial });
+        const prepared = preparedByGroup.get(group);
         const localResult = localWrite(prepared);
         total += Number(localResult[resultKey]) || 0;
         rows.push(...(localResult.items || []));
@@ -652,19 +694,23 @@ async function routedWriteMany({
   };
 }
 
-async function routedRemoveMany(req, routing, node, durability, database, collection, ids) {
+async function routedRemoveMany(req, routing, node, durability, memoryGuard, database, collection, ids) {
   const result = {
     deleted: 0,
     ids: [],
     skipped: [],
   };
   let wroteLocally = false;
+  const groups = routing.groupByShard(req, database, collection, ids, (id) => id);
+  for (const group of groups) {
+    if (!group.local) continue;
+    assertDeleteAllowed(req, existingObjectsForIds(node, database, collection, group.items));
+  }
+  if (groups.some((group) => group.local)) assertMemoryGuardAcceptsWrites(memoryGuard);
 
   try {
-    for (const group of routing.groupByShard(req, database, collection, ids, (id) => id)) {
+    for (const group of groups) {
       if (group.local) {
-        const existing = existingObjectsForIds(node, database, collection, group.items);
-        assertDeleteAllowed(req, existing);
         const local = node.removeMany(database, collection, group.items);
         result.deleted += local.deleted;
         result.ids.push(...local.ids);
@@ -734,9 +780,7 @@ async function findReferenceAwareRows({ req, node, routing, database, collection
 }
 
 async function findReferenceAwarePairs({ req, node, routing, database, collection, criteria, options = {} }) {
-  const queryDepth = referenceDepthForQuery(criteria);
-  const sortDepth = pathHasReferenceObject(options.sortBy) ? 1 : 0;
-  const depth = Math.max(queryDepth, sortDepth, normalizeRefDepth(options.refDepth, 0));
+  const { expansionDepth } = referenceReadPlan(criteria, options);
   const fetchOptions = {
     refDepth: 0,
     ...(typeof options.includeId === "function" ? { includeId: options.includeId } : {}),
@@ -747,8 +791,8 @@ async function findReferenceAwarePairs({ req, node, routing, database, collectio
 
   for (const raw of result.objects || []) {
     const compact = stripReferenceObjects(raw);
-    const matchObject = depth > 0
-      ? await expandReferences(compact, { database, depth, getObject: resolver })
+    const matchObject = expansionDepth > 0
+      ? await expandReferences(compact, { database, depth: expansionDepth, getObject: resolver })
       : compact;
     if (matchesQuery(matchObject, criteria)) pairs.push({ raw: compact, matchObject });
   }
@@ -808,109 +852,28 @@ async function resolveReferencedObject({ req, node, routing, database, collectio
   return remote.body ? stripReferenceObjects(remote.body) : null;
 }
 
-function sortReferencePairs(pairs, options = {}) {
-  if (!options.sortBy) return pairs;
-  const direction = options.sort === "desc" ? -1 : 1;
-  return [...pairs].sort((left, right) => {
-    return compareSortValues(
-      getPathValue(left.matchObject, options.sortBy),
-      getPathValue(right.matchObject, options.sortBy),
-    ) * direction;
-  });
-}
-
-function paginateReferencePairs(pairs, options = {}) {
-  const offset = options.offset || 0;
-  const limit = options.limit ?? Infinity;
-  if (limit <= 0) return [];
-  return pairs.slice(offset, offset + limit);
-}
-
-function aggregateRows(rows, spec = {}) {
-  if (isObjectDbAggregateSpec(spec)) return aggregateObjects(rows, spec);
-
-  const groupBy = spec.groupBy;
-  const metrics = {
-    sum: asArray(spec.sum),
-    avg: asArray(spec.avg),
-    min: asArray(spec.min),
-    max: asArray(spec.max),
-  };
-  const groups = new Map();
-
-  for (const object of rows || []) {
-    const key = groupBy ? stableKey(getPathValue(object, groupBy)) : "__all__";
-    let bucket = groups.get(key);
-    if (!bucket) {
-      bucket = makeAggregateBucket(groupBy ? getPathValue(object, groupBy) : undefined, metrics);
-      groups.set(key, bucket);
-    }
-    addAggregateRow(bucket, object, metrics);
-  }
-
-  if (!groupBy) return finishAggregateBucket(groups.get("__all__") || makeAggregateBucket(undefined, metrics), metrics);
-  return [...groups.values()].map((bucket) => finishAggregateBucket(bucket, metrics));
-}
-
-function makeAggregateBucket(key, metrics) {
-  return {
-    key,
-    count: 0,
-    sum: Object.fromEntries(metrics.sum.map((field) => [field, 0])),
-    avg: Object.fromEntries(metrics.avg.map((field) => [field, { sum: 0, count: 0 }])),
-    min: Object.fromEntries(metrics.min.map((field) => [field, undefined])),
-    max: Object.fromEntries(metrics.max.map((field) => [field, undefined])),
-  };
-}
-
-function addAggregateRow(bucket, object, metrics) {
-  bucket.count++;
-  for (const field of metrics.sum) {
-    const value = getPathValue(object, field);
-    if (typeof value === "number") bucket.sum[field] += value;
-  }
-  for (const field of metrics.avg) {
-    const value = getPathValue(object, field);
-    if (typeof value === "number") {
-      bucket.avg[field].sum += value;
-      bucket.avg[field].count++;
-    }
-  }
-  for (const field of metrics.min) {
-    const value = getPathValue(object, field);
-    if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
-      bucket.min[field] = value;
-    }
-  }
-  for (const field of metrics.max) {
-    const value = getPathValue(object, field);
-    if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
-      bucket.max[field] = value;
-    }
-  }
-}
-
-function finishAggregateBucket(bucket, metrics) {
-  const out = { count: bucket.count };
-  if (bucket.key !== undefined) out.key = bucket.key;
-  if (metrics.sum.length) out.sum = bucket.sum;
-  if (metrics.avg.length) {
-    out.avg = Object.fromEntries(
-      Object.entries(bucket.avg).map(([field, state]) => [field, state.count ? state.sum / state.count : null]),
-    );
-  }
-  if (metrics.min.length) out.min = bucket.min;
-  if (metrics.max.length) out.max = bucket.max;
-  return out;
-}
-
-function asArray(value) {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
 function permissionUser(req) {
   return req.auth?.user || null;
+}
+
+function rejectUnlessGlobalAdmin(req, res, auth) {
+  if (isGlobalAdminRequest(req, auth)) return false;
+  json(res, 403, { error: "global admin token required" });
+  return true;
+}
+
+function rejectUnlessDatabaseAdmin(req, res, auth) {
+  if (isAdminRequest(req, auth)) return false;
+  json(res, 403, { error: "database admin token required" });
+  return true;
+}
+
+function isGlobalAdminRequest(req, auth) {
+  return auth.enabled === false || (req.auth?.claims?.globalUser === true && isAdminRequest(req, auth));
+}
+
+function isAdminRequest(req, auth) {
+  return auth.enabled === false || isPermissionBypass(permissionUser(req));
 }
 
 function readCriteriaForRequest(req, criteria = {}) {
@@ -918,31 +881,31 @@ function readCriteriaForRequest(req, criteria = {}) {
 }
 
 function assertReadAllowed(req, object) {
-  if (!canRead(permissionUser(req), object)) throw permissionError("read", object?.id);
+  if (!canRead(permissionUser(req), object)) throw permissionError("read", object?._id);
 }
 
 function assertCreateAllowed(req, objects = []) {
   const user = permissionUser(req);
   for (const object of objects || []) {
-    if (!canCreate(user, object)) throw permissionError("create", object?.id);
+    if (!canCreate(user, object)) throw permissionError("create", object?._id);
   }
 }
 
 function assertUpsertAllowed(req, node, database, collection, objects = [], { partial = false } = {}) {
   const user = permissionUser(req);
-  const existing = existingObjectMap(node, database, collection, objects.map((object) => object.id));
+  const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
   for (const object of objects || []) {
-    const before = existing.get(String(object.id));
-    const after = partial && before ? { ...before, ...object, id: object.id } : object;
+    const before = existing.get(String(object._id));
+    const after = partial && before ? { ...before, ...object, _id: object._id } : object;
     const allowed = before ? canUpdate(user, before, after) : canCreate(user, after);
-    if (!allowed) throw permissionError(before ? "update" : "create", object?.id);
+    if (!allowed) throw permissionError(before ? "update" : "create", object?._id);
   }
 }
 
 function assertDeleteAllowed(req, objects = []) {
   const user = permissionUser(req);
   for (const object of objects || []) {
-    if (!canDelete(user, object)) throw permissionError("delete", object?.id);
+    if (!canDelete(user, object)) throw permissionError("delete", object?._id);
   }
 }
 
@@ -951,7 +914,7 @@ function existingObjectsForIds(node, database, collection, ids = []) {
 }
 
 function existingObjectMap(node, database, collection, ids = []) {
-  return new Map(existingObjectsForIds(node, database, collection, ids).map((object) => [String(object.id), object]));
+  return new Map(existingObjectsForIds(node, database, collection, ids).map((object) => [String(object._id), object]));
 }
 
 function parseDatabaseAdminUser(body = {}) {
@@ -973,11 +936,11 @@ function parseDatabaseAdminUser(body = {}) {
     throw httpError(400, "body.adminUser.password must be a non-empty string");
   }
   if (
-    body.adminUser.id !== undefined &&
-    body.adminUser.id !== null &&
-    String(body.adminUser.id).length === 0
+    body.adminUser._id !== undefined &&
+    body.adminUser._id !== null &&
+    String(body.adminUser._id).length === 0
   ) {
-    throw httpError(400, "body.adminUser.id must be a non-empty string when provided");
+    throw httpError(400, "body.adminUser._id must be a non-empty string when provided");
   }
 
   const { collection: _collection, ...user } = body.adminUser;
@@ -985,7 +948,7 @@ function parseDatabaseAdminUser(body = {}) {
     collection,
     user: {
       ...user,
-      ...(user.id !== undefined && user.id !== null ? { id: String(user.id) } : { id: randomUUID() }),
+      ...(user._id !== undefined && user._id !== null ? { _id: String(user._id) } : { _id: createObjectId() }),
       admin: true,
     },
   };
@@ -1034,16 +997,16 @@ async function afterLocalWrite(durability) {
   }
 }
 
-function withInsertIds(items) {
+function withObjectIds(items) {
   return items.map((item) => ({
     ...item,
-    id: item.id ? String(item.id) : randomUUID(),
+    _id: item._id !== undefined && item._id !== null ? String(item._id) : createObjectId(),
   }));
 }
 
 function remoteInsertedItems(body) {
   if (Array.isArray(body?.items)) return body.items;
-  if (body && typeof body === "object" && body.id !== undefined) return [body];
+  if (body && typeof body === "object" && body._id !== undefined) return [body];
   return [];
 }
 
@@ -1055,9 +1018,9 @@ function remoteInsertedCount(body, fallback) {
 function orderLikeInput(input, rows) {
   const byId = new Map();
   for (const row of rows) {
-    if (row?.id !== undefined && !byId.has(String(row.id))) byId.set(String(row.id), row);
+    if (row?._id !== undefined && !byId.has(String(row._id))) byId.set(String(row._id), row);
   }
-  return input.map((item) => byId.get(String(item.id))).filter(Boolean);
+  return input.map((item) => byId.get(String(item._id))).filter(Boolean);
 }
 
 function remoteError(remote, fallback) {
@@ -1075,6 +1038,17 @@ function httpError(status, message) {
 
 function proxyJson(res, remote) {
   return json(res, remote.status, remote.body === null ? undefined : remote.body);
+}
+
+function rejectIfMemoryGuardBlocked(res, memoryGuard) {
+  const rejection = memoryGuard?.writeRejection?.();
+  if (!rejection) return false;
+  json(res, rejection.status, rejection.body, rejection.headers || {});
+  return true;
+}
+
+function assertMemoryGuardAcceptsWrites(memoryGuard) {
+  memoryGuard?.assertCanWrite?.();
 }
 
 function jsonWithQueryPath(res, status, body, path) {
@@ -1179,8 +1153,11 @@ function validatePlainObjects(items, { requireId = false } = {}) {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       return { error: `item at index ${i} must be a plain object`, index: i };
     }
-    if (requireId && (item.id === undefined || item.id === null || String(item.id).length === 0)) {
-      return { error: `item at index ${i} must include id`, index: i };
+    if (!requireId && item._id !== undefined && item._id !== null && String(item._id).length === 0) {
+      return { error: `item at index ${i} must include a non-empty _id when _id is provided`, index: i };
+    }
+    if (requireId && (item._id === undefined || item._id === null || String(item._id).length === 0)) {
+      return { error: `item at index ${i} must include _id`, index: i };
     }
   }
   return null;
@@ -1204,8 +1181,8 @@ function parseBulkIds(body) {
   if (!Array.isArray(source)) throw new TypeError("body must be an array of ids or { ids: [...] }");
   return source.map((item, index) => {
     if (typeof item === "string" && item.length > 0) return item;
-    if (item && typeof item === "object" && item.id !== undefined && item.id !== null) return String(item.id);
-    const err = new TypeError(`id at index ${index} must be a non-empty string or object with id`);
+    if (item && typeof item === "object" && item._id !== undefined && item._id !== null) return String(item._id);
+    const err = new TypeError(`id at index ${index} must be a non-empty string or object with _id`);
     err.index = index;
     throw err;
   });

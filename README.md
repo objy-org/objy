@@ -1,302 +1,383 @@
 # spread-db
 
-An in-memory database for dynamic, stateless JavaScript objects.
+An in-memory, sharded, replicated object database for large dynamic object sets.
 
-- **Dynamic objects** – no schema. Any JSON object, any shape, stored as-is.
-- **Shape store internals** – objects are never kept as raw blobs. Every object is
-  classified by its *shape* (ordered field-name layout) and its values are stored
-  in generic column arrays shared by all objects of the same field set. Value
-  types stay fully dynamic and do not participate in shape identity.
-- **Namespaced** – databases contain collections; object ids live in a flat
-  `db / collection / id` namespace, so the same id can exist independently in
-  different databases and collections.
-- **Multi-leader replication** – every node accepts writes. A conflict-free
-  (CRDT) merge, based on whole-object last-write-wins with Lamport timestamps,
-  keeps all nodes convergent. Any node can be written to, and the cluster
-  heals to a consistent state.
-- **REST API** – plain HTTP/JSON, zero runtime dependencies.
-- **Console UI** – a zero-dependency web console at `GET /` for poking at the
-  API by hand: insert, get, list, patch, replace, delete, and inspect the
-  internal shape store.
+spread-db is built for plain JavaScript-style objects, fast local reads, bulk-first writes, object sharding, pull-based replication, S3 persistence, and a small admin console. It is intentionally lightweight: no OBJY, no schema-first object model, no hidden application context.
 
-## Quick start
+Public REST API usage is documented in `API.md`. This guide is for developing, running, and operating the database itself.
 
-```sh
-npm test          # run the test suite (node:test, no deps needed)
-npm start         # start a node on PORT (default 8080)
-```
+## Why This Exists
 
-Open http://localhost:8080/ for the console UI.
+spread-db keeps the database model simple:
+
+- Objects are dynamic and identified by `_id`.
+- Collections own metadata such as index definitions.
+- Databases are top-level namespaces.
+- Shards distribute objects globally across all databases and collections.
+- Replicas converge through the replication log.
+- Persistence is journals plus compacted snapshots on S3.
+
+The goal is a system that stays understandable while still handling very large object counts.
+
+## Quick Start
+
+Install dependencies:
 
 ```sh
-# node A
-PORT=8080 PEERS=http://localhost:8081 npm start
-
-# node B
-PORT=8081 PEERS=http://localhost:8080 npm start
+npm ci
 ```
 
-`PEERS` is shorthand for adding URLs to the global default shard. For explicit
-shard placement, start with `SHARD_MAP`:
+Start a node:
 
 ```sh
-SHARD_MAP='{
-  "databases": {
-    "app": {
-      "collections": {
-        "users": {
-          "shards": {
-            "users-0": {
-              "peers": [{ "url": "http://localhost:8081" }]
-            }
-          }
-        }
-      }
-    }
-  }
-}' npm start
+node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
 ```
 
-## REST API
+Open the console:
 
-Objects are stored as `db/coll/{id}`. The `id` is returned on insert; you can
-also supply your own `id` in the body. `id` is reserved and not part of the
-stored shape.
+```text
+http://localhost:8080/
+```
 
-| Method | Path                               | Body      | Result                          |
-| ------ | ---------------------------------- | --------- | ------------------------------- |
-| POST   | `/db/:db/coll/:coll`               | object    | `201 { id }`                    |
-| GET    | `/db/:db/coll/:coll`               | –         | `{ db, coll, count, objects }`  |
-| GET    | `/db/:db/coll/:coll/:id`           | –         | `200 object` / `404`            |
-| PUT    | `/db/:db/coll/:coll/:id`           | object    | full replace (upsert)           |
-| PATCH  | `/db/:db/coll/:coll/:id`           | object    | partial merge (upsert)          |
-| DELETE | `/db/:db/coll/:coll/:id`           | –         | `204` / `404`                   |
-| GET    | `/db/:db/coll/:coll/shapes`        | –         | shape-store layout + stats      |
-| GET    | `/health`                          | –         | node liveness + node id         |
-| GET    | `/cluster/shards`                  | –         | current shard map               |
-| PUT    | `/cluster/shards`                  | shard map | replace shard map               |
-| POST   | `/cluster/peers`                   | peer spec | add peer to a shard             |
+Default local login from the sample config:
 
-Examples:
+```text
+admin / 123
+```
+
+## The Mental Model
+
+```text
+database
+  collection
+    meta
+    object _id=...
+    object _id=...
+```
+
+Objects live under `database/collection/object`. A collection can contain fully dynamic objects, and collection meta carries optional indexes and vector settings.
+
+Sharding is object-based. For any `{ database, collection, _id }`, the shard map decides the owner shard. Any node can receive a request; if it does not own the shard, it forwards the operation to a peer that does.
+
+## Runtime Pieces
+
+| Piece | Responsibility |
+| --- | --- |
+| Store | Keeps objects in memory. `object` is the current high-throughput path; `shape` remains available. |
+| CRDT node | Applies whole-object writes, deletes, clocks, tombstones, and convergence rules. |
+| Shard router | Finds object owners and fans reads/writes across shards when needed. |
+| Replication scheduler | Uses hinted pull plus periodic anti-entropy sync. |
+| Persistence manager | Flushes journals, writes snapshots, restores data on boot. |
+| Index layer | Maintains field, column, and vector index readiness. |
+| Interfaces | Mount public, cluster, and optional plugin routes. |
+
+## Configuration
+
+The default config path is:
+
+```text
+spread-db.config.json
+```
+
+Use another file with `--config`. The same config can be shared by every peer; peer identity is usually supplied at startup:
 
 ```sh
-curl -X POST localhost:8080/db/app/coll/users -d '{"name":"ada","age":36}'
-# {"id":"<uuid>"}
-
-curl localhost:8080/db/app/coll/users/<uuid>
-# {"id":"<uuid>","name":"ada","age":36}
-
-curl -X PATCH localhost:8080/db/app/coll/users/<uuid> -d '{"age":37}'
-curl -X DELETE localhost:8080/db/app/coll/users/<uuid>
+node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
 ```
 
-Dynamic peer add:
-
-```sh
-curl -X POST localhost:8080/cluster/peers \
-  -d '{
-    "database": "app",
-    "collection": "users",
-    "shard": "users-0",
-    "url": "http://localhost:8081"
-  }'
-```
-
-## Query, Index, Aggregate
-
-Programmatic collections and `CRDTNode` support the old `object-db` query shape:
-
-```js
-node.createIndex("app", "users", "email");
-
-const admins = node.find(
-  "app",
-  "users",
-  {
-    tags: { $contains: "admin" },
-    "profile.city": "London",
-  },
-  { sortBy: "age", sort: "desc", limit: 50 },
-);
-```
-
-Supported operators:
-
-- `$eq`
-- `$ne`
-- `$gt`
-- `$gte`
-- `$lt`
-- `$lte`
-- `$in`
-- `$contains`
-- `$exists`
-- `$regex`
-
-Indexes are equality indexes over a field path. A direct equality query such as
-`{ email: "ada@example.com" }` uses the index when one exists; richer operators
-still use the same matcher and scan candidate objects.
-
-Aggregation uses the same query matcher first, then computes metrics:
-
-```js
-node.aggregate("app", "orders", { status: "paid" }, {
-  groupBy: "region",
-  sum: "total",
-  avg: "total",
-  max: "total",
-});
-```
-
-Metric fields can be a string or an array. Supported metrics are `sum`, `avg`,
-`min`, and `max`; every aggregate result includes `count`.
-
-## How it works
-
-### Shape store (`src/shape.js`)
-
-When an object is written, its live fields are reduced to a layout:
-`[{name}]` sorted by name. The layout is hashed into a `shapeId`. Each shape
-owns one generic value column per field. Columns store row value codes plus a
-small dictionary of distinct values, so repeated values are shared within the
-column, but the values themselves remain dynamically typed.
-
-Objects are rows in their shape; object-id -> `(shapeId, row)` is the only
-per-object pointer. Changing a field's value type stays in place; only adding or
-removing fields moves the row into a different shape. Empty shapes are
-garbage-collected. Removed rows release interned values, and reused rows
-overwrite only column cells instead of recreating full objects. `GET /.../shapes`
-exposes the internal columnar layout, dictionary sizes, capacity, and byte
-estimates so you can see the deduplication in action.
-
-### CRDT (`src/crdt.js`, `src/store.js`)
-
-Writes are turned into append-only ops, each stamped with a Lamport timestamp
-`{c, n}` (counter + origin node id):
-
-- `touch`   – ensure an (empty) object exists
-- `putObj`  – replace one whole object value
-- `delObj`  – tombstone an object
-
-Merge rules are commutative, associative, and idempotent:
-
-- Per object: the op with the higher timestamp wins (LWW register).
-- Object delete: applied only if its timestamp is newer than the object's
-  current last write; a later `putObj` resurrects the object, an earlier one
-  doesn't.
-- Re-applying the same ops changes nothing.
-
-Each node keeps an append-only op log of *its own* writes. Peers are polled;
-the response returns only the ops the peer hasn't seen yet (`after` seq), so
-gossip is incremental. Pulls are bounded by `syncBatchSize` (default `1024`) and
-repeat until the peer catches up, which keeps large log transfers from becoming
-one giant response. Because every node pulls from every peer, writes made
-anywhere eventually reach everywhere. No leader, no lock, no ordering service.
-
-### HTTP replication
-
-Internal endpoints (not part of the public CRUD surface):
-
-- `GET /replicate?after=<seq>&limit=<n>` -> `{ node, lastSeq, ops }` (or `410`
-  if the log was truncated past `<seq>`)
-- `GET /replicate/snapshot`      -> full CRDT state, for peers too far behind
-- `POST /replicate/ack`          -> `{ node, after }` acknowledges how much of
-  our log the peer has applied
-
-### Shard Map
-
-Peer membership is organized as `database -> collection -> shard -> peers`.
-Object sharding is active at the collection level: every op is tagged with
-`shard = hash(objectId) % collectionShardCount`, using the sorted shard names for
-that `database/collection`. Database-level sharding is not implemented.
+This sample shows the runtime defaults explicitly. Values like node identity and secrets should be replaced for real deployments.
 
 ```json
 {
-  "databases": {
-    "app": {
-      "collections": {
-        "users": {
-          "shards": {
-            "users-0": {
-              "peers": [
-                { "url": "http://localhost:8081" }
-              ]
-            }
-          }
-        }
+  "node": {
+    "id": "node-a",
+    "url": "http://localhost:8080",
+    "retainOps": 256,
+    "syncBatchSize": 1024
+  },
+  "server": {
+    "port": 8080
+  },
+  "storage": {
+    "engine": "shape",
+    "object": {
+      "valueDirectory": {
+        "enabled": true,
+        "minRefs": 2,
+        "maxEntries": 100000,
+        "maxCandidates": 4096,
+        "maxCandidatesPerPath": 256,
+        "maxPaths": 1024,
+        "maxStringLength": 256,
+        "maxKeyBytes": 512
       }
+    }
+  },
+  "vector": {
+    "enabled": true,
+    "field": "_vec",
+    "hnsw": {
+      "M": 16,
+      "efConstruction": 200,
+      "efSearch": 0
+    }
+  },
+  "memoryGuard": {
+    "enabled": false,
+    "limitMb": null,
+    "rejectWritesPercent": 85,
+    "resumeWritesPercent": 78,
+    "checkMs": 1000
+  },
+  "cluster": {
+    "syncMs": 2500,
+    "forwardTimeoutMs": 60000,
+    "replicationTimeoutMs": 60000,
+    "secret": "change-me",
+    "hints": {
+      "enabled": true,
+      "debounceMs": 25,
+      "maxScopesPerHint": 128
+    },
+    "shardMapStore": {
+      "mode": "off",
+      "prefix": "spread-db",
+      "key": "cluster/shard-map.json",
+      "s3": {
+        "bucket": "spread-db",
+        "endpoint": null,
+        "region": "us-east-1",
+        "accessKeyId": null,
+        "secretAccessKey": null,
+        "forcePathStyle": null
+      }
+    }
+  },
+  "auth": {
+    "enabled": true,
+    "jwtSecret": "change-me",
+    "accessTokenTtlSeconds": 900,
+    "refreshTokenTtlSeconds": 1209600,
+    "clockToleranceSeconds": 0,
+    "users": [
+      {
+        "_id": "admin",
+        "username": "admin",
+        "password": "123",
+        "role": "admin",
+        "admin": true
+      }
+    ]
+  },
+  "persistence": {
+    "mode": "off",
+    "prefix": "spread-db",
+    "flushMs": 1000,
+    "opBatchSize": 1000,
+    "snapshotMs": 60000,
+    "segmentBytes": 16777216,
+    "compactJournals": true,
+    "snapshotRetention": {
+      "keepLatest": 0,
+      "keepForMs": 0
+    },
+    "journalRetention": {
+      "keepLatest": 0,
+      "keepForMs": 0
+    },
+    "snapshotDirtyOnly": true,
+    "snapshotRole": "primary",
+    "restoreMode": "scoped",
+    "restoreSnapshotId": null,
+    "ack": "memory",
+    "localWal": {
+      "mode": "off",
+      "dir": ".spread-db/wal",
+      "fsync": true,
+      "flushMs": 0
+    },
+    "s3": {
+      "bucket": "spread-db",
+      "endpoint": null,
+      "region": "us-east-1",
+      "accessKeyId": null,
+      "secretAccessKey": null,
+      "forcePathStyle": null
     }
   }
 }
 ```
 
-The special `* / * / default` shard is the global fallback used by `PEERS` and
-by `node.addPeer(peer)`. `node.addPeerToShard(...)` and `/cluster/peers` add
-peers dynamically to a specific database/collection/shard without restarting the
-process.
+### Config Parts
 
-Replication is shard-scoped. A peer assigned to `app/users/users-0` pulls only
-ops for objects routed to `users-0`; if the peer is too far behind, snapshot
-recovery is filtered to that same shard. This keeps shard replicas from receiving
-objects owned by sibling shards.
+`node` identifies the peer. `id` must be unique in the cluster, and `url` must be reachable by other peers. CLI flags can override `id`, `url`, and `port`, which lets all peers use one shared config.
 
-Current limits:
+`server` controls the local HTTP listener.
 
-- Writes are routed locally by the writer's shard map; write forwarding and
-  ownership rejection are not implemented yet.
-- Collection queries still run against whatever shard data is local to the node.
-  Cross-shard query fan-out/merge is a later layer.
+`storage` selects the in-memory engine. The runtime default is `shape`. For the current object-store path, set `storage.engine` to `object`; the value directory then pools repeated small values to reduce object memory pressure.
 
-### Op-log retention
+`vector` controls the `_vec` field and HNSW tuning used by vector search.
 
-The op log is pruned based on peer acknowledgements. Each pull includes the
-requester's node id; after applying ops, the requester acks how far it got. A
-node drops its own log entries once *every* peer has acked past them, keeping a
-configurable buffer of recent ops on top:
+`memoryGuard` can stop accepting local public writes when RSS crosses the reject threshold, then resume after RSS falls below the resume threshold.
 
-- `RETAIN_OPS` (default `256`) — ops to keep beyond the lowest ack watermark.
-  Set `0` to prune immediately on ack.
+`cluster` controls peer behavior: request forwarding, replication timeouts, anti-entropy sync, hinted pull replication, cluster route authentication, and where the shard map is loaded from.
 
-Two safety nets:
+`auth` enables JWT login and bootstraps the global admin user. Keep `jwtSecret` private.
 
-- **Min-ack watermark** — if a peer acked up to seq 10 and then went down, its
-  old ack keeps ops 11+ retained, so it catches up incrementally when it returns.
-- **Snapshot fallback** — a peer that pulls `after` a point we've already
-  pruned gets `410` and transparently switches to `GET /replicate/snapshot`,
-  applying the full state with LWW merge. So a brand-new or data-lost node still
-  converges even after aggressive pruning. Object tombstones are part of the
-  snapshot and the merge, so deletes survive recovery. Snapshots also advance
-  the receiver's Lamport clock before new writes, and carry object timestamps so
-  empty objects survive recovery.
+`persistence` controls S3 journals, snapshots, restore behavior, and optional local WAL acknowledgements.
 
-## Project layout
+## S3 Persistence
 
+Persistence is designed around S3. The database writes append-friendly journal segments and periodic snapshots under the configured `prefix`.
+
+At startup, a peer:
+
+1. Loads the shard map.
+2. Restores snapshots for owned scopes.
+3. Replays journals newer than the restored snapshot.
+4. Restores metadata.
+5. Rebuilds or warms indexes.
+6. Starts persistence, replication, and HTTP interfaces.
+
+At runtime, a peer:
+
+1. Applies writes in memory.
+2. Records local WAL entries first when `ack` is `localWal`.
+3. Flushes journal segments to S3 asynchronously.
+4. Writes snapshots for dirty scopes.
+5. Compacts journal history covered by retained snapshots.
+
+Minimal S3 persistence shape:
+
+```json
+{
+  "persistence": {
+    "mode": "s3",
+    "prefix": "spread-db",
+    "ack": "localWal",
+    "localWal": {
+      "mode": "on",
+      "dir": ".spread-db/wal",
+      "fsync": true,
+      "flushMs": 0
+    },
+    "s3": {
+      "bucket": "spread-db",
+      "endpoint": "https://s3.example.com",
+      "region": "us-east-1",
+      "accessKeyId": "replace-me",
+      "secretAccessKey": "replace-me",
+      "forcePathStyle": false
+    }
+  }
+}
 ```
-src/
-  shape.js    shape store: layouts, dynamic value columns
-  store.js    Store/Database/Collection: CRDT metadata + shape-store glue
-  clock.js    Lamport timestamps and comparisons
-  crdt.js     CRDTNode: local ops, op log, merge, peer sync
-  server.js   HTTP server: REST + replication endpoints
-  index.js    entrypoint (env-driven)
-test/
-  shape.test.js  shape-store behaviour
-  crud.test.js   CRUD + namespacing
-  crdt.test.js   convergence, LWW, delete/update races, idempotency
-  server.test.js REST + HTTP replication
+
+`ack: "memory"` is fastest but only acknowledges in-memory acceptance. `ack: "localWal"` acknowledges after the local write-ahead log has flushed, which is safer during process failure before the next S3 journal flush.
+
+Restore modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `scoped` | Restore scopes owned by the current shard map. |
+| `reshard` | Scan old persisted shard scopes and redistribute objects through the current shard map. |
+
+`restoreSnapshotId` is normally omitted. Set it only for an intentional restore from a retained snapshot.
+
+## Shards and Replication
+
+The shard map is global. It is not defined per database or per collection.
+
+Each shard has one or more peers. When a shard has one peer, that peer is the only owner for objects assigned to the shard. When a shard has multiple peers, those peers are replicas of the same shard. Any one replica can accept the shard's writes, and the replication scheduler brings the other replicas into convergence.
+
+Replication is scoped by shard. A node only stores and replicates the shards it owns, so adding replicas increases availability and read/write placement options, but it also increases physical memory usage. Logical capacity should count one replica per shard; physical capacity includes every running replica process.
+
+The first reachable peer in a shard is treated as the preferred owner for routed operations. If a request reaches a node that does not own the target object shard, the shard router forwards it to an owning peer. Hinted pull replication then wakes shard replicas quickly after writes, while periodic anti-entropy sync remains as the safety net.
+
+```json
+{
+  "shards": {
+    "shard-0": {
+      "peers": [
+        { "id": "node-a", "url": "http://localhost:8080" },
+        { "id": "node-b", "url": "http://localhost:8081" }
+      ]
+    },
+    "shard-1": {
+      "peers": [
+        { "id": "node-c", "url": "http://localhost:8082" },
+        { "id": "node-d", "url": "http://localhost:8083" }
+      ]
+    }
+  }
+}
 ```
 
-## Semantics & trade-offs
+If `cluster.shardMapStore.mode` is `s3`, write the map before starting or restarting peers:
 
-- **Eventual consistency, LWW.** Concurrent writes to the same object converge
-  to the higher timestamp; ties are broken by node id. Whole objects replace,
-  so independent concurrent field changes are not merged. There is no
-  read-your-writes guarantee across nodes until a sync completes.
-- **In-memory only.** Data lives in shape columns and JS maps; nothing is
-  persisted to disk.
-- **Multi-writer.** Safe to write the same object on many nodes at once; the
-  merge is deterministic and convergent.
-- **Retention keeps memory bounded.** Logs are pruned once all peers ack;
-  deleted objects keep a lightweight tombstone so deletes win correctly when
-  replayed. Op logs grow with local write volume; the snapshot fallback means a
-  node that missed pruned ops still converges.
+```sh
+node scripts/put-shard-map.js --config spread-db.config.json --map shard-map.json
+```
+
+If no shard map store is enabled, embed the map under `cluster.shardMap`.
+
+## Cluster Startup
+
+Start multiple peers from the same config and override the local identity:
+
+```sh
+node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
+node src/index.js --config spread-db.config.json --node node-b --url http://localhost:8081 --port 8081
+node src/index.js --config spread-db.config.json --node node-c --url http://localhost:8082 --port 8082
+node src/index.js --config spread-db.config.json --node node-d --url http://localhost:8083 --port 8083
+```
+
+Each peer loads the same global shard map and determines ownership from its node id or URL.
+
+## Indexes
+
+Collection meta controls indexes.
+
+| Index | Used for |
+| --- | --- |
+| Field index | Equality-style filters, old query planner paths, selected sorted paging. |
+| Column index | Numeric aggregate paths such as `$sum`, `$avg`, and count-style summaries. |
+| Vector index | `_vec` search using stored client-provided embeddings. |
+
+Index readiness is visible in the admin console cluster status popup.
+
+## Console and Status
+
+The admin console is served by the running node:
+
+```text
+http://localhost:8080/
+```
+
+It shows:
+
+- Database and collection tree.
+- Object list and JSON viewer.
+- Collection meta editor.
+- Cluster peers and shard state.
+- Logical and physical RSS memory.
+- Index and vector readiness.
+- Replication scheduler state.
+
+The lightweight health check is:
+
+```sh
+curl http://localhost:8080/health
+```
+
+## Practical Notes
+
+- Prefer `storage.engine: "object"` for the current fast path.
+- Use `localWal` acknowledgements when acknowledged writes must survive process failure before S3 journal flush.
+- Keep `cluster.secret` identical across peers.
+- Keep `forwardTimeoutMs` realistic for heavy shard owners.
+- Keep `syncMs` high enough that anti-entropy does not waste work, but low enough to recover from missed hints.
+- Upload or embed the shard map before starting peers.
+- Restart the whole cluster after planned resharding.
+- Avoid repeated meta/index changes during large imports unless rebuild cost is acceptable.
+- Watch logical memory for capacity planning; watch physical memory for replica and process pressure.

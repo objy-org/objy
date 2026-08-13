@@ -24,24 +24,24 @@ test("object storage engine supports CRUD and queries through CRDTNode", () => {
   n.createCollection("db", "events", { indexes: ["status", "tenant"] });
 
   n.insertMany("db", "events", [
-    { id: "a", status: "open", tenant: "acme", payload: { score: 1 } },
-    { id: "b", status: "closed", tenant: "acme", payload: { score: 2 } },
-    { id: "c", status: "open", tenant: "globex", payload: { score: 3 } },
+    { _id: "a", status: "open", tenant: "acme", payload: { score: 1 } },
+    { _id: "b", status: "closed", tenant: "acme", payload: { score: 2 } },
+    { _id: "c", status: "open", tenant: "globex", payload: { score: 3 } },
   ]);
 
   assert.deepEqual(n.get("db", "events", "a"), {
-    id: "a",
+    _id: "a",
     status: "open",
     tenant: "acme",
     payload: { score: 1 },
   });
-  assert.deepEqual(n.find("db", "events", { status: "open" }).map((item) => item.id).sort(), ["a", "c"]);
+  assert.deepEqual(n.find("db", "events", { status: "open" }).map((item) => item._id).sort(), ["a", "c"]);
 
   n.update("db", "events", "a", { payload: { score: 10 } });
   assert.equal(n.get("db", "events", "a").payload.score, 10);
 
   n.replace("db", "events", "b", { status: "open", tenant: "initech" });
-  assert.deepEqual(n.find("db", "events", { status: "open" }).map((item) => item.id).sort(), ["a", "b", "c"]);
+  assert.deepEqual(n.find("db", "events", { status: "open" }).map((item) => item._id).sort(), ["a", "b", "c"]);
 
   n.remove("db", "events", "c");
   assert.equal(n.get("db", "events", "c"), undefined);

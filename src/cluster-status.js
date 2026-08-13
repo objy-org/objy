@@ -1,8 +1,10 @@
+import { freemem, totalmem } from "node:os";
 import { DEFAULT_SHARD, peerKey } from "./shard-map.js";
+import { CLUSTER_SECRET_HEADER } from "./interfaces/cluster.js";
 
 export const CLUSTER_STATUS_PATH = "/cluster/status";
 
-export function localClusterStatus(node) {
+export function localClusterStatus(node, memoryGuard = null, replicationScheduler = null) {
   const memory = memorySnapshot();
   const shardMap = node.shardMapSnapshot();
   const peers = peerSummaries(node, shardMap);
@@ -16,6 +18,7 @@ export function localClusterStatus(node) {
       url: node.url || null,
     },
     memory,
+    memoryGuard: memoryGuard?.status?.() || null,
     ownedShards: shards.filter((shard) => shard.owned).map((shard) => shard.name),
     shards,
     peers,
@@ -25,6 +28,7 @@ export function localClusterStatus(node) {
       trimmed: node.trimmed,
       retainOps: node.retainOps,
       syncBatchSize: node.syncBatchSize,
+      scheduler: replicationScheduler?.status?.() || null,
     },
     indexes: node.indexReadiness(),
     vectors: node.vectorStats(),
@@ -35,8 +39,8 @@ export function localClusterStatus(node) {
   };
 }
 
-export async function collectClusterStatus(node, { timeoutMs = 1500 } = {}) {
-  const local = { ...localClusterStatus(node), local: true, reachable: true };
+export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard = null, replicationScheduler = null } = {}) {
+  const local = { ...localClusterStatus(node, memoryGuard, replicationScheduler), local: true, reachable: true };
   const remotes = await Promise.all(remoteStatusPeers(node).map((peer) => fetchPeerStatus(peer, timeoutMs)));
   const nodes = uniqueNodes([local, ...remotes]);
   const shardMap = node.shardMapSnapshot();
@@ -48,6 +52,7 @@ export async function collectClusterStatus(node, { timeoutMs = 1500 } = {}) {
     shardMap,
     shards: shardSummaries(node, shardMap, nodes),
     peers: peerSummaries(node, shardMap, nodes),
+    rss: rssSummary(nodes, shardMap),
     nodes,
   };
 }
@@ -56,7 +61,10 @@ async function fetchPeerStatus(peer, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${peer.url}${CLUSTER_STATUS_PATH}`, { signal: controller.signal });
+    const response = await fetch(`${peer.url}${CLUSTER_STATUS_PATH}`, {
+      signal: controller.signal,
+      headers: peer.secret ? { [CLUSTER_SECRET_HEADER]: peer.secret } : {},
+    });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body) {
       return unreachablePeer(peer, `status ${response.status}`, response.status);
@@ -89,6 +97,7 @@ function unreachablePeer(peer, error, status = 0) {
       url: peer.url || null,
     },
     memory: null,
+    memoryGuard: null,
     ownedShards: [],
     shards: [],
     peers: [],
@@ -112,6 +121,110 @@ function uniqueNodes(nodes) {
     if (left.local) return -1;
     if (right.local) return 1;
     return nodeLabel(left).localeCompare(nodeLabel(right));
+  });
+}
+
+function rssSummary(nodes, shardMap) {
+  const perNode = nodes.map(nodeMemoryEntry);
+  const physical = memoryTotals(perNode);
+  const logical = logicalMemoryTotals(nodes, perNode, shardMap);
+  return {
+    cluster: logical,
+    logical,
+    physical,
+    nodes: perNode,
+  };
+}
+
+function nodeMemoryEntry(status) {
+  const rss = status.memory?.rss ?? null;
+  const totalMemory = status.memory?.systemTotal ?? null;
+  const freeMemory = status.memory?.systemFree ?? null;
+  return {
+    key: nodeStatusKey(status),
+    nodeId: status.node?.id || null,
+    url: status.node?.url || status.sourcePeer?.url || null,
+    local: status.local === true,
+    reachable: status.reachable !== false,
+    rss,
+    rssMb: rss === null ? null : mib(rss),
+    totalMemory,
+    totalMemoryMb: totalMemory === null ? null : mib(totalMemory),
+    freeMemory,
+    freeMemoryMb: freeMemory === null ? null : mib(freeMemory),
+    rssPercent: percent(rss, totalMemory),
+    error: status.reachable === false ? status.error : undefined,
+  };
+}
+
+function memoryTotals(entries, extra = {}) {
+  const total = sumField(entries, "rss");
+  const totalMemory = sumField(entries, "totalMemory");
+  const freeMemory = sumField(entries, "freeMemory");
+  const online = entries.filter((entry) => entry.reachable).length;
+  return {
+    rss: total,
+    rssMb: mib(total),
+    totalMemory,
+    totalMemoryMb: mib(totalMemory),
+    freeMemory,
+    freeMemoryMb: mib(freeMemory),
+    rssPercent: percent(total, totalMemory),
+    nodeCount: entries.length,
+    onlineNodeCount: online,
+    offlineNodeCount: entries.length - online,
+    ...extra,
+  };
+}
+
+function logicalMemoryTotals(nodes, perNode, shardMap) {
+  const byKey = new Map(perNode.map((entry) => [entry.key, entry]));
+  const selected = new Map();
+  const selectedReplicas = [];
+  const missingShards = [];
+  let sawConfiguredPeer = false;
+  const shards = shardEntries(shardMap);
+
+  for (const [shard, config] of shards) {
+    const peers = config.peers || [];
+    if (peers.length) sawConfiguredPeer = true;
+    const status = peers
+      .map((peer) => nodes.find((candidate) => peerMatchesStatus(peer, candidate)))
+      .find((candidate) => candidate && candidate.reachable !== false);
+
+    if (!status) {
+      missingShards.push(shard);
+      continue;
+    }
+
+    const key = nodeStatusKey(status);
+    const entry = byKey.get(key);
+    if (entry && !selected.has(key)) selected.set(key, entry);
+    selectedReplicas.push({
+      shard,
+      nodeId: status.node?.id || null,
+      url: status.node?.url || status.sourcePeer?.url || null,
+    });
+  }
+
+  if (!sawConfiguredPeer) {
+    return memoryTotals(perNode, {
+      shardCount: shards.length,
+      coveredShardCount: perNode.some((entry) => entry.reachable) ? shards.length : 0,
+      missingShardCount: 0,
+      missingShards: [],
+      selectedReplicas: [],
+      mode: "physical-fallback",
+    });
+  }
+
+  return memoryTotals([...selected.values()], {
+    shardCount: shards.length,
+    coveredShardCount: selectedReplicas.length,
+    missingShardCount: missingShards.length,
+    missingShards,
+    selectedReplicas,
+    mode: "one-replica-per-shard",
   });
 }
 
@@ -155,13 +268,21 @@ function shardEntries(shardMap) {
 
 function enrichedPeer(node, peer, nodes) {
   const status = nodes.find((candidate) => peerMatchesStatus(peer, candidate));
+  const rss = status?.memory?.rss ?? null;
+  const totalMemory = status?.memory?.systemTotal ?? null;
+  const freeMemory = status?.memory?.systemFree ?? null;
   return {
     ...describePeer(peer),
     self: node._isSelfPeer(peer),
     online: node._isSelfPeer(peer) || status?.reachable === true,
     nodeId: status?.node?.id || peer.nodeId || null,
-    rss: status?.memory?.rss ?? null,
-    rssMb: status?.memory?.rssMb ?? null,
+    rss,
+    rssMb: rss === null ? null : mib(rss),
+    totalMemory,
+    totalMemoryMb: totalMemory === null ? null : mib(totalMemory),
+    freeMemory,
+    freeMemoryMb: freeMemory === null ? null : mib(freeMemory),
+    rssPercent: percent(rss, totalMemory),
     error: status?.reachable === false ? status.error : undefined,
   };
 }
@@ -185,9 +306,16 @@ function describePeer(peer = {}) {
 
 function memorySnapshot() {
   const usage = process.memoryUsage();
+  const systemTotal = totalmem();
+  const systemFree = freemem();
   return {
     rss: usage.rss,
     rssMb: mib(usage.rss),
+    systemTotal,
+    systemTotalMb: mib(systemTotal),
+    systemFree,
+    systemFreeMb: mib(systemFree),
+    rssSystemPercent: percent(usage.rss, systemTotal),
     heapUsed: usage.heapUsed,
     heapUsedMb: mib(usage.heapUsed),
     heapTotal: usage.heapTotal,
@@ -199,12 +327,27 @@ function memorySnapshot() {
   };
 }
 
+function sumField(entries, field) {
+  return entries.reduce((sum, entry) => sum + (Number(entry[field]) || 0), 0);
+}
+
+function percent(value, total) {
+  const numerator = Number(value);
+  const denominator = Number(total);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return null;
+  return Math.round((numerator / denominator) * 10_000) / 100;
+}
+
 function mib(bytes) {
   return Math.round((bytes / 1024 / 1024) * 10) / 10;
 }
 
 function nodeLabel(status) {
-  return status.node?.id || status.node?.url || status.sourcePeer?.url || "";
+  return nodeStatusKey(status);
+}
+
+function nodeStatusKey(status) {
+  return status.node?.id || status.node?.url || status.sourcePeer?.url || status.sourcePeer?.key || "";
 }
 
 function peerLabel(peer) {
