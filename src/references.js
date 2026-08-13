@@ -1,3 +1,5 @@
+import { compareSortValues, getPathValue } from "./query.js";
+
 const MAX_REF_DEPTH = 8;
 
 export function isReference(value) {
@@ -109,6 +111,38 @@ export function pathHasReferenceObject(path) {
 
 export function hasReferenceQuery(query = {}) {
   return referenceDepthForQuery(query) > 0;
+}
+
+export function referenceReadPlan(criteria = {}, options = {}) {
+  const queryDepth = referenceDepthForQuery(criteria);
+  const sortDepth = pathHasReferenceObject(options.sortBy) ? 1 : 0;
+  const matchDepth = Math.max(queryDepth, sortDepth);
+  const responseDepth = normalizeRefDepth(options.refDepth, matchDepth > 0 ? 1 : 0);
+  return {
+    queryDepth,
+    sortDepth,
+    matchDepth,
+    responseDepth,
+    expansionDepth: Math.max(matchDepth, normalizeRefDepth(options.refDepth, 0)),
+  };
+}
+
+export function sortReferencePairs(pairs, options = {}) {
+  if (!options.sortBy) return pairs;
+  const direction = options.sort === "desc" ? -1 : 1;
+  return [...pairs].sort((left, right) => {
+    return compareSortValues(
+      getPathValue(left.matchObject, options.sortBy),
+      getPathValue(right.matchObject, options.sortBy),
+    ) * direction;
+  });
+}
+
+export function paginateReferencePairs(pairs, options = {}) {
+  const offset = options.offset || 0;
+  const limit = options.limit ?? Infinity;
+  if (limit <= 0) return [];
+  return pairs.slice(offset, offset + limit);
 }
 
 export function baseCriteriaForReferenceQuery(query = {}) {

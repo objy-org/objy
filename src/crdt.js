@@ -2,17 +2,21 @@ import { randomUUID } from "node:crypto";
 import { Store } from "./store.js";
 import { makeClock, nextTs, touch } from "./clock.js";
 import { DEFAULT_SHARD, GLOBAL_COLLECTION, GLOBAL_DATABASE, ShardMap } from "./shard-map.js";
-import { aggregateObjects, isObjectDbAggregateSpec } from "./aggregate.js";
-import { compareSortValues, getPathValue, matchesQuery, stableKey } from "./query.js";
+import { aggregateRows } from "./aggregate.js";
+import { matchesQuery } from "./query.js";
 import {
   baseCriteriaForReferenceQuery,
   expandReferencesSync,
   normalizeRefDepth,
+  paginateReferencePairs,
   pathHasReferenceObject,
   referenceDepthForAggregateSpec,
   referenceDepthForQuery,
+  referenceReadPlan,
+  sortReferencePairs,
   stripReferenceObjects,
 } from "./references.js";
+import { createObjectId } from "./object-id.js";
 
 export class CRDTNode {
   constructor({ id = randomUUID(), url, clock, retainOps = 256, syncBatchSize = 1024, shardMap, storage, vector } = {}) {
@@ -108,25 +112,30 @@ export class CRDTNode {
   }
 
   insert(db, coll, obj) {
-    return this.insertMany(db, coll, [obj])[0].id;
+    return this.insertMany(db, coll, [obj])[0]._id;
   }
 
   insertMany(db, coll, objects) {
-    const items = (objects || []).map((obj = {}) => {
-      const id = obj && obj.id ? String(obj.id) : randomUUID();
-      return { id, value: withoutId(obj) };
-    });
-    assertUniqueIds(items.map((item) => item.id));
-    this._writeMany(db, coll, items);
-    return items.map(({ id }) => this.get(db, coll, id) || { id });
+    const { items } = this._commitInsertMany(db, coll, objects);
+    return items.map(({ id }) => this.get(db, coll, id) || { _id: id });
+  }
+
+  insertManyCount(db, coll, objects) {
+    return this._commitInsertMany(db, coll, objects).applied.length;
+  }
+
+  _commitInsertMany(db, coll, objects) {
+    const items = normalizeInsertObjects(objects);
+    assertInsertTargetsMissing(this.db.collection(db, coll), items);
+    return { items, ...this._writeMany(db, coll, items) };
   }
 
   update(db, coll, id, obj) {
-    return this.updateMany(db, coll, [{ ...withoutId(obj), id }]).items[0]?.id || id;
+    return this.updateMany(db, coll, [{ ...withoutObjectId(obj), _id: id }]).items[0]?._id || id;
   }
 
   replace(db, coll, id, obj) {
-    return this.replaceMany(db, coll, [{ ...withoutId(obj), id }]).items[0]?.id || id;
+    return this.replaceMany(db, coll, [{ ...withoutObjectId(obj), _id: id }]).items[0]?._id || id;
   }
 
   remove(db, coll, id) {
@@ -136,27 +145,27 @@ export class CRDTNode {
   replaceMany(db, coll, objects) {
     const items = normalizeObjectsWithIds(objects);
     this._writeMany(db, coll, items.map((object) => ({
-      id: object.id,
-      value: this.db.preserveVector(db, coll, object.id, withoutId(object)),
+      id: object._id,
+      value: this.db.preserveVector(db, coll, object._id, withoutObjectId(object)),
     })));
     return {
       replaced: items.length,
-      items: this.getMany(db, coll, items.map((item) => item.id)),
+      items: this.getMany(db, coll, items.map((item) => item._id)),
     };
   }
 
   updateMany(db, coll, objects) {
     const items = normalizeObjectsWithIds(objects).map((object) => {
-      const current = this.get(db, coll, object.id) || { id: object.id };
+      const current = this.get(db, coll, object._id) || { _id: object._id };
       return {
-        id: object.id,
-        value: this.db.preserveVector(db, coll, object.id, { ...withoutId(current), ...withoutId(object) }),
+        _id: object._id,
+        value: this.db.preserveVector(db, coll, object._id, { ...withoutObjectId(current), ...withoutObjectId(object) }),
       };
     });
-    this._writeMany(db, coll, items);
+    this._writeMany(db, coll, items.map((item) => ({ id: item._id, value: item.value })));
     return {
       updated: items.length,
-      items: this.getMany(db, coll, items.map((item) => item.id)),
+      items: this.getMany(db, coll, items.map((item) => item._id)),
     };
   }
 
@@ -536,6 +545,10 @@ export class CRDTNode {
     return total;
   }
 
+  syncScopeForShard(shard = DEFAULT_SHARD) {
+    return this._scope(GLOBAL_DATABASE, GLOBAL_COLLECTION, shard);
+  }
+
   ownedShardTargets() {
     const targets = this.shardMap.syncTargets();
     if (!this.url) return targets;
@@ -631,10 +644,7 @@ export class CRDTNode {
 
   _findWithReferences(db, coll, query = {}, options = {}) {
     const criteria = query || {};
-    const queryDepth = referenceDepthForQuery(criteria);
-    const sortDepth = pathHasReferenceObject(options.sortBy) ? 1 : 0;
-    const responseDepth = normalizeRefDepth(options.refDepth, queryDepth > 0 || sortDepth > 0 ? 1 : 0);
-    const matchDepth = Math.max(queryDepth, sortDepth);
+    const { matchDepth, responseDepth } = referenceReadPlan(criteria, options);
     if (matchDepth <= 0) {
       return this.db.collection(db, coll)
         .find(criteria, withoutReferenceOptions(options))
@@ -653,7 +663,7 @@ export class CRDTNode {
       if (matchesQuery(matchObject, criteria)) matched.push({ raw: object, matchObject });
     }
     const sorted = sortReferencePairs(matched, options);
-    const paged = paginatePairs(sorted, options);
+    const paged = paginateReferencePairs(sorted, options);
     return paged.map(({ raw }) => responseDepth > 0 ? this.expandReferences(db, raw, responseDepth) : raw);
   }
 
@@ -673,12 +683,11 @@ export class CRDTNode {
   _aggregateWithReferences(db, coll, query = {}, spec = {}) {
     const depth = Math.max(referenceDepthForQuery(query), referenceDepthForAggregateSpec(spec));
     const rows = this._findWithReferences(db, coll, query, { refDepth: depth });
-    if (isObjectDbAggregateSpec(spec)) return aggregateObjects(rows, spec);
-    return aggregateLegacyRows(rows, spec);
+    return aggregateRows(rows, spec);
   }
 
   _prepareWriteValue(db, coll, value) {
-    const prepared = stripReferenceObjects(withoutId(value));
+    const prepared = stripReferenceObjects(withoutObjectId(value));
     this.db.validateWriteValue(db, coll, prepared);
     return prepared;
   }
@@ -746,8 +755,8 @@ export class CRDTNode {
   }
 }
 
-function withoutId(object) {
-  const { id, ...rest } = object || {};
+function withoutObjectId(object) {
+  const { _id, ...rest } = object || {};
   return rest;
 }
 
@@ -761,105 +770,6 @@ function vectorShardIndexKey(shards = []) {
   return shardList.length ? `shards:${shardList.join(",")}` : "all";
 }
 
-function sortReferencePairs(pairs, options = {}) {
-  if (!options.sortBy) return pairs;
-  const direction = options.sort === "desc" ? -1 : 1;
-  return [...pairs].sort((left, right) => {
-    return compareSortValues(
-      getPathValue(left.matchObject, options.sortBy),
-      getPathValue(right.matchObject, options.sortBy),
-    ) * direction;
-  });
-}
-
-function paginatePairs(pairs, options = {}) {
-  const offset = options.offset || 0;
-  const limit = options.limit ?? Infinity;
-  if (limit <= 0) return [];
-  return pairs.slice(offset, offset + limit);
-}
-
-function aggregateLegacyRows(rows, spec = {}) {
-  const groupBy = spec.groupBy;
-  const metrics = {
-    sum: asArray(spec.sum),
-    avg: asArray(spec.avg),
-    min: asArray(spec.min),
-    max: asArray(spec.max),
-  };
-  const groups = new Map();
-
-  for (const object of rows || []) {
-    const key = groupBy ? stableKey(getPathValue(object, groupBy)) : "__all__";
-    let bucket = groups.get(key);
-    if (!bucket) {
-      bucket = makeAggregateBucket(groupBy ? getPathValue(object, groupBy) : undefined, metrics);
-      groups.set(key, bucket);
-    }
-    addAggregateRow(bucket, object, metrics);
-  }
-
-  if (!groupBy) return finishAggregateBucket(groups.get("__all__") || makeAggregateBucket(undefined, metrics), metrics);
-  return [...groups.values()].map((bucket) => finishAggregateBucket(bucket, metrics));
-}
-
-function makeAggregateBucket(key, metrics) {
-  return {
-    key,
-    count: 0,
-    sum: Object.fromEntries(metrics.sum.map((field) => [field, 0])),
-    avg: Object.fromEntries(metrics.avg.map((field) => [field, { sum: 0, count: 0 }])),
-    min: Object.fromEntries(metrics.min.map((field) => [field, undefined])),
-    max: Object.fromEntries(metrics.max.map((field) => [field, undefined])),
-  };
-}
-
-function addAggregateRow(bucket, object, metrics) {
-  bucket.count++;
-  for (const field of metrics.sum) {
-    const value = getPathValue(object, field);
-    if (typeof value === "number") bucket.sum[field] += value;
-  }
-  for (const field of metrics.avg) {
-    const value = getPathValue(object, field);
-    if (typeof value === "number") {
-      bucket.avg[field].sum += value;
-      bucket.avg[field].count++;
-    }
-  }
-  for (const field of metrics.min) {
-    const value = getPathValue(object, field);
-    if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
-      bucket.min[field] = value;
-    }
-  }
-  for (const field of metrics.max) {
-    const value = getPathValue(object, field);
-    if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
-      bucket.max[field] = value;
-    }
-  }
-}
-
-function finishAggregateBucket(bucket, metrics) {
-  const out = { count: bucket.count };
-  if (bucket.key !== undefined) out.key = bucket.key;
-  if (metrics.sum.length) out.sum = bucket.sum;
-  if (metrics.avg.length) {
-    out.avg = Object.fromEntries(
-      Object.entries(bucket.avg).map(([field, state]) => [field, state.count ? state.sum / state.count : null]),
-    );
-  }
-  if (metrics.min.length) out.min = bucket.min;
-  if (metrics.max.length) out.max = bucket.max;
-  return out;
-}
-
-function asArray(value) {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
 function normalizeObjectsWithIds(objects) {
   if (!Array.isArray(objects)) throw new TypeError("objects must be an array");
   const normalized = objects.map((object, index) => {
@@ -868,14 +778,29 @@ function normalizeObjectsWithIds(objects) {
       err.index = index;
       throw err;
     }
-    if (object.id === undefined || object.id === null || String(object.id).length === 0) {
-      const err = new TypeError(`item at index ${index} must include id`);
+    if (object._id === undefined || object._id === null || String(object._id).length === 0) {
+      const err = new TypeError(`item at index ${index} must include _id`);
       err.index = index;
       throw err;
     }
-    return { ...object, id: String(object.id) };
+    return { ...object, _id: String(object._id) };
   });
-  assertUniqueIds(normalized.map((object) => object.id));
+  assertUniqueIds(normalized.map((object) => object._id));
+  return normalized;
+}
+
+function normalizeInsertObjects(objects) {
+  const normalized = (objects || []).map((obj = {}, index) => {
+    const hasId = obj && obj._id !== undefined && obj._id !== null;
+    const id = hasId ? String(obj._id) : createObjectId();
+    if (id.length === 0) {
+      const err = new TypeError(`item at index ${index} must include a non-empty _id when _id is provided`);
+      err.index = index;
+      throw err;
+    }
+    return { id, value: withoutObjectId(obj) };
+  });
+  assertUniqueIds(normalized.map((item) => item.id));
   return normalized;
 }
 
@@ -899,12 +824,22 @@ function assertUniqueIds(ids) {
   for (let i = 0; i < ids.length; i++) {
     const id = String(ids[i]);
     if (seen.has(id)) {
-      const err = new TypeError(`duplicate id in bulk request: ${id}`);
+      const err = new TypeError(`duplicate _id in bulk request: ${id}`);
       err.index = i;
       err.id = id;
       throw err;
     }
     seen.add(id);
+  }
+}
+
+function assertInsertTargetsMissing(collection, items) {
+  for (const item of items || []) {
+    if (!collection.has(item.id)) continue;
+    const err = new Error(`object already exists: ${item.id}`);
+    err.status = 409;
+    err.id = item.id;
+    throw err;
   }
 }
 

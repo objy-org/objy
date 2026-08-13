@@ -4,6 +4,7 @@ import { ObjectRowStore } from "./object-store.js";
 import { ShapeStore } from "./shape.js";
 import { gt } from "./clock.js";
 import {
+  aggregateLegacyObjects,
   aggregateObjects,
   aggregatePartialObjects,
   isObjectDbAggregateSpec,
@@ -68,7 +69,7 @@ class Collection {
     const prepared = this._prepareStoredValue(value);
     m.ts = ts;
     m.deleted = null;
-    this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "id"));
+    this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "_id"));
     this._applyVectorUpdate(id, prepared.vector);
     const after = this.readForQuery(id);
     this._refreshIndexes(id, before, after);
@@ -108,7 +109,7 @@ class Collection {
     const m = this.meta.get(id);
     if (!m || m.deleted) return undefined;
     const vals = this.store.read(id) || {};
-    return { id, ...vals };
+    return { ...vals, _id: id };
   }
 
   readForQuery(id) {
@@ -117,7 +118,7 @@ class Collection {
     const vals = typeof this.store.readForQuery === "function"
       ? this.store.readForQuery(id) || {}
       : this.store.read(id) || {};
-    return { id, ...vals };
+    return { ...vals, _id: id };
   }
 
   readObjects(ids) {
@@ -173,7 +174,7 @@ class Collection {
     }
     return sortObjects(matched, options)
       .slice(offset, offset + limit)
-      .map((obj) => this.read(obj.id))
+      .map((obj) => this.read(obj._id))
       .filter(Boolean);
   }
 
@@ -259,29 +260,13 @@ class Collection {
       return spec?.$partial === true ? aggregatePartialObjects(rows, spec) : aggregateObjects(rows, spec);
     }
 
-    const groupBy = spec.groupBy;
-    const metrics = normalizeMetrics(spec);
-    const groups = new Map();
-
-    for (const object of this.findForQuery(query, options)) {
-      const key = groupBy ? stableKey(getPathValue(object, groupBy)) : "__all__";
-      let bucket = groups.get(key);
-      if (!bucket) {
-        bucket = makeBucket(groupBy ? getPathValue(object, groupBy) : undefined, metrics);
-        groups.set(key, bucket);
-      }
-      addToBucket(bucket, object, metrics);
-    }
-
-    if (!groupBy) return finishBucket(groups.get("__all__") || makeBucket(undefined, metrics), metrics);
-
-    return [...groups.values()].map((bucket) => finishBucket(bucket, metrics));
+    return aggregateLegacyObjects(this.findForQuery(query, options), spec);
   }
 
   createIndex(path) {
     const key = String(path);
     const index = new FieldIndex(key);
-    for (const id of this._liveIds()) {
+    for (const id of this._liveIdIterator()) {
       const object = this.readForQuery(id);
       index.add(object);
     }
@@ -386,7 +371,7 @@ class Collection {
     const k = Math.max(0, Number.isFinite(limit) ? Math.floor(limit) : 20);
     if (k <= 0) return [];
     return index.search(queryVec, k, options.ef).map(({ id, dist }) => ({
-      id,
+      _id: id,
       dist,
       _score: 1 - dist,
     }));
@@ -396,7 +381,7 @@ class Collection {
     return rankBySimilarity(rows, queryVec, {
       limit,
       getVec: (id) => this.getVector(id),
-      idOf: (row) => row?.id,
+      idOf: (row) => row?._id,
     });
   }
 
@@ -501,10 +486,10 @@ class Collection {
     return out;
   }
 
-  _liveIds() {
-    const ids = [];
-    for (const [id, m] of this.meta) if (!m.deleted) ids.push(id);
-    return ids;
+  *_liveIdIterator() {
+    for (const [id, m] of this.meta) {
+      if (!m.deleted) yield id;
+    }
   }
 
   _planRead(criteria, options = {}) {
@@ -550,7 +535,9 @@ class Collection {
   }
 
   *_idsForPlan(idPlan, criteria = {}) {
-    const ids = idPlan?.ids || this._liveIds();
+    const ids = idPlan?.ids === null || idPlan?.ids === undefined
+      ? this._liveIdIterator()
+      : idPlan.ids;
     for (const id of ids) {
       if (!idPlan?.verify) {
         yield id;
@@ -640,7 +627,7 @@ class Collection {
   }
 
   _idsForFieldConstraint(path, expected) {
-    if (path === "id" || path === "_id") return this._idsForObjectIdConstraint(expected);
+    if (path === "_id") return this._idsForObjectIdConstraint(expected);
 
     const index = this.indexes.get(path);
     if (!index) return null;
@@ -668,7 +655,7 @@ class Collection {
       return;
     }
     const plan = this._planIndexedIds(query);
-    yield* (plan?.ids || this._liveIds());
+    yield* (plan?.ids || this._liveIdIterator());
   }
 
   _refreshIndexes(id, before, after) {
@@ -705,7 +692,7 @@ class Collection {
 
   _createIndexFromMeta(path) {
     const index = new FieldIndex(path);
-    for (const id of this._liveIds()) {
+    for (const id of this._liveIdIterator()) {
       const object = this.readForQuery(id);
       index.add(object);
     }
@@ -793,17 +780,16 @@ class Collection {
     });
 
     try {
-      const ids = this._liveIds();
-      for (let offset = 0; offset < ids.length; offset += COLUMN_BUILD_BATCH_SIZE) {
-        const rows = [];
-        for (const id of ids.slice(offset, offset + COLUMN_BUILD_BATCH_SIZE)) {
-          const object = this.readForQuery(id);
-          if (!object) continue;
-          rows.push(columnWorkerRow(object, paths));
-        }
+      let rows = [];
+      for (const id of this._liveIdIterator()) {
+        const object = this.readForQuery(id);
+        if (object) rows.push(columnWorkerRow(object, paths));
+        if (rows.length < COLUMN_BUILD_BATCH_SIZE) continue;
         await postWorkerBatch(worker, ackResolvers, rows);
+        rows = [];
         await yieldToEventLoop();
       }
+      if (rows.length) await postWorkerBatch(worker, ackResolvers, rows);
 
       worker.postMessage({ type: "finish" });
       await done;
@@ -899,7 +885,7 @@ class Collection {
       limit: options.limit ?? Infinity,
       read: (id) => this.readForQuery(id),
       matches: (object) => filterProven ? true : matchesQuery(object, criteria),
-    }).map((object) => this.read(object.id)).filter(Boolean);
+    }).map((object) => this.read(object._id)).filter(Boolean);
   }
 
   _prepareStoredValue(value = {}) {
@@ -1062,13 +1048,13 @@ class FieldIndex {
   }
 
   add(object) {
-    if (!object?.id) return;
+    if (!object?._id) return;
     for (const key of indexKeysForObjectPath(object, this.path)) {
       const ids = this.lookup.get(key) || new Set();
-      ids.add(object.id);
+      ids.add(object._id);
       this.lookup.set(key, ids);
     }
-    this._addOrdered(object.id, getPathValue(object, this.path));
+    this._addOrdered(object._id, getPathValue(object, this.path));
   }
 
   remove(id, object) {
@@ -1220,8 +1206,8 @@ class ColumnIndex {
   }
 
   updateFromObject(object) {
-    if (!object?.id) return;
-    this.updateScalarState(object.id, columnScalarState(getPathValue(object, this.path)));
+    if (!object?._id) return;
+    this.updateScalarState(object._id, columnScalarState(getPathValue(object, this.path)));
   }
 
   updateScalarState(id, state) {
@@ -1285,7 +1271,7 @@ class ColumnIndex {
 }
 
 function columnWorkerRow(object, paths) {
-  const row = { id: object.id, values: {}, nonScalar: [] };
+  const row = { id: object._id, values: {}, nonScalar: [] };
   for (const path of paths) {
     const state = columnScalarState(getPathValue(object, path));
     if (state.kind === "scalar") row.values[path] = state.value;
@@ -1585,11 +1571,6 @@ function isEmptyCriteria(criteria) {
   );
 }
 
-function withoutId(object) {
-  const { id, ...rest } = object || {};
-  return rest;
-}
-
 function normalizeCollectionMeta(meta = {}) {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
     throw new TypeError("collection meta must be a plain object");
@@ -1649,78 +1630,6 @@ function normalizeVectorWarmupPlans(plans = []) {
     });
   }
   return out;
-}
-
-function normalizeMetrics(spec) {
-  return {
-    sum: asArray(spec.sum),
-    avg: asArray(spec.avg),
-    min: asArray(spec.min),
-    max: asArray(spec.max),
-  };
-}
-
-function asArray(value) {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
-function makeBucket(key, metrics) {
-  const bucket = {
-    key: cloneAggregateResultValue(key),
-    count: 0,
-    sum: Object.fromEntries(metrics.sum.map((field) => [field, 0])),
-    avg: Object.fromEntries(metrics.avg.map((field) => [field, { sum: 0, count: 0 }])),
-    min: Object.fromEntries(metrics.min.map((field) => [field, undefined])),
-    max: Object.fromEntries(metrics.max.map((field) => [field, undefined])),
-  };
-  return bucket;
-}
-
-function addToBucket(bucket, object, metrics) {
-  bucket.count++;
-  for (const field of metrics.sum) {
-    const value = getPathValue(object, field);
-    if (typeof value === "number") bucket.sum[field] += value;
-  }
-  for (const field of metrics.avg) {
-    const value = getPathValue(object, field);
-    if (typeof value === "number") {
-      bucket.avg[field].sum += value;
-      bucket.avg[field].count++;
-    }
-  }
-  for (const field of metrics.min) {
-    const value = getPathValue(object, field);
-    if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
-      bucket.min[field] = cloneAggregateResultValue(value);
-    }
-  }
-  for (const field of metrics.max) {
-    const value = getPathValue(object, field);
-    if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
-      bucket.max[field] = cloneAggregateResultValue(value);
-    }
-  }
-}
-
-function finishBucket(bucket, metrics) {
-  const out = { count: bucket.count };
-  if (bucket.key !== undefined) out.key = cloneAggregateResultValue(bucket.key);
-  if (metrics.sum.length) out.sum = bucket.sum;
-  if (metrics.avg.length) {
-    out.avg = Object.fromEntries(
-      Object.entries(bucket.avg).map(([field, state]) => [field, state.count ? state.sum / state.count : null]),
-    );
-  }
-  if (metrics.min.length) out.min = cloneAggregateResultValue(bucket.min);
-  if (metrics.max.length) out.max = cloneAggregateResultValue(bucket.max);
-  return out;
-}
-
-function cloneAggregateResultValue(value) {
-  if (value === null || typeof value !== "object") return value;
-  return structuredClone(value);
 }
 
 class Database {

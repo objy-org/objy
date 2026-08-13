@@ -46,12 +46,11 @@ const queryControls = new Set([
 export function getPathValue(source, path) {
   if (source === null || source === undefined) return undefined;
   const key = String(path);
-  if (key === "_id") return source._id ?? source.id;
-  if (key === "id") return source.id ?? source._id;
+  if (key === "_id") return source._id;
+  if (key === "id") return source.id;
 
   return key.split(".").reduce((cursor, part) => {
     if (cursor === null || cursor === undefined || typeof cursor !== "object") return undefined;
-    if (part === "_id" && cursor._id === undefined && cursor.id !== undefined) return cursor.id;
     return cursor[part];
   }, source);
 }

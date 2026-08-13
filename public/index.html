@@ -25,7 +25,11 @@
 
   * { box-sizing: border-box; }
 
-  html, body { min-height: 100%; }
+  html, body {
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden;
+  }
 
   body {
     margin: 0;
@@ -101,16 +105,19 @@
   }
 
   .app {
-    min-height: 100vh;
+    height: 100vh;
+    min-height: 0;
     display: grid;
     grid-template-rows: 58px 1fr;
+    overflow: hidden;
   }
 
   .topbar {
     display: grid;
-    grid-template-columns: minmax(210px, 320px) 1fr auto;
+    grid-template-columns: minmax(170px, 260px) max-content minmax(0, 1fr) auto;
     align-items: center;
-    gap: 18px;
+    gap: 12px;
+    min-height: 58px;
     padding: 0 18px;
     border-bottom: 1px solid var(--line-soft);
     background: rgba(13, 14, 15, .94);
@@ -156,13 +163,46 @@
     display: flex;
     align-items: center;
     gap: 9px;
+    width: max-content;
+    max-width: 100%;
     min-width: 0;
   }
 
-  .connection input {
+  .server-label {
+    flex: 0 1 auto;
+    width: max-content;
+    max-width: min(260px, 28vw);
+    min-width: 0;
     height: 34px;
+    justify-content: flex-start;
+    border-color: var(--line-soft);
+    background: transparent;
+    color: var(--muted);
+    padding: 4px 9px;
+  }
+
+  .server-label:hover {
+    color: var(--text);
+    border-color: var(--line);
+    filter: none;
+  }
+
+  .server-kicker {
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .server-value {
+    min-width: 0;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px;
+    color: #fff7e8;
   }
 
   .session {
@@ -172,6 +212,119 @@
     gap: 9px;
     min-width: 0;
   }
+
+  .top-stats-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .top-stats {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .top-stat {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    align-items: baseline;
+    column-gap: 6px;
+    min-height: 30px;
+    min-width: 0;
+    flex: 0 0 auto;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .02);
+    padding: 4px 8px;
+    white-space: nowrap;
+    color: var(--text);
+    text-align: left;
+    justify-content: start;
+  }
+
+  button.top-stat {
+    min-height: 30px;
+    font-weight: 400;
+  }
+
+  button.top-stat:hover {
+    border-color: var(--line);
+    background: rgba(255, 255, 255, .045);
+    filter: none;
+  }
+
+  .top-stat .stat-label {
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .top-stat strong {
+    color: #fff7e8;
+    font-size: 12px;
+    font-weight: 850;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .top-stat.ok strong { color: var(--teal); }
+  .top-stat.warn strong { color: var(--amber); }
+  .top-stat.bad strong { color: var(--red); }
+
+  .top-stat.node-rss .stat-label {
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .memory-stat {
+    grid-template-columns: auto auto;
+    grid-template-rows: auto 3px;
+    align-items: center;
+    min-width: 112px;
+  }
+
+  .memory-meter {
+    grid-column: 1 / -1;
+    width: 100%;
+    height: 3px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .09);
+    overflow: hidden;
+  }
+
+  .memory-meter::before {
+    content: "";
+    display: block;
+    width: var(--used, 0%);
+    height: 100%;
+    border-radius: inherit;
+    background: var(--meter-color, var(--teal));
+  }
+
+  .memory-stat.warn .memory-meter { --meter-color: var(--amber); }
+  .memory-stat.bad .memory-meter { --meter-color: var(--red); }
+
+  .top-config-message {
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    color: var(--muted);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-config-message.bad { color: #ffd1cf; }
 
   .pill {
     display: inline-flex;
@@ -190,30 +343,21 @@
     font-size: 12px;
   }
 
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: var(--faint);
-    flex: 0 0 auto;
-  }
-
-  .dot.ok { background: var(--teal); box-shadow: 0 0 0 4px rgba(62, 215, 181, .12); }
-  .dot.warn { background: var(--amber); box-shadow: 0 0 0 4px rgba(240, 182, 77, .12); }
-  .dot.bad { background: var(--red); box-shadow: 0 0 0 4px rgba(239, 111, 108, .12); }
-
   .shell {
     display: grid;
     grid-template-columns: 326px minmax(0, 1fr);
     min-height: 0;
+    overflow: hidden;
   }
 
   .sidebar {
     min-width: 0;
+    min-height: 0;
     border-right: 1px solid var(--line-soft);
     background: var(--band);
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
   }
 
   .login-panel {
@@ -223,23 +367,21 @@
     gap: 12px;
   }
 
+  .login-panel[hidden] {
+    display: none;
+  }
+
   .login-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 9px;
   }
 
-  .login-actions {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 8px;
-    align-items: center;
-  }
-
   .tree-panel {
     min-height: 0;
     display: grid;
     grid-template-rows: auto 1fr;
+    overflow: hidden;
   }
 
   .tree-head, .content-head, .detail-head {
@@ -274,206 +416,9 @@
   }
 
   .tree {
-    overflow: auto;
-    padding: 0 10px 14px;
-  }
-
-  .cluster-panel {
-    border-top: 1px solid var(--line-soft);
-    display: grid;
-    grid-template-rows: auto minmax(0, auto);
     min-height: 0;
-  }
-
-  .cluster-status {
     overflow: auto;
-    max-height: 38vh;
     padding: 0 10px 14px;
-    display: grid;
-    gap: 9px;
-  }
-
-  .cluster-summary {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 7px;
-  }
-
-  .cluster-metric, .node-row, .shard-row {
-    border: 1px solid var(--line-soft);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, .018);
-  }
-
-  .cluster-metric {
-    display: grid;
-    gap: 1px;
-    padding: 9px;
-    min-width: 0;
-  }
-
-  .cluster-metric strong {
-    font-size: 15px;
-    line-height: 1.1;
-    color: #fff7e8;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .cluster-metric span {
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-
-  .cluster-group {
-    display: grid;
-    gap: 7px;
-  }
-
-  .cluster-label {
-    color: var(--faint);
-    font-size: 10px;
-    font-weight: 850;
-    text-transform: uppercase;
-    padding: 2px 2px 0;
-  }
-
-  .node-row, .shard-row {
-    padding: 9px;
-    display: grid;
-    gap: 6px;
-  }
-
-  .node-main, .shard-main, .peer-line {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    gap: 7px;
-  }
-
-  .node-main strong, .shard-main strong {
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .rss-value {
-    margin-left: auto;
-    color: var(--teal);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px;
-    white-space: nowrap;
-  }
-
-  .node-meta, .shard-peers, .peer-line {
-    color: var(--muted);
-    font-size: 11px;
-    min-width: 0;
-  }
-
-  .node-meta, .shard-peers {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .index-readiness {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .index-head, .worker-line, .index-collection {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-
-  .index-head {
-    justify-content: space-between;
-  }
-
-  .index-title {
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 850;
-    text-transform: uppercase;
-  }
-
-  .status-chip, .worker-chip, .index-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 20px;
-    max-width: 100%;
-    border: 1px solid var(--line-soft);
-    border-radius: 999px;
-    padding: 2px 7px;
-    color: var(--muted);
-    background: rgba(255, 255, 255, .02);
-    font-size: 10px;
-    font-weight: 800;
-    white-space: nowrap;
-  }
-
-  .status-chip.ok, .index-chip.ok {
-    color: var(--teal);
-    border-color: rgba(62, 215, 181, .22);
-    background: rgba(62, 215, 181, .07);
-  }
-
-  .status-chip.warn, .index-chip.warn {
-    color: var(--amber);
-    border-color: rgba(240, 182, 77, .22);
-    background: rgba(240, 182, 77, .07);
-  }
-
-  .status-chip.bad, .index-chip.bad {
-    color: var(--red);
-    border-color: rgba(239, 111, 108, .24);
-    background: rgba(239, 111, 108, .08);
-  }
-
-  .worker-chip strong {
-    color: #fff7e8;
-    font-weight: 850;
-    margin-left: 4px;
-  }
-
-  .index-collections {
-    display: grid;
-    gap: 5px;
-    min-width: 0;
-  }
-
-  .index-collection {
-    color: var(--faint);
-    font-size: 10px;
-  }
-
-  .index-collection-name {
-    color: var(--muted);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 150px;
-  }
-
-  .index-more {
-    color: var(--faint);
-    font-size: 10px;
-  }
-
-  .peer-line span:last-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .db-block {
@@ -499,6 +444,24 @@
   .db-row {
     color: #fff7e8;
     background: rgba(255, 255, 255, .025);
+  }
+
+  .db-row .chevron {
+    width: 14px;
+    height: 14px;
+    transition: transform .12s ease;
+  }
+
+  .db-row[aria-expanded="false"] .chevron {
+    transform: rotate(-90deg);
+  }
+
+  .coll-list {
+    display: grid;
+  }
+
+  .coll-list[hidden] {
+    display: none;
   }
 
   .coll-row {
@@ -531,6 +494,7 @@
     min-height: 0;
     display: grid;
     grid-template-rows: auto 1fr;
+    overflow: hidden;
     background:
       linear-gradient(180deg, rgba(62, 215, 181, .035), transparent 180px),
       var(--bg);
@@ -541,6 +505,7 @@
     border-bottom: 1px solid var(--line-soft);
     display: grid;
     gap: 12px;
+    min-width: 0;
   }
 
   .breadcrumb {
@@ -575,6 +540,7 @@
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+    overflow: hidden;
   }
 
   .object-list {
@@ -583,6 +549,7 @@
     border-right: 1px solid var(--line-soft);
     display: grid;
     grid-template-rows: auto 1fr;
+    overflow: hidden;
   }
 
   .content-head, .detail-head {
@@ -642,6 +609,7 @@
     min-height: 0;
     display: grid;
     grid-template-rows: auto 1fr;
+    overflow: hidden;
   }
 
   .detail-tools {
@@ -664,6 +632,7 @@
   }
 
   .json-box {
+    min-width: 0;
     border: 1px solid var(--line-soft);
     border-radius: 8px;
     background: #101213;
@@ -675,7 +644,16 @@
     width: min(1120px, 100%);
   }
 
+  .modal.cluster-modal {
+    width: min(1180px, 100%);
+  }
+
   .modal-body.docs-body {
+    padding: 0;
+    display: block;
+  }
+
+  .modal-body.cluster-body {
     padding: 0;
     display: block;
   }
@@ -761,6 +739,272 @@
     padding: 0;
     font-size: 12px;
     line-height: 1.55;
+  }
+
+  .cluster-dashboard {
+    display: grid;
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .cluster-hero {
+    display: grid;
+    grid-template-columns: minmax(180px, .55fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .cluster-title-block {
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: #101213;
+    padding: 16px;
+    min-width: 0;
+  }
+
+  .cluster-title-block h3 {
+    margin: 0 0 8px;
+    color: #fff7e8;
+    font-size: 16px;
+  }
+
+  .cluster-title-block p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    word-break: break-word;
+  }
+
+  .cluster-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cluster-metric,
+  .cluster-panel {
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: #101213;
+    min-width: 0;
+  }
+
+  .cluster-metric {
+    padding: 12px;
+  }
+
+  .cluster-metric span,
+  .cluster-section-title span,
+  .cluster-label {
+    display: block;
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .cluster-metric strong {
+    display: block;
+    margin-top: 5px;
+    color: #fff7e8;
+    font-size: 20px;
+    line-height: 1.1;
+  }
+
+  .cluster-metric small,
+  .cluster-subtle {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .cluster-metric.ok strong { color: var(--teal); }
+  .cluster-metric.warn strong { color: var(--amber); }
+  .cluster-metric.bad strong { color: var(--red); }
+
+  .cluster-section {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cluster-section-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .cluster-section-title h3 {
+    margin: 0;
+    color: #fff7e8;
+    font-size: 13px;
+  }
+
+  .cluster-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cluster-panel {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .cluster-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cluster-panel-head strong {
+    color: #fff7e8;
+    font-size: 13px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .state-text {
+    color: var(--teal);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .state-text.warn { color: var(--amber); }
+  .state-text.bad { color: var(--red); }
+
+  .config-meter {
+    height: 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .08);
+    overflow: hidden;
+  }
+
+  .config-meter span {
+    display: block;
+    width: var(--used, 0%);
+    height: 100%;
+    border-radius: inherit;
+    background: var(--meter-color, var(--teal));
+  }
+
+  .config-meter.warn span { --meter-color: var(--amber); }
+  .config-meter.bad span { --meter-color: var(--red); }
+
+  .cluster-kv {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .cluster-kv div {
+    min-width: 0;
+  }
+
+  .cluster-kv strong {
+    display: block;
+    margin-top: 2px;
+    color: var(--text);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cluster-list {
+    display: grid;
+    gap: 7px;
+  }
+
+  .cluster-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 7px;
+    color: var(--muted);
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  .cluster-row:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .cluster-row strong,
+  .cluster-context {
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .index-table {
+    display: grid;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .index-row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1.2fr) 82px minmax(0, 1fr) minmax(0, 1fr) 100px;
+    gap: 10px;
+    align-items: start;
+    padding: 9px 10px;
+    border-top: 1px solid var(--line-soft);
+    color: var(--muted);
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  .index-row:first-child {
+    border-top: 0;
+  }
+
+  .index-row.header {
+    background: rgba(255, 255, 255, .035);
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .index-row > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .raw-config {
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: #101213;
+    overflow: hidden;
+  }
+
+  .raw-config summary {
+    cursor: pointer;
+    color: var(--muted);
+    padding: 12px;
+    font-weight: 800;
+  }
+
+  .raw-config pre {
+    border-top: 1px solid var(--line-soft);
+    max-height: 340px;
+    overflow: auto;
+    padding: 14px;
+    white-space: pre;
+    word-break: normal;
   }
 
   .j-key { color: var(--teal); }
@@ -899,19 +1143,23 @@
   @media (max-width: 980px) {
     .app { grid-template-rows: auto 1fr; }
     .topbar { grid-template-columns: 1fr; height: auto; padding: 12px; gap: 10px; position: static; }
-    .connection, .session { justify-content: stretch; }
-    .shell { grid-template-columns: 1fr; }
+    .connection { justify-content: flex-start; }
+    .top-stats-wrap, .session { justify-content: stretch; }
+    .top-stats { flex-wrap: wrap; overflow: visible; }
+    .cluster-hero { grid-template-columns: 1fr; }
+    .index-table { overflow-x: auto; }
+    .index-row { min-width: 720px; }
+    .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
     .sidebar { border-right: 0; border-bottom: 1px solid var(--line-soft); }
     .tree { max-height: 260px; }
-    .workspace { grid-template-columns: 1fr; }
+    .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 34vh) minmax(0, 1fr); }
     .object-list { border-right: 0; border-bottom: 1px solid var(--line-soft); }
-    .objects { max-height: 320px; }
     .query-row { grid-template-columns: 1fr 84px; }
     .query-row button { min-width: 0; }
   }
 
   @media (max-width: 560px) {
-    .login-grid, .login-actions, .query-row { grid-template-columns: 1fr; }
+    .login-grid, .query-row { grid-template-columns: 1fr; }
     .form-grid { grid-template-columns: 1fr; }
     .tree-head, .content-head, .detail-head { align-items: flex-start; flex-direction: column; }
     .tree-actions, .content-actions, .object-actions, .modal-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
@@ -932,17 +1180,25 @@
     </div>
 
     <div class="connection">
-      <label>
-        Server
-        <input id="server" type="url" autocomplete="off" />
-      </label>
+      <button id="server-label" class="server-label" title="Change server">
+        <span class="server-kicker">Server</span>
+        <span class="server-value">localhost:8080</span>
+      </button>
       <button id="health-btn" class="secondary icon-only" title="Check health" aria-label="Check health">
         <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v7h-7"/></svg>
       </button>
     </div>
 
+    <div class="top-stats-wrap">
+      <div class="top-stats" id="cluster-status">
+        <span class="top-config-message">Sign in for cluster stats.</span>
+      </div>
+      <button id="refresh-cluster-btn" class="secondary icon-only" title="Refresh cluster" aria-label="Refresh cluster" disabled>
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+      </button>
+    </div>
+
     <div class="session">
-      <span class="pill" id="health-pill"><span class="dot"></span><span>unknown</span></span>
       <span class="pill" id="session-pill">not signed in</span>
       <button id="api-docs-btn" class="secondary">
         <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 7h8"/><path d="M8 11h8"/></svg>
@@ -961,7 +1217,7 @@
 
   <div class="shell">
     <aside class="sidebar">
-      <section class="login-panel">
+      <section class="login-panel" id="login-panel">
         <div class="tree-head" style="padding:0">
           <span class="section-title">Login</span>
           <button id="login-btn" title="Log in">
@@ -996,18 +1252,6 @@
         </div>
         <div class="tree" id="tree">
           <div class="empty">Sign in to load databases.</div>
-        </div>
-      </section>
-
-      <section class="cluster-panel">
-        <div class="tree-head">
-          <span class="section-title">Cluster</span>
-          <button id="refresh-cluster-btn" class="secondary icon-only" title="Refresh cluster" aria-label="Refresh cluster" disabled>
-            <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
-          </button>
-        </div>
-        <div class="cluster-status" id="cluster-status">
-          <div class="empty">Sign in to load cluster status.</div>
         </div>
       </section>
     </aside>
@@ -1188,7 +1432,7 @@
     </div>
     <div class="modal-body">
       <div class="form-grid">
-        <label>Object ID <input id="object-id" autocomplete="off" /></label>
+        <label>Object _id <input id="object-id" autocomplete="off" /></label>
         <label class="wide">Object JSON <textarea id="object-json" class="json-editor" spellcheck="false">{}</textarea></label>
       </div>
       <div class="modal-error" id="object-modal-error"></div>
@@ -1263,6 +1507,22 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="cluster-modal" role="dialog" aria-modal="true" aria-labelledby="cluster-modal-title">
+  <div class="modal cluster-modal">
+    <div class="modal-head">
+      <h2 id="cluster-modal-title">Cluster Status</h2>
+      <button class="ghost icon-only" data-close-modal="cluster-modal" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body cluster-body">
+      <div class="cluster-dashboard" id="cluster-modal-body">
+        <div class="empty">Load cluster status first.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1287,6 +1547,7 @@ const state = {
   objects: [],
   selected: null,
   objectMode: "add",
+  collapsedDbs: new Set(),
 };
 
 function defaultServer() {
@@ -1311,9 +1572,12 @@ function objectPath(db, coll, tail = "") {
   return `/api/${enc(db)}/${enc(coll)}/object${tail}`;
 }
 
+function normalizeServer(value) {
+  return String(value || "").trim().replace(/\/+$/, "") || defaultServer();
+}
+
 function loadSession() {
-  $("server").value = localStorage.getItem("spread-db-ui:server") || state.server;
-  state.server = $("server").value.replace(/\/+$/, "");
+  state.server = normalizeServer(localStorage.getItem("spread-db-ui:server") || state.server);
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
     state.accessToken = saved.accessToken || "";
@@ -1326,6 +1590,7 @@ function loadSession() {
   } catch {
     clearSession(false);
   }
+  renderServerLabel();
   renderSession();
 }
 
@@ -1350,6 +1615,7 @@ function clearSession(render = true) {
   state.cluster = null;
   state.objects = [];
   state.selected = null;
+  state.collapsedDbs.clear();
   localStorage.removeItem(STORE_KEY);
   if (render) {
     renderSession();
@@ -1365,18 +1631,47 @@ function clearSession(render = true) {
 
 function renderSession() {
   const user = state.user;
+  $("login-panel").hidden = !!state.accessToken;
   $("session-pill").textContent = user
-    ? `${user.username || user.id || "user"} at ${state.authDb}/${state.authColl}`
+    ? `${user.username || user._id || "user"} at ${state.authDb}/${state.authColl}`
     : "not signed in";
   $("renew-btn").disabled = !state.refreshToken;
   $("logout-btn").disabled = !state.accessToken;
   renderActionState();
 }
 
+function renderServerLabel() {
+  const label = $("server-label");
+  const server = normalizeServer(state.server);
+  label.title = `Change server: ${server}`;
+  label.querySelector(".server-value").textContent = compactServerLabel(server);
+}
+
+function compactServerLabel(server) {
+  return String(server || "").replace(/^https?:\/\//i, "") || "localhost:8080";
+}
+
+async function editServer() {
+  const current = normalizeServer(state.server);
+  const next = prompt("Server URL", current);
+  if (next === null) return;
+
+  const normalized = normalizeServer(next);
+  if (normalized === current) return;
+
+  state.server = normalized;
+  state.apiDocs = null;
+  state.apiDocsSource = "";
+  saveSession();
+  renderServerLabel();
+  await checkHealth();
+  if (state.accessToken) await Promise.all([loadTree(), loadClusterStatus()]);
+}
+
 function renderActionState() {
   const signedIn = !!state.accessToken;
   const hasCollection = signedIn && !!state.active;
-  const hasObject = hasCollection && !!state.selected?.id;
+  const hasObject = hasCollection && !!state.selected?._id;
   $("add-db-btn").disabled = !signedIn;
   $("add-coll-btn").disabled = !signedIn;
   $("refresh-cluster-btn").disabled = !signedIn;
@@ -1538,15 +1833,13 @@ function renderInlineMarkdown(text) {
 
 async function checkHealth() {
   const result = await apiFetch("GET", "/health", undefined, { auth: false });
-  const dot = $("health-pill").querySelector(".dot");
-  const label = $("health-pill").querySelector("span:last-child");
-  dot.className = "dot " + (result.ok ? "ok" : "bad");
-  label.textContent = result.ok ? "reachable" : "unreachable";
-  $("node-label").textContent = result.body?.node ? `node ${result.body.node}` : "node unknown";
+  $("node-label").textContent = result.ok
+    ? (result.body?.node ? `node ${result.body.node}` : "node reachable")
+    : "node unreachable";
 }
 
 async function login() {
-  state.server = $("server").value.trim().replace(/\/+$/, "") || defaultServer();
+  state.server = normalizeServer(state.server);
   state.authDb = $("auth-db").value.trim() || "_global";
   state.authColl = $("auth-coll").value.trim() || "users";
   const username = $("username").value.trim();
@@ -1560,6 +1853,7 @@ async function login() {
   state.user = result.body.user || null;
   $("password").value = "";
   saveSession();
+  renderServerLabel();
   renderSession();
   showToast("Signed in");
   await Promise.all([loadTree(), loadClusterStatus()]);
@@ -1616,11 +1910,14 @@ async function loadClusterStatus() {
     return;
   }
 
-  $("cluster-status").innerHTML = `<div class="empty">Loading cluster...</div>`;
+  const root = $("cluster-status");
+  root.title = "";
+  root.innerHTML = `<span class="top-config-message">Loading cluster...</span>`;
   const result = await apiFetch("GET", "/api/config");
   if (!result.ok) {
     state.cluster = null;
-    $("cluster-status").innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load cluster status")}</div>`;
+    root.title = "";
+    root.innerHTML = `<span class="top-config-message bad">${escapeHtml(result.body?.error || "Could not load cluster status")}</span>`;
     return;
   }
 
@@ -1631,198 +1928,546 @@ async function loadClusterStatus() {
 function renderClusterStatus(config) {
   const root = $("cluster-status");
   if (!state.accessToken) {
-    root.innerHTML = `<div class="empty">Sign in to load cluster status.</div>`;
+    root.innerHTML = `<span class="top-config-message">Sign in for cluster stats.</span>`;
+    root.title = "";
     return;
   }
   if (!config) {
-    root.innerHTML = `<div class="empty">No cluster status loaded.</div>`;
+    root.innerHTML = `<span class="top-config-message">No cluster status loaded.</span>`;
+    root.title = "";
     return;
   }
 
   const nodes = Array.isArray(config.nodes) ? config.nodes : [];
   const shards = Array.isArray(config.shards) ? config.shards : [];
   const peers = Array.isArray(config.peers) ? config.peers : [];
+  const rss = configRss(config, nodes);
   const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
-  const totalRss = nodes.reduce((sum, nodeStatus) => sum + (Number(nodeStatus.memory?.rss) || 0), 0);
   const readyIndexes = nodes.filter((nodeStatus) => nodeStatus.indexes?.status === "ready").length;
+  const nodesTone = !nodes.length ? "warn" : online === nodes.length ? "ok" : "bad";
+  const indexesTone = !nodes.length ? "warn" : readyIndexes === nodes.length ? "ok" : "warn";
+  const workerCount = nodes.reduce((sum, nodeStatus) => {
+    const workers = nodeStatus.indexes?.workers || {};
+    return sum
+      + (Number(workers.columnIndex?.active) || 0)
+      + (Number(workers.vectorIndex?.active) || 0);
+  }, 0);
 
-  root.innerHTML = `
-    <div class="cluster-summary">
-      <div class="cluster-metric"><strong>${nodes.length}</strong><span>nodes</span></div>
-      <div class="cluster-metric"><strong>${shards.length}</strong><span>shards</span></div>
-      <div class="cluster-metric"><strong>${formatMb(totalRss)}</strong><span>rss</span></div>
-      <div class="cluster-metric"><strong>${readyIndexes}/${nodes.length}</strong><span>indexes</span></div>
-    </div>
-    <div class="cluster-group" id="cluster-nodes"></div>
-    <div class="cluster-group" id="cluster-shards"></div>
-  `;
-
-  const nodeRoot = $("cluster-nodes");
-  nodeRoot.innerHTML = `<div class="cluster-label">Nodes ${online}/${nodes.length} online</div>`;
-  for (const nodeStatus of nodes) nodeRoot.appendChild(renderNodeStatus(nodeStatus));
-
-  const shardRoot = $("cluster-shards");
-  shardRoot.innerHTML = `<div class="cluster-label">Shards ${peers.length} peers</div>`;
-  for (const shard of shards) shardRoot.appendChild(renderShardStatus(shard));
+  root.title = clusterTitle({ nodes, shards, peers });
+  root.innerHTML = [
+    topStat("nodes", `${online}/${nodes.length}`, nodesTone, `${online} of ${nodes.length} nodes online`),
+    topStat("shards", shards.length, shards.length ? "ok" : "warn", shardTitle(shards)),
+    topStat("peers", peers.length, peers.length ? "ok" : "warn", `${peers.length} configured peers`),
+    memoryStat("rss logical", rss.cluster, rssClusterTitle(rss)),
+    ...rss.nodes.map((entry) => memoryStat(rssNodeLabel(entry), entry, rssNodeTitle(entry), "node-rss")),
+    topStat("indexes", `${readyIndexes}/${nodes.length}`, indexesTone, indexTitle(nodes)),
+    topStat("workers", workerCount, workerCount ? "warn" : "ok", `${workerCount} active index workers`),
+  ].join("");
 }
 
-function renderNodeStatus(nodeStatus) {
+async function openClusterStatsModal() {
+  if (!state.accessToken) return showToast("Sign in first", true);
+  const root = $("cluster-modal-body");
+  root.innerHTML = `<div class="empty">Loading cluster status...</div>`;
+  openModal("cluster-modal");
+  if (!state.cluster) await loadClusterStatus();
+  if (!state.cluster) {
+    root.innerHTML = `<div class="error">Could not load cluster status.</div>`;
+    return;
+  }
+  renderClusterStatsModal(state.cluster);
+}
+
+function renderClusterStatsModal(config) {
+  const nodes = Array.isArray(config.nodes) ? config.nodes : [];
+  const shards = Array.isArray(config.shards) ? config.shards : [];
+  const peers = Array.isArray(config.peers) ? config.peers : [];
+  const rss = configRss(config, nodes);
+  const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
+  const readyIndexes = nodes.filter((nodeStatus) => nodeStatus.indexes?.status === "ready").length;
+  const workerCount = nodes.reduce((sum, nodeStatus) => sum + activeWorkerCount(nodeStatus), 0);
+  const vectorContexts = nodes.reduce((sum, nodeStatus) => sum + activeVectorContextCount(nodeStatus), 0);
+
+  $("cluster-modal-body").innerHTML = `
+    <section class="cluster-hero">
+      <div class="cluster-title-block">
+        <h3>${escapeHtml(config.node?.id || "cluster")}</h3>
+        <p>${escapeHtml(config.node?.url || state.server)}</p>
+        <p>Generated ${escapeHtml(formatDateTime(config.generatedAt))}</p>
+      </div>
+      <div class="cluster-metrics">
+        ${clusterMetric("nodes", `${online}/${nodes.length}`, "online", nodesTone(online, nodes.length))}
+        ${clusterMetric("shards", shards.length, `${coveredShardText(rss.cluster)}`, shards.length ? "ok" : "warn")}
+        ${clusterMetric("peers", peers.length, "configured", peers.length ? "ok" : "warn")}
+        ${clusterMetric("indexes", `${readyIndexes}/${nodes.length}`, "nodes ready", readyIndexes === nodes.length ? "ok" : "warn")}
+        ${clusterMetric("workers", workerCount, "active", workerCount ? "warn" : "ok")}
+        ${clusterMetric("vectors", vectorContexts, "contexts with data", vectorContexts ? "ok" : "")}
+      </div>
+    </section>
+
+    ${renderMemoryDetails(rss)}
+    ${renderShardDetails(shards)}
+    ${renderNodeDetails(nodes)}
+    ${renderIndexDetails(nodes)}
+    ${renderReplicationDetails(nodes)}
+
+    <details class="raw-config">
+      <summary>Raw /api/config payload</summary>
+      <pre>${highlightJson(config)}</pre>
+    </details>
+  `;
+}
+
+function clusterMetric(label, value, sub = "", tone = "") {
+  return `
+    <div class="cluster-metric ${tone}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(sub)}</small>
+    </div>
+  `;
+}
+
+function renderMemoryDetails(rss) {
+  const selectedReplicas = Array.isArray(rss.cluster.selectedReplicas) ? rss.cluster.selectedReplicas : [];
+  return `
+    <section class="cluster-section">
+      <div class="cluster-section-title">
+        <h3>Memory</h3>
+        <span>logical capacity excludes extra replicas</span>
+      </div>
+      <div class="cluster-grid">
+        ${memoryPanel("Logical cluster", rss.cluster, coveredShardText(rss.cluster))}
+        ${memoryPanel("Physical processes", rss.physical, `${rss.physical.onlineNodeCount}/${rss.physical.nodeCount} nodes online`)}
+        ${selectedReplicas.length ? selectedReplicaPanel(selectedReplicas) : ""}
+      </div>
+    </section>
+  `;
+}
+
+function memoryPanel(title, entry, subtitle = "") {
+  const percent = memoryPercent(entry);
+  const tone = memoryTone(percent);
+  return `
+    <div class="cluster-panel">
+      <div class="cluster-panel-head">
+        <strong>${escapeHtml(title)}</strong>
+        <span class="state-text ${tone === "ok" ? "" : tone}">${formatPercent(percent)}</span>
+      </div>
+      ${meterHtml(percent, tone)}
+      <div class="cluster-kv">
+        ${kv("RSS", formatMemory(entry.rss))}
+        ${kv("Capacity", formatMemory(entry.totalMemory))}
+        ${kv("Free", formatMemory(entry.freeMemory))}
+        ${kv("Nodes", `${entry.onlineNodeCount ?? 0}/${entry.nodeCount ?? 0}`)}
+      </div>
+      ${subtitle ? `<div class="cluster-subtle">${escapeHtml(subtitle)}</div>` : ""}
+    </div>
+  `;
+}
+
+function selectedReplicaPanel(replicas) {
+  return `
+    <div class="cluster-panel">
+      <div class="cluster-panel-head">
+        <strong>Logical replicas</strong>
+        <span class="state-text">selected</span>
+      </div>
+      <div class="cluster-list">
+        ${replicas.map((replica) => `
+          <div class="cluster-row">
+            <strong>${escapeHtml(replica.shard || "default")}</strong>
+            <span>${escapeHtml(replica.nodeId || replica.url || "unknown")}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderShardDetails(shards) {
+  return `
+    <section class="cluster-section">
+      <div class="cluster-section-title">
+        <h3>Shards</h3>
+        <span>${shards.length} configured</span>
+      </div>
+      <div class="cluster-grid">
+        ${shards.length ? shards.map(shardPanel).join("") : emptyPanel("No shards configured")}
+      </div>
+    </section>
+  `;
+}
+
+function shardPanel(shard) {
+  const peers = Array.isArray(shard.peers) ? shard.peers : [];
+  const online = peers.filter((peer) => peer.online).length;
+  const tone = nodesTone(online, peers.length);
+  return `
+    <div class="cluster-panel">
+      <div class="cluster-panel-head">
+        <strong>${escapeHtml(shard.name || "default")}</strong>
+        <span class="state-text ${tone === "ok" ? "" : tone}">${online}/${peers.length} online</span>
+      </div>
+      <div class="cluster-list">
+        ${peers.map((peer) => peerRow(peer)).join("") || `<div class="cluster-subtle">No peers assigned.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function peerRow(peer) {
+  const tone = peer.online ? "" : "bad";
+  const label = peer.nodeId || peer.url || peer.key || "unknown";
+  const detail = [
+    peer.self ? "self" : "",
+    peer.rss ? formatMemory(peer.rss) : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <div class="cluster-row">
+      <strong>${escapeHtml(label)}</strong>
+      <span class="state-text ${tone}">${escapeHtml(detail || (peer.online ? "online" : "offline"))}</span>
+    </div>
+  `;
+}
+
+function renderNodeDetails(nodes) {
+  return `
+    <section class="cluster-section">
+      <div class="cluster-section-title">
+        <h3>Nodes</h3>
+        <span>${nodes.length} observed</span>
+      </div>
+      <div class="cluster-grid">
+        ${nodes.length ? nodes.map(nodePanel).join("") : emptyPanel("No node status available")}
+      </div>
+    </section>
+  `;
+}
+
+function nodePanel(nodeStatus) {
+  const name = nodeName(nodeStatus);
   const online = isNodeOnline(nodeStatus);
-  const row = document.createElement("div");
-  row.className = "node-row";
-  row.innerHTML = `
-    <div class="node-main">
-      <span class="dot ${online ? "ok" : "bad"}"></span>
-      <strong></strong>
-      <span class="rss-value"></span>
+  const memory = nodeMemory(nodeStatus);
+  const percent = memoryPercent(memory);
+  const tone = online ? memoryTone(percent) : "bad";
+  const guard = nodeStatus.memoryGuard || {};
+  const processInfo = nodeStatus.process || {};
+  return `
+    <div class="cluster-panel">
+      <div class="cluster-panel-head">
+        <strong>${escapeHtml(name)}</strong>
+        <span class="state-text ${online ? "" : "bad"}">${online ? "online" : "offline"}</span>
+      </div>
+      ${meterHtml(online ? percent : 0, tone)}
+      <div class="cluster-kv">
+        ${kv("RSS", online ? formatMemory(memory.rss) : "offline")}
+        ${kv("Total", online ? formatMemory(memory.totalMemory) : "unknown")}
+        ${kv("Heap", formatMemory(nodeStatus.memory?.heapUsed))}
+        ${kv("Free", formatMemory(memory.freeMemory))}
+        ${kv("Writes", guard.acceptingWrites === false ? "blocked" : "accepting")}
+        ${kv("Uptime", formatDuration(processInfo.uptimeMs))}
+      </div>
+      <div class="cluster-subtle">${escapeHtml(nodeStatus.node?.url || nodeStatus.sourcePeer?.url || "")}</div>
     </div>
-    <div class="node-meta"></div>
-    <div class="index-readiness"></div>
   `;
-  row.querySelector("strong").textContent = nodeName(nodeStatus);
-  row.querySelector(".rss-value").textContent = nodeStatus.memory ? formatMb(nodeStatus.memory.rss) : "offline";
-  row.querySelector(".node-meta").textContent = nodeMeta(nodeStatus);
-  row.querySelector(".index-readiness").replaceWith(renderIndexReadiness(nodeStatus));
-  return row;
 }
 
-function renderIndexReadiness(nodeStatus) {
-  const root = document.createElement("div");
-  root.className = "index-readiness";
-  if (!isNodeOnline(nodeStatus)) return root;
-
-  const indexes = nodeStatus.indexes;
-  if (!indexes) {
-    root.innerHTML = `<div class="index-head"><span class="index-title">Indexes</span><span class="status-chip warn">unavailable</span></div>`;
-    return root;
+function renderIndexDetails(nodes) {
+  const rows = [];
+  for (const nodeStatus of nodes) {
+    const collections = Array.isArray(nodeStatus.indexes?.collections) ? nodeStatus.indexes.collections : [];
+    for (const item of collections) rows.push({ node: nodeName(nodeStatus), ...item });
   }
-
-  const workers = indexes.workers || {};
-  const collections = Array.isArray(indexes.collections) ? indexes.collections : [];
-  const nonReady = collections.filter((entry) => entry.status !== "ready").length;
-  const header = document.createElement("div");
-  header.className = "index-head";
-  header.innerHTML = `
-    <span class="index-title">Indexes ${collections.length}${nonReady ? ` / ${nonReady} pending` : ""}</span>
-    <span class="status-chip ${statusTone(indexes.status)}">${escapeHtml(statusLabel(indexes.status))}</span>
+  return `
+    <section class="cluster-section">
+      <div class="cluster-section-title">
+        <h3>Indexes</h3>
+        <span>${rows.length} collection states</span>
+      </div>
+      <div class="index-table">
+        <div class="index-row header">
+          <span>Context</span><span>Status</span><span>Field indexes</span><span>Column indexes</span><span>Vector</span>
+        </div>
+        ${rows.length ? rows.map(indexRow).join("") : `<div class="cluster-row"><span>No index state available.</span><span></span></div>`}
+      </div>
+    </section>
   `;
-  root.appendChild(header);
-
-  const workerLine = document.createElement("div");
-  workerLine.className = "worker-line";
-  workerLine.appendChild(workerChip("column", workers.columnIndex, "worker"));
-  workerLine.appendChild(workerChip("vector", workers.vectorIndex, "task"));
-  root.appendChild(workerLine);
-
-  const visible = prioritizedIndexCollections(collections).slice(0, 5);
-  if (visible.length) {
-    const list = document.createElement("div");
-    list.className = "index-collections";
-    for (const entry of visible) list.appendChild(renderIndexCollection(entry));
-    if (collections.length > visible.length) {
-      const more = document.createElement("div");
-      more.className = "index-more";
-      more.textContent = `${collections.length - visible.length} more collections`;
-      list.appendChild(more);
-    }
-    root.appendChild(list);
-  }
-
-  return root;
 }
 
-function workerChip(label, worker, fallbackType) {
-  const chip = document.createElement("span");
-  chip.className = "worker-chip";
-  const active = Number(worker?.active) || 0;
-  const type = worker?.type === "worker_thread" ? "thread" : fallbackType;
-  chip.innerHTML = `${escapeHtml(label)} ${escapeHtml(type)} <strong>${active}</strong>`;
-  chip.title = `${label} ${worker?.type || fallbackType}, ${active} active`;
-  return chip;
+function indexRow(item) {
+  const context = `${item.node} · ${item.database || "_"} / ${item.collection || "_"}`;
+  const fields = indexPathList(item.fieldIndexes);
+  const columns = indexPathList(item.columnIndexes, true);
+  const vector = item.vector
+    ? `${statusLabel(item.vector.status)} · ${formatNumber(item.vector.stored)} stored`
+    : "none";
+  return `
+    <div class="index-row">
+      <span class="cluster-context" title="${escapeHtml(context)}">${escapeHtml(context)}</span>
+      <span class="state-text ${item.status === "ready" ? "" : "warn"}">${escapeHtml(statusLabel(item.status))}</span>
+      <span title="${escapeHtml(fields)}">${escapeHtml(fields)}</span>
+      <span title="${escapeHtml(columns)}">${escapeHtml(columns)}</span>
+      <span title="${escapeHtml(vector)}">${escapeHtml(vector)}</span>
+    </div>
+  `;
 }
 
-function renderIndexCollection(entry) {
-  const row = document.createElement("div");
-  row.className = "index-collection";
-  const name = document.createElement("span");
-  name.className = "index-collection-name";
-  name.textContent = `${entry.database}/${entry.collection}`;
-  name.title = name.textContent;
-  row.appendChild(name);
-
-  const field = Array.isArray(entry.fieldIndexes) ? entry.fieldIndexes : [];
-  const columns = Array.isArray(entry.columnIndexes) ? entry.columnIndexes : [];
-  row.appendChild(indexChip(`f ${readyCount(field)}/${field.length}`, statusFromList(field)));
-  row.appendChild(indexChip(`c ${readyCount(columns)}/${columns.length}`, statusFromList(columns)));
-
-  const vector = entry.vector || {};
-  if (vector.stored || vector.indexes || vector.status === "building" || vector.status === "pending" || vector.status === "failed") {
-    row.appendChild(indexChip(`v ${statusLabel(vector.status)}`, vector.status));
-  }
-  return row;
+function renderReplicationDetails(nodes) {
+  return `
+    <section class="cluster-section">
+      <div class="cluster-section-title">
+        <h3>Replication</h3>
+        <span>per node</span>
+      </div>
+      <div class="cluster-grid">
+        ${nodes.length ? nodes.map(replicationPanel).join("") : emptyPanel("No replication status available")}
+      </div>
+    </section>
+  `;
 }
 
-function indexChip(label, status) {
-  const chip = document.createElement("span");
-  chip.className = `index-chip ${statusTone(status)}`;
-  chip.textContent = label;
-  return chip;
+function replicationPanel(nodeStatus) {
+  const replication = nodeStatus.replication || {};
+  const scheduler = replication.scheduler || {};
+  const lastError = scheduler.lastError ? String(scheduler.lastError) : "";
+  return `
+    <div class="cluster-panel">
+      <div class="cluster-panel-head">
+        <strong>${escapeHtml(nodeName(nodeStatus))}</strong>
+        <span class="state-text ${lastError ? "bad" : ""}">${escapeHtml(scheduler.mode || "sync")}</span>
+      </div>
+      <div class="cluster-kv">
+        ${kv("Seq", formatNumber(replication.seq))}
+        ${kv("Trimmed", formatNumber(replication.trimmed))}
+        ${kv("Log", formatNumber(replication.logLength))}
+        ${kv("Batch", formatNumber(replication.syncBatchSize))}
+        ${kv("Pulls", formatNumber(scheduler.pullSyncs))}
+        ${kv("Anti-entropy", formatNumber(scheduler.antiEntropySyncs))}
+        ${kv("Pending hints", formatNumber(scheduler.pendingHintScopes))}
+        ${kv("Inflight", formatNumber(scheduler.inflightPulls))}
+      </div>
+      <div class="cluster-subtle">${escapeHtml(lastError || `last sync ${formatDateTime(scheduler.lastSyncAt)}`)}</div>
+    </div>
+  `;
 }
 
-function prioritizedIndexCollections(collections) {
-  return [...collections].sort((left, right) => {
-    const leftScore = indexCollectionScore(left);
-    const rightScore = indexCollectionScore(right);
-    if (leftScore !== rightScore) return rightScore - leftScore;
-    return `${left.database}/${left.collection}`.localeCompare(`${right.database}/${right.collection}`);
-  });
+function meterHtml(percent, tone = memoryTone(percent)) {
+  const safe = Math.max(0, Math.min(100, Number(percent) || 0));
+  return `<div class="config-meter ${tone === "ok" ? "" : tone}"><span style="--used:${safe}%"></span></div>`;
 }
 
-function indexCollectionScore(entry) {
-  let score = entry.status === "ready" ? 0 : 100;
-  score += (entry.fieldIndexes?.length || 0) + (entry.columnIndexes?.length || 0) * 2;
-  if (entry.vector && (entry.vector.stored || entry.vector.indexes || entry.vector.status !== "ready")) score += 3;
-  return score;
+function kv(label, value) {
+  return `<div><span class="cluster-label">${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "")}</strong></div>`;
 }
 
-function readyCount(indexes) {
-  return indexes.filter((entry) => entry.status === "ready").length;
+function emptyPanel(message) {
+  return `<div class="cluster-panel"><div class="cluster-subtle">${escapeHtml(message)}</div></div>`;
 }
 
-function statusFromList(indexes) {
-  if (!indexes.length) return "ready";
-  if (indexes.some((entry) => entry.status === "error" || entry.status === "failed" || entry.status === "missing")) return "error";
-  if (indexes.some((entry) => entry.status === "building" || entry.status === "pending")) return "building";
-  return "ready";
+function nodeMemory(nodeStatus) {
+  return {
+    rss: nodeStatus.memory?.rss ?? null,
+    totalMemory: nodeStatus.memory?.systemTotal ?? null,
+    freeMemory: nodeStatus.memory?.systemFree ?? null,
+  };
 }
 
-function statusTone(status) {
-  if (status === "ready" || status === "disabled") return "ok";
-  if (status === "building" || status === "pending") return "warn";
-  return "bad";
+function indexPathList(indexes, includePending = false) {
+  if (!Array.isArray(indexes) || !indexes.length) return "none";
+  return indexes.map((index) => {
+    const path = index.path || String(index);
+    const pending = includePending && Number(index.pendingEntries) > 0 ? ` (${formatNumber(index.pendingEntries)} pending)` : "";
+    return `${path}${pending}`;
+  }).join(", ");
+}
+
+function activeWorkerCount(nodeStatus) {
+  const workers = nodeStatus.indexes?.workers || {};
+  return (Number(workers.columnIndex?.active) || 0) + (Number(workers.vectorIndex?.active) || 0);
+}
+
+function activeVectorContextCount(nodeStatus) {
+  const vectors = Array.isArray(nodeStatus.vectors) ? nodeStatus.vectors : [];
+  return vectors.filter((item) => Number(item.stored) > 0 || Number(item.indexes) > 0 || item.status !== "ready").length;
+}
+
+function nodesTone(online, total) {
+  if (!total) return "warn";
+  if (online === total) return "ok";
+  return online > 0 ? "warn" : "bad";
+}
+
+function coveredShardText(cluster) {
+  if (!Number.isFinite(Number(cluster.shardCount))) return "logical";
+  return `${cluster.coveredShardCount ?? 0}/${cluster.shardCount} covered`;
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return number.toLocaleString();
+}
+
+function formatDateTime(value) {
+  if (!value) return "never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function formatDuration(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value <= 0) return "0s";
+  const seconds = Math.floor(value / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 }
 
 function statusLabel(status) {
   return status || "unknown";
 }
 
-function renderShardStatus(shard) {
-  const row = document.createElement("div");
-  row.className = "shard-row";
-  const peers = Array.isArray(shard.peers) ? shard.peers : [];
-  const online = peers.filter((peer) => peer.online).length;
-  row.innerHTML = `
-    <div class="shard-main">
-      <strong></strong>
-      <span class="rss-value">${online}/${peers.length}</span>
-    </div>
-    <div class="shard-peers"></div>
+function topStat(label, value, tone = "", title = "") {
+  const safeTitle = title || `${label}: ${value}`;
+  return `<button type="button" class="top-stat ${tone}" title="${escapeHtml(safeTitle)}" data-open-cluster="true"><span class="stat-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></button>`;
+}
+
+function memoryStat(label, entry, title = "", extraClass = "") {
+  const reachable = entry.reachable !== false;
+  const value = reachable ? memoryUsageText(entry) : "offline";
+  const percent = reachable ? memoryPercent(entry) : 0;
+  const tone = reachable ? memoryTone(percent) : "bad";
+  return `
+    <button type="button" class="top-stat memory-stat ${tone} ${extraClass}" title="${escapeHtml(title || `${label}: ${value}`)}" data-open-cluster="true">
+      <span class="stat-label">${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <span class="memory-meter" style="--used:${percent}%"></span>
+    </button>
   `;
-  row.querySelector("strong").textContent = shard.name || "default";
-  row.querySelector(".shard-peers").textContent = peers.length
-    ? peers.map((peer) => `${peer.online ? "up" : "down"} ${peerName(peer)}${peer.rss ? ` (${formatMb(peer.rss)})` : ""}`).join(" | ")
-    : "no peers";
-  return row;
+}
+
+function configRss(config, nodes) {
+  const apiNodes = Array.isArray(config.rss?.nodes) ? config.rss.nodes : null;
+  const rssNodes = apiNodes || nodes.map((nodeStatus) => ({
+    nodeId: nodeStatus.node?.id || null,
+    url: nodeStatus.node?.url || nodeStatus.sourcePeer?.url || null,
+    local: nodeStatus.local === true,
+    reachable: nodeStatus.reachable !== false,
+    rss: nodeStatus.memory?.rss ?? null,
+    rssMb: nodeStatus.memory?.rssMb ?? null,
+    totalMemory: nodeStatus.memory?.systemTotal ?? null,
+    totalMemoryMb: nodeStatus.memory?.systemTotalMb ?? null,
+    freeMemory: nodeStatus.memory?.systemFree ?? null,
+    freeMemoryMb: nodeStatus.memory?.systemFreeMb ?? null,
+    rssPercent: nodeStatus.memory?.rssSystemPercent ?? null,
+    error: nodeStatus.reachable === false ? nodeStatus.error : undefined,
+  }));
+  const fallbackTotal = rssNodes.reduce((sum, entry) => sum + (Number(entry.rss) || 0), 0);
+  const fallbackMemory = rssNodes.reduce((sum, entry) => sum + (Number(entry.totalMemory) || 0), 0);
+  const fallbackFree = rssNodes.reduce((sum, entry) => sum + (Number(entry.freeMemory) || 0), 0);
+  const cluster = config.rss?.logical || config.rss?.cluster || {};
+  const physical = config.rss?.physical || config.rss?.cluster || {};
+  return {
+    cluster: clusterMemory(cluster, rssNodes, { fallbackTotal, fallbackMemory, fallbackFree }),
+    physical: clusterMemory(physical, rssNodes, { fallbackTotal, fallbackMemory, fallbackFree }),
+    nodes: rssNodes,
+  };
+}
+
+function clusterMemory(cluster, rssNodes, fallback) {
+  const { fallbackTotal, fallbackMemory, fallbackFree } = fallback;
+  return {
+    ...cluster,
+    rss: Number.isFinite(Number(cluster.rss)) ? Number(cluster.rss) : fallbackTotal,
+    rssMb: Number.isFinite(Number(cluster.rssMb)) ? Number(cluster.rssMb) : fallbackTotal / 1024 / 1024,
+    totalMemory: Number.isFinite(Number(cluster.totalMemory)) ? Number(cluster.totalMemory) : fallbackMemory,
+    totalMemoryMb: Number.isFinite(Number(cluster.totalMemoryMb)) ? Number(cluster.totalMemoryMb) : fallbackMemory / 1024 / 1024,
+    freeMemory: Number.isFinite(Number(cluster.freeMemory)) ? Number(cluster.freeMemory) : fallbackFree,
+    freeMemoryMb: Number.isFinite(Number(cluster.freeMemoryMb)) ? Number(cluster.freeMemoryMb) : fallbackFree / 1024 / 1024,
+    rssPercent: Number.isFinite(Number(cluster.rssPercent)) ? Number(cluster.rssPercent) : memoryPercent({ rss: fallbackTotal, totalMemory: fallbackMemory }),
+    nodeCount: Number.isInteger(cluster.nodeCount) ? cluster.nodeCount : rssNodes.length,
+    onlineNodeCount: Number.isInteger(cluster.onlineNodeCount) ? cluster.onlineNodeCount : rssNodes.filter((entry) => entry.reachable).length,
+    offlineNodeCount: Number.isInteger(cluster.offlineNodeCount) ? cluster.offlineNodeCount : rssNodes.filter((entry) => !entry.reachable).length,
+  };
+}
+
+function rssClusterTitle(rss) {
+  const cluster = rss.cluster;
+  const physical = rss.physical;
+  const shards = Number.isFinite(Number(cluster.shardCount))
+    ? `; shards ${cluster.coveredShardCount}/${cluster.shardCount}`
+    : "";
+  return `Logical RSS ${formatMemory(cluster.rss)} of ${formatMemory(cluster.totalMemory)} (${formatPercent(memoryPercent(cluster))})${shards}; physical ${formatMemory(physical.rss)} of ${formatMemory(physical.totalMemory)}; ${physical.onlineNodeCount}/${physical.nodeCount} nodes online`;
+}
+
+function rssNodeTitle(entry) {
+  const name = entry.nodeId || entry.url || "unknown";
+  return entry.reachable
+    ? `${name}: ${formatMemory(entry.rss)} RSS of ${formatMemory(entry.totalMemory)} (${formatPercent(memoryPercent(entry))}); free ${formatMemory(entry.freeMemory)}`
+    : `${name}: offline${entry.error ? ` (${entry.error})` : ""}`;
+}
+
+function rssNodeLabel(entry) {
+  const label = entry.nodeId || entry.url || "node";
+  const clean = String(label).replace(/^https?:\/\//, "");
+  return clean.length > 18 ? `${clean.slice(0, 15)}...` : clean;
+}
+
+function memoryUsageText(entry) {
+  const total = Number(entry.totalMemory);
+  if (!Number.isFinite(total) || total <= 0) return formatMemory(entry.rss);
+  return `${formatMemory(entry.rss)} / ${formatMemory(total)}`;
+}
+
+function memoryPercent(entry) {
+  const value = Number(entry.rss);
+  const total = Number(entry.totalMemory);
+  if (!Number.isFinite(value) || !Number.isFinite(total) || total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((value / total) * 1000) / 10));
+}
+
+function memoryTone(percent) {
+  if (percent >= 90) return "bad";
+  if (percent >= 75) return "warn";
+  return "ok";
+}
+
+function formatPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0%";
+  return `${number.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+}
+
+function clusterTitle({ nodes, shards, peers }) {
+  return [
+    nodeMemoryTitle(nodes),
+    shardTitle(shards),
+    `${peers.length} configured peers`,
+    indexTitle(nodes),
+  ].filter(Boolean).join("\n");
+}
+
+function nodeMemoryTitle(nodes) {
+  if (!nodes.length) return "No nodes";
+  return nodes.map((nodeStatus) => `${nodeName(nodeStatus)}: ${nodeStatus.memory ? formatMemory(nodeStatus.memory.rss) : "offline"}`).join("\n");
+}
+
+function shardTitle(shards) {
+  if (!shards.length) return "No shards";
+  return shards.map((shard) => {
+    const peers = Array.isArray(shard.peers) ? shard.peers : [];
+    const online = peers.filter((peer) => peer.online).length;
+    return `${shard.name || "default"}: ${online}/${peers.length} peers online`;
+  }).join("\n");
+}
+
+function indexTitle(nodes) {
+  if (!nodes.length) return "No index status";
+  return nodes.map((nodeStatus) => `${nodeName(nodeStatus)}: ${statusLabel(nodeStatus.indexes?.status)}`).join("\n");
 }
 
 function isNodeOnline(nodeStatus) {
@@ -1833,23 +2478,12 @@ function nodeName(nodeStatus) {
   return nodeStatus.node?.id || nodeStatus.node?.url || nodeStatus.sourcePeer?.url || "unknown";
 }
 
-function nodeMeta(nodeStatus) {
-  if (!isNodeOnline(nodeStatus)) return nodeStatus.error || "unreachable";
-  const shards = Array.isArray(nodeStatus.ownedShards) && nodeStatus.ownedShards.length
-    ? nodeStatus.ownedShards.join(", ")
-    : "no owned shards";
-  const seq = Number.isFinite(nodeStatus.replication?.seq) ? `seq ${nodeStatus.replication.seq}` : "seq n/a";
-  return `${shards} | ${seq}`;
-}
-
-function peerName(peer) {
-  return peer.nodeId || peer.url || peer.key || "unknown";
-}
-
-function formatMb(bytes) {
+function formatMemory(bytes) {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value <= 0) return "0 MiB";
-  return `${(value / 1024 / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
+  const mib = value / 1024 / 1024;
+  if (mib >= 1024) return `${(mib / 1024).toLocaleString(undefined, { maximumFractionDigits: 2 })} GiB`;
+  return `${mib.toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
 }
 
 function pickFirstCollection() {
@@ -1874,19 +2508,29 @@ function renderTree() {
     return;
   }
 
+  for (const db of [...state.collapsedDbs]) {
+    if (!state.tree[db]) state.collapsedDbs.delete(db);
+  }
+
   root.innerHTML = "";
   for (const db of dbs) {
     const block = document.createElement("div");
     block.className = "db-block";
+    const collapsed = state.collapsedDbs.has(db);
 
     const dbRow = document.createElement("button");
     dbRow.className = "db-row";
     dbRow.type = "button";
-    dbRow.innerHTML = `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="db-name"></span><span class="count-chip"></span>`;
+    dbRow.setAttribute("aria-expanded", String(!collapsed));
+    dbRow.innerHTML = `<svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="db-name"></span><span class="count-chip"></span>`;
     dbRow.querySelector(".db-name").textContent = db;
     dbRow.querySelector(".count-chip").textContent = String((state.tree[db] || []).length);
+    dbRow.addEventListener("click", () => toggleDatabase(db));
     block.appendChild(dbRow);
 
+    const list = document.createElement("div");
+    list.className = "coll-list";
+    list.hidden = collapsed;
     for (const collection of [...(state.tree[db] || [])].sort()) {
       const active = state.active?.db === db && state.active?.collection === collection;
       const row = document.createElement("button");
@@ -1895,13 +2539,21 @@ function renderTree() {
       row.innerHTML = `<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg><span class="coll-name"></span>`;
       row.querySelector(".coll-name").textContent = collection;
       row.addEventListener("click", () => selectCollection(db, collection));
-      block.appendChild(row);
+      list.appendChild(row);
     }
+    block.appendChild(list);
     root.appendChild(block);
   }
 }
 
+function toggleDatabase(db) {
+  if (state.collapsedDbs.has(db)) state.collapsedDbs.delete(db);
+  else state.collapsedDbs.add(db);
+  renderTree();
+}
+
 async function selectCollection(db, collection) {
+  state.collapsedDbs.delete(db);
   state.active = { db, collection };
   state.selected = null;
   state.collectionMeta = null;
@@ -1982,7 +2634,7 @@ async function loadObjects({ selectId = null } = {}) {
   renderObjects();
   const selected = selectId === null
     ? null
-    : state.objects.find((object) => String(object.id) === String(selectId));
+    : state.objects.find((object) => String(object._id) === String(selectId));
   if (selected) showObject(selected);
   else if (state.objects.length) showObject(state.objects[0]);
   else renderDetail(null);
@@ -2004,12 +2656,12 @@ function renderObjects() {
   for (const object of state.objects) {
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "object-card" + (state.selected?.id === object.id ? " active" : "");
+    card.className = "object-card" + (state.selected?._id === object._id ? " active" : "");
     card.innerHTML = `
       <div class="object-id"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg><span></span></div>
       <div class="object-preview"></div>
     `;
-    card.querySelector(".object-id span").textContent = object.id;
+    card.querySelector(".object-id span").textContent = object._id || "";
     card.querySelector(".object-preview").textContent = previewObject(object);
     card.addEventListener("click", () => showObject(object));
     root.appendChild(card);
@@ -2017,7 +2669,7 @@ function renderObjects() {
 }
 
 function previewObject(object) {
-  const entries = Object.entries(object || {}).filter(([key]) => key !== "id").slice(0, 4);
+  const entries = Object.entries(object || {}).filter(([key]) => key !== "_id").slice(0, 4);
   if (!entries.length) return "{}";
   return entries.map(([key, value]) => `${key}: ${shortValue(value)}`).join(", ");
 }
@@ -2034,14 +2686,14 @@ function showObject(object) {
 }
 
 async function reloadObject() {
-  if (!state.active || !state.selected?.id) return;
-  const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, `/${enc(state.selected.id)}`));
+  if (!state.active || !state.selected?._id) return;
+  const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, `/${enc(state.selected._id)}`));
   if (!result.ok) return showToast(result.body?.error || "Could not reload object", true);
   showObject(result.body);
 }
 
 function renderDetail(object) {
-  $("detail-title").textContent = object?.id ? `Object ${object.id}` : "Object";
+  $("detail-title").textContent = object?._id ? `Object ${object._id}` : "Object";
   renderActionState();
   if (!object) {
     $("detail").innerHTML = `<div class="empty">Select an object.</div>`;
@@ -2076,10 +2728,10 @@ function formatQuery() {
 }
 
 async function copySelectedId() {
-  if (!state.selected?.id) return;
+  if (!state.selected?._id) return;
   try {
-    await navigator.clipboard.writeText(state.selected.id);
-    showToast("Object id copied");
+    await navigator.clipboard.writeText(state.selected._id);
+    showToast("Object _id copied");
   } catch {
     showToast("Clipboard unavailable", true);
   }
@@ -2161,8 +2813,8 @@ function openObjectModal(mode) {
   $("object-id").disabled = mode === "edit";
 
   if (mode === "edit") {
-    if (!state.selected?.id) return showToast("Select an object first", true);
-    $("object-id").value = state.selected.id;
+    if (!state.selected?._id) return showToast("Select an object first", true);
+    $("object-id").value = state.selected._id;
     setJsonField("object-json", state.selected);
   } else {
     $("object-id").value = "";
@@ -2178,12 +2830,12 @@ async function saveObject() {
   if (!parsed.ok) return setModalError("object-modal", parsed.error);
 
   if (state.objectMode === "edit") {
-    if (!state.selected?.id) return setModalError("object-modal", "Selected object is missing");
+    if (!state.selected?._id) return setModalError("object-modal", "Selected object is missing");
     if (!isPlainObject(parsed.value)) return setModalError("object-modal", "Object JSON must be a plain object");
-    const id = state.selected.id;
+    const id = state.selected._id;
     const result = await apiFetch("PUT", objectPath(state.active.db, state.active.collection, `/${enc(id)}`), {
       ...parsed.value,
-      id,
+      _id: id,
     });
     if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
     closeModal("object-modal");
@@ -2195,32 +2847,32 @@ async function saveObject() {
   const explicitId = $("object-id").value.trim();
   let body = parsed.value;
   if (Array.isArray(body)) {
-    if (explicitId) return setModalError("object-modal", "Object ID is only for single-object inserts");
+    if (explicitId) return setModalError("object-modal", "Object _id is only for single-object inserts");
     const badIndex = body.findIndex((item) => !isPlainObject(item));
     if (badIndex >= 0) return setModalError("object-modal", `Item at index ${badIndex} must be a plain object`);
   } else if (explicitId) {
-    body = { ...body, id: explicitId };
+    body = { ...body, _id: explicitId };
   }
 
   const result = await apiFetch("POST", objectPath(state.active.db, state.active.collection), body);
   if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
-  const newId = Array.isArray(body) ? result.body?.items?.[0]?.id : result.body?.id;
+  const newId = Array.isArray(body) ? result.body?.items?.[0]?._id : result.body?._id;
   closeModal("object-modal");
   showToast(Array.isArray(body) ? `${result.body?.inserted ?? body.length} objects added` : "Object added");
   await loadObjects({ selectId: newId || null });
 }
 
 function openDeleteObjectModal() {
-  if (!state.selected?.id) return showToast("Select an object first", true);
+  if (!state.selected?._id) return showToast("Select an object first", true);
   clearModalError("delete-object-modal");
-  $("delete-object-name").textContent = state.selected.id;
+  $("delete-object-name").textContent = state.selected._id;
   openModal("delete-object-modal", "delete-object-confirm");
 }
 
 async function deleteSelectedObject() {
-  if (!state.active || !state.selected?.id) return;
+  if (!state.active || !state.selected?._id) return;
   clearModalError("delete-object-modal");
-  const id = state.selected.id;
+  const id = state.selected._id;
   const result = await apiFetch("DELETE", objectPath(state.active.db, state.active.collection, `/${enc(id)}`));
   if (!result.ok) return setModalError("delete-object-modal", result.body?.error || "Could not delete object");
   closeModal("delete-object-modal");
@@ -2328,12 +2980,7 @@ function showToast(message, bad = false) {
   toastTimer = setTimeout(() => { el.className = "toast"; }, 2600);
 }
 
-$("server").addEventListener("input", () => {
-  state.server = $("server").value.trim().replace(/\/+$/, "") || defaultServer();
-  state.apiDocs = null;
-  state.apiDocsSource = "";
-  saveSession();
-});
+$("server-label").addEventListener("click", editServer);
 $("health-btn").addEventListener("click", checkHealth);
 $("api-docs-btn").addEventListener("click", openApiDocs);
 $("login-btn").addEventListener("click", login);
@@ -2342,6 +2989,9 @@ $("renew-btn").addEventListener("click", () => renewToken());
 $("logout-btn").addEventListener("click", () => clearSession());
 $("refresh-tree-btn").addEventListener("click", loadTree);
 $("refresh-cluster-btn").addEventListener("click", loadClusterStatus);
+$("cluster-status").addEventListener("click", (event) => {
+  if (event.target.closest("[data-open-cluster]")) openClusterStatsModal();
+});
 $("add-db-btn").addEventListener("click", openDatabaseModal);
 $("add-coll-btn").addEventListener("click", openCollectionModal);
 $("edit-meta-btn").addEventListener("click", openMetaModal);

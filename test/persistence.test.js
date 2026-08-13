@@ -33,8 +33,8 @@ test("local WAL restores acknowledged writes before S3 journal flush", async () 
   try {
     persistence.start();
     node.insertMany("app", "events", [
-      { id: "e1", value: 1 },
-      { id: "e2", value: 2 },
+      { _id: "e1", value: 1 },
+      { _id: "e2", value: 2 },
     ]);
     const flushed = await persistence.afterWrite();
 
@@ -54,8 +54,8 @@ test("local WAL restores acknowledged writes before S3 journal flush", async () 
     }).restore();
 
     assert.equal(restored.localWalOps, 2);
-    assert.deepEqual(fresh.get("app", "events", "e1"), { id: "e1", value: 1 });
-    assert.deepEqual(fresh.get("app", "events", "e2"), { id: "e2", value: 2 });
+    assert.deepEqual(fresh.get("app", "events", "e1"), { _id: "e1", value: 1 });
+    assert.deepEqual(fresh.get("app", "events", "e2"), { _id: "e2", value: 2 });
   } finally {
     await persistence.stop().catch(() => {});
     rmSync(dir, { recursive: true, force: true });
@@ -68,7 +68,7 @@ test("journaled writes restore by database, collection, and shard", async () => 
   const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
   persistence.start();
 
-  node.insert("app", "users", { id: "u1", name: "Ada" });
+  node.insert("app", "users", { _id: "u1", name: "Ada" });
   node.update("app", "users", "u1", { active: true });
   await persistence.stop();
 
@@ -78,7 +78,7 @@ test("journaled writes restore by database, collection, and shard", async () => 
   const fresh = new CRDTNode({ id: "n1" });
   const restored = await new PersistenceManager({ node: fresh, storage }).restore();
   assert.equal(restored.journalOps, 2);
-  assert.deepEqual(fresh.get("app", "users", "u1"), { id: "u1", name: "Ada", active: true });
+  assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada", active: true });
   assert.equal(fresh.seq, 2);
   assert.equal(fresh.trimmed, 2);
 });
@@ -88,8 +88,8 @@ test("snapshots restore full objects and tombstones", async () => {
   const node = new CRDTNode({ id: "n1" });
   const persistence = new PersistenceManager({ node, storage, segmentBytes: 1024 });
 
-  node.insert("app", "users", { id: "u1", name: "Ada" });
-  node.insert("app", "users", { id: "u2", name: "Grace" });
+  node.insert("app", "users", { _id: "u1", name: "Ada" });
+  node.insert("app", "users", { _id: "u2", name: "Grace" });
   node.remove("app", "users", "u1");
   const written = await persistence.checkpoint();
 
@@ -101,13 +101,13 @@ test("snapshots restore full objects and tombstones", async () => {
   const restored = await new PersistenceManager({ node: fresh, storage }).restore();
   assert.equal(restored.snapshots, 1);
   assert.equal(fresh.get("app", "users", "u1"), undefined);
-  assert.deepEqual(fresh.get("app", "users", "u2"), { id: "u2", name: "Grace" });
+  assert.deepEqual(fresh.get("app", "users", "u2"), { _id: "u2", name: "Grace" });
 });
 
 test("restore seeds replication cursors from persisted source nodes", async () => {
   const snapshotStorage = new MemoryObjectStorage();
   const snapshotWriter = new CRDTNode({ id: "snapshot-writer" });
-  snapshotWriter.insert("app", "events", { id: "e1", value: 1 });
+  snapshotWriter.insert("app", "events", { _id: "e1", value: 1 });
   await new PersistenceManager({ node: snapshotWriter, storage: snapshotStorage }).checkpoint();
 
   const snapshotReplica = new CRDTNode({ id: "snapshot-replica" });
@@ -121,7 +121,7 @@ test("restore seeds replication cursors from persisted source nodes", async () =
   const journalWriter = new CRDTNode({ id: "journal-writer" });
   const journalPersistence = new PersistenceManager({ node: journalWriter, storage: journalStorage, flushMs: 0, snapshotMs: 0 });
   journalPersistence.start();
-  journalWriter.insert("app", "events", { id: "e1", value: 1 });
+  journalWriter.insert("app", "events", { _id: "e1", value: 1 });
   journalWriter.update("app", "events", "e1", { value: 2 });
   await journalPersistence.stop();
 
@@ -145,7 +145,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
     indexes: ["status"],
     owner: "events-team",
   });
-  node.insert("app", "orders", { id: "o1", status: "paid", amount: 10 });
+  node.insert("app", "orders", { _id: "o1", status: "paid", amount: 10 });
   await persistence.stop();
 
   const rawMeta = await storage.get("spread-db/db/app/collection/orders/meta.json");
@@ -173,11 +173,11 @@ test("collection metadata persists outside shard snapshots and restores indexes"
     columnIndexes: [],
     owner: "events-team",
   });
-  assert.deepEqual(fresh.get("app", "orders", "o1"), { id: "o1", status: "paid", amount: 10 });
+  assert.deepEqual(fresh.get("app", "orders", "o1"), { _id: "o1", status: "paid", amount: 10 });
   assert.equal(fresh.indexStats("app", "orders")[0].entries, 1);
   assert.equal(fresh.indexStats("app", "orders")[0].orderedEntries, 1);
   assert.deepEqual(
-    fresh.find("app", "orders", {}, { sortBy: "status", limit: 1 }).map((order) => order.id),
+    fresh.find("app", "orders", {}, { sortBy: "status", limit: 1 }).map((order) => order._id),
     ["o1"],
   );
 });
@@ -189,7 +189,7 @@ test("collection removal deletes the persisted collection prefix", async () => {
   persistence.start();
 
   node.createCollection("app", "orders", { indexes: ["status"] });
-  node.insert("app", "orders", { id: "o1", status: "paid" });
+  node.insert("app", "orders", { _id: "o1", status: "paid" });
   await persistence.checkpoint();
   assert.ok(await storage.get("spread-db/db/app/collection/orders/meta.json"));
   assert.ok((await storage.list("spread-db/db/app/collection/orders/")).length > 0);
@@ -211,7 +211,7 @@ test("checkpoints are partitioned per object shard", async () => {
   const persistence = new PersistenceManager({ node, storage, segmentBytes: 2048 });
 
   for (let i = 0; i < 100; i++) {
-    node.insert("app", "events", { id: `event-${i}`, kind: i % 5, value: i });
+    node.insert("app", "events", { _id: `event-${i}`, kind: i % 5, value: i });
   }
 
   const written = await persistence.checkpoint();
@@ -248,7 +248,7 @@ test("failed journal flush is kept pending and can be retried", async () => {
   const node = new CRDTNode({ id: "n1" });
   const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
   persistence.start();
-  node.insert("app", "users", { id: "u1", name: "Ada" });
+  node.insert("app", "users", { _id: "u1", name: "Ada" });
 
   await assert.rejects(() => persistence.flush(), /temporary S3 failure/);
   assert.equal(persistence.getStats().pendingOps, 1);
@@ -256,7 +256,7 @@ test("failed journal flush is kept pending and can be retried", async () => {
 
   const fresh = new CRDTNode({ id: "fresh" });
   await new PersistenceManager({ node: fresh, storage }).restore();
-  assert.deepEqual(fresh.get("app", "users", "u1"), { id: "u1", name: "Ada" });
+  assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada" });
 });
 
 test("checkpoint compacts journal segments for the snapshotted scope", async () => {
@@ -265,8 +265,8 @@ test("checkpoint compacts journal segments for the snapshotted scope", async () 
   const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
   persistence.start();
 
-  node.insert("app", "users", { id: "u1", name: "Ada" });
-  node.insert("app", "users", { id: "u2", name: "Grace" });
+  node.insert("app", "users", { _id: "u1", name: "Ada" });
+  node.insert("app", "users", { _id: "u2", name: "Grace" });
   await persistence.flush();
 
   const journalPrefix = "spread-db/db/app/collection/users/shard/default/journal/";
@@ -281,6 +281,104 @@ test("checkpoint compacts journal segments for the snapshotted scope", async () 
   assert.equal(fresh.count("app", "users"), 2);
 });
 
+test("snapshot retention prunes old snapshot folders but keeps latest restore pointer", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({
+    node,
+    storage,
+    snapshotRetention: { keepLatest: 2 },
+  });
+
+  node.insert("app", "users", { _id: "u1", version: 1 });
+  const first = await persistence.checkpoint();
+  node.update("app", "users", "u1", { version: 2 });
+  const second = await persistence.checkpoint();
+  node.update("app", "users", "u1", { version: 3 });
+  const third = await persistence.checkpoint();
+
+  const snapshotPrefix = "spread-db/db/app/collection/users/shard/default/snapshots/";
+  const keys = await storage.list(snapshotPrefix);
+  assert.equal(keys.some((key) => key.includes(`/${first.id}/`)), false);
+  assert.ok(keys.some((key) => key.includes(`/${second.id}/`)));
+  assert.ok(keys.some((key) => key.includes(`/${third.id}/`)));
+
+  const latest = JSON.parse(await storage.get("spread-db/db/app/collection/users/shard/default/latest.json"));
+  assert.equal(latest.id, third.id);
+});
+
+test("journal retention keeps incremental history without replaying covered journal segments", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({
+    node,
+    storage,
+    flushMs: 0,
+    snapshotMs: 0,
+    journalRetention: { keepLatest: 10 },
+  });
+  persistence.start();
+
+  node.insert("app", "users", { _id: "u1", version: 1 });
+  await persistence.flush();
+  const checkpoint = await persistence.checkpoint();
+  assert.ok(checkpoint.id);
+
+  const journalPrefix = "spread-db/db/app/collection/users/shard/default/journal/";
+  assert.equal((await storage.list(journalPrefix)).length, 1);
+
+  node.update("app", "users", "u1", { version: 2 });
+  await persistence.flush();
+  assert.equal((await storage.list(journalPrefix)).length, 2);
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  const restored = await new PersistenceManager({ node: fresh, storage }).restore();
+  assert.equal(restored.snapshots, 1);
+  assert.equal(restored.journalOps, 1);
+  assert.equal(restored.skippedJournals, 1);
+  assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", version: 2 });
+});
+
+test("restore can target a retained checkpoint id", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({
+    node,
+    storage,
+    flushMs: 0,
+    snapshotMs: 0,
+    journalRetention: { keepLatest: 10 },
+    snapshotRetention: { keepLatest: 5 },
+  });
+  persistence.start();
+
+  node.createCollection("app", "users", { indexes: ["version"] });
+  node.insert("app", "users", { _id: "u1", version: 1 });
+  await persistence.flush();
+  const first = await persistence.checkpoint();
+  node.update("app", "users", "u1", { version: 2 });
+  node.setCollectionMeta("app", "users", { indexes: [] });
+  await persistence.flush();
+  const second = await persistence.checkpoint();
+
+  const latest = new CRDTNode({ id: "latest" });
+  await new PersistenceManager({ node: latest, storage }).restore();
+  assert.deepEqual(latest.get("app", "users", "u1"), { _id: "u1", version: 2 });
+
+  const earlier = new CRDTNode({ id: "earlier" });
+  await new PersistenceManager({
+    node: earlier,
+    storage,
+    restoreSnapshotId: first.id,
+  }).restore();
+  assert.notEqual(first.id, second.id);
+  assert.deepEqual(earlier.get("app", "users", "u1"), { _id: "u1", version: 1 });
+  assert.deepEqual(earlier.getCollectionMeta("app", "users"), {
+    indexes: ["version"],
+    columnIndexes: [],
+  });
+});
+
 test("automatic checkpoints are dirty-only and primary-only", async () => {
   const shardMap = shardMapFor(["events-0"], {
     "events-0": [{ url: "http://node-a" }, { url: "http://node-b" }],
@@ -291,7 +389,7 @@ test("automatic checkpoints are dirty-only and primary-only", async () => {
   primary.replaceShardMap(shardMap);
   const primaryPersistence = new PersistenceManager({ node: primary, storage: primaryStorage, flushMs: 0, snapshotMs: 0 });
   primaryPersistence.start();
-  primary.insert("app", "events", { id: "e1", value: 1 });
+  primary.insert("app", "events", { _id: "e1", value: 1 });
 
   const first = await primaryPersistence.checkpoint({ automatic: true });
   assert.equal(first.scopes, 1);
@@ -307,7 +405,7 @@ test("automatic checkpoints are dirty-only and primary-only", async () => {
   secondary.replaceShardMap(shardMap);
   const secondaryPersistence = new PersistenceManager({ node: secondary, storage: secondaryStorage, flushMs: 0, snapshotMs: 0 });
   secondaryPersistence.start();
-  secondary.insert("app", "events", { id: "e1", value: 1 });
+  secondary.insert("app", "events", { _id: "e1", value: 1 });
 
   const skipped = await secondaryPersistence.checkpoint({ automatic: true });
   assert.equal(skipped.scopes, 0);
@@ -327,7 +425,7 @@ test("restore only hydrates shards owned by an explicitly scoped replica", async
   writer.replaceShardMap(shardMapFor(["events-0", "events-1"]));
 
   for (let i = 0; i < 200; i++) {
-    writer.insert("app", "events", { id: `event-${i}`, value: i });
+    writer.insert("app", "events", { _id: `event-${i}`, value: i });
   }
   await new PersistenceManager({ node: writer, storage, segmentBytes: 2048 }).checkpoint();
 
@@ -341,7 +439,7 @@ test("restore only hydrates shards owned by an explicitly scoped replica", async
 
   const expectedScoped = writer
     .list("app", "events")
-    .filter((object) => writer.shardForObject("app", "events", object.id) === "events-0")
+    .filter((object) => writer.shardForObject("app", "events", object._id) === "events-0")
     .length;
   assert.equal(scoped.count("app", "events"), expectedScoped);
 
@@ -366,7 +464,7 @@ test("restore and checkpoint use node url ownership when a full global map is lo
   writer.replaceShardMap(shardMap);
 
   for (let i = 0; i < 200; i++) {
-    writer.insert("app", "events", { id: `event-${i}`, value: i });
+    writer.insert("app", "events", { _id: `event-${i}`, value: i });
   }
   await new PersistenceManager({ node: writer, storage, segmentBytes: 2048 }).checkpoint();
 
@@ -376,7 +474,7 @@ test("restore and checkpoint use node url ownership when a full global map is lo
 
   const expected = writer
     .list("app", "events")
-    .filter((object) => writer.shardForObject("app", "events", object.id) === "shard-0");
+    .filter((object) => writer.shardForObject("app", "events", object._id) === "shard-0");
   assert.equal(restored.snapshots, 1);
   assert.equal(owned.count("app", "events"), expected.length);
 
@@ -395,7 +493,7 @@ test("planned reshard restore redistributes old shard snapshots and journals thr
   persistence.start();
 
   for (let i = 0; i < 300; i++) {
-    oldWriter.insert("app", "events", { id: `event-${i}`, value: i, version: 0 });
+    oldWriter.insert("app", "events", { _id: `event-${i}`, value: i, version: 0 });
   }
   await persistence.checkpoint();
 

@@ -2,16 +2,43 @@
 
 HTTP API for the default public spread-db interface.
 
-Examples use `http://localhost:8080`. In a cluster, public `/api` requests may hit any public node; the node routes object operations to the owning shard when needed.
+Examples use `{URL}` as the base URL. In a cluster, public `/api` requests may hit any public node; the node routes object operations to the owning shard when needed.
 
-## Concepts
+## Context
 
-**Database, Collection, Object**
-
-Data is separated as `database / collection / object`. Object endpoints always include the database and collection in the URL:
+spread-db stores data in three contexts: `database / collection / object`. Object endpoints always include the database and collection:
 
 ```text
-http://localhost:8080/api/{db}/{collection}/object/{id}
+{URL}/api/{db}/{collection}/object/{_id}
+```
+
+**Database**
+
+A database is the top-level namespace. It separates application or customer data from other databases. Database names are part of every collection and object URL. The built-in `_global` database is used for the default global admin user.
+
+**Collection**
+
+A collection is a named group of objects inside one database. Collections are dynamic; they do not require a schema before objects are inserted.
+
+Each collection also has a small `meta` JavaScript object. It is kept in memory and persisted separately from object data. Custom keys are allowed, and these built-in keys affect query planning:
+
+```json
+{
+  "indexes": ["status", "tenantId"],
+  "columnIndexes": ["score"]
+}
+```
+
+**Object**
+
+Objects are plain dynamic JSON-style records. They can have different shapes in the same collection, and values can be strings, numbers, booleans, arrays, nested objects, or `null`.
+
+Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact URL-safe id. `PUT` replaces the full object, `PATCH` merges fields, and `DELETE` creates a replicated delete. Special fields such as `_vec` are handled by storage features and are hidden from normal read responses.
+
+Public object routes use this shape:
+
+```text
+{URL}/api/{db}/{collection}/object/{_id}
 ```
 
 **Authentication**
@@ -31,17 +58,6 @@ Content-Type: application/json
 ```
 
 Passwords are hashed on write and redacted from responses.
-
-**Collection Meta**
-
-Every collection has a small metadata object. It is kept in memory and persisted with the rest of the database metadata. It can contain custom keys, but these keys have built-in behavior:
-
-```json
-{
-  "indexes": ["status", "tenantId"],
-  "columnIndexes": ["score"]
-}
-```
 
 **Field Indexes**
 
@@ -76,7 +92,7 @@ Reads expand references by default with `$refDepth=1`, adding an `object` field.
 Request:
 
 ```http
-POST http://localhost:8080/api/_global/users/auth
+POST {URL}/api/_global/users/auth
 Content-Type: application/json
 
 {
@@ -89,7 +105,7 @@ Response:
 
 ```json
 {
-  "user": { "id": "admin", "username": "admin", "role": "admin" },
+  "user": { "_id": "admin", "username": "admin", "role": "admin" },
   "accessToken": "...",
   "refreshToken": "...",
   "expiresIn": 900
@@ -101,7 +117,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/_global/users/renew
+POST {URL}/api/_global/users/renew
 Content-Type: application/json
 
 {
@@ -113,7 +129,7 @@ Response:
 
 ```json
 {
-  "user": { "id": "admin", "username": "admin", "role": "admin" },
+  "user": { "_id": "admin", "username": "admin", "role": "admin" },
   "accessToken": "...",
   "refreshToken": "...",
   "expiresIn": 900
@@ -129,7 +145,7 @@ Refresh tokens must be renewed against the same database and collection they wer
 Request:
 
 ```http
-GET http://localhost:8080/api/databases
+GET {URL}/api/databases
 Authorization: Bearer <accessToken>
 ```
 
@@ -146,7 +162,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/databases
+POST {URL}/api/databases
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -171,7 +187,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/databases
+POST {URL}/api/databases
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -195,7 +211,7 @@ Response:
   "adminUser": {
     "collection": "users",
     "user": {
-      "id": "generated-id",
+      "_id": "mHzQzLE6k9P9s6b2",
       "username": "owner",
       "admin": true
     }
@@ -212,7 +228,7 @@ If `adminUser.collection` is omitted, `users` is used. The users collection rece
 Request:
 
 ```http
-GET http://localhost:8080/api/{db}/collections
+GET {URL}/api/{db}/collections
 Authorization: Bearer <accessToken>
 ```
 
@@ -230,7 +246,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/collections
+POST {URL}/api/{db}/collections
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -261,7 +277,7 @@ You may also send `{ "name": "{collection}", "meta": { ... } }`.
 Request:
 
 ```http
-GET http://localhost:8080/api/{db}/{collection}/meta
+GET {URL}/api/{db}/{collection}/meta
 Authorization: Bearer <accessToken>
 ```
 
@@ -279,7 +295,7 @@ Response:
 Request:
 
 ```http
-PUT http://localhost:8080/api/{db}/{collection}/meta
+PUT {URL}/api/{db}/{collection}/meta
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -305,7 +321,7 @@ Changing `indexes` or `columnIndexes` rebuilds indexes in the background.
 Request:
 
 ```http
-DELETE http://localhost:8080/api/{db}/collections/{collection}
+DELETE {URL}/api/{db}/collections/{collection}
 Authorization: Bearer <accessToken>
 ```
 
@@ -317,19 +333,19 @@ HTTP/1.1 204 No Content
 
 ## Objects
 
-Every object has an `id`. If `id` is omitted on insert, the server generates one. Single operations and bulk operations use the same base route.
+Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact 16-character URL-safe id. Single operations and bulk operations use the same base route.
 
 ### Insert One
 
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/object
+POST {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 {
-  "id": "object-1",
+  "_id": "object-1",
   "status": "active",
   "score": 42,
   "tags": ["new", "paid"]
@@ -340,7 +356,7 @@ Response:
 
 ```json
 {
-  "id": "object-1",
+  "_id": "object-1",
   "status": "active",
   "score": 42,
   "tags": ["new", "paid"]
@@ -352,7 +368,7 @@ Response:
 Request:
 
 ```http
-GET http://localhost:8080/api/{db}/{collection}/object/object-1
+GET {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 ```
 
@@ -360,7 +376,7 @@ Response:
 
 ```json
 {
-  "id": "object-1",
+  "_id": "object-1",
   "status": "active",
   "score": 42
 }
@@ -368,12 +384,12 @@ Response:
 
 ### Replace One
 
-`PUT` is a full object replacement. The URL `:id` is authoritative.
+`PUT` is a full object replacement. The URL object id is authoritative.
 
 Request:
 
 ```http
-PUT http://localhost:8080/api/{db}/{collection}/object/object-1
+PUT {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -387,7 +403,7 @@ Response:
 
 ```json
 {
-  "id": "object-1",
+  "_id": "object-1",
   "status": "archived",
   "score": 11
 }
@@ -400,7 +416,7 @@ Response:
 Request:
 
 ```http
-PATCH http://localhost:8080/api/{db}/{collection}/object/object-1
+PATCH {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -413,7 +429,7 @@ Response:
 
 ```json
 {
-  "id": "object-1",
+  "_id": "object-1",
   "status": "archived",
   "score": 12
 }
@@ -424,7 +440,7 @@ Response:
 Request:
 
 ```http
-DELETE http://localhost:8080/api/{db}/{collection}/object/object-1
+DELETE {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 ```
 
@@ -443,13 +459,13 @@ Batches are split by object shard internally. Duplicate ids inside one bulk requ
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/object
+POST {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 [
-  { "id": "object-1", "status": "active", "score": 42 },
-  { "id": "object-2", "status": "archived", "score": 10 }
+  { "_id": "object-1", "status": "active", "score": 42 },
+  { "_id": "object-2", "status": "archived", "score": 10 }
 ]
 ```
 
@@ -459,8 +475,8 @@ Response:
 {
   "inserted": 2,
   "items": [
-    { "id": "object-1", "status": "active", "score": 42 },
-    { "id": "object-2", "status": "archived", "score": 10 }
+    { "_id": "object-1", "status": "active", "score": 42 },
+    { "_id": "object-2", "status": "archived", "score": 10 }
   ]
 }
 ```
@@ -470,14 +486,14 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/object
+POST {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 Prefer: return=minimal
 
 [
-  { "id": "object-1", "status": "active" },
-  { "id": "object-2", "status": "archived" }
+  { "_id": "object-1", "status": "active" },
+  { "_id": "object-2", "status": "archived" }
 ]
 ```
 
@@ -494,13 +510,13 @@ Response:
 Request:
 
 ```http
-PUT http://localhost:8080/api/{db}/{collection}/object
+PUT {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 [
-  { "id": "object-1", "status": "active", "score": 50 },
-  { "id": "object-2", "status": "archived", "score": 12 }
+  { "_id": "object-1", "status": "active", "score": 50 },
+  { "_id": "object-2", "status": "archived", "score": 12 }
 ]
 ```
 
@@ -510,8 +526,8 @@ Response:
 {
   "replaced": 2,
   "items": [
-    { "id": "object-1", "status": "active", "score": 50 },
-    { "id": "object-2", "status": "archived", "score": 12 }
+    { "_id": "object-1", "status": "active", "score": 50 },
+    { "_id": "object-2", "status": "archived", "score": 12 }
   ]
 }
 ```
@@ -521,13 +537,13 @@ Response:
 Request:
 
 ```http
-PATCH http://localhost:8080/api/{db}/{collection}/object
+PATCH {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 [
-  { "id": "object-1", "score": 51 },
-  { "id": "object-2", "score": 13 }
+  { "_id": "object-1", "score": 51 },
+  { "_id": "object-2", "score": 13 }
 ]
 ```
 
@@ -537,8 +553,8 @@ Response:
 {
   "updated": 2,
   "items": [
-    { "id": "object-1", "status": "active", "score": 51 },
-    { "id": "object-2", "status": "archived", "score": 13 }
+    { "_id": "object-1", "status": "active", "score": 51 },
+    { "_id": "object-2", "status": "archived", "score": 13 }
   ]
 }
 ```
@@ -548,7 +564,7 @@ Response:
 Request:
 
 ```http
-DELETE http://localhost:8080/api/{db}/{collection}/object
+DELETE {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -580,7 +596,7 @@ Query responses are plain arrays. Use GET for small URL-safe queries and POST `/
 Request:
 
 ```http
-GET http://localhost:8080/api/{db}/{collection}/object?q=%7B%22status%22%3A%22active%22%2C%22score%22%3A%7B%22%24gte%22%3A10%7D%7D&sortBy=score&sort=desc&limit=50&offset=0
+GET {URL}/api/{db}/{collection}/object?q=%7B%22status%22%3A%22active%22%2C%22score%22%3A%7B%22%24gte%22%3A10%7D%7D&sortBy=score&sort=desc&limit=50&offset=0
 Authorization: Bearer <accessToken>
 ```
 
@@ -588,8 +604,8 @@ Response:
 
 ```json
 [
-  { "id": "object-1", "status": "active", "score": 42 },
-  { "id": "object-9", "status": "active", "score": 31 }
+  { "_id": "object-1", "status": "active", "score": 42 },
+  { "_id": "object-9", "status": "active", "score": 31 }
 ]
 ```
 
@@ -598,7 +614,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/search
+POST {URL}/api/{db}/{collection}/search
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -613,7 +629,7 @@ Response:
 
 ```json
 [
-  { "id": "object-1", "status": "active", "score": 42 }
+  { "_id": "object-1", "status": "active", "score": 42 }
 ]
 ```
 
@@ -622,7 +638,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/search
+POST {URL}/api/{db}/{collection}/search
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -641,7 +657,7 @@ Response:
 
 ```json
 [
-  { "id": "object-1", "status": "active", "score": 42, "tags": ["paid"] }
+  { "_id": "object-1", "status": "active", "score": 42, "tags": ["paid"] }
 ]
 ```
 
@@ -654,7 +670,7 @@ Aggregation is supplied as `$aggregate` inside the query object. Supported opera
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/search
+POST {URL}/api/{db}/{collection}/search
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -691,12 +707,12 @@ Store embeddings on `_vec`. The vector is indexed separately and hidden from nor
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/object
+POST {URL}/api/{db}/{collection}/object
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 {
-  "id": "doc-1",
+  "_id": "doc-1",
   "title": "Hello",
   "_vec": [0.1, 0.2, 0.3]
 }
@@ -706,7 +722,7 @@ Response:
 
 ```json
 {
-  "id": "doc-1",
+  "_id": "doc-1",
   "title": "Hello"
 }
 ```
@@ -716,7 +732,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/search
+POST {URL}/api/{db}/{collection}/search
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -733,7 +749,7 @@ Response:
 
 ```json
 [
-  { "id": "doc-1", "title": "Hello", "_score": 0.98 }
+  { "_id": "doc-1", "title": "Hello", "_score": 0.98 }
 ]
 ```
 
@@ -756,12 +772,12 @@ Reference descriptors can point to another collection. `database` is optional; i
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/object?$refDepth=0
+POST {URL}/api/{db}/{collection}/object?$refDepth=0
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 {
-  "id": "post-1",
+  "_id": "post-1",
   "title": "Hello",
   "author": {
     "type": "reference",
@@ -775,7 +791,7 @@ Response:
 
 ```json
 {
-  "id": "post-1",
+  "_id": "post-1",
   "title": "Hello",
   "author": {
     "type": "reference",
@@ -792,7 +808,7 @@ Reads expand references by default with depth `1`.
 Request:
 
 ```http
-GET http://localhost:8080/api/{db}/{collection}/object/post-1
+GET {URL}/api/{db}/{collection}/object/post-1
 Authorization: Bearer <accessToken>
 ```
 
@@ -800,13 +816,13 @@ Response:
 
 ```json
 {
-  "id": "post-1",
+  "_id": "post-1",
   "title": "Hello",
   "author": {
     "type": "reference",
     "collection": "users",
     "value": "user-1",
-    "object": { "id": "user-1", "username": "marco" }
+    "object": { "_id": "user-1", "username": "marco" }
   }
 }
 ```
@@ -816,7 +832,7 @@ Response:
 Request:
 
 ```http
-GET http://localhost:8080/api/{db}/{collection}/object/post-1?$refDepth=0
+GET {URL}/api/{db}/{collection}/object/post-1?$refDepth=0
 Authorization: Bearer <accessToken>
 ```
 
@@ -824,7 +840,7 @@ Response:
 
 ```json
 {
-  "id": "post-1",
+  "_id": "post-1",
   "title": "Hello",
   "author": {
     "type": "reference",
@@ -839,7 +855,7 @@ Response:
 Request:
 
 ```http
-POST http://localhost:8080/api/{db}/{collection}/search
+POST {URL}/api/{db}/{collection}/search
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 
@@ -853,13 +869,13 @@ Response:
 ```json
 [
   {
-    "id": "post-1",
+    "_id": "post-1",
     "title": "Hello",
     "author": {
       "type": "reference",
       "collection": "users",
       "value": "user-1",
-      "object": { "id": "user-1", "username": "marco" }
+      "object": { "_id": "user-1", "username": "marco" }
     }
   }
 ]
@@ -874,7 +890,7 @@ Vector search cannot currently be combined with reference object paths.
 Request:
 
 ```http
-GET http://localhost:8080/api/config
+GET {URL}/api/config
 Authorization: Bearer <accessToken>
 ```
 
@@ -884,7 +900,7 @@ Response:
 {
   "nodes": [
     {
-      "node": { "id": "node-8080", "url": "http://localhost:8080" },
+      "node": { "id": "node-8080", "url": "{URL}" },
       "ownedShards": ["shard-0", "shard-3"],
       "memory": { "rss": 2190999552 },
       "indexes": {
@@ -900,7 +916,7 @@ Response:
     {
       "name": "shard-0",
       "peers": [
-        { "url": "http://localhost:8080", "online": true }
+        { "url": "{URL}", "online": true }
       ]
     }
   ]

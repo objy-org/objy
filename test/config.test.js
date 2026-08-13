@@ -35,12 +35,36 @@ test("normalizes a single-node config with runtime defaults", () => {
       efSearch: 0,
     },
   });
+  assert.deepEqual(config.memoryGuard, {
+    enabled: false,
+    limitMb: null,
+    rejectWritesPercent: 85,
+    resumeWritesPercent: 78,
+    checkMs: 1000,
+  });
   assert.equal(config.node.retainOps, 256);
   assert.equal(config.node.syncBatchSize, 1024);
-  assert.equal(config.cluster.syncMs, 1000);
+  assert.equal(config.cluster.syncMs, 2500);
+  assert.equal(config.cluster.forwardTimeoutMs, 60000);
+  assert.equal(config.cluster.replicationTimeoutMs, 60000);
+  assert.deepEqual(config.cluster.hints, {
+    enabled: true,
+    debounceMs: 25,
+    maxScopesPerHint: 128,
+  });
+  assert.equal(config.cluster.secret, "test-jwt-secret");
   assert.equal(config.auth.jwtSecret, "test-jwt-secret");
   assert.equal(config.persistence.mode, "off");
   assert.equal(config.persistence.ack, "memory");
+  assert.deepEqual(config.persistence.snapshotRetention, {
+    keepLatest: 0,
+    keepForMs: 0,
+  });
+  assert.deepEqual(config.persistence.journalRetention, {
+    keepLatest: 0,
+    keepForMs: 0,
+  });
+  assert.equal(config.persistence.restoreSnapshotId, null);
   assert.deepEqual(config.persistence.localWal, {
     mode: "off",
     dir: ".spread-db/wal",
@@ -66,6 +90,14 @@ test("loads node identity overrides from cli arguments", () => {
     node: { retainOps: 0, syncBatchSize: 4096 },
     cluster: {
       syncMs: 250,
+      forwardTimeoutMs: 1250,
+      replicationTimeoutMs: 5000,
+      hints: {
+        enabled: false,
+        debounceMs: 5,
+        maxScopesPerHint: 4,
+      },
+      secret: "cluster-secret",
       shardMap: {
         shards: {
           "events-0": { peers: [] },
@@ -78,6 +110,15 @@ test("loads node identity overrides from cli arguments", () => {
       flushMs: 25,
       snapshotDirtyOnly: false,
       snapshotRole: "none",
+      snapshotRetention: {
+        keepLatest: 7,
+        keepForMs: 86_400_000,
+      },
+      journalRetention: {
+        keepLatest: 25,
+        keepForMs: 3_600_000,
+      },
+      restoreSnapshotId: "20260813T100000000Z-restore",
       ack: "localWal",
       localWal: {
         dir: ".tmp/wal",
@@ -97,6 +138,13 @@ test("loads node identity overrides from cli arguments", () => {
         },
       },
     },
+    memoryGuard: {
+      enabled: true,
+      limitMb: 1024,
+      rejectWritesPercent: 90,
+      resumeWritesPercent: 80,
+      checkMs: 500,
+    },
     auth: TEST_AUTH,
   }));
 
@@ -112,6 +160,14 @@ test("loads node identity overrides from cli arguments", () => {
   assert.equal(config.node.syncBatchSize, 4096);
   assert.equal(config.server.port, 9010);
   assert.equal(config.cluster.syncMs, 250);
+  assert.equal(config.cluster.forwardTimeoutMs, 1250);
+  assert.equal(config.cluster.replicationTimeoutMs, 5000);
+  assert.deepEqual(config.cluster.hints, {
+    enabled: false,
+    debounceMs: 5,
+    maxScopesPerHint: 4,
+  });
+  assert.equal(config.cluster.secret, "cluster-secret");
   assert.equal(config.cluster.shardMap.shards["events-0"].peers.length, 0);
   assert.equal(config.storage.engine, "object");
   assert.equal(config.storage.object.valueDirectory.minRefs, 3);
@@ -119,11 +175,27 @@ test("loads node identity overrides from cli arguments", () => {
   assert.equal(config.storage.object.valueDirectory.maxPaths, 64);
   assert.equal(config.storage.object.valueDirectory.maxStringLength, 64);
   assert.equal(config.storage.object.valueDirectory.maxKeyBytes, 128);
+  assert.deepEqual(config.memoryGuard, {
+    enabled: true,
+    limitMb: 1024,
+    rejectWritesPercent: 90,
+    resumeWritesPercent: 80,
+    checkMs: 500,
+  });
   assert.equal(config.persistence.mode, "memory");
   assert.equal(config.persistence.restoreMode, "reshard");
   assert.equal(config.persistence.flushMs, 25);
   assert.equal(config.persistence.snapshotDirtyOnly, false);
   assert.equal(config.persistence.snapshotRole, "none");
+  assert.deepEqual(config.persistence.snapshotRetention, {
+    keepLatest: 7,
+    keepForMs: 86_400_000,
+  });
+  assert.deepEqual(config.persistence.journalRetention, {
+    keepLatest: 25,
+    keepForMs: 3_600_000,
+  });
+  assert.equal(config.persistence.restoreSnapshotId, "20260813T100000000Z-restore");
   assert.equal(config.persistence.ack, "localWal");
   assert.deepEqual(config.persistence.localWal, {
     mode: "on",
@@ -152,6 +224,21 @@ test("rejects invalid storage engines", () => {
       auth: TEST_AUTH,
     }),
     /storage\.engine/,
+  );
+});
+
+test("rejects invalid memory guard hysteresis", () => {
+  assert.throws(
+    () => normalizeConfig({
+      node: { id: "node-a" },
+      memoryGuard: {
+        enabled: true,
+        rejectWritesPercent: 80,
+        resumeWritesPercent: 90,
+      },
+      auth: TEST_AUTH,
+    }),
+    /memoryGuard\.resumeWritesPercent/,
   );
 });
 
@@ -222,7 +309,7 @@ test("runtime pieces can be started from normalized config", async () => {
     syncBatchSize: config.node.syncBatchSize,
     storage: config.storage,
   });
-  node.replaceShardMap(shardMapFromHttp(config.cluster.shardMap, node.id));
+  node.replaceShardMap(shardMapFromHttp(config.cluster.shardMap, node.id, { secret: config.cluster.secret }));
   const persistence = createPersistence(node, config.persistence);
   persistence.start();
   const state = await startServer({ port: config.server.port, node, auth: config.auth, persistence });
@@ -259,8 +346,9 @@ test("json shard map peer urls become HTTP replication peers", () => {
     auth: TEST_AUTH,
   });
 
-  node.replaceShardMap(shardMapFromHttp(config.cluster.shardMap, node.id));
+  node.replaceShardMap(shardMapFromHttp(config.cluster.shardMap, node.id, { secret: config.cluster.secret }));
   const peer = node.peersForShard("events-0")[0];
   assert.equal(peer.url, "http://localhost:8081");
+  assert.equal(peer.secret, "test-jwt-secret");
   assert.equal(typeof peer.pull, "function");
 });

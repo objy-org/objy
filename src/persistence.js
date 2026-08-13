@@ -5,6 +5,7 @@ import { createObjectStorage } from "./object-storage.js";
 
 const DEFAULT_PREFIX = "spread-db";
 const DEFAULT_SEGMENT_BYTES = 16 * 1024 * 1024;
+let snapshotSequence = 0;
 
 export class PersistenceManager {
   constructor({
@@ -16,10 +17,13 @@ export class PersistenceManager {
     snapshotMs = 60_000,
     segmentBytes = DEFAULT_SEGMENT_BYTES,
     compactJournals = true,
+    snapshotRetention,
+    journalRetention,
     snapshotDirtyOnly = true,
     snapshotRole = "primary",
     restoreScopes,
     restoreMode = "scoped",
+    restoreSnapshotId,
     ack = "memory",
     localWal,
   } = {}) {
@@ -33,10 +37,13 @@ export class PersistenceManager {
     this.snapshotMs = Math.max(0, Number(snapshotMs) || 0);
     this.segmentBytes = Math.max(1024, Number(segmentBytes) || DEFAULT_SEGMENT_BYTES);
     this.compactJournals = compactJournals !== false;
+    this.snapshotRetention = normalizeRetention(snapshotRetention);
+    this.journalRetention = normalizeRetention(journalRetention);
     this.snapshotDirtyOnly = snapshotDirtyOnly !== false;
     this.snapshotRole = normalizeSnapshotRole(snapshotRole);
     this.restoreScopes = restoreScopes;
     this.restoreMode = restoreMode;
+    this.restoreSnapshotId = normalizeSnapshotId(restoreSnapshotId);
     this.localWal = createLocalWalStore(localWal, node.id);
     this.ack = normalizeAckMode(ack);
     if (this.ack === "localWal" && !this.localWal) {
@@ -77,6 +84,8 @@ export class PersistenceManager {
       localWalMetadata: 0,
       localWalCollectionDrops: 0,
       localWalSkippedPartialRecords: 0,
+      skippedJournals: 0,
+      skippedJournalOps: 0,
     };
     let maxLocalSeq = this.node.seq;
 
@@ -91,14 +100,35 @@ export class PersistenceManager {
         stats.snapshotObjects += restored.objects;
         if (restored.node === this.node.id) maxLocalSeq = Math.max(maxLocalSeq, restored.seq);
       }
+      if (this.restoreSnapshotId) continue;
+      const snapshotCursors = restored?.cursors || {};
 
       const journalKeys = keys.filter((key) => key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`));
       for (const key of journalKeys.sort()) {
+        const journalInfo = parseJournalKey(key, this.prefix);
+        const sourceFromKey = journalInfo?.node;
+        const coveredFromKey = Number(sourceFromKey ? snapshotCursors[sourceFromKey] : 0) || 0;
+        if (journalInfo?.lastSeq && coveredFromKey >= journalInfo.lastSeq) {
+          stats.skippedJournals++;
+          stats.skippedJournalOps += journalInfo.count || 0;
+          continue;
+        }
+
         const raw = await this.storage.get(key);
         if (!raw) continue;
         const segment = JSON.parse(raw);
-        const ops = this._filterRestoreOps(scope, Array.isArray(segment.ops) ? segment.ops : []);
         const sourceNode = segment.node || "persistence";
+        const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
+        const segmentOps = Array.isArray(segment.ops) ? segment.ops : [];
+        const ops = this._filterRestoreOps(scope, segmentOps.filter((op) => {
+          const seq = Number(op?.seq);
+          return !Number.isFinite(seq) || seq > coveredSeq;
+        }));
+        if (!ops.length && segmentOps.length) {
+          stats.skippedJournals++;
+          stats.skippedJournalOps += segmentOps.length;
+          continue;
+        }
         this.node.applyRemote(sourceNode, ops, `persistence:${key}`);
         rememberRestoredCursor(this.node, sourceNode, scope, ops);
         for (const op of ops) {
@@ -111,7 +141,7 @@ export class PersistenceManager {
       }
     }
 
-    if (this.localWal) {
+    if (this.localWal && !this.restoreSnapshotId) {
       const local = await this._restoreLocalWal();
       stats.localWalRecords = local.records;
       stats.localWalOps = local.ops;
@@ -483,6 +513,7 @@ export class PersistenceManager {
     const segment = {
       version: 1,
       node: this.node.id,
+      createdAt: new Date().toISOString(),
       database: scope.database,
       collection: scope.collection,
       shard: scope.shard,
@@ -499,14 +530,17 @@ export class PersistenceManager {
     await this.flush();
     this.flushPaused = true;
     const scopes = this._snapshotScopes(options);
-    const stats = { scopes: 0, objects: 0, segments: 0 };
+    const checkpointId = snapshotId();
+    const stats = { id: checkpointId, scopes: 0, objects: 0, segments: 0, retainedSnapshotsDeleted: 0, retainedJournalsDeleted: 0 };
     try {
       for (const scope of scopes) {
-        const written = await this._writeSnapshot(scope);
+        const written = await this._writeSnapshot(scope, checkpointId);
         this._markCheckpointed(scope);
         stats.scopes++;
         stats.objects += written.objects;
         stats.segments += written.segments;
+        stats.retainedSnapshotsDeleted += written.retainedSnapshotsDeleted || 0;
+        stats.retainedJournalsDeleted += written.retainedJournalsDeleted || 0;
       }
     } finally {
       this.flushPaused = false;
@@ -600,8 +634,7 @@ export class PersistenceManager {
     return [...new Set(this.node.ownedShardTargets().map((target) => target.shard))];
   }
 
-  async _writeSnapshot(scope) {
-    const id = snapshotId();
+  async _writeSnapshot(scope, id = snapshotId()) {
     const base = `${scopePrefix(this.prefix, scope)}/snapshots/${id}`;
     const segments = [];
     let objectCount = 0;
@@ -622,27 +655,52 @@ export class PersistenceManager {
       database: scope.database,
       collection: scope.collection,
       shard: scope.shard,
+      databaseMeta: clone(this.node.getDatabaseMeta(scope.database) || {}),
+      collectionMeta: clone(this.node.getCollectionMeta(scope.database, scope.collection) || {}),
+      cursors: this._snapshotCursors(scope),
       objectCount,
       segments,
     };
     await this.storage.put(`${base}/manifest.json`, JSON.stringify(manifest), "application/json");
     await this.storage.put(`${scopePrefix(this.prefix, scope)}/latest.json`, JSON.stringify(manifest), "application/json");
-    if (this.compactJournals) await this._compactJournals(scope);
-    return { objects: objectCount, segments: segments.length };
+    const retainedJournalsDeleted = this.compactJournals ? await this._compactJournals(scope) : 0;
+    const retainedSnapshotsDeleted = await this._applySnapshotRetention(scope, id);
+    return { objects: objectCount, segments: segments.length, retainedJournalsDeleted, retainedSnapshotsDeleted };
   }
 
   async _compactJournals(scope) {
     const prefix = `${scopePrefix(this.prefix, scope)}/journal/`;
     const keys = await this.storage.list(prefix);
     if (!keys.length) return 0;
-    return this.storage.delete(keys);
+    const removable = filterRetentionKeys(keys, this.journalRetention, (key) => {
+      const info = parseJournalKey(key, this.prefix);
+      return info?.createdAtMs || 0;
+    });
+    if (!removable.length) return 0;
+    return this.storage.delete(removable);
+  }
+
+  async _applySnapshotRetention(scope, latestId) {
+    if (!retentionEnabled(this.snapshotRetention)) return 0;
+    const prefix = `${scopePrefix(this.prefix, scope)}/snapshots/`;
+    const keys = await this.storage.list(prefix);
+    const snapshots = snapshotEntries(keys, prefix);
+    const latest = snapshots.find((entry) => entry.id === latestId);
+    const removable = filterSnapshotRetention(snapshots, this.snapshotRetention, latest || { id: latestId })
+      .flatMap((entry) => entry.keys);
+    if (!removable.length) return 0;
+    return this.storage.delete(removable);
   }
 
   async _restoreSnapshot(scope) {
-    const raw = await this.storage.get(`${scopePrefix(this.prefix, scope)}/latest.json`);
+    const manifestKey = this.restoreSnapshotId
+      ? `${scopePrefix(this.prefix, scope)}/snapshots/${this.restoreSnapshotId}/manifest.json`
+      : `${scopePrefix(this.prefix, scope)}/latest.json`;
+    const raw = await this.storage.get(manifestKey);
     if (!raw) return null;
     const manifest = JSON.parse(raw);
     let objects = 0;
+    if (this.restoreSnapshotId) this._restoreManifestMetadata(scope, manifest);
 
     for (const segment of manifest.segments || []) {
       const body = await this.storage.get(segment.key);
@@ -658,7 +716,12 @@ export class PersistenceManager {
       objects += rows.length;
     }
 
-    return { node: manifest.node, seq: Number(manifest.seq) || 0, objects };
+    return {
+      node: manifest.node,
+      seq: Number(manifest.seq) || 0,
+      cursors: normalizeSnapshotCursors(manifest),
+      objects,
+    };
   }
 
   async _restoreMetadata(keys) {
@@ -755,6 +818,28 @@ export class PersistenceManager {
   _rootPrefix() {
     return this.prefix ? `${this.prefix}/` : "";
   }
+
+  _restoreManifestMetadata(scope, manifest = {}) {
+    if (isPlainObject(manifest.databaseMeta)) {
+      this.node.db.setDatabaseMeta(scope.database, clone(manifest.databaseMeta));
+    }
+    if (isPlainObject(manifest.collectionMeta)) {
+      this.node.db.setCollectionMeta(scope.database, scope.collection, clone(manifest.collectionMeta));
+    }
+  }
+
+  _snapshotCursors(scope) {
+    const cursors = { [this.node.id]: this.node.seq };
+    const suffix = this.node._cursorKey ? `|${scope.database}/${scope.collection}/${scope.shard}` : null;
+    if (!suffix) return cursors;
+    for (const [key, seen] of this.node.lastSeen || []) {
+      if (typeof key !== "string" || !key.endsWith(suffix)) continue;
+      const sourceNode = key.slice(0, -suffix.length);
+      if (!sourceNode) continue;
+      cursors[sourceNode] = Math.max(cursors[sourceNode] || 0, Number(seen) || 0);
+    }
+    return cursors;
+  }
 }
 
 export function createPersistence(node, config = {}) {
@@ -775,9 +860,12 @@ export function createPersistence(node, config = {}) {
     snapshotMs: config.snapshotMs ?? 60_000,
     segmentBytes: config.segmentBytes ?? DEFAULT_SEGMENT_BYTES,
     compactJournals: config.compactJournals !== false,
+    snapshotRetention: config.snapshotRetention,
+    journalRetention: config.journalRetention,
     snapshotDirtyOnly: config.snapshotDirtyOnly !== false,
     snapshotRole: config.snapshotRole || "primary",
     restoreMode: config.restoreMode || "scoped",
+    restoreSnapshotId: config.restoreSnapshotId,
     restoreScopes: config.restoreScopes,
     ack: config.ack || "memory",
     localWal: config.localWal,
@@ -964,6 +1052,29 @@ function parseScopeFromKey(key, prefix) {
   };
 }
 
+function parseJournalKey(key, prefix) {
+  const scope = parseScopeFromKey(key, prefix);
+  if (!scope) return null;
+  const root = normalizePrefix(prefix);
+  const expected = root ? `${root}/` : "";
+  const parts = key.slice(expected.length).split("/");
+  if (parts[6] !== "journal" || !parts[7] || !parts[8]) return null;
+  const file = parts[8];
+  const match = file.match(/^(\d+)-(\d+)-(\d+)-.+\.json$/);
+  const createdAtMs = match ? Number(match[1]) : 0;
+  const firstSeq = match ? Number(match[2]) : 0;
+  const lastSeq = match ? Number(match[3]) : 0;
+  const count = lastSeq >= firstSeq && firstSeq > 0 ? lastSeq - firstSeq + 1 : 0;
+  return {
+    ...scope,
+    node: decodeURIComponent(parts[7]),
+    createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
+    firstSeq: Number.isFinite(firstSeq) ? firstSeq : 0,
+    lastSeq: Number.isFinite(lastSeq) ? lastSeq : 0,
+    count,
+  };
+}
+
 function parseMetaFromKey(key, prefix) {
   const root = normalizePrefix(prefix);
   const expected = root ? `${root}/` : "";
@@ -987,6 +1098,61 @@ function parseDatabaseMetaFromKey(key, prefix) {
   return {
     database: decodeURIComponent(parts[1]),
   };
+}
+
+function snapshotEntries(keys, prefix) {
+  const byId = new Map();
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue;
+    const rest = key.slice(prefix.length);
+    const id = rest.split("/")[0];
+    if (!id || rest === id) continue;
+    const entry = byId.get(id) || {
+      id,
+      createdAtMs: snapshotCreatedAtMs(id),
+      keys: [],
+    };
+    entry.keys.push(key);
+    byId.set(id, entry);
+  }
+  return [...byId.values()].sort((left, right) => {
+    const created = right.createdAtMs - left.createdAtMs;
+    return created || right.id.localeCompare(left.id);
+  });
+}
+
+function filterSnapshotRetention(snapshots, retention, latest = null) {
+  if (!retentionEnabled(retention)) return [];
+  const keep = new Set(latest?.id ? [latest.id] : []);
+  const keepLatest = Math.max(0, Number(retention.keepLatest) || 0);
+  for (const snapshot of snapshots.slice(0, keepLatest)) keep.add(snapshot.id);
+
+  const keepSince = retention.keepForMs > 0 ? Date.now() - retention.keepForMs : null;
+  if (keepSince !== null) {
+    for (const snapshot of snapshots) {
+      if (!snapshot.createdAtMs || snapshot.createdAtMs >= keepSince) keep.add(snapshot.id);
+    }
+  }
+
+  return snapshots.filter((snapshot) => !keep.has(snapshot.id));
+}
+
+function filterRetentionKeys(keys, retention, createdAtMsForKey) {
+  if (!retentionEnabled(retention)) return keys;
+  const keepLatest = Math.max(0, Number(retention.keepLatest) || 0);
+  const sorted = [...keys].sort((left, right) => {
+    const created = (createdAtMsForKey(right) || 0) - (createdAtMsForKey(left) || 0);
+    return created || right.localeCompare(left);
+  });
+  const keep = new Set(sorted.slice(0, keepLatest));
+  const keepSince = retention.keepForMs > 0 ? Date.now() - retention.keepForMs : null;
+  if (keepSince !== null) {
+    for (const key of sorted) {
+      const createdAtMs = createdAtMsForKey(key) || 0;
+      if (!createdAtMs || createdAtMs >= keepSince) keep.add(key);
+    }
+  }
+  return sorted.filter((key) => !keep.has(key));
 }
 
 function parseScopeKey(key) {
@@ -1020,7 +1186,24 @@ function databasePrefix(prefix, database) {
 }
 
 function snapshotId() {
-  return `${new Date().toISOString().replace(/[-:.]/g, "")}-${randomUUID()}`;
+  snapshotSequence = (snapshotSequence + 1) % 1_000_000;
+  const seq = String(snapshotSequence).padStart(6, "0");
+  return `${new Date().toISOString().replace(/[-:.]/g, "")}-${seq}-${randomUUID()}`;
+}
+
+function snapshotCreatedAtMs(id) {
+  const match = String(id || "").match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z/);
+  if (!match) return 0;
+  const [, year, month, day, hour, minute, second, ms] = match;
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Number(ms),
+  );
 }
 
 function safe(value) {
@@ -1050,4 +1233,32 @@ function normalizeSnapshotRole(value) {
 
 function normalizeUrl(url) {
   return url ? String(url).replace(/\/+$/, "") : null;
+}
+
+function normalizeRetention(config = {}) {
+  return {
+    keepLatest: positiveInt(config?.keepLatest, 0),
+    keepForMs: positiveInt(config?.keepForMs, 0),
+  };
+}
+
+function retentionEnabled(retention = {}) {
+  return (Number(retention.keepLatest) || 0) > 0 || (Number(retention.keepForMs) || 0) > 0;
+}
+
+function normalizeSnapshotId(id) {
+  if (typeof id !== "string" || id.length === 0) return null;
+  if (id.includes("/")) throw new Error("persistence.restoreSnapshotId must not contain slashes");
+  return id;
+}
+
+function normalizeSnapshotCursors(manifest = {}) {
+  const cursors = isPlainObject(manifest.cursors) ? { ...manifest.cursors } : {};
+  if (manifest.node) cursors[manifest.node] = Math.max(Number(cursors[manifest.node]) || 0, Number(manifest.seq) || 0);
+  return cursors;
+}
+
+function positiveInt(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }

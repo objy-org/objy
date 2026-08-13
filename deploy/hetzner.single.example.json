@@ -13,6 +13,10 @@
     "installNode": true,
     "nodeMajor": 22
   },
+  "health": {
+    "waitSeconds": 1200,
+    "requestTimeoutMs": 5000
+  },
   "node": {
     "id": "hetzner-1",
     "url": "http://123.123.123.123:8080",
@@ -36,7 +40,15 @@
     }
   },
   "cluster": {
-    "syncMs": 1000,
+    "syncMs": 2500,
+    "forwardTimeoutMs": 60000,
+    "replicationTimeoutMs": 60000,
+    "hints": {
+      "enabled": true,
+      "debounceMs": 25,
+      "maxScopesPerHint": 128
+    },
+    "secret": "replace-with-a-long-random-cluster-secret",
     "shardMapPrefix": "spread-db",
     "shardMapKey": "cluster/shard-map.json",
     "shardName": "shard-0"

@@ -11,7 +11,7 @@ function shardMapFor(shardNames, peerByShard = {}) {
 }
 
 function sortObjects(objects) {
-  return objects.sort((a, b) => a.id.localeCompare(b.id));
+  return objects.sort((a, b) => a._id.localeCompare(b._id));
 }
 
 function expectedForShard(source, shard, ids) {
@@ -54,7 +54,7 @@ test("large sharded cluster recovers failed replicas and converges", async () =>
     const id = `event-${i}`;
     ids.push(id);
     writer.insert("app", "events", {
-      id,
+      _id: id,
       kind: i % 11,
       version: 0,
       active: true,
@@ -129,7 +129,7 @@ test("multi-writer shard replicas converge after partition and heal", async () =
 
   for (let i = 0; i < ids.length; i++) {
     nodes[i % 2].insert("app", "events", {
-      id: ids[i],
+      _id: ids[i],
       owner: `seed-${i % 2}`,
       score: i,
     });

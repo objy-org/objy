@@ -5,11 +5,13 @@ import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEAD
 
 export const FORWARDED_HEADER = "x-spread-db-forwarded";
 export const TARGET_SHARD_HEADER = "x-spread-db-target-shard";
+export const DEFAULT_FORWARD_TIMEOUT_MS = 5_000;
 
 export class ShardRequestRouter {
-  constructor({ node }) {
+  constructor({ node, forwardTimeoutMs = DEFAULT_FORWARD_TIMEOUT_MS }) {
     if (!node) throw new Error("node is required");
     this.node = node;
+    this.forwardTimeoutMs = positiveInt(forwardTimeoutMs, DEFAULT_FORWARD_TIMEOUT_MS);
   }
 
   targetShard(req) {
@@ -44,7 +46,7 @@ export class ShardRequestRouter {
     const seen = new Set();
     for (const item of items || []) {
       const id = String(idOf(item));
-      if (seen.has(id)) throw httpError(400, `duplicate id in bulk request: ${id}`);
+      if (seen.has(id)) throw httpError(400, `duplicate _id in bulk request: ${id}`);
       seen.add(id);
       const shard = this.shardForObject(database, collection, id);
       this.assertTargetShardMatches(req, shard);
@@ -99,13 +101,14 @@ export class ShardRequestRouter {
       all.push(...local.objects);
       if (local.path) paths.push(local.path);
     }
-    for (const target of targets) {
-      if (target.local) continue;
-      const remote = await this.forwardToShard(req, target.shard, objectPath(database, collection), {
+    const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+      this.forwardToShard(req, target.shard, objectPath(database, collection), {
         method: "GET",
         query: queryForFind(criteria, shardOptions),
-        retryStatuses: [409, 503],
-      });
+        retryStatuses: [409, 503, 504],
+      })
+    ));
+    for (const { remote } of remoteResults) {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote query failed", remote.body);
       const objects = responseObjects(remote.body);
       if (options.includeCount) count += responseCount(remote.body, objects.length);
@@ -161,13 +164,14 @@ export class ShardRequestRouter {
         paths.push(publicAggregatePath(this.node.aggregatePathShards(database, collection, criteria, partialAggregateSpec(spec), localShards)));
       }
       const partialSpec = partialAggregateSpec(spec);
-      for (const target of targets) {
-        if (target.local) continue;
-        const remote = await this.forwardToShard(req, target.shard, objectPath(database, collection), {
+      const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+        this.forwardToShard(req, target.shard, objectPath(database, collection), {
           method: "GET",
           query: queryForAggregate(criteria, partialSpec),
-          retryStatuses: [409, 503],
-        });
+          retryStatuses: [409, 503, 504],
+        })
+      ));
+      for (const { remote } of remoteResults) {
         if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote aggregate failed", remote.body);
         partials.push(...responseObjects(remote.body));
         const remotePath = responseQueryPath(remote);
@@ -187,13 +191,14 @@ export class ShardRequestRouter {
       rows.push(...local.objects);
       if (local.path) paths.push(`aggregate-${local.path}`);
     }
-    for (const target of targets) {
-      if (target.local) continue;
-      const remote = await this.forwardToShard(req, target.shard, objectPath(database, collection), {
+    const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+      this.forwardToShard(req, target.shard, objectPath(database, collection), {
         method: "GET",
         query: queryForCriteria(criteria),
-        retryStatuses: [409, 503],
-      });
+        retryStatuses: [409, 503, 504],
+      })
+    ));
+    for (const { remote } of remoteResults) {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote aggregate scan failed", remote.body);
       rows.push(...responseObjects(remote.body));
       const remotePath = responseQueryPath(remote);
@@ -239,13 +244,14 @@ export class ShardRequestRouter {
       all.push(...this.vectorSearchLocalShards(database, collection, criteria, vector, localShards, options));
     }
 
-    for (const target of targets) {
-      if (target.local) continue;
-      const remote = await this.forwardToShard(req, target.shard, searchPath(database, collection), {
+    const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+      this.forwardToShard(req, target.shard, searchPath(database, collection), {
         method: "POST",
         body: queryForVectorSearch(criteria, vector, options),
-        retryStatuses: [409, 503],
-      });
+        retryStatuses: [409, 503, 504],
+      })
+    ));
+    for (const { remote } of remoteResults) {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote vector search failed", remote.body);
       all.push(...responseObjects(remote.body));
     }
@@ -305,7 +311,7 @@ export class ShardRequestRouter {
       : this.node.vectorSearch(database, collection, queryVec, limit, { ef: vector.ef });
     return hits
       .map((hit) => {
-        const row = this.node.get(database, collection, hit.id, { refDepth: 0 });
+        const row = this.node.get(database, collection, hit._id, { refDepth: 0 });
         return row ? { ...row, _score: hit._score } : null;
       })
       .filter(Boolean);
@@ -325,11 +331,18 @@ export class ShardRequestRouter {
     return this.forwardToShard(req, shard, path, options);
   }
 
+  async forwardRemoteTargets(targets, forward) {
+    return Promise.all(targets
+      .filter((target) => !target.local)
+      .map(async (target) => ({ target, remote: await forward(target) })));
+  }
+
   async forwardToShard(req, shard, path, {
     method = "GET",
     body,
     query,
     retryStatuses = [409, 502, 503, 504],
+    timeoutMs,
   } = {}) {
     const peers = this.node.routingPeersForShard(shard);
     if (!peers.length) throw httpError(503, `no remote peer available for shard ${shard}`);
@@ -337,7 +350,7 @@ export class ShardRequestRouter {
     let last = null;
     for (const peer of peers) {
       try {
-        const response = await this.forwardJson(req, peer, shard, path, { method, body, query });
+        const response = await this.forwardJson(req, peer, shard, path, { method, body, query, timeoutMs });
         last = response;
         if (!retryStatuses.includes(response.status)) return response;
       } catch (err) {
@@ -354,36 +367,54 @@ export class ShardRequestRouter {
     method = "GET",
     body,
     retryStatuses = [502, 503, 504],
+    timeoutMs,
   } = {}) {
     const peers = this.node.shardMap.allPeers().filter((peer) => peer.url && !this.node._isSelfPeer(peer));
     const unique = new Map(peers.map((peer) => [peer.url, peer]));
-    const responses = [];
-    for (const peer of unique.values()) {
-      const response = await this.forwardJson(req, peer, null, path, {
+    const responses = await Promise.all([...unique.values()].map((peer) => (
+      this.forwardJson(req, peer, null, path, {
         method,
         body,
         forwardedOnly: true,
-      });
-      responses.push(response);
-      if (retryStatuses.includes(response.status) || !ok(response.status)) return response;
-    }
+        timeoutMs,
+      }).catch((err) => ({
+        status: err.status || 503,
+        body: err.body || { error: err.message },
+      }))
+    )));
+    const failed = responses.find((response) => retryStatuses.includes(response.status) || !ok(response.status));
+    if (failed) return failed;
     return { status: 200, body: { ok: true, peers: responses.length } };
   }
 
-  async forwardJson(req, peer, shard, path, { method = "GET", body, query, forwardedOnly = false } = {}) {
+  async forwardJson(req, peer, shard, path, { method = "GET", body, query, forwardedOnly = false, timeoutMs } = {}) {
     const suffix = query ? `?${query}` : "";
     const headers = forwardedOnly ? forwardedControlHeaders(req, body !== undefined) : forwardedHeaders(req, shard, body !== undefined);
-    const response = await fetch(`${peer.url}${path}${suffix}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    const text = await response.text();
-    return {
-      status: response.status,
-      body: text ? JSON.parse(text) : null,
-      headers: Object.fromEntries(response.headers),
-    };
+    const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
+    timer.unref?.();
+    try {
+      const response = await fetch(`${peer.url}${path}${suffix}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      return {
+        status: response.status,
+        body: text ? JSON.parse(text) : null,
+        headers: Object.fromEntries(response.headers),
+      };
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw httpError(504, `forward timeout after ${forwardTimeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   assertTargetShardMatches(req, shard) {
@@ -538,4 +569,9 @@ function responseQueryPath(response = {}) {
 
 function responseCount(body, fallback) {
   return Number.isFinite(body?.count) ? body.count : fallback;
+}
+
+function positiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }

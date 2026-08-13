@@ -6,12 +6,14 @@ import { spawnSync } from "node:child_process";
 
 const DEFAULT_REMOTE_ROOT = "/opt/spread-db";
 const DEFAULT_SERVICE = "spread-db";
-const DEFAULT_PORT = 8080;
+const DEFAULT_PORT = 3333;
 const DEFAULT_NODE_ID = "hetzner-1";
 const DEFAULT_PREFIX = "spread-db";
 const DEFAULT_SHARD_MAP_KEY = "cluster/shard-map.json";
 const DEFAULT_NODE_MAJOR = 22;
 const DEFAULT_SSH_CONTROL_PERSIST = "10m";
+const DEFAULT_HEALTH_WAIT_SECONDS = 20 * 60;
+const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 5000;
 
 const args = parseArgs(process.argv.slice(2));
 if (args.help) usage(0);
@@ -115,11 +117,12 @@ usage:
 
 optional overrides:
   --host root@123.123.123.123
-  --public-url http://123.123.123.123:8080
+  --public-url http://123.123.123.123:3333
   --node hetzner-1
-  --port 8080
+  --port 3333
   --map deploy/shard-map.json
   --release 20260812-120000
+  --health-wait-seconds 1200
 
 The script uploads the current repo to a timestamped release, writes
 spread-db.config.json and shard-map.json, stores the shard map in S3, installs
@@ -178,7 +181,15 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
       users: Array.isArray(raw.auth?.users) ? raw.auth.users : [],
     },
     cluster: {
-      syncMs: positiveInt(raw.cluster?.syncMs, 1000),
+      syncMs: positiveInt(raw.cluster?.syncMs, 2500),
+      forwardTimeoutMs: positiveInt(raw.cluster?.forwardTimeoutMs, 60_000),
+      replicationTimeoutMs: positiveInt(raw.cluster?.replicationTimeoutMs, 60_000),
+      hints: {
+        enabled: raw.cluster?.hints?.enabled !== false,
+        debounceMs: positiveInt(raw.cluster?.hints?.debounceMs, 25),
+        maxScopesPerHint: positiveInt(raw.cluster?.hints?.maxScopesPerHint, 128),
+      },
+      secret: raw.cluster?.secret || raw.auth?.jwtSecret,
       shardMapPrefix: raw.cluster?.shardMapPrefix || raw.persistence?.prefix || DEFAULT_PREFIX,
       shardMapKey: raw.cluster?.shardMapKey || DEFAULT_SHARD_MAP_KEY,
       shardName: raw.cluster?.shardName || "shard-0",
@@ -191,10 +202,23 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
       snapshotRole: raw.persistence?.snapshotRole || "primary",
       segmentBytes: positiveInt(raw.persistence?.segmentBytes, 16 * 1024 * 1024),
       compactJournals: raw.persistence?.compactJournals !== false,
+      snapshotRetention: raw.persistence?.snapshotRetention || {},
+      journalRetention: raw.persistence?.journalRetention || {},
       restoreMode: raw.persistence?.restoreMode || "reshard",
+      restoreSnapshotId: raw.persistence?.restoreSnapshotId || null,
       localWalFsync: raw.persistence?.localWal?.fsync !== false,
       localWalFlushMs: positiveInt(raw.persistence?.localWal?.flushMs, 1000),
       s3,
+    },
+    health: {
+      waitSeconds: positiveInt(
+        overrides.healthWaitSeconds || raw.health?.waitSeconds || raw.deploy?.healthWaitSeconds,
+        DEFAULT_HEALTH_WAIT_SECONDS,
+      ),
+      requestTimeoutMs: positiveInt(
+        overrides.healthRequestTimeoutMs || raw.health?.requestTimeoutMs || raw.deploy?.healthRequestTimeoutMs,
+        DEFAULT_HEALTH_REQUEST_TIMEOUT_MS,
+      ),
     },
   };
 }
@@ -213,6 +237,10 @@ function makeRuntimeConfig(config) {
     storage: config.storage,
     cluster: {
       syncMs: config.cluster.syncMs,
+      forwardTimeoutMs: config.cluster.forwardTimeoutMs,
+      replicationTimeoutMs: config.cluster.replicationTimeoutMs,
+      hints: config.cluster.hints,
+      secret: config.cluster.secret,
       shardMapStore: {
         mode: "s3",
         prefix: config.cluster.shardMapPrefix,
@@ -230,7 +258,10 @@ function makeRuntimeConfig(config) {
       snapshotRole: config.persistence.snapshotRole,
       segmentBytes: config.persistence.segmentBytes,
       compactJournals: config.persistence.compactJournals,
+      snapshotRetention: config.persistence.snapshotRetention,
+      journalRetention: config.persistence.journalRetention,
       restoreMode: config.persistence.restoreMode,
+      ...(config.persistence.restoreSnapshotId ? { restoreSnapshotId: config.persistence.restoreSnapshotId } : {}),
       ack: "localWal",
       localWal: {
         mode: "on",
@@ -445,10 +476,13 @@ WantedBy=multi-user.target
 }
 
 async function smokeCheck() {
-  log("waiting for service health");
+  log(`waiting up to ${config.health.waitSeconds}s for service health`);
   const base = config.node.url;
   let last = null;
-  for (let i = 0; i < 40; i++) {
+  let attempt = 0;
+  const deadline = Date.now() + config.health.waitSeconds * 1000;
+  while (Date.now() < deadline) {
+    attempt++;
     try {
       const health = await fetchWithTimeout(`${base}/health`);
       last = health.status;
@@ -476,7 +510,7 @@ async function smokeCheck() {
     } catch (err) {
       last = cleanFetchError(err);
     }
-    if (i === 0 || (i + 1) % 5 === 0) {
+    if (attempt === 1 || attempt % 10 === 0) {
       log(`waiting for ${base}/health: ${last}`);
     }
     await sleep(1000);
@@ -490,7 +524,7 @@ async function smokeCheck() {
 
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2500);
+  const timer = setTimeout(() => controller.abort(), config.health.requestTimeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
@@ -609,7 +643,7 @@ function logCommand(command, argv, label = null) {
   }
   const printable = [command, ...argv].map((part) => {
     const text = String(part);
-    if (/secretAccessKey|jwtSecret/i.test(text)) return "[redacted]";
+    if (/secretAccessKey|jwtSecret|cluster\.secret|clusterSecret/i.test(text)) return "[redacted]";
     if (text.includes("\n")) return "[inline-script]";
     if (text.length > 180) return `${text.slice(0, 160)}...`;
     return text;
