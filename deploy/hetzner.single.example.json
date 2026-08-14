@@ -39,6 +39,9 @@
       }
     }
   },
+  "files": {
+    "mode": "s3"
+  },
   "cluster": {
     "syncMs": 2500,
     "forwardTimeoutMs": 60000,

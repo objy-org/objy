@@ -174,6 +174,7 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
         valueDirectory: { enabled: true },
       },
     },
+    files: normalizeFilesConfig(raw.files),
     auth: {
       jwtSecret: required(raw.auth?.jwtSecret, "auth.jwtSecret"),
       accessTokenTtlSeconds: positiveInt(raw.auth?.accessTokenTtlSeconds, 900),
@@ -235,6 +236,7 @@ function makeRuntimeConfig(config) {
       port: config.node.port,
     },
     storage: config.storage,
+    files: config.files,
     cluster: {
       syncMs: config.cluster.syncMs,
       forwardTimeoutMs: config.cluster.forwardTimeoutMs,
@@ -271,6 +273,18 @@ function makeRuntimeConfig(config) {
       },
       s3: config.persistence.s3,
     },
+  };
+}
+
+function normalizeFilesConfig(raw = {}) {
+  if (raw === false) return { mode: "off" };
+  const mode = raw.mode || "s3";
+  if (!["off", "s3"].includes(mode)) throw new Error("files.mode must be one of: off, s3");
+  return {
+    mode,
+    ...(raw.prefix ? { prefix: raw.prefix } : {}),
+    ...(raw.maxUploadBytes ? { maxUploadBytes: positiveInt(raw.maxUploadBytes, 256 * 1024 * 1024) } : {}),
+    ...(raw.s3 ? { s3: normalizeS3Config(raw.s3) } : {}),
   };
 }
 

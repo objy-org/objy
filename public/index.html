@@ -84,6 +84,10 @@
     padding: 9px 10px;
   }
 
+  input[type="file"] {
+    padding: 7px 10px;
+  }
+
   textarea {
     min-height: 78px;
     resize: vertical;
@@ -408,6 +412,10 @@
     padding: 14px 16px 10px;
   }
 
+  .tree-head.actions-only {
+    justify-content: flex-end;
+  }
+
   .section-title {
     color: var(--muted);
     font-size: 11px;
@@ -528,12 +536,17 @@
     display: grid;
     grid-template-columns: minmax(220px, 1fr) 92px auto auto;
     gap: 10px;
-    align-items: start;
+    align-items: end;
   }
 
   .query-row textarea {
+    height: 42px;
     min-height: 42px;
     max-height: 160px;
+  }
+
+  .query-row button {
+    min-height: 42px;
   }
 
   .workspace {
@@ -596,6 +609,22 @@
     white-space: nowrap;
   }
 
+  .file-chip {
+    margin-left: auto;
+    border: 1px solid rgba(110, 168, 254, .34);
+    border-radius: 999px;
+    padding: 1px 6px;
+    color: var(--blue);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .file-chip[hidden] {
+    display: none;
+  }
+
   .object-preview {
     color: var(--muted);
     font-size: 12px;
@@ -622,6 +651,45 @@
     min-height: 0;
     overflow: auto;
     padding: 18px;
+    display: grid;
+    gap: 12px;
+    align-content: start;
+  }
+
+  .detail-file {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: #101213;
+    padding: 12px;
+    box-shadow: var(--shadow);
+  }
+
+  .detail-file div {
+    min-width: 0;
+  }
+
+  .detail-file strong,
+  .detail-file small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail-file strong {
+    color: #fff7e8;
+    font-size: 13px;
+  }
+
+  .detail-file small {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 2px;
   }
 
   pre {
@@ -1120,6 +1188,19 @@
     min-height: 260px;
   }
 
+  .file-summary {
+    color: var(--muted);
+    font-size: 12px;
+    min-height: 18px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-summary.has-file {
+    color: var(--blue);
+  }
+
   .modal-error {
     display: none;
     color: #ffd1cf;
@@ -1160,8 +1241,10 @@
 
   @media (max-width: 560px) {
     .login-grid, .query-row { grid-template-columns: 1fr; }
+    .query-row { align-items: stretch; }
     .form-grid { grid-template-columns: 1fr; }
     .tree-head, .content-head, .detail-head { align-items: flex-start; flex-direction: column; }
+    .tree-head.actions-only { align-items: flex-end; }
     .tree-actions, .content-actions, .object-actions, .modal-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
     .session { flex-wrap: wrap; justify-content: flex-start; }
     .pill { max-width: 100%; }
@@ -1234,8 +1317,7 @@
       </section>
 
       <section class="tree-panel">
-        <div class="tree-head">
-          <span class="section-title">Databases</span>
+        <div class="tree-head actions-only">
           <div class="tree-actions">
             <button id="add-db-btn" class="secondary" title="Add database" aria-label="Add database" disabled>
               <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
@@ -1275,10 +1357,7 @@
           </div>
         </div>
         <div class="query-row">
-          <label>
-            Query JSON
-            <textarea id="query" spellcheck="false" placeholder='{"status":"active"}'></textarea>
-          </label>
+          <textarea id="query" spellcheck="false" aria-label="Query JSON" placeholder='{"status":"active"}'></textarea>
           <label>
             Limit
             <select id="limit">
@@ -1320,6 +1399,10 @@
           <div class="detail-head">
             <span class="section-title" id="detail-title">Object</span>
             <div class="detail-tools">
+              <button id="download-file-btn" class="secondary" disabled>
+                <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>
+                File
+              </button>
               <button id="edit-object-btn" class="secondary" disabled>
                 <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                 Edit
@@ -1433,6 +1516,8 @@
     <div class="modal-body">
       <div class="form-grid">
         <label>Object _id <input id="object-id" autocomplete="off" /></label>
+        <label class="wide">File <input id="object-file" type="file" /></label>
+        <div class="file-summary wide" id="object-file-summary">No file selected</div>
         <label class="wide">Object JSON <textarea id="object-json" class="json-editor" spellcheck="false">{}</textarea></label>
       </div>
       <div class="modal-error" id="object-modal-error"></div>
@@ -1672,12 +1757,14 @@ function renderActionState() {
   const signedIn = !!state.accessToken;
   const hasCollection = signedIn && !!state.active;
   const hasObject = hasCollection && !!state.selected?._id;
+  const hasFile = hasObject && !!fileMetadata(state.selected);
   $("add-db-btn").disabled = !signedIn;
   $("add-coll-btn").disabled = !signedIn;
   $("refresh-cluster-btn").disabled = !signedIn;
   $("edit-meta-btn").disabled = !hasCollection;
   $("delete-coll-btn").disabled = !hasCollection;
   $("add-object-btn").disabled = !hasCollection;
+  $("download-file-btn").disabled = !hasFile;
   $("edit-object-btn").disabled = !hasObject;
   $("delete-object-btn").disabled = !hasObject;
   $("copy-id-btn").disabled = !hasObject;
@@ -1711,10 +1798,50 @@ async function apiFetch(method, path, body, { retry = true, auth = true } = {}) 
     const renewed = await renewToken({ silent: true });
     if (renewed.ok) return apiFetch(method, path, body, { retry: false, auth });
   }
+  return { ok: res.ok, status: res.status, body: await parseResponseBody(res) };
+}
+
+async function apiFetchForm(method, path, form, { retry = true } = {}) {
+  const url = state.server + path;
+  let res;
+  try {
+    res = await fetch(url, { method, headers: authHeaders(), body: form });
+  } catch (err) {
+    return { ok: false, status: 0, body: { error: err.message } };
+  }
+  if (res.status === 401 && retry && state.refreshToken) {
+    const renewed = await renewToken({ silent: true });
+    if (renewed.ok) return apiFetchForm(method, path, form, { retry: false });
+  }
+  return { ok: res.ok, status: res.status, body: await parseResponseBody(res) };
+}
+
+async function apiFetchBlob(path, { retry = true } = {}) {
+  const url = state.server + path;
+  let res;
+  try {
+    res = await fetch(url, { method: "GET", headers: authHeaders() });
+  } catch (err) {
+    return { ok: false, status: 0, body: { error: err.message } };
+  }
+  if (res.status === 401 && retry && state.refreshToken) {
+    const renewed = await renewToken({ silent: true });
+    if (renewed.ok) return apiFetchBlob(path, { retry: false });
+  }
+  if (!res.ok) return { ok: false, status: res.status, body: await parseResponseBody(res) };
+  return {
+    ok: true,
+    status: res.status,
+    blob: await res.blob(),
+    contentType: res.headers.get("content-type") || "",
+  };
+}
+
+async function parseResponseBody(res) {
   const text = await res.text();
   let parsed = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-  return { ok: res.ok, status: res.status, body: parsed };
+  return parsed;
 }
 
 async function openApiDocs() {
@@ -2658,10 +2785,11 @@ function renderObjects() {
     card.type = "button";
     card.className = "object-card" + (state.selected?._id === object._id ? " active" : "");
     card.innerHTML = `
-      <div class="object-id"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg><span></span></div>
+      <div class="object-id"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg><span></span><span class="file-chip" title="Attached file" hidden>file</span></div>
       <div class="object-preview"></div>
     `;
     card.querySelector(".object-id span").textContent = object._id || "";
+    card.querySelector(".file-chip").hidden = !fileMetadata(object);
     card.querySelector(".object-preview").textContent = previewObject(object);
     card.addEventListener("click", () => showObject(object));
     root.appendChild(card);
@@ -2669,7 +2797,7 @@ function renderObjects() {
 }
 
 function previewObject(object) {
-  const entries = Object.entries(object || {}).filter(([key]) => key !== "_id").slice(0, 4);
+  const entries = Object.entries(object || {}).filter(([key]) => key !== "_id" && key !== "_file").slice(0, 4);
   if (!entries.length) return "{}";
   return entries.map(([key, value]) => `${key}: ${shortValue(value)}`).join(", ");
 }
@@ -2699,7 +2827,21 @@ function renderDetail(object) {
     $("detail").innerHTML = `<div class="empty">Select an object.</div>`;
     return;
   }
-  $("detail").innerHTML = `<div class="json-box"><pre>${highlightJson(object)}</pre></div>`;
+  const file = fileMetadata(object);
+  const filePanel = file
+    ? `<div class="detail-file">
+        <div>
+          <strong>${escapeHtml(fileDisplayName(object))}</strong>
+          <small>${escapeHtml(file.mimeType || "application/octet-stream")}</small>
+        </div>
+        <button type="button" class="secondary" data-open-file>
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>
+          Open
+        </button>
+      </div>`
+    : "";
+  $("detail").innerHTML = `${filePanel}<div class="json-box"><pre>${highlightJson(object)}</pre></div>`;
+  $("detail").querySelector("[data-open-file]")?.addEventListener("click", openSelectedFile);
 }
 
 function highlightJson(value) {
@@ -2735,6 +2877,35 @@ async function copySelectedId() {
   } catch {
     showToast("Clipboard unavailable", true);
   }
+}
+
+async function openSelectedFile() {
+  if (!state.active || !state.selected?._id || !fileMetadata(state.selected)) {
+    return showToast("Selected object has no file", true);
+  }
+  const target = window.open("about:blank", "_blank");
+  const id = state.selected._id;
+  const result = await apiFetchBlob(objectPath(state.active.db, state.active.collection, `/${enc(id)}/blob`));
+  if (!result.ok) {
+    target?.close();
+    return showToast(result.body?.error || "Could not open file", true);
+  }
+
+  const url = URL.createObjectURL(result.blob);
+  if (target) {
+    target.opener = null;
+    target.location.href = url;
+  } else {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  showToast("File opened");
 }
 
 function openDatabaseModal() {
@@ -2811,6 +2982,7 @@ function openObjectModal(mode) {
   clearModalError("object-modal");
   $("object-modal-title").textContent = mode === "edit" ? "Edit Object" : "Add Object";
   $("object-id").disabled = mode === "edit";
+  $("object-file").value = "";
 
   if (mode === "edit") {
     if (!state.selected?._id) return showToast("Select an object first", true);
@@ -2820,6 +2992,7 @@ function openObjectModal(mode) {
     $("object-id").value = "";
     setJsonField("object-json", {});
   }
+  updateObjectFileSummary();
   openModal("object-modal", mode === "edit" ? "object-json" : "object-id");
 }
 
@@ -2828,15 +3001,17 @@ async function saveObject() {
   clearModalError("object-modal");
   const parsed = parseJsonField("object-json", "Object JSON", { allowArray: state.objectMode === "add" });
   if (!parsed.ok) return setModalError("object-modal", parsed.error);
+  const file = selectedObjectFile();
 
   if (state.objectMode === "edit") {
     if (!state.selected?._id) return setModalError("object-modal", "Selected object is missing");
     if (!isPlainObject(parsed.value)) return setModalError("object-modal", "Object JSON must be a plain object");
     const id = state.selected._id;
-    const result = await apiFetch("PUT", objectPath(state.active.db, state.active.collection, `/${enc(id)}`), {
-      ...parsed.value,
-      _id: id,
-    });
+    const object = { ...parsed.value, _id: id };
+    const path = objectPath(state.active.db, state.active.collection, `/${enc(id)}`);
+    const result = file
+      ? await apiFetchForm("PUT", path, objectFileForm(object, file))
+      : await apiFetch("PUT", path, object);
     if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
     closeModal("object-modal");
     showToast("Object saved");
@@ -2847,6 +3022,7 @@ async function saveObject() {
   const explicitId = $("object-id").value.trim();
   let body = parsed.value;
   if (Array.isArray(body)) {
+    if (file) return setModalError("object-modal", "Files can only be uploaded with a single object");
     if (explicitId) return setModalError("object-modal", "Object _id is only for single-object inserts");
     const badIndex = body.findIndex((item) => !isPlainObject(item));
     if (badIndex >= 0) return setModalError("object-modal", `Item at index ${badIndex} must be a plain object`);
@@ -2854,12 +3030,58 @@ async function saveObject() {
     body = { ...body, _id: explicitId };
   }
 
-  const result = await apiFetch("POST", objectPath(state.active.db, state.active.collection), body);
+  const path = objectPath(state.active.db, state.active.collection);
+  const result = file
+    ? await apiFetchForm("POST", path, objectFileForm(body, file))
+    : await apiFetch("POST", path, body);
   if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
   const newId = Array.isArray(body) ? result.body?.items?.[0]?._id : result.body?._id;
   closeModal("object-modal");
   showToast(Array.isArray(body) ? `${result.body?.inserted ?? body.length} objects added` : "Object added");
   await loadObjects({ selectId: newId || null });
+}
+
+function selectedObjectFile() {
+  return $("object-file")?.files?.[0] || null;
+}
+
+function updateObjectFileSummary() {
+  const summary = $("object-file-summary");
+  const file = selectedObjectFile();
+  const current = state.objectMode === "edit" ? fileMetadata(state.selected) : null;
+  if (file) {
+    summary.textContent = `${file.name || "blob"} (${formatMemory(file.size)})`;
+    summary.classList.add("has-file");
+    return;
+  }
+  if (current) {
+    summary.textContent = `${current.mimeType || "application/octet-stream"} attached`;
+    summary.classList.add("has-file");
+    return;
+  }
+  summary.textContent = "No file selected";
+  summary.classList.remove("has-file");
+}
+
+function objectFileForm(object, file) {
+  const form = new FormData();
+  form.append("object", JSON.stringify(withoutFileMetadata(object)));
+  form.append("file", file, file.name || "blob");
+  return form;
+}
+
+function withoutFileMetadata(object) {
+  const { _file, ...rest } = object || {};
+  return rest;
+}
+
+function fileMetadata(object) {
+  return isPlainObject(object?._file) ? object._file : null;
+}
+
+function fileDisplayName(object) {
+  const value = object?.name || object?.filename || object?.title || object?._id || "blob";
+  return String(value).replace(/[\\/:*?"<>|]+/g, "_") || "blob";
 }
 
 function openDeleteObjectModal() {
@@ -3001,8 +3223,10 @@ $("format-query-btn").addEventListener("click", formatQuery);
 $("add-object-btn").addEventListener("click", () => openObjectModal("add"));
 $("edit-object-btn").addEventListener("click", () => openObjectModal("edit"));
 $("delete-object-btn").addEventListener("click", openDeleteObjectModal);
+$("download-file-btn").addEventListener("click", openSelectedFile);
 $("copy-id-btn").addEventListener("click", copySelectedId);
 $("reload-object-btn").addEventListener("click", reloadObject);
+$("object-file").addEventListener("change", updateObjectFileSummary);
 $("db-modal-save").addEventListener("click", saveDatabase);
 $("collection-modal-save").addEventListener("click", saveCollection);
 $("meta-modal-save").addEventListener("click", saveCollectionMeta);

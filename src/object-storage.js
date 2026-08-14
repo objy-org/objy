@@ -20,8 +20,26 @@ export class MemoryObjectStorage {
     });
   }
 
+  async putBlob(key, body, contentType = "application/octet-stream") {
+    this.objects.set(key, {
+      body: Buffer.isBuffer(body) ? Buffer.from(body) : Buffer.from(body || ""),
+      contentType,
+    });
+  }
+
   async get(key) {
     return this.objects.get(key)?.body ?? null;
+  }
+
+  async getBlob(key) {
+    const object = this.objects.get(key);
+    if (!object) return null;
+    const body = Buffer.isBuffer(object.body) ? Buffer.from(object.body) : Buffer.from(String(object.body));
+    return {
+      body,
+      contentType: object.contentType || "application/octet-stream",
+      contentLength: body.length,
+    };
   }
 
   async list(prefix = "") {
@@ -94,6 +112,16 @@ export class S3ObjectStorage {
     }));
   }
 
+  async putBlob(key, body, contentType = "application/octet-stream") {
+    await this.ensureBucket();
+    await this.client.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }));
+  }
+
   async get(key) {
     await this.ensureBucket();
     try {
@@ -102,6 +130,25 @@ export class S3ObjectStorage {
         Key: key,
       }));
       return bodyToString(got.Body);
+    } catch (err) {
+      const code = err.$metadata?.httpStatusCode;
+      if (code === 404 || err.name === "NoSuchKey" || err.name === "NotFound") return null;
+      throw err;
+    }
+  }
+
+  async getBlob(key) {
+    await this.ensureBucket();
+    try {
+      const got = await this.client.send(new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }));
+      return {
+        body: got.Body,
+        contentType: got.ContentType || "application/octet-stream",
+        contentLength: got.ContentLength,
+      };
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (code === 404 || err.name === "NoSuchKey" || err.name === "NotFound") return null;

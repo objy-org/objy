@@ -12,6 +12,8 @@ export const QUERY_PATH_HEADER = "x-spread-db-query-path";
 export const AGGREGATE_PATH = {
   COLUMN_SUMMARY: "aggregate-column-summary",
   COLUMN_SCAN: "aggregate-column-scan",
+  GROUP_COUNT_INDEX: "aggregate-group-count-index",
+  GROUP_FORWARD_INDEX: "aggregate-group-forward-index",
   GROUP_INDEX: "aggregate-group-index",
   GROUP_COLUMN_SCAN: "aggregate-group-column-scan",
   SCAN: "aggregate-scan",
@@ -110,7 +112,8 @@ export function planAggregate(criteria = {}, spec = {}, options = {}, adapter) {
   const normalized = normalizeAggregateSpec(spec);
   const hasCriteria = hasObjectCriteria(criteria);
   const includeId = typeof options.includeId === "function" ? options.includeId : null;
-  const idPlan = aggregateIdPlan(criteria, includeId, adapter);
+  const includeIds = options.includeIds instanceof Set ? options.includeIds : null;
+  const idPlan = aggregateIdPlan(criteria, includeId, includeIds, adapter);
   const metricColumns = readyColumns(metricColumnPaths(normalized), adapter);
 
   if (!metricColumns.ready) {
@@ -118,7 +121,7 @@ export function planAggregate(criteria = {}, spec = {}, options = {}, adapter) {
   }
 
   if (normalized.groupBy.length === 0) {
-    if (!hasCriteria && !includeId && canUseColumnSummary(normalized)) {
+    if (!hasCriteria && !includeId && !includeIds && canUseColumnSummary(normalized)) {
       return {
         path: AGGREGATE_PATH.COLUMN_SUMMARY,
         normalized,
@@ -138,6 +141,35 @@ export function planAggregate(criteria = {}, spec = {}, options = {}, adapter) {
   }
 
   if (!idPlan) return aggregateScanPlan(normalized, "criteria cannot be narrowed by indexes");
+
+  const scopeShards = Array.isArray(options.scopeShards) ? options.scopeShards : null;
+  if (normalized.groupBy.length === 1 && isRowCountOnlyAggregate(normalized) && !includeId && (!includeIds || scopeShards?.length)) {
+    const groupCountIndex = adapter.groupCountIndex?.(criteria, normalized.groupBy[0], {
+      scopeShards,
+    });
+    if (groupCountIndex) {
+      return {
+        path: AGGREGATE_PATH.GROUP_COUNT_INDEX,
+        normalized,
+        groupBy: normalized.groupBy[0],
+        groupCountIndex,
+        reason: "count-only grouped aggregate can be answered from aggregate count indexes",
+      };
+    }
+  }
+
+  if (normalized.groupBy.length === 1 && !isRowCountOnlyAggregate(normalized) && idPlan.exact && idPlan.ids instanceof Set &&
+      adapter.hasGroupForwardIndex?.(normalized.groupBy[0])) {
+    return {
+      path: AGGREGATE_PATH.GROUP_FORWARD_INDEX,
+      normalized,
+      columns: metricColumns.columns,
+      groupBy: normalized.groupBy[0],
+      groupIndex: adapter.fieldIndex(normalized.groupBy[0]),
+      idPlan,
+      reason: "groupBy field can be read from the field index forward map and metrics have column indexes",
+    };
+  }
 
   if (normalized.groupBy.length === 1 && adapter.hasGroupIndex(normalized.groupBy[0])) {
     return {
@@ -175,14 +207,17 @@ function planIndexedIds(criteria, adapter) {
   return null;
 }
 
-function aggregateIdPlan(criteria, includeId, adapter) {
+function aggregateIdPlan(criteria, includeId, includeIds, adapter) {
   if (!hasObjectCriteria(criteria)) {
-    if (!includeId) return allIdsPlan();
-    return { ids: adapter.idsForAll(includeId), exact: true, verify: false };
+    if (includeIds && includeId) return { ids: adapter.filterIds(includeIds, includeId), exact: true, verify: false };
+    if (includeIds) return { ids: includeIds, exact: true, verify: false };
+    if (includeId) return { ids: adapter.idsForAll(includeId), exact: true, verify: false };
+    return allIdsPlan();
   }
 
   const indexed = planIndexedIds(criteria, adapter);
   if (!indexed) return null;
+  if (includeIds) return { ...indexed, scopeIds: includeIds };
   if (!includeId) return indexed;
   return {
     ...indexed,
@@ -225,6 +260,11 @@ function canUseColumnSummary(normalized) {
   return normalized.fields.every((field) => {
     return field.operator === "$sum" || field.operator === "$avg" || field.operator === "$count";
   });
+}
+
+function isRowCountOnlyAggregate(normalized) {
+  return normalized.fields.length > 0 &&
+    normalized.fields.every((field) => field.operator === "$count" && field.operand === true);
 }
 
 function mergeColumnMaps(left, right) {

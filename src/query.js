@@ -36,9 +36,12 @@ const rhsOperators = new Set([
 const queryControls = new Set([
   "$aggregate",
   "$cursor",
+  "$limit",
+  "$offset",
   "$page",
   "$pageSize",
   "$refDepth",
+  "$skip",
   "$sort",
   "$vector",
 ]);

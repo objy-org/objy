@@ -34,6 +34,7 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
       port,
     },
     storage: normalizeStorageConfig(config.storage),
+    files: normalizeFilesConfig(config.files, config.persistence),
     vector: normalizeVectorConfig(config.vector),
     memoryGuard: normalizeMemoryGuardConfig(config.memoryGuard),
     cluster: {
@@ -47,6 +48,25 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
     },
     auth: normalizeAuthConfig(config.auth),
     persistence: normalizePersistenceConfig(config.persistence),
+  };
+}
+
+function normalizeFilesConfig(config = {}, persistenceConfig = {}) {
+  const mode = config.mode || "off";
+  if (!["off", "memory", "s3"].includes(mode)) {
+    throw new Error(`unsupported files mode: ${mode}`);
+  }
+  const s3Config = mode === "s3"
+    ? {
+        ...(persistenceConfig?.s3 || {}),
+        ...(config.s3 || {}),
+      }
+    : (config.s3 || {});
+  return {
+    mode,
+    prefix: config.prefix || "spread-db/files",
+    maxUploadBytes: positiveInt(config.maxUploadBytes, 256 * 1024 * 1024),
+    s3: normalizeS3Config(s3Config, "files.s3"),
   };
 }
 
@@ -148,7 +168,7 @@ function normalizePersistenceConfig(config = {}) {
   };
 }
 
-function normalizeS3Config(config = {}) {
+function normalizeS3Config(config = {}, label = "persistence.s3") {
   const endpoint = config.endpoint;
   const endpointLocation = typeof endpoint === "string" ? hetznerLocationFromEndpoint(endpoint) : null;
   const configuredRegion = typeof config.region === "string" && config.region.trim()
@@ -156,7 +176,7 @@ function normalizeS3Config(config = {}) {
     : null;
   const region = normalizeS3Region(configuredRegion, endpointLocation);
   if (endpointLocation && region !== endpointLocation) {
-    throw new Error(`persistence.s3.region must be ${endpointLocation} for endpoint ${endpoint}`);
+    throw new Error(`${label}.region must be ${endpointLocation} for endpoint ${endpoint}`);
   }
   return {
     bucket: config.bucket || "spread-db",

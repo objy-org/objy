@@ -532,6 +532,12 @@ test("query planner chooses old index-style read and aggregate paths", async () 
       total: { $sum: "score" },
     },
   }).path, AGGREGATE_PATH.GROUP_INDEX);
+  assert.equal(collection._planAggregate({ status: "active" }, {
+    groupBy: "status",
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.GROUP_FORWARD_INDEX);
   assert.equal(collection._planAggregate({}, {
     groupBy: "profile.city",
     fields: {
@@ -543,6 +549,308 @@ test("query planner chooses old index-style read and aggregate paths", async () 
       total: { $sum: "missingColumn" },
     },
   }).path, AGGREGATE_PATH.SCAN);
+});
+
+test("indexed grouped count aggregates use bucket counts", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "assets", {
+    indexes: ["applications", "properties.department.value"],
+    columnIndexes: ["score"],
+  });
+
+  const departments = ["ops", "rd", "sales"];
+  const expected = new Map(departments.map((department) => [department, { count: 0, score: 0 }]));
+  const rows = [];
+  for (let i = 0; i < 1000; i++) {
+    const department = departments[i % departments.length];
+    const score = i % 11;
+    const applications = i % 2 === 0 ? ["assetmanagement", "core"] : ["crm"];
+    rows.push({
+      _id: `asset-${i}`,
+      applications,
+      properties: {
+        department: { value: department },
+      },
+      score,
+    });
+    if (applications.includes("assetmanagement")) {
+      expected.get(department).count++;
+      expected.get(department).score += score;
+    }
+  }
+  n.insertMany("db", "assets", rows);
+  await n.awaitColumnIndexes("db", "assets");
+
+  const spec = {
+    groupBy: "properties.department.value",
+    fields: {
+      _count: { $count: true },
+    },
+    $sort: { "properties.department.value": 1 },
+  };
+  const collection = n.db.collection("db", "assets");
+  assert.equal(collection._planAggregate({ applications: "assetmanagement" }, spec).path, AGGREGATE_PATH.GROUP_COUNT_INDEX);
+  assert.equal(collection._planAggregate({ applications: { $contains: "assetmanagement" } }, spec).path, AGGREGATE_PATH.GROUP_COUNT_INDEX);
+
+  const groupIndex = collection.indexes.get("properties.department.value");
+  const originalIterateGroups = groupIndex.iterateGroups;
+  const originalIterateGroupCounts = groupIndex.iterateGroupCounts;
+  const originalReadForQuery = collection.readForQuery;
+  groupIndex.iterateGroups = function* () {
+    throw new Error("grouped count aggregate walked IDs");
+  };
+  groupIndex.iterateGroupCounts = function* () {
+    throw new Error("grouped count aggregate intersected ID buckets");
+  };
+  collection.readForQuery = () => {
+    throw new Error("grouped count aggregate read objects");
+  };
+  try {
+    assert.deepEqual(
+      n.aggregate("db", "assets", { applications: "assetmanagement" }, spec),
+      [...expected.entries()].map(([department, values]) => ({
+        "properties.department.value": department,
+        _count: values.count,
+      })),
+    );
+    assert.deepEqual(
+      n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+      [...expected.entries()].map(([department, values]) => ({
+        "properties.department.value": department,
+        _count: values.count,
+      })),
+    );
+  } finally {
+    groupIndex.iterateGroups = originalIterateGroups;
+    groupIndex.iterateGroupCounts = originalIterateGroupCounts;
+    collection.readForQuery = originalReadForQuery;
+  }
+
+  n.update("db", "assets", "asset-0", {
+    _id: "asset-0",
+    applications: ["crm"],
+    properties: { department: { value: "ops" } },
+    score: 0,
+  });
+  expected.get("ops").count--;
+  assert.deepEqual(
+    n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+    [...expected.entries()].map(([department, values]) => ({
+      "properties.department.value": department,
+      _count: values.count,
+    })),
+  );
+
+  n.remove("db", "assets", "asset-6");
+  expected.get("ops").count--;
+  expected.get("ops").score -= 6;
+  assert.deepEqual(
+    n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+    [...expected.entries()].map(([department, values]) => ({
+      "properties.department.value": department,
+      _count: values.count,
+    })),
+  );
+
+  assert.deepEqual(
+    n.aggregate("db", "assets", { applications: "assetmanagement" }, {
+      groupBy: "properties.department.value",
+      fields: {
+        _count: { $count: true },
+        totalScore: { $sum: "score" },
+      },
+      $sort: { "properties.department.value": 1 },
+    }),
+    [...expected.entries()].map(([department, values]) => ({
+      "properties.department.value": department,
+      _count: values.count,
+      totalScore: values.score,
+    })),
+  );
+
+  const strings = new CRDTNode({ id: "strings" });
+  strings.createCollection("db", "docs", { indexes: ["title"] });
+  strings.insertMany("db", "docs", [
+    { _id: "a", title: "assetmanagement" },
+    { _id: "b", title: "asset" },
+  ]);
+  assert.equal(strings.db.collection("db", "docs")._planRead({ title: { $contains: "asset" } }, {}).path, READ_PATH.SCAN);
+  assert.equal(strings.db.collection("db", "docs")._planAggregate({ title: { $contains: "asset" } }, {
+    groupBy: "title",
+    fields: { _count: { $count: true } },
+  }).path, AGGREGATE_PATH.SCAN);
+  assert.equal(collection._planAggregate({ applications: { $in: ["assetmanagement", "core"] } }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
+});
+
+test("indexed grouped metric aggregates use forward index values and column maps", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "assets", {
+    indexes: ["applications", "properties.department.value"],
+    columnIndexes: ["score", "cost", "label"],
+  });
+  n.insertMany("db", "assets", [
+    {
+      _id: "a1",
+      applications: ["assetmanagement", "core"],
+      properties: { department: { value: "ops" } },
+      score: 10,
+      cost: 100,
+      label: "charlie",
+    },
+    {
+      _id: "a2",
+      applications: ["assetmanagement"],
+      properties: { department: { value: "ops" } },
+      score: 20,
+      cost: 50,
+      label: "alpha",
+    },
+    {
+      _id: "a3",
+      applications: ["assetmanagement"],
+      properties: { department: { value: "rd" } },
+      score: 5,
+      cost: 30,
+      label: "bravo",
+    },
+    {
+      _id: "a4",
+      applications: ["crm"],
+      properties: { department: { value: "ops" } },
+      score: 100,
+      cost: 1000,
+      label: "ignored",
+    },
+  ]);
+  await n.awaitColumnIndexes("db", "assets");
+
+  const spec = {
+    groupBy: "properties.department.value",
+    fields: {
+      totalScore: { $sum: "score" },
+      averageCost: { $avg: "cost" },
+      minLabel: { $min: "label" },
+      maxScore: { $max: "score" },
+      n: { $count: true },
+    },
+    $sort: { "properties.department.value": 1 },
+  };
+  const collection = n.db.collection("db", "assets");
+  assert.equal(
+    collection._planAggregate({ applications: { $contains: "assetmanagement" } }, spec).path,
+    AGGREGATE_PATH.GROUP_FORWARD_INDEX,
+  );
+
+  const groupIndex = collection.indexes.get("properties.department.value");
+  const originalIterateGroups = groupIndex.iterateGroups;
+  const originalReadForQuery = collection.readForQuery;
+  groupIndex.iterateGroups = function* () {
+    throw new Error("forward aggregate walked group buckets");
+  };
+  collection.readForQuery = () => {
+    throw new Error("forward aggregate read objects");
+  };
+  try {
+    assert.deepEqual(
+      n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+      [
+        {
+          "properties.department.value": "ops",
+          totalScore: 30,
+          averageCost: 75,
+          minLabel: "alpha",
+          maxScore: 20,
+          n: 2,
+        },
+        {
+          "properties.department.value": "rd",
+          totalScore: 5,
+          averageCost: 30,
+          minLabel: "bravo",
+          maxScore: 5,
+          n: 1,
+        },
+      ],
+    );
+  } finally {
+    groupIndex.iterateGroups = originalIterateGroups;
+    collection.readForQuery = originalReadForQuery;
+  }
+
+  n.update("db", "assets", "a2", {
+    applications: ["assetmanagement"],
+    properties: { department: { value: "rd" } },
+    score: 25,
+    cost: 70,
+    label: "delta",
+  });
+  n.remove("db", "assets", "a1");
+
+  assert.deepEqual(
+    n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+    [
+      {
+        "properties.department.value": "rd",
+        totalScore: 30,
+        averageCost: 50,
+        minLabel: "bravo",
+        maxScore: 25,
+        n: 2,
+      },
+    ],
+  );
+});
+
+test("shard scoped grouped count aggregates use shard id sets", () => {
+  const n = new CRDTNode({
+    id: "a",
+    shardMap: {
+      shards: {
+        "shard-0": { peers: [] },
+        "shard-1": { peers: [] },
+      },
+    },
+  });
+  n.createCollection("db", "assets", {
+    indexes: ["applications", "properties.department.value"],
+  });
+
+  const expected = new Map();
+  const rows = [];
+  for (let i = 0; i < 1000; i++) {
+    const department = i % 3 === 0 ? "ops" : "rd";
+    const applications = i % 2 === 0 ? ["assetmanagement"] : ["crm"];
+    const row = {
+      _id: `asset-${i}`,
+      applications,
+      properties: { department: { value: department } },
+    };
+    rows.push(row);
+    if (n.shardForObject("db", "assets", row._id) === "shard-0" && applications.includes("assetmanagement")) {
+      expected.set(department, (expected.get(department) || 0) + 1);
+    }
+  }
+  n.insertMany("db", "assets", rows);
+
+  const options = n._shardQueryOptions("db", "assets", ["shard-0"]);
+  assert.equal(options.includeIds instanceof Set, true);
+  assert.equal(typeof options.includeId, "undefined");
+
+  n.shardForObject = () => {
+    throw new Error("shard scoped aggregate hashed object ids");
+  };
+
+  assert.deepEqual(
+    n.aggregateShards("db", "assets", { applications: { $contains: "assetmanagement" } }, {
+      groupBy: "properties.department.value",
+      fields: { _count: { $count: true } },
+      $sort: { "properties.department.value": 1 },
+    }, ["shard-0"]),
+    [...expected.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([department, count]) => ({
+      "properties.department.value": department,
+      _count: count,
+    })),
+  );
 });
 
 test("unfiltered limited reads and column builds stream live ids", async () => {

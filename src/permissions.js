@@ -8,7 +8,18 @@ const OP_CODES = {
 };
 
 const VALID_PERMS = new Set(["c", "r", "u", "d"]);
-const QUERY_CONTROLS = new Set(["$aggregate", "$cursor", "$page", "$pageSize", "$refDepth", "$sort", "$vector"]);
+const QUERY_CONTROLS = new Set([
+  "$aggregate",
+  "$cursor",
+  "$limit",
+  "$offset",
+  "$page",
+  "$pageSize",
+  "$refDepth",
+  "$skip",
+  "$sort",
+  "$vector",
+]);
 
 export function normalizePermissions(permissions) {
   if (permissions === undefined || permissions === null) return [];

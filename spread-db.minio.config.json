@@ -23,6 +23,10 @@
       }
     }
   },
+  "files": {
+    "mode": "s3",
+    "prefix": "spread-db/files"
+  },
   "cluster": {
     "syncMs": 2500,
     "forwardTimeoutMs": 60000,

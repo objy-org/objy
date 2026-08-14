@@ -67,6 +67,7 @@ function makeNodeConfig(base, cluster, node) {
   const shard = node.shard || node.shards?.[0] || cluster.cluster?.shardName || base.cluster?.shardName || "shard-0";
   const sshHost = node.ssh?.host || node.sshHost || node.host || node.ip;
   if (!sshHost) throw new Error(`node ${node.id} needs ssh.host or host`);
+  const files = mergeOptionalConfig(cluster.files, node.files);
 
   return deepMerge(base, {
     ssh: deepMerge(cluster.ssh || {}, {
@@ -84,6 +85,7 @@ function makeNodeConfig(base, cluster, node) {
     cluster: deepMerge(cluster.cluster || {}, {
       shardName: shard,
     }),
+    ...(files !== undefined ? { files } : {}),
     storage: cluster.storage || {},
     auth: cluster.auth || {},
     persistence: cluster.persistence || {},
@@ -125,6 +127,13 @@ function deepMerge(...items) {
     }
   }
   return out;
+}
+
+function mergeOptionalConfig(base, override) {
+  if (override !== undefined) {
+    return isPlainObject(base) && isPlainObject(override) ? deepMerge(base, override) : override;
+  }
+  return base;
 }
 
 function parseArgs(argv) {
