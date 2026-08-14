@@ -2,7 +2,14 @@ import { USERS_COLLECTION } from "../auth.js";
 import { aggregateRows } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
 import { json, readJson } from "../http-router.js";
+import {
+  buildMultipartObjectFile,
+  isMultipartRequest,
+  readMultipartObjectFile,
+  writeBlobResponse,
+} from "../files.js";
 import { createObjectId } from "../object-id.js";
+import { applyPatchToObject, patchUnsetsPath } from "../patch.js";
 import {
   canCreate,
   canDelete,
@@ -30,10 +37,13 @@ import {
 import { objectPath, ok } from "../shard-router.js";
 import { isValidVector } from "../vector.js";
 
+const DEFAULT_PUBLIC_QUERY_LIMIT = 250;
+const MAX_PUBLIC_QUERY_LIMIT = 250;
+
 export function createPublicObjectInterface() {
   return {
     name: "public-object",
-    register(router, { node, auth, routing, durability, memoryGuard, replicationScheduler }) {
+    register(router, { node, auth, routing, durability, memoryGuard, replicationScheduler, files }) {
       const secure = secureRoute(auth);
 
       router.get("/api/databases", secure((req, res) => {
@@ -278,13 +288,35 @@ export function createPublicObjectInterface() {
         json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
       }));
 
+      router.get("/api/:database/:collection/object/:id/blob", secure(async (req, res) => {
+        if (!files) return json(res, 404, { error: "file storage is not configured" });
+        try {
+          const object = await readableObjectForFile({ req, node, routing });
+          if (!object) return json(res, 404, { error: "not found" });
+          if (!object._file) return json(res, 404, { error: "object has no file" });
+          const blob = await files.get(req.params.database, req.params.collection, req.params.id, object._file);
+          if (!blob) return json(res, 404, { error: "file not found" });
+          await writeBlobResponse(res, blob, object._file.mimeType);
+        } catch (err) {
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+        }
+      }));
+
       router.post("/api/:database/:collection/object", secure(async (req, res) => {
+        if (isMultipartRequest(req)) {
+          return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files });
+        }
         const body = await readJson(req);
         const isBulk = Array.isArray(body);
         const rawItems = isBulk ? body : [body || {}];
         const error = validatePlainObjects(rawItems);
         if (error) return json(res, 400, error);
-        const items = withObjectIds(rawItems);
+        let items;
+        try {
+          items = normalizeFileObjects(files, req.params.database, req.params.collection, withObjectIds(rawItems));
+        } catch (err) {
+          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+        }
         const minimalBulkReturn = isBulk && prefersMinimalReturn(req);
         let groups;
         const preparedByGroup = new Map();
@@ -363,6 +395,7 @@ export function createPublicObjectInterface() {
         const error = validatePlainObjects(body, { requireId: true });
         if (error) return json(res, 400, error);
         try {
+          const objects = normalizeFileObjects(files, req.params.database, req.params.collection, body);
           const result = await routedWriteMany({
             req,
             routing,
@@ -370,13 +403,14 @@ export function createPublicObjectInterface() {
             node,
             database: req.params.database,
             collection: req.params.collection,
-            objects: body,
+            objects,
             method: "PUT",
             resultKey: "replaced",
             partial: false,
             localWrite: (prepared) => node.replaceMany(req.params.database, req.params.collection, prepared),
             durability,
             memoryGuard,
+            files,
           });
           json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
         } catch (err) {
@@ -390,20 +424,17 @@ export function createPublicObjectInterface() {
         const error = validatePlainObjects(body, { requireId: true });
         if (error) return json(res, 400, error);
         try {
-          const result = await routedWriteMany({
+          const result = await routedPatchMany({
             req,
             routing,
             auth,
             node,
             database: req.params.database,
             collection: req.params.collection,
-            objects: body,
-            method: "PATCH",
-            resultKey: "updated",
-            partial: true,
-            localWrite: (prepared) => node.updateMany(req.params.database, req.params.collection, prepared),
+            patches: body,
             durability,
             memoryGuard,
+            files,
           });
           json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
         } catch (err) {
@@ -419,13 +450,16 @@ export function createPublicObjectInterface() {
           return json(res, 400, errorBody(err));
         }
         try {
-          json(res, 200, await routedRemoveMany(req, routing, node, durability, memoryGuard, req.params.database, req.params.collection, ids));
+          json(res, 200, await routedRemoveMany(req, routing, node, durability, memoryGuard, req.params.database, req.params.collection, ids, files));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
       }));
 
       router.put("/api/:database/:collection/object/:id", secure(async (req, res) => {
+        if (isMultipartRequest(req)) {
+          return multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files });
+        }
         const body = await readJson(req);
         const error = validatePlainObjects([body || {}]);
         if (error) return json(res, 400, error);
@@ -457,11 +491,14 @@ export function createPublicObjectInterface() {
             [{ ...(body || {}), _id: req.params.id }],
             { partial: false },
           );
-          assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
+          const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
+          assertUpsertAllowed(req, node, req.params.database, req.params.collection, [preparedObject], { partial: false });
           assertMemoryGuardAcceptsWrites(memoryGuard);
-          node.replace(req.params.database, req.params.collection, req.params.id, prepared);
+          const before = node.get(req.params.database, req.params.collection, req.params.id);
+          node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
           await afterLocalWrite(durability);
           const object = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
+          await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [object]);
           const expanded = await expandObjectForRead({
             req,
             node,
@@ -502,17 +539,29 @@ export function createPublicObjectInterface() {
             });
             return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, object));
           }
+          const patchedObject = compilePatchedObject({
+            node,
+            database: req.params.database,
+            collection: req.params.collection,
+            id: req.params.id,
+            patch: body || {},
+            files,
+          });
+          if (!patchedObject) return json(res, 404, { error: "not found" });
           const [prepared] = auth.prepareWriteObjects(
             req.params.database,
             req.params.collection,
-            [{ ...(body || {}), _id: req.params.id }],
+            [patchedObject],
             { partial: true },
           );
-          assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: true });
+          const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
+          assertUpdateAllowed(req, node, req.params.database, req.params.collection, [preparedObject]);
           assertMemoryGuardAcceptsWrites(memoryGuard);
-          node.update(req.params.database, req.params.collection, req.params.id, prepared);
+          const before = node.get(req.params.database, req.params.collection, req.params.id);
+          node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
           await afterLocalWrite(durability);
           const object = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
+          await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [object]);
           const expanded = await expandObjectForRead({
             req,
             node,
@@ -550,10 +599,155 @@ export function createPublicObjectInterface() {
         const ok = node.remove(req.params.database, req.params.collection, req.params.id);
         if (!ok) return json(res, 404, { error: "not found" });
         await afterLocalWrite(durability);
+        await deleteObjectFiles(files, req.params.database, req.params.collection, [existing]);
         json(res, 204);
       }));
     },
   };
+}
+
+async function multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files }) {
+  if (!files) return json(res, 404, { error: "file storage is not configured" });
+  try {
+    assertMemoryGuardAcceptsWrites(memoryGuard);
+    const { object, file } = await readMultipartObjectFile(req, {
+      maxBytes: files.maxUploadBytes,
+      assertCanBuffer: () => assertMemoryGuardAcceptsWrites(memoryGuard),
+    });
+    const error = validatePlainObjects([object]);
+    if (error) return json(res, 400, error);
+    const item = withObjectIds([object])[0];
+
+    if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, item._id)) {
+      const forwarded = buildMultipartObjectFile({ object: item, file });
+      const remote = await routing.forwardToObjectRaw(
+        req,
+        req.params.database,
+        req.params.collection,
+        item._id,
+        objectPath(req.params.database, req.params.collection),
+        {
+          method: "POST",
+          body: forwarded.body,
+          contentType: forwarded.contentType,
+          query: refDepthQuery(0),
+        },
+      );
+      if (!ok(remote.status)) return proxyJson(res, remote);
+      const expanded = await expandObjectForRead({
+        req,
+        node,
+        routing,
+        database: req.params.database,
+        object: stripReferenceObjects(remote.body),
+        refDepth: refDepthParam(req),
+      });
+      return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, expanded));
+    }
+
+    if (node.get(req.params.database, req.params.collection, item._id)) {
+      throw httpError(409, `object already exists: ${item._id}`);
+    }
+    const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
+    const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
+    assertCreateAllowed(req, [prepared]);
+    await files.put(req.params.database, req.params.collection, item._id, objectWithFile._file, file);
+    const [row] = node.insertMany(req.params.database, req.params.collection, [prepared]);
+    await afterLocalWrite(durability);
+    const expanded = await expandObjectForRead({
+      req,
+      node,
+      routing,
+      database: req.params.database,
+      object: stripReferenceObjects(row),
+      refDepth: refDepthParam(req),
+    });
+    return json(res, 201, auth.redactObject(req.params.database, req.params.collection, expanded));
+  } catch (err) {
+    return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+  }
+}
+
+async function multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files }) {
+  if (!files) return json(res, 404, { error: "file storage is not configured" });
+  try {
+    assertMemoryGuardAcceptsWrites(memoryGuard);
+    const { object, file } = await readMultipartObjectFile(req, {
+      maxBytes: files.maxUploadBytes,
+      assertCanBuffer: () => assertMemoryGuardAcceptsWrites(memoryGuard),
+    });
+    const error = validatePlainObjects([object]);
+    if (error) return json(res, 400, error);
+    const item = { ...object, _id: req.params.id };
+
+    if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+      const forwarded = buildMultipartObjectFile({ object: item, file });
+      const remote = await routing.forwardToObjectRaw(
+        req,
+        req.params.database,
+        req.params.collection,
+        req.params.id,
+        objectPath(req.params.database, req.params.collection, req.params.id),
+        {
+          method: "PUT",
+          body: forwarded.body,
+          contentType: forwarded.contentType,
+          query: refDepthQuery(0),
+        },
+      );
+      if (!ok(remote.status)) return proxyJson(res, remote);
+      const expanded = await expandObjectForRead({
+        req,
+        node,
+        routing,
+        database: req.params.database,
+        object: stripReferenceObjects(remote.body),
+        refDepth: refDepthParam(req),
+      });
+      return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, expanded));
+    }
+
+    const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
+    const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
+    assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
+    const before = node.get(req.params.database, req.params.collection, req.params.id);
+    await files.put(req.params.database, req.params.collection, req.params.id, objectWithFile._file, file);
+    node.replace(req.params.database, req.params.collection, req.params.id, prepared);
+    await afterLocalWrite(durability);
+    const row = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
+    await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [row]);
+    const expanded = await expandObjectForRead({
+      req,
+      node,
+      routing,
+      database: req.params.database,
+      object: stripReferenceObjects(row),
+      refDepth: refDepthParam(req),
+    });
+    return json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
+  } catch (err) {
+    return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+  }
+}
+
+async function readableObjectForFile({ req, node, routing }) {
+  if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+    const remote = await routing.forwardToObject(
+      req,
+      req.params.database,
+      req.params.collection,
+      req.params.id,
+      objectPath(req.params.database, req.params.collection, req.params.id),
+      { method: "GET", query: refDepthQuery(0), retryStatuses: [404, 409, 503] },
+    );
+    if (remote.status === 404) return null;
+    if (!ok(remote.status)) throw remoteError(remote, "file object lookup failed");
+    return stripReferenceObjects(remote.body);
+  }
+
+  const object = node.get(req.params.database, req.params.collection, req.params.id);
+  if (object) assertReadAllowed(req, object);
+  return object || null;
 }
 
 async function executeCollectionQuery(req, res, { node, auth, routing, query }) {
@@ -639,8 +833,10 @@ async function routedWriteMany({
   localWrite,
   durability,
   memoryGuard,
+  files,
 }) {
   const rows = [];
+  const removedFileObjects = [];
   let total = 0;
   let wroteLocally = false;
   const groups = routing.groupByShard(req, database, collection, objects, (item) => item._id);
@@ -657,9 +853,11 @@ async function routedWriteMany({
     for (const group of groups) {
       if (group.local) {
         const prepared = preparedByGroup.get(group);
+        const before = files ? existingObjectMap(node, database, collection, prepared.map((object) => object._id)) : null;
         const localResult = localWrite(prepared);
         total += Number(localResult[resultKey]) || 0;
         rows.push(...(localResult.items || []));
+        removedFileObjects.push(...removedFiles(before, localResult.items));
         wroteLocally = true;
         continue;
       }
@@ -673,7 +871,10 @@ async function routedWriteMany({
       total += Number(remote.body?.[resultKey]) || 0;
       rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
     }
-    if (wroteLocally) await afterLocalWrite(durability);
+    if (wroteLocally) {
+      await afterLocalWrite(durability);
+      await deleteObjectFiles(files, database, collection, removedFileObjects);
+    }
   } catch (err) {
     if (wroteLocally) await afterLocalWrite(durability).catch((flushErr) => {
       err = flushErr;
@@ -694,17 +895,132 @@ async function routedWriteMany({
   };
 }
 
-async function routedRemoveMany(req, routing, node, durability, memoryGuard, database, collection, ids) {
+async function routedPatchMany({
+  req,
+  routing,
+  auth,
+  node,
+  database,
+  collection,
+  patches,
+  durability,
+  memoryGuard,
+  files,
+}) {
+  const rows = [];
+  const skipped = [];
+  const removedFileObjects = [];
+  let updated = 0;
+  let wroteLocally = false;
+  const groups = routing.groupByShard(req, database, collection, patches, (item) => item._id);
+  const preparedByGroup = new Map();
+
+  for (const group of groups) {
+    if (!group.local) continue;
+    const compiled = [];
+    for (const item of group.items) {
+      const { _id, ...patch } = item;
+      const patched = compilePatchedObject({ node, database, collection, id: _id, patch, files });
+      if (!patched) {
+        skipped.push(String(_id));
+        continue;
+      }
+      compiled.push(patched);
+    }
+    if (!compiled.length) continue;
+    const prepared = normalizeFileObjects(
+      files,
+      database,
+      collection,
+      auth.prepareWriteObjects(database, collection, compiled, { partial: true }),
+    );
+    assertUpdateAllowed(req, node, database, collection, prepared);
+    preparedByGroup.set(group, prepared);
+  }
+  if (preparedByGroup.size) assertMemoryGuardAcceptsWrites(memoryGuard);
+
+  try {
+    for (const group of groups) {
+      if (group.local) {
+        const prepared = preparedByGroup.get(group) || [];
+        if (!prepared.length) continue;
+        const before = files ? existingObjectMap(node, database, collection, prepared.map((object) => object._id)) : null;
+        const localResult = node.replaceMany(database, collection, prepared);
+        updated += Number(localResult.replaced) || 0;
+        rows.push(...(localResult.items || []));
+        removedFileObjects.push(...removedFiles(before, localResult.items));
+        wroteLocally = true;
+        continue;
+      }
+
+      const remote = await routing.forwardToShard(req, group.shard, objectPath(database, collection), {
+        method: "PATCH",
+        body: group.items,
+        query: refDepthQuery(0),
+      });
+      if (!ok(remote.status)) throw remoteError(remote, `PATCH failed on shard ${group.shard}`);
+      updated += Number(remote.body?.updated) || 0;
+      rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
+      skipped.push(...(Array.isArray(remote.body?.skipped) ? remote.body.skipped.map(String) : []));
+    }
+    if (wroteLocally) {
+      await afterLocalWrite(durability);
+      await deleteObjectFiles(files, database, collection, removedFileObjects);
+    }
+  } catch (err) {
+    if (wroteLocally) await afterLocalWrite(durability).catch((flushErr) => {
+      err = flushErr;
+    });
+    throw err;
+  }
+
+  return {
+    updated,
+    skipped,
+    items: await expandObjectsForRead({
+      req,
+      node,
+      routing,
+      database,
+      objects: orderLikeInput(patches, rows).map(stripReferenceObjects),
+      refDepth: refDepthParam(req),
+    }),
+  };
+}
+
+function compilePatchedObject({ node, database, collection, id, patch }) {
+  const objectId = String(id);
+  const current = node.get(database, collection, objectId);
+  if (!current) return null;
+  const next = applyPatchToObject(current, patch);
+  const vectorField = collectionVectorField(node, database, collection);
+  if (vectorField && patchUnsetsPath(patch, vectorField)) next[vectorField] = null;
+  return { ...next, _id: objectId };
+}
+
+function collectionVectorField(node, database, collection) {
+  try {
+    return node.db.collection(database, collection).vectorField || null;
+  } catch {
+    return null;
+  }
+}
+
+async function routedRemoveMany(req, routing, node, durability, memoryGuard, database, collection, ids, files = null) {
   const result = {
     deleted: 0,
     ids: [],
     skipped: [],
   };
   let wroteLocally = false;
+  const existingByGroup = new Map();
+  const removedFileObjects = [];
   const groups = routing.groupByShard(req, database, collection, ids, (id) => id);
   for (const group of groups) {
     if (!group.local) continue;
-    assertDeleteAllowed(req, existingObjectsForIds(node, database, collection, group.items));
+    const existing = existingObjectsForIds(node, database, collection, group.items);
+    assertDeleteAllowed(req, existing);
+    existingByGroup.set(group, new Map(existing.map((object) => [String(object._id), object])));
   }
   if (groups.some((group) => group.local)) assertMemoryGuardAcceptsWrites(memoryGuard);
 
@@ -715,6 +1031,8 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
         result.deleted += local.deleted;
         result.ids.push(...local.ids);
         result.skipped.push(...local.skipped);
+        const existing = existingByGroup.get(group) || new Map();
+        removedFileObjects.push(...local.ids.map((id) => existing.get(String(id))).filter(Boolean));
         wroteLocally = wroteLocally || local.deleted > 0;
         continue;
       }
@@ -728,7 +1046,10 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
       result.ids.push(...(Array.isArray(remote.body?.ids) ? remote.body.ids : []));
       result.skipped.push(...(Array.isArray(remote.body?.skipped) ? remote.body.skipped : []));
     }
-    if (wroteLocally) await afterLocalWrite(durability);
+    if (wroteLocally) {
+      await afterLocalWrite(durability);
+      await deleteObjectFiles(files, database, collection, removedFileObjects);
+    }
   } catch (err) {
     if (wroteLocally) await afterLocalWrite(durability).catch((flushErr) => {
       err = flushErr;
@@ -902,6 +1223,15 @@ function assertUpsertAllowed(req, node, database, collection, objects = [], { pa
   }
 }
 
+function assertUpdateAllowed(req, node, database, collection, objects = []) {
+  const user = permissionUser(req);
+  const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
+  for (const object of objects || []) {
+    const before = existing.get(String(object._id));
+    if (!before || !canUpdate(user, before, object)) throw permissionError("update", object?._id);
+  }
+}
+
 function assertDeleteAllowed(req, objects = []) {
   const user = permissionUser(req);
   for (const object of objects || []) {
@@ -1004,6 +1334,41 @@ function withObjectIds(items) {
   }));
 }
 
+function normalizeFileObjects(files, database, collection, objects = []) {
+  return objects.map((object) => normalizeFileObject(files, database, collection, object));
+}
+
+function normalizeFileObject(files, database, collection, object) {
+  return files ? files.normalizeObject(database, collection, object) : object;
+}
+
+function removedFiles(beforeMap, afterObjects = []) {
+  if (!beforeMap) return [];
+  const removed = [];
+  for (const after of afterObjects || []) {
+    const before = beforeMap.get(String(after?._id));
+    if (before?._file && before._file.key !== after?._file?.key) removed.push(before);
+  }
+  return removed;
+}
+
+async function deleteRemovedFiles(files, database, collection, beforeObjects = [], afterObjects = []) {
+  if (!files) return;
+  const beforeMap = new Map((beforeObjects || []).filter(Boolean).map((object) => [String(object._id), object]));
+  await deleteObjectFiles(files, database, collection, removedFiles(beforeMap, afterObjects));
+}
+
+async function deleteObjectFiles(files, database, collection, objects = []) {
+  if (!files) return;
+  for (const object of objects || []) {
+    try {
+      await files.deleteObjectFile(database, collection, object);
+    } catch {
+      // File cleanup is best-effort; the database delete/replace is already durable.
+    }
+  }
+}
+
 function remoteInsertedItems(body) {
   if (Array.isArray(body?.items)) return body.items;
   if (body && typeof body === "object" && body._id !== undefined) return [body];
@@ -1091,11 +1456,26 @@ function parseQueryParam(req) {
 
 function queryOptions(req, controls = {}) {
   const parsedSort = parseSortControl(controls.$sort);
+  const limit = publicQueryLimit(firstNumberParam(
+    req.query.get("limit"),
+    req.query.get("$limit"),
+    controls.$limit,
+    controls.$pageSize,
+  ));
+  const offset = firstNumberParam(
+    req.query.get("offset"),
+    req.query.get("skip"),
+    req.query.get("$offset"),
+    req.query.get("$skip"),
+    controls.$offset,
+    controls.$skip,
+    pageOffset(controls.$page, limit),
+  );
   return {
     sortBy: req.query.get("sortBy") || parsedSort.sortBy || undefined,
     sort: req.query.get("sort") || parsedSort.sort || undefined,
-    limit: numberParam(req.query.get("limit")),
-    offset: numberParam(req.query.get("offset")),
+    limit,
+    offset,
     refDepth: refDepthParam(req, controls),
   };
 }
@@ -1145,6 +1525,25 @@ function numberParam(value) {
   if (value === null || value === undefined || value === "") return undefined;
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
+}
+
+function firstNumberParam(...values) {
+  for (const value of values) {
+    const parsed = numberParam(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+function pageOffset(page, pageSize) {
+  const parsedPage = numberParam(page);
+  if (parsedPage === undefined || pageSize === undefined) return undefined;
+  return Math.max(0, parsedPage - 1) * pageSize;
+}
+
+function publicQueryLimit(value) {
+  const limit = value === undefined ? DEFAULT_PUBLIC_QUERY_LIMIT : value;
+  return Math.min(limit, MAX_PUBLIC_QUERY_LIMIT);
 }
 
 function validatePlainObjects(items, { requireId = false } = {}) {

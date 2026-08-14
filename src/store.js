@@ -17,6 +17,7 @@ import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, Ve
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
 const VECTOR_BUILD_BATCH_SIZE = 4096;
+const ALL_COUNT_SCOPE = "";
 
 class Collection {
   constructor(name, options = {}) {
@@ -31,6 +32,9 @@ class Collection {
     this.indexes = new Map();
     this.columnIndexes = new Map();
     this.columnBuilds = new Set();
+    this.groupCounts = new GroupCountIndex();
+    this.shardIds = new Map();
+    this.unshardedLiveCount = 0;
     this.collectionMeta = normalizeCollectionMeta();
     this.liveCount = 0;
   }
@@ -48,60 +52,76 @@ class Collection {
     return this.putObjects([{ id, value: {}, ts }]).length === 1;
   }
 
-  putObject(id, value, ts) {
-    return this.putObjects([{ id, value, ts }]).length === 1;
+  putObject(id, value, ts, shard = null) {
+    return this.putObjects([{ id, value, ts, shard }]).length === 1;
   }
 
   putObjects(rows) {
     const applied = [];
     for (const row of rows || []) {
-      if (this._putObject(row.id, row.value, row.ts)) applied.push(row);
+      if (this._putObject(row.id, row.value, row.ts, row.shard)) applied.push(row);
     }
     return applied;
   }
 
-  _putObject(id, value, ts) {
+  _putObject(id, value, ts, shard = null) {
     const m = this._ensureMeta(id);
     if (m.deleted && !gt(ts, m.deleted)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
+    const previousShard = wasLive ? m.shard : null;
     const before = wasLive ? this.readForQuery(id) : undefined;
     if (m.ts && !gt(ts, m.ts)) return false;
+    const nextShard = normalizeShard(shard) || m.shard || null;
     const prepared = this._prepareStoredValue(value);
     m.ts = ts;
     m.deleted = null;
+    m.shard = nextShard;
     this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "_id"));
     this._applyVectorUpdate(id, prepared.vector);
     const after = this.readForQuery(id);
     this._refreshIndexes(id, before, after);
     this._refreshColumnIndexes(id, after);
-    if (!wasLive) this.liveCount++;
+    this._refreshGroupCounts(before, after, previousShard, nextShard);
+    if (!wasLive) {
+      this.liveCount++;
+      this._addShardId(id, nextShard);
+    } else if (previousShard !== nextShard) {
+      this._removeShardId(id, previousShard);
+      this._addShardId(id, nextShard);
+    }
     return true;
   }
 
-  deleteObject(id, ts) {
-    return this.deleteObjects([{ id, ts }]).length === 1;
+  deleteObject(id, ts, shard = null) {
+    return this.deleteObjects([{ id, ts, shard }]).length === 1;
   }
 
   deleteObjects(rows) {
     const applied = [];
     for (const row of rows || []) {
-      if (this._deleteObject(row.id, row.ts)) applied.push(row);
+      if (this._deleteObject(row.id, row.ts, row.shard)) applied.push(row);
     }
     return applied;
   }
 
-  _deleteObject(id, ts) {
+  _deleteObject(id, ts, shard = null) {
     const m = this._ensureMeta(id);
     const last = m.deleted || m.ts;
     if (last && !gt(ts, last)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
+    const previousShard = wasLive ? m.shard : null;
     const before = wasLive ? this.readForQuery(id) : undefined;
     m.deleted = ts;
+    if (shard) m.shard = normalizeShard(shard);
     this.store.removeObject(id);
     this._removeVector(id);
     this._refreshIndexes(id, before, undefined);
     this._refreshColumnIndexes(id, undefined);
-    if (wasLive) this.liveCount--;
+    this._refreshGroupCounts(before, undefined, previousShard, null);
+    if (wasLive) {
+      this.liveCount--;
+      this._removeShardId(id, previousShard);
+    }
     return true;
   }
 
@@ -221,7 +241,14 @@ class Collection {
   count(query = {}, options = {}) {
     const criteria = stripQueryControls(query);
     const includeId = typeof options.includeId === "function" ? options.includeId : null;
+    const includeIds = options.includeIds instanceof Set ? options.includeIds : null;
     if (!criteria || Object.keys(criteria).length === 0) {
+      if (includeIds && includeId) {
+        let n = 0;
+        for (const id of includeIds) if (includeId(id)) n++;
+        return n;
+      }
+      if (includeIds) return includeIds.size;
       if (includeId) {
         let n = 0;
         for (const [id, m] of this.meta) if (!m.deleted && includeId(id)) n++;
@@ -231,6 +258,14 @@ class Collection {
     }
     const plan = this._planCount(criteria, options);
     if (plan.path === READ_PATH.INDEX_EXACT && !plan.idPlan?.verify) {
+      if (includeIds && includeId) {
+        let n = 0;
+        for (const id of smallerSet(plan.idPlan.ids, includeIds)) {
+          if (plan.idPlan.ids.has(id) && includeIds.has(id) && includeId(id)) n++;
+        }
+        return n;
+      }
+      if (includeIds) return countIntersection(plan.idPlan.ids, includeIds);
       if (!includeId) return plan.idPlan.ids.size;
       let n = 0;
       for (const id of plan.idPlan.ids) if (includeId(id)) n++;
@@ -240,6 +275,7 @@ class Collection {
     let n = 0;
     const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
     for (const id of this._idsForPlan(plan.idPlan, criteria)) {
+      if (includeIds && !includeIds.has(id)) continue;
       if (includeId && !includeId(id)) continue;
       if (verifyScan) {
         const obj = this.readForQuery(id);
@@ -275,6 +311,7 @@ class Collection {
       ...this.collectionMeta,
       indexes: unique([...this.collectionMeta.indexes, key]),
     });
+    this._rebuildGroupCounts();
   }
 
   dropIndex(path) {
@@ -284,6 +321,7 @@ class Collection {
       ...this.collectionMeta,
       indexes: this.collectionMeta.indexes.filter((index) => index !== key),
     });
+    this._rebuildGroupCounts();
     return removed;
   }
 
@@ -318,6 +356,13 @@ class Collection {
         pendingEntries: index.pendingEntries,
         ...(index.error ? { error: index.error } : {}),
       })),
+      {
+        type: "aggregateCount",
+        status: "ready",
+        fields: this.groupCounts.fieldCount,
+        pairs: this.groupCounts.pairCount,
+        entries: this.groupCounts.entries,
+      },
     ];
   }
 
@@ -338,13 +383,13 @@ class Collection {
     for (const [id, m] of this.meta) {
       if (!allow(id)) continue;
       if (m.deleted) {
-        yield { id, ts: m.ts, deleted: m.deleted };
+        yield { id, ts: m.ts, deleted: m.deleted, ...(m.shard ? { shard: m.shard } : {}) };
         continue;
       }
       const value = this.store.read(id) || {};
       const vector = this.getVector(id);
       if (vector && this.vectorField) value[this.vectorField] = vector;
-      yield { id, ts: m.ts, deleted: null, value };
+      yield { id, ts: m.ts, deleted: null, value, ...(m.shard ? { shard: m.shard } : {}) };
     }
   }
 
@@ -519,11 +564,20 @@ class Collection {
       partialIdsForCriteria: (criteria) => this._partialIdsForCriteria(criteria),
       hasOrderedIndex: (path) => this.indexes.has(String(path)),
       hasGroupIndex: (path) => this.indexes.has(String(path)),
+      hasGroupForwardIndex: (path) => this.indexes.get(String(path))?.canReadValuesById === true,
       fieldIndex: (path) => this.indexes.get(String(path)) || null,
       columnIndex: (path) => this.columnIndexes.get(String(path)) || null,
+      groupCountIndex: (criteria, groupBy, options) => this._groupCountPlan(criteria, groupBy, options),
       idsForAll: (includeId) => this._idSetForAll(includeId),
       filterIds: (ids, includeId) => filterIds(ids, includeId),
     };
+  }
+
+  _groupCountPlan(criteria, groupBy, options = {}) {
+    return this.groupCounts.plan(criteria, groupBy, {
+      indexes: this.indexes,
+      scopeShards: options.scopeShards,
+    });
   }
 
   _idSetForAll(includeId = null) {
@@ -534,11 +588,22 @@ class Collection {
     return ids;
   }
 
+  idsForShards(shards = []) {
+    if (this.unshardedLiveCount > 0) return null;
+    const names = [...new Set((shards || []).map(normalizeShard).filter(Boolean))];
+    if (!names.length) return null;
+    if (names.length === 1) return this.shardIds.get(names[0]) || new Set();
+    let ids = new Set();
+    for (const shard of names) ids = setUnion(ids, this.shardIds.get(shard) || new Set());
+    return ids;
+  }
+
   *_idsForPlan(idPlan, criteria = {}) {
     const ids = idPlan?.ids === null || idPlan?.ids === undefined
       ? this._liveIdIterator()
       : idPlan.ids;
     for (const id of ids) {
+      if (idPlan?.scopeIds && !idPlan.scopeIds.has(id)) continue;
       if (!idPlan?.verify) {
         yield id;
         continue;
@@ -550,7 +615,7 @@ class Collection {
 
   _idSetForPlan(idPlan, criteria = {}) {
     if (!idPlan || idPlan.ids === null) return null;
-    if (!idPlan.verify) return idPlan.ids;
+    if (!idPlan.verify) return idPlan.scopeIds ? setIntersection(idPlan.ids, idPlan.scopeIds) : idPlan.ids;
     const ids = new Set();
     for (const id of this._idsForPlan(idPlan, criteria)) ids.add(id);
     return ids;
@@ -632,6 +697,9 @@ class Collection {
     const index = this.indexes.get(path);
     if (!index) return null;
 
+    const containsValue = indexableContainsValue(expected);
+    if (containsValue !== null) return index.idsForContains(containsValue);
+
     const values = indexableConstraintValues(expected);
     if (values === null) return null;
     return index.idsForValues(values);
@@ -672,12 +740,39 @@ class Collection {
     }
   }
 
+  _refreshGroupCounts(before, after, beforeShard, afterShard) {
+    if (!this.groupCounts.fieldCount) return;
+    if (before) this.groupCounts.remove(before, beforeShard);
+    if (after) this.groupCounts.add(after, afterShard);
+  }
+
   _addToIndexes(object) {
     for (const index of this.indexes.values()) index.add(object);
   }
 
   _removeFromIndexes(id, object) {
     for (const index of this.indexes.values()) index.remove(id, object);
+  }
+
+  _addShardId(id, shard) {
+    if (!shard) {
+      this.unshardedLiveCount++;
+      return;
+    }
+    const key = String(shard);
+    const ids = this.shardIds.get(key) || new Set();
+    ids.add(String(id));
+    this.shardIds.set(key, ids);
+  }
+
+  _removeShardId(id, shard) {
+    if (!shard) {
+      if (this.unshardedLiveCount > 0) this.unshardedLiveCount--;
+      return;
+    }
+    const ids = this.shardIds.get(String(shard));
+    ids?.delete(String(id));
+    if (ids?.size === 0) this.shardIds.delete(String(shard));
   }
 
   _applyMetaIndexes() {
@@ -688,6 +783,7 @@ class Collection {
     for (const path of wanted) {
       if (!this.indexes.has(path)) this._createIndexFromMeta(path);
     }
+    this._rebuildGroupCounts();
   }
 
   _createIndexFromMeta(path) {
@@ -697,6 +793,15 @@ class Collection {
       index.add(object);
     }
     this.indexes.set(path, index);
+  }
+
+  _rebuildGroupCounts() {
+    this.groupCounts.reset([...this.indexes.keys()]);
+    if (!this.groupCounts.fieldCount) return;
+    for (const id of this._liveIdIterator()) {
+      const object = this.readForQuery(id);
+      if (object) this.groupCounts.add(object, this.meta.get(id)?.shard || null);
+    }
   }
 
   _applyMetaColumnIndexes() {
@@ -819,6 +924,10 @@ class Collection {
           spec,
           plan.normalized,
         );
+      case AGGREGATE_PATH.GROUP_COUNT_INDEX:
+        return this._aggregateGroupCountIndex(plan, spec);
+      case AGGREGATE_PATH.GROUP_FORWARD_INDEX:
+        return this._aggregateGroupForwardIndex(plan, criteria, spec);
       case AGGREGATE_PATH.GROUP_INDEX:
         return this._aggregateGroupIndex(plan, criteria, spec);
       case AGGREGATE_PATH.GROUP_COLUMN_SCAN: {
@@ -856,10 +965,24 @@ class Collection {
   }
 
   _aggregateGroupIndex(plan, criteria, spec) {
-    const filterIds = this._idSetForPlan(plan.idPlan, criteria);
     const groups = [];
     let rowsSeen = 0;
 
+    if (isRowCountOnlyAggregate(plan.normalized)) {
+      const filterIds = plan.idPlan?.verify ? this._idSetForPlan(plan.idPlan, criteria) : plan.idPlan?.ids || null;
+      const scopeIds = plan.idPlan?.verify ? null : plan.idPlan?.scopeIds || null;
+      for (const [groupValue, count] of plan.groupIndex.iterateGroupCounts(filterIds, scopeIds)) {
+        if (count <= 0) continue;
+        rowsSeen += count;
+        groups.push({
+          groupValues: { [plan.groupBy]: groupValue === undefined ? null : groupValue },
+          state: rowCountOnlyState(plan.normalized, count),
+        });
+      }
+      return finishGroupedColumnAggregate({ rowsSeen, groups }, spec, plan.normalized);
+    }
+
+    const filterIds = this._idSetForPlan(plan.idPlan, criteria);
     for (const [groupValue, ids] of plan.groupIndex.iterateGroups(filterIds)) {
       const scanned = scanFlatColumnAggregate(ids, plan.normalized, plan.columns);
       if (!scanned.rowsSeen) continue;
@@ -870,6 +993,31 @@ class Collection {
       });
     }
 
+    return finishGroupedColumnAggregate({ rowsSeen, groups }, spec, plan.normalized);
+  }
+
+  _aggregateGroupForwardIndex(plan, criteria, spec) {
+    const grouped = scanForwardGroupedColumnAggregate(
+      this._idsForPlan(plan.idPlan, criteria),
+      plan.normalized,
+      plan.groupBy,
+      plan.groupIndex,
+      plan.columns,
+    );
+    return finishGroupedColumnAggregate(grouped, spec, plan.normalized);
+  }
+
+  _aggregateGroupCountIndex(plan, spec) {
+    const groups = [];
+    let rowsSeen = 0;
+    for (const [groupValue, count] of this.groupCounts.counts(plan.groupCountIndex)) {
+      if (count <= 0) continue;
+      rowsSeen += count;
+      groups.push({
+        groupValues: { [plan.groupBy]: groupValue === undefined ? null : groupValue },
+        state: rowCountOnlyState(plan.normalized, count),
+      });
+    }
     return finishGroupedColumnAggregate({ rowsSeen, groups }, spec, plan.normalized);
   }
 
@@ -1019,16 +1167,20 @@ function createPhysicalStore(options = {}) {
   throw new TypeError(`unsupported storage engine: ${engine}`);
 }
 
-function indexKeysForObjectPath(object, path) {
-  return indexedStoredValues(getPathValue(object, path)).map(indexValueKey);
-}
-
 class FieldIndex {
   constructor(path) {
     this.path = String(path);
     this.lookup = new Map();
     this.ordered = new Map();
+    this.forward = new Map();
+    this.containsStringIds = new Set();
+    this.containsScalarIds = new Set();
+    this.containsNestedArrayIds = new Set();
     this.sortedOrderedKeys = null;
+  }
+
+  get canReadValuesById() {
+    return true;
   }
 
   get lookupKeys() {
@@ -1049,35 +1201,61 @@ class FieldIndex {
 
   add(object) {
     if (!object?._id) return;
-    for (const key of indexKeysForObjectPath(object, this.path)) {
+    const value = getPathValue(object, this.path);
+    this.forward.set(object._id, value);
+    for (const key of indexedStoredValues(value).map(indexValueKey)) {
       const ids = this.lookup.get(key) || new Set();
       ids.add(object._id);
       this.lookup.set(key, ids);
     }
-    this._addOrdered(object._id, getPathValue(object, this.path));
+    this._addOrdered(object._id, value);
+    this._addContainsState(object._id, value);
   }
 
   remove(id, object) {
-    for (const key of indexKeysForObjectPath(object, this.path)) {
+    const value = getPathValue(object, this.path);
+    this.forward.delete(id);
+    for (const key of indexedStoredValues(value).map(indexValueKey)) {
       const ids = this.lookup.get(key);
       ids?.delete(id);
       if (ids?.size === 0) this.lookup.delete(key);
     }
-    this._removeOrdered(id, getPathValue(object, this.path));
+    this._removeOrdered(id, value);
+    this._removeContainsState(id, value);
   }
 
   idsForValues(values) {
+    const unique = uniqueIndexValues(values);
+    if (unique.length === 1) return this.lookup.get(indexValueKey(unique[0])) || new Set();
+
     let ids = new Set();
-    for (const value of uniqueIndexValues(values)) {
+    for (const value of unique) {
       ids = setUnion(ids, this.lookup.get(indexValueKey(value)) || new Set());
     }
     return ids;
+  }
+
+  idsForContains(value) {
+    if (!isScalarIndexValue(value)) return null;
+    if (this.containsStringIds.size || this.containsScalarIds.size || this.containsNestedArrayIds.size) return null;
+    return this.lookup.get(indexValueKey(value)) || new Set();
+  }
+
+  valueForId(id) {
+    return this.forward.get(id);
   }
 
   *iterateGroups(filterIds = null) {
     for (const bucket of this.ordered.values()) {
       const ids = filterIds ? setIntersection(filterIds, bucket.ids) : bucket.ids;
       if (ids.size > 0) yield [bucket.value, ids];
+    }
+  }
+
+  *iterateGroupCounts(filterIds = null, scopeIds = null) {
+    for (const bucket of this.ordered.values()) {
+      const count = countIntersectingSets(bucket.ids, filterIds, scopeIds);
+      if (count > 0) yield [bucket.value, count];
     }
   }
 
@@ -1123,6 +1301,18 @@ class FieldIndex {
     bucket.ids.add(id);
   }
 
+  _addContainsState(id, value) {
+    if (typeof value === "string") this.containsStringIds.add(id);
+    else if (typeof value === "number" || typeof value === "boolean") this.containsScalarIds.add(id);
+    else if (Array.isArray(value) && value.some(Array.isArray)) this.containsNestedArrayIds.add(id);
+  }
+
+  _removeContainsState(id, value) {
+    if (typeof value === "string") this.containsStringIds.delete(id);
+    else if (typeof value === "number" || typeof value === "boolean") this.containsScalarIds.delete(id);
+    else if (Array.isArray(value) && value.some(Array.isArray)) this.containsNestedArrayIds.delete(id);
+  }
+
   _removeOrdered(id, value) {
     const key = orderedValueKey(value);
     const bucket = this.ordered.get(key);
@@ -1143,6 +1333,161 @@ class FieldIndex {
         .map(([key]) => key);
     }
     return this.sortedOrderedKeys;
+  }
+}
+
+class GroupCountIndex {
+  constructor(fields = []) {
+    this.reset(fields);
+  }
+
+  reset(fields = []) {
+    this.fields = unique((fields || []).map(String).filter(Boolean));
+    this.groups = new Map();
+    this.pairs = new Map();
+    this.entries = 0;
+  }
+
+  get fieldCount() {
+    return this.fields.length;
+  }
+
+  get pairCount() {
+    return this.pairs.size;
+  }
+
+  add(object, shard = null) {
+    this._apply(object, shard, 1);
+  }
+
+  remove(object, shard = null) {
+    this._apply(object, shard, -1);
+  }
+
+  plan(criteria, groupBy, { indexes, scopeShards } = {}) {
+    const groupField = String(groupBy || "");
+    if (!this.fields.includes(groupField)) return null;
+    const filter = aggregateCountFilter(criteria, indexes);
+    if (!filter) return null;
+    if (filter.path && !this.fields.includes(filter.path)) return null;
+    return {
+      groupField,
+      filterField: filter.path,
+      filterValue: filter.value,
+      scopeShards: normalizeScopeShards(scopeShards),
+    };
+  }
+
+  *counts(plan) {
+    const scopes = readCountScopes(plan.scopeShards);
+    if (!plan.filterField) {
+      yield* this._countsFromScopeMap(this.groups.get(plan.groupField), scopes);
+      return;
+    }
+
+    const pair = this.pairs.get(pairKey(plan.groupField, plan.filterField));
+    const filter = pair?.get(indexValueKey(plan.filterValue));
+    yield* this._countsFromScopeMap(filter, scopes);
+  }
+
+  _apply(object, shard, delta) {
+    if (!object?._id || !this.fields.length) return;
+    const values = new Map();
+    for (const field of this.fields) {
+      const value = getPathValue(object, field);
+      values.set(field, {
+        groupValue: value,
+        groupKey: orderedValueKey(value),
+        filterValues: uniqueIndexValues(indexedStoredValues(value)),
+      });
+    }
+
+    const scopes = writeCountScopes(shard);
+    for (const groupField of this.fields) {
+      const group = values.get(groupField);
+      for (const scope of scopes) {
+        this._incrementGroup(groupField, scope, group.groupKey, group.groupValue, delta);
+      }
+
+      for (const filterField of this.fields) {
+        const filter = values.get(filterField);
+        for (const filterValue of filter.filterValues) {
+          const filterKey = indexValueKey(filterValue);
+          for (const scope of scopes) {
+            this._incrementPair(groupField, filterField, filterKey, scope, group.groupKey, group.groupValue, delta);
+          }
+        }
+      }
+    }
+  }
+
+  *_countsFromScopeMap(scopeMap, scopes) {
+    if (!scopeMap) return;
+    if (scopes.length === 1) {
+      for (const bucket of scopeMap.get(scopes[0])?.values() || []) yield [bucket.value, bucket.count];
+      return;
+    }
+
+    const merged = new Map();
+    for (const scope of scopes) {
+      for (const [groupKey, bucket] of scopeMap.get(scope)?.entries() || []) {
+        const current = merged.get(groupKey);
+        if (current) current.count += bucket.count;
+        else merged.set(groupKey, { value: bucket.value, count: bucket.count });
+      }
+    }
+    for (const bucket of merged.values()) yield [bucket.value, bucket.count];
+  }
+
+  _incrementGroup(groupField, scope, groupKey, groupValue, delta) {
+    let scopeMap = this.groups.get(groupField);
+    if (!scopeMap) {
+      scopeMap = new Map();
+      this.groups.set(groupField, scopeMap);
+    }
+    this._incrementScopeBucket(scopeMap, scope, groupKey, groupValue, delta);
+  }
+
+  _incrementPair(groupField, filterField, filterKey, scope, groupKey, groupValue, delta) {
+    const key = pairKey(groupField, filterField);
+    let pair = this.pairs.get(key);
+    if (!pair) {
+      pair = new Map();
+      this.pairs.set(key, pair);
+    }
+
+    let scopeMap = pair.get(filterKey);
+    if (!scopeMap) {
+      scopeMap = new Map();
+      pair.set(filterKey, scopeMap);
+    }
+    this._incrementScopeBucket(scopeMap, scope, groupKey, groupValue, delta);
+
+    if (isEmptyScopeMap(scopeMap)) pair.delete(filterKey);
+    if (pair.size === 0) this.pairs.delete(key);
+  }
+
+  _incrementScopeBucket(scopeMap, scope, groupKey, groupValue, delta) {
+    let buckets = scopeMap.get(scope);
+    if (!buckets) {
+      buckets = new Map();
+      scopeMap.set(scope, buckets);
+    }
+
+    const bucket = buckets.get(groupKey);
+    if (!bucket) {
+      if (delta <= 0) return;
+      buckets.set(groupKey, { value: groupValue, count: delta });
+      this.entries++;
+    } else {
+      bucket.count += delta;
+      if (bucket.count <= 0) {
+        buckets.delete(groupKey);
+        this.entries--;
+      }
+    }
+
+    if (buckets.size === 0) scopeMap.delete(scope);
   }
 }
 
@@ -1293,6 +1638,21 @@ function isScalarColumnValue(value) {
 
 function scanFlatColumnAggregate(ids, normalized, columns) {
   const state = Object.fromEntries(normalized.fields.map((field) => [field.resultKey, flatFieldState(field)]));
+  const rowCount = idSetSize(ids);
+  if (rowCount !== null) {
+    for (const field of normalized.fields) {
+      if (isRowCountField(field)) state[field.resultKey].count += rowCount;
+    }
+
+    const fieldsNeedingIds = normalized.fields.filter((field) => !isRowCountField(field));
+    if (fieldsNeedingIds.length === 0) return { rowsSeen: rowCount, state };
+
+    for (const id of ids) {
+      for (const field of fieldsNeedingIds) stepFlatField(state[field.resultKey], field, id, columns);
+    }
+    return { rowsSeen: rowCount, state };
+  }
+
   let rowsSeen = 0;
 
   for (const id of ids) {
@@ -1303,6 +1663,24 @@ function scanFlatColumnAggregate(ids, normalized, columns) {
   }
 
   return { rowsSeen, state };
+}
+
+function isRowCountOnlyAggregate(normalized) {
+  return normalized.fields.length > 0 && normalized.fields.every(isRowCountField);
+}
+
+function isRowCountField(field) {
+  return field.operator === "$count" && field.operand === true;
+}
+
+function rowCountOnlyState(normalized, count) {
+  const state = Object.fromEntries(normalized.fields.map((field) => [field.resultKey, flatFieldState(field)]));
+  for (const field of normalized.fields) state[field.resultKey].count = count;
+  return state;
+}
+
+function idSetSize(ids) {
+  return ids instanceof Set ? ids.size : null;
 }
 
 function flatFieldState(field) {
@@ -1422,6 +1800,32 @@ function scanGroupedColumnAggregate(ids, normalized, columns) {
   return { rowsSeen, groups: [...groups.values()] };
 }
 
+function scanForwardGroupedColumnAggregate(ids, normalized, groupBy, groupIndex, columns) {
+  const groups = new Map();
+  let rowsSeen = 0;
+
+  for (const id of ids) {
+    const rawGroupValue = groupIndex.valueForId(id);
+    const groupValue = rawGroupValue === undefined ? null : rawGroupValue;
+    const key = stableKey([groupValue]);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        groupValues: { [groupBy]: groupValue },
+        state: Object.fromEntries(normalized.fields.map((field) => [field.resultKey, flatFieldState(field)])),
+      };
+      groups.set(key, group);
+    }
+
+    rowsSeen++;
+    for (const field of normalized.fields) {
+      stepFlatField(group.state[field.resultKey], field, id, columns);
+    }
+  }
+
+  return { rowsSeen, groups: [...groups.values()] };
+}
+
 function finishGroupedColumnAggregate(aggregate, spec, normalized) {
   if (!aggregate || !aggregate.rowsSeen) return [];
   const partialRows = aggregate.groups.map((group) => {
@@ -1449,6 +1853,60 @@ function isComparableAggregateValue(value) {
 function sameAggregateTypeLessThan(left, right) {
   if (typeof left !== typeof right) return false;
   return compareSortValues(left, right) < 0;
+}
+
+function aggregateCountFilter(criteria = {}, indexes = new Map()) {
+  if (isEmptyCriteria(criteria)) return { path: null, value: null };
+  const entries = Object.entries(criteria || {});
+  if (entries.length !== 1) return null;
+
+  const [[path, expected]] = entries;
+  if (path === "$and" && Array.isArray(expected)) {
+    const children = expected.filter((child) => !isEmptyCriteria(child));
+    if (children.length !== 1) return null;
+    return aggregateCountFilter(children[0], indexes);
+  }
+  if (path.startsWith("$")) return null;
+
+  const index = indexes.get(String(path));
+  if (!index) return null;
+
+  const containsValue = indexableContainsValue(expected);
+  if (containsValue !== null) {
+    return index.idsForContains(containsValue) === null ? null : { path: String(path), value: containsValue };
+  }
+
+  const values = indexableConstraintValues(expected);
+  if (values === null) return null;
+  const uniqueValues = uniqueIndexValues(values);
+  return uniqueValues.length === 1 ? { path: String(path), value: uniqueValues[0] } : null;
+}
+
+function readCountScopes(scopeShards = null) {
+  const shards = normalizeScopeShards(scopeShards);
+  return shards.length ? shards : [ALL_COUNT_SCOPE];
+}
+
+function writeCountScopes(shard) {
+  const normalized = normalizeShard(shard);
+  return normalized ? [ALL_COUNT_SCOPE, normalized] : [ALL_COUNT_SCOPE];
+}
+
+function normalizeScopeShards(scopeShards = null) {
+  return unique((Array.isArray(scopeShards) ? scopeShards : [])
+    .map(normalizeShard)
+    .filter(Boolean));
+}
+
+function pairKey(groupField, filterField) {
+  return `${groupField}\0${filterField}`;
+}
+
+function isEmptyScopeMap(scopeMap) {
+  for (const buckets of scopeMap.values()) {
+    if (buckets.size > 0) return false;
+  }
+  return true;
 }
 
 function postWorkerBatch(worker, ackResolvers, rows) {
@@ -1500,6 +1958,13 @@ function indexableConstraintValues(constraint) {
   return indexableEqualityValue(constraint);
 }
 
+function indexableContainsValue(constraint) {
+  if (!constraint || typeof constraint !== "object" || Array.isArray(constraint)) return null;
+  const keys = Object.keys(constraint);
+  if (keys.length !== 1 || keys[0] !== "$contains") return null;
+  return isScalarIndexValue(constraint.$contains) ? constraint.$contains : null;
+}
+
 function indexableDisjunctionValues(constraints) {
   const values = [];
   for (const constraint of constraints) {
@@ -1549,10 +2014,44 @@ function setIntersection(left, right) {
   return out;
 }
 
+function countIntersection(left, right) {
+  if (left.size > right.size) return countIntersection(right, left);
+  let count = 0;
+  for (const id of left) if (right.has(id)) count++;
+  return count;
+}
+
+function countIntersectingSets(...sets) {
+  const present = sets.filter((set) => set instanceof Set);
+  if (!present.length) return 0;
+  if (present.length === 1) return present[0].size;
+  if (present.length === 2) return countIntersection(present[0], present[1]);
+  const smallest = present.reduce((best, set) => (set.size < best.size ? set : best));
+  let count = 0;
+  for (const id of smallest) {
+    let found = true;
+    for (const set of present) {
+      if (set === smallest || set.has(id)) continue;
+      found = false;
+      break;
+    }
+    if (found) count++;
+  }
+  return count;
+}
+
+function smallerSet(left, right) {
+  return left.size <= right.size ? left : right;
+}
+
 function setUnion(left, right) {
   const out = new Set(left);
   for (const id of right) out.add(id);
   return out;
+}
+
+function normalizeShard(shard) {
+  return typeof shard === "string" && shard.length > 0 ? shard : null;
 }
 
 function filterIds(ids, includeId) {
@@ -1734,6 +2233,12 @@ export class Store {
     return this.collection(dbName, collName).awaitColumnIndexes();
   }
 
+  idsForShards(dbName, collName, shards = []) {
+    const db = this.dbs.get(dbName);
+    const collection = db?.collections.get(collName);
+    return collection ? collection.idsForShards(shards) : null;
+  }
+
   collectionMetadata() {
     const out = [];
     for (const [dbName, db] of this.dbs) {
@@ -1770,6 +2275,7 @@ export class Store {
         id: op.id,
         value: op.kind === "touch" ? {} : op.value || {},
         ts: op.ts,
+        shard: op.shard,
         op,
       });
     }

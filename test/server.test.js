@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, httpPeer } from "../src/server.js";
 import { CRDTNode } from "../src/crdt.js";
+import { FileService, createFileService } from "../src/files.js";
 import { createMemoryGuard } from "../src/memory-guard.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
@@ -66,6 +67,22 @@ function api(base, token = null, extraHeaders = {}) {
       });
       return result(r);
     },
+  };
+}
+
+async function multipartObjectRequest(base, token, method, path, object, content, mimeType = "text/plain") {
+  const form = new FormData();
+  form.set("object", new Blob([JSON.stringify(object)], { type: "application/json" }));
+  form.set("file", new Blob([content], { type: mimeType }), object.name || "blob");
+  const response = await fetch(base + path, {
+    method,
+    headers: { authorization: `Bearer ${token}` },
+    body: form,
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: await response.json().catch(() => null),
   };
 }
 
@@ -212,6 +229,44 @@ test("sharded reads fan out to remote shards in parallel", async () => {
 
   assert.equal(maxActive, 2);
   assert.deepEqual(result.objects.map((object) => object._id), ["shard-a", "shard-b"]);
+});
+
+test("sharded aggregates start remote work before local shard aggregation", async () => {
+  let remoteStarted = false;
+  const router = new ShardRequestRouter({
+    node: {
+      shardMap: { shardsForCollection: () => ["local-shard", "remote-shard"] },
+      ownsShard: (shard) => shard === "local-shard",
+      aggregateShards: (_db, _coll, _criteria, _spec, shards) => {
+        assert.deepEqual(shards, ["local-shard"]);
+        assert.equal(remoteStarted, true);
+        return [{ group: "local", _count: 1 }];
+      },
+      aggregatePathShards: () => "group-index",
+    },
+  });
+  router.forwardToShard = async (_req, shard) => {
+    remoteStarted = true;
+    return {
+      status: 200,
+      body: [{ group: "remote", _count: 1 }],
+      headers: { "x-spread-db-query-path": "aggregate-group-index" },
+      shard,
+    };
+  };
+
+  const result = await router.aggregate(
+    { headers: {} },
+    "db",
+    "items",
+    {},
+    { groupBy: "group", fields: { _count: { $count: true } } },
+  );
+
+  assert.deepEqual(result.rows, [
+    { group: "local", _count: 1 },
+    { group: "remote", _count: 1 },
+  ]);
 });
 
 test("all-peer fan-out runs in parallel", async () => {
@@ -692,7 +747,7 @@ test("global users are password-hashed and can log in", async () => {
     assert.match(s.node.get("_global", "users", "bulk-user").password, /^pbkdf2\$sha256\$/);
     assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "bulk-user", password: "bulk-secret" })).status, 200);
 
-    const patched = await authed.patch("/api/_global/users/object/ada", { password: "new-secret" });
+    const patched = await authed.patch("/api/_global/users/object/ada", { $set: { password: "new-secret" } });
     assert.equal(patched.status, 200);
     assert.equal(patched.body.password, undefined);
     assert.match(s.node.get("_global", "users", "ada").password, /^pbkdf2\$sha256\$/);
@@ -754,17 +809,17 @@ test("database user permissions filter reads and guard writes", async () => {
     assert.equal(created.status, 201, JSON.stringify(created.body));
     assert.equal((await reader.post(docsBase, { _id: "new-other", owner: "other" })).status, 403);
 
-    const patched = await reader.patch(`${docsBase}/own`, { status: "closed" });
+    const patched = await reader.patch(`${docsBase}/own`, { $set: { status: "closed" } });
     assert.equal(patched.status, 200, JSON.stringify(patched.body));
     assert.equal(patched.body.status, "closed");
 
-    const deniedPatch = await reader.patch(`${docsBase}/own`, { owner: "other" });
+    const deniedPatch = await reader.patch(`${docsBase}/own`, { $set: { owner: "other" } });
     assert.equal(deniedPatch.status, 403);
     assert.equal(s.node.get(db, "docs", "own").owner, "reader");
 
     const deniedBulk = await reader.patch(docsBase, [
-      { _id: "bulk-a", status: "changed" },
-      { _id: "bulk-b", owner: "other" },
+      { _id: "bulk-a", $set: { status: "changed" } },
+      { _id: "bulk-b", $set: { owner: "other" } },
     ]);
     assert.equal(deniedBulk.status, 403);
     assert.equal(s.node.get(db, "docs", "bulk-a").status, "bulk");
@@ -811,11 +866,11 @@ test("permissions are enforced by remote shard owners", async () => {
     assert.equal(allowed.body._id, allowedId);
     assert.equal((await reader.get(`${docsBase}/${deniedId}`)).status, 403);
 
-    const patched = await reader.patch(`${docsBase}/${allowedId}`, { value: 3 });
+    const patched = await reader.patch(`${docsBase}/${allowedId}`, { $set: { value: 3 } });
     assert.equal(patched.status, 200, JSON.stringify(patched.body));
     assert.equal(b.node.get(db, "docs", allowedId).value, 3);
 
-    const deniedPatch = await reader.patch(`${docsBase}/${allowedId}`, { owner: "other" });
+    const deniedPatch = await reader.patch(`${docsBase}/${allowedId}`, { $set: { owner: "other" } });
     assert.equal(deniedPatch.status, 403);
     assert.equal(b.node.get(db, "docs", allowedId).owner, "reader");
 
@@ -834,7 +889,7 @@ test("REST CRUD lifecycle", async () => {
     const c = api(`http://localhost:${s.port}`, session.accessToken);
     const base = "/api/app/users/object";
 
-    const ins = await c.post(base, { name: "ada", age: 36 });
+    const ins = await c.post(base, { name: "ada", age: 36, profile: { city: "Berlin", legacy: true } });
     assert.equal(ins.status, 201);
     const id = ins.body._id;
 
@@ -843,10 +898,23 @@ test("REST CRUD lifecycle", async () => {
     assert.match(duplicate.body.error, /object already exists/);
 
     const got = await c.get(`${base}/${id}`);
-    assert.deepEqual(got.body, { _id: id, name: "ada", age: 36 });
+    assert.deepEqual(got.body, { _id: id, name: "ada", age: 36, profile: { city: "Berlin", legacy: true } });
 
-    const patched = await c.patch(`${base}/${id}`, { age: 37 });
+    const patched = await c.patch(`${base}/${id}`, {
+      $set: { age: 37, "profile.city": "Hamburg" },
+      $unset: ["name", "profile.legacy"],
+    });
     assert.equal(patched.body.age, 37);
+    assert.equal(patched.body.name, undefined);
+    assert.deepEqual(patched.body.profile, { city: "Hamburg" });
+
+    const illegalIdPatch = await c.patch(`${base}/${id}`, { $set: { _id: "other" } });
+    assert.equal(illegalIdPatch.status, 400);
+    assert.match(illegalIdPatch.body.error, /_id cannot be changed/);
+
+    const plainPatch = await c.patch(`${base}/${id}`, { age: 38 });
+    assert.equal(plainPatch.status, 400);
+    assert.match(plainPatch.body.error, /unsupported patch key/);
 
     const replaced = await c.put(`${base}/${id}`, { name: "ada", active: true });
     assert.deepEqual(replaced.body, { _id: id, name: "ada", active: true });
@@ -862,8 +930,150 @@ test("REST CRUD lifecycle", async () => {
 
     const nope = await c.get(`${base}/nope`);
     assert.equal(nope.status, 404);
+
+    const missingPatch = await c.patch(`${base}/nope`, { $set: { age: 99 } });
+    assert.equal(missingPatch.status, 404);
   } finally {
     s.server.close();
+  }
+});
+
+test("single object file CRUD stores blobs outside the object", async () => {
+  const files = createFileService({ mode: "memory", prefix: "files" });
+  const s = await startTestServer({ port: 0, files });
+  try {
+    const baseUrl = `http://localhost:${s.port}`;
+    const session = await login(baseUrl);
+    const c = api(baseUrl, session.accessToken);
+    const base = "/api/app/docs/object";
+
+    const created = await multipartObjectRequest(baseUrl, session.accessToken, "POST", base, {
+      _id: "doc-1",
+      name: "note.txt",
+      status: "draft",
+    }, "hello file", "text/plain");
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body._file.storage, "memory");
+    assert.match(created.body._file.key, /^files\/db\/app\/collection\/docs\/object\/doc-1\/blob\/[A-Za-z0-9_-]+$/);
+    assert.equal(created.body._file.mimeType, "text/plain");
+    assert.deepEqual(s.node.get("app", "docs", "doc-1"), {
+      _id: "doc-1",
+      name: "note.txt",
+      status: "draft",
+      _file: created.body._file,
+    });
+
+    const blob = await fetch(`${baseUrl}${base}/doc-1/blob`, {
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    });
+    assert.equal(blob.status, 200);
+    assert.equal(blob.headers.get("content-type"), "text/plain");
+    assert.equal(await blob.text(), "hello file");
+
+    const readerUser = await c.post("/api/app/users/object", {
+      _id: "reader",
+      username: "reader",
+      password: "secret",
+      permissions: [
+        { name: "own docs", query: { owner: "reader" }, perm: "r" },
+      ],
+    });
+    assert.equal(readerUser.status, 201, JSON.stringify(readerUser.body));
+    const readerSession = await login(baseUrl, "reader", "secret", "app", "users");
+    const deniedBlob = await fetch(`${baseUrl}${base}/doc-1/blob`, {
+      headers: { authorization: `Bearer ${readerSession.accessToken}` },
+    });
+    assert.equal(deniedBlob.status, 403);
+
+    const replaced = await multipartObjectRequest(baseUrl, session.accessToken, "PUT", `${base}/doc-1`, {
+      name: "note-v2.txt",
+      status: "final",
+    }, "updated file", "text/plain");
+    assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
+    assert.notEqual(replaced.body._file.key, created.body._file.key);
+    assert.equal(await files.storage.getBlob(created.body._file.key), null);
+    assert.equal(replaced.body.name, "note-v2.txt");
+    const updatedBlob = await fetch(`${baseUrl}${base}/doc-1/blob`, {
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    });
+    assert.equal(await updatedBlob.text(), "updated file");
+
+    const invalidFile = await c.post(base, {
+      _id: "bad-file",
+      _file: { storage: "memory", key: "evil", mimeType: "text/plain" },
+    });
+    assert.equal(invalidFile.status, 400);
+    assert.match(invalidFile.body.error, /server-derived file key/);
+
+    const deleted = await c.del(`${base}/doc-1`);
+    assert.equal(deleted.status, 204);
+    assert.equal(await files.storage.getBlob(replaced.body._file.key), null);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("multipart file writes respect memory guard before buffering", async () => {
+  const files = createFileService({ mode: "memory", prefix: "files" });
+  const memoryGuard = createMemoryGuard({
+    enabled: true,
+    rejectWritesPercent: 50,
+    resumeWritesPercent: 40,
+  }, {
+    limitBytes: 100,
+    getUsage: () => ({ rss: 99 }),
+  });
+  const s = await startTestServer({ port: 0, files, memoryGuard });
+  try {
+    const baseUrl = `http://localhost:${s.port}`;
+    const session = await login(baseUrl);
+    const created = await multipartObjectRequest(baseUrl, session.accessToken, "POST", "/api/app/docs/object", {
+      _id: "blocked-file",
+      name: "blocked.txt",
+    }, "blocked", "text/plain");
+    assert.equal(created.status, 507, JSON.stringify(created.body));
+    assert.equal(s.node.get("app", "docs", "blocked-file"), undefined);
+    assert.deepEqual(await files.storage.list("files/db/app/collection/docs/object/blocked-file/blob/"), []);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("multipart object file writes route to the owning shard", async () => {
+  const storage = new MemoryObjectStorage();
+  const { a, b, urlA, urlB } = await startRoutedTwoShardCluster({
+    a: { files: new FileService({ storage, prefix: "files", storageName: "memory" }) },
+    b: { files: new FileService({ storage, prefix: "files", storageName: "memory" }) },
+  });
+  try {
+    const session = await login(urlA);
+    const db = "app";
+    const coll = "files";
+    const id = idForShard(a.node, db, coll, "shard-b", "remote-file");
+    const base = `/api/${db}/${coll}/object`;
+
+    const created = await multipartObjectRequest(urlA, session.accessToken, "POST", base, {
+      _id: id,
+      name: "remote.txt",
+    }, "remote bytes", "text/plain");
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(a.node.get(db, coll, id), undefined);
+    assert.equal(b.node.get(db, coll, id).name, "remote.txt");
+
+    const blobFromA = await fetch(`${urlA}${base}/${id}/blob`, {
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    });
+    assert.equal(blobFromA.status, 200);
+    assert.equal(await blobFromA.text(), "remote bytes");
+
+    const blobFromB = await fetch(`${urlB}${base}/${id}/blob`, {
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    });
+    assert.equal(blobFromB.status, 200);
+    assert.equal(await blobFromB.text(), "remote bytes");
+  } finally {
+    a.server.close();
+    b.server.close();
   }
 });
 
@@ -875,8 +1085,8 @@ test("public object interface supports bulk CRUD", async () => {
     const base = "/api/app/events/object";
 
     const created = await c.post(base, [
-      { _id: "e1", type: "signup", count: 1 },
-      { _id: "e2", type: "purchase", count: 2 },
+      { _id: "e1", type: "signup", count: 1, flags: { old: true } },
+      { _id: "e2", type: "purchase", count: 2, flags: { old: true } },
     ]);
     assert.equal(created.status, 201);
     assert.equal(created.body.inserted, 2);
@@ -886,13 +1096,18 @@ test("public object interface supports bulk CRUD", async () => {
     assert.deepEqual(listed.body.map((item) => item._id), ["e1", "e2"]);
 
     const patched = await c.patch(base, [
-      { _id: "e1", count: 10 },
-      { _id: "e2", extra: true },
+      { _id: "e1", $set: { count: 10 }, $unset: ["type", "flags.old"] },
+      { _id: "e2", $set: { extra: true }, $unset: { type: true } },
+      { _id: "missing", $set: { count: 99 } },
     ]);
     assert.equal(patched.status, 200);
     assert.equal(patched.body.updated, 2);
+    assert.deepEqual(patched.body.skipped, ["missing"]);
     assert.equal((await c.get(`${base}/e1`)).body.count, 10);
+    assert.equal((await c.get(`${base}/e1`)).body.type, undefined);
+    assert.deepEqual((await c.get(`${base}/e1`)).body.flags, {});
     assert.equal((await c.get(`${base}/e2`)).body.extra, true);
+    assert.equal((await c.get(`${base}/e2`)).body.type, undefined);
 
     const replaced = await c.put(base, [
       { _id: "e1", done: true },
@@ -981,8 +1196,8 @@ test("public bulk object routes reject duplicate _ids", async () => {
     assert.equal((await c.get(`${base}/e2`)).status, 404);
 
     const duplicatePatch = await c.patch(base, [
-      { _id: "e1", value: 2 },
-      { _id: "e1", other: true },
+      { _id: "e1", $set: { value: 2 } },
+      { _id: "e1", $set: { other: true } },
     ]);
     assert.equal(duplicatePatch.status, 400);
     assert.match(duplicatePatch.body.error, /duplicate _id in bulk request: e1/);
@@ -1072,7 +1287,7 @@ test("public CRUD routes object writes to the owning shard peer", async () => {
     assert.equal(remoteRead.status, 200);
     assert.deepEqual(remoteRead.body, { _id: remoteId, side: "b", value: 2 });
 
-    const patched = await c.patch(`${base}/${remoteId}`, { value: 3 });
+    const patched = await c.patch(`${base}/${remoteId}`, { $set: { value: 3 } });
     assert.equal(patched.status, 200);
     assert.equal(b.node.get(db, coll, remoteId).value, 3);
     assert.equal(a.node.get(db, coll, remoteId), undefined);
@@ -1137,7 +1352,7 @@ test("public queries resolve live references across shard owners", async () => {
     assert.equal(alice.status, 200, JSON.stringify(alice.body));
     assert.deepEqual(alice.body.map((post) => post._id), [postId]);
 
-    const patched = await c.patch(`${authorBase}/${authorId}`, { name: "Ada" });
+    const patched = await c.patch(`${authorBase}/${authorId}`, { $set: { name: "Ada" } });
     assert.equal(patched.status, 200);
     const qAda = encodeURIComponent(JSON.stringify({ "author.object.name": "Ada" }));
     const ada = await c.get(`${postBase}?q=${qAda}`);
@@ -1184,8 +1399,8 @@ test("bulk CRUD splits batches by shard and read routes fan out", async () => {
     assert.equal(b.node.get(db, coll, idA), undefined);
 
     const patched = await c.patch(base, [
-      { _id: idA, value: 11 },
-      { _id: idB, value: 21 },
+      { _id: idA, $set: { value: 11 } },
+      { _id: idB, $set: { value: 21 } },
     ]);
     assert.equal(patched.status, 200);
     assert.equal(patched.body.updated, 2);
@@ -1377,6 +1592,88 @@ test("public object interface returns old aggregate rows from the object route",
   }
 });
 
+test("POST search honors body pagination controls", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const session = await login(`http://localhost:${s.port}`);
+    const c = api(`http://localhost:${s.port}`, session.accessToken);
+    const db = "app";
+    const coll = "search_body_paging";
+    const base = `/api/${db}/${coll}`;
+
+    const created = await c.post(`${base}/object`, [
+      { _id: "a", status: "active", score: 1 },
+      { _id: "b", status: "active", score: 2 },
+      { _id: "c", status: "active", score: 3 },
+    ]);
+    assert.equal(created.status, 201);
+
+    const page = await c.post(`${base}/search`, {
+      status: "active",
+      $sort: { score: 1 },
+      $page: 2,
+      $pageSize: 1,
+      $refDepth: 0,
+    });
+    assert.equal(page.status, 200, JSON.stringify(page.body));
+    assert.deepEqual(page.body.map((row) => row._id), ["b"]);
+
+    const skipped = await c.post(`${base}/search`, {
+      status: "active",
+      $sort: { score: 1 },
+      $skip: 2,
+      $limit: 1,
+      $refDepth: 0,
+    });
+    assert.equal(skipped.status, 200, JSON.stringify(skipped.body));
+    assert.deepEqual(skipped.body.map((row) => row._id), ["c"]);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("public object queries default and cap page size", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const session = await login(`http://localhost:${s.port}`);
+    const c = api(`http://localhost:${s.port}`, session.accessToken, { prefer: "return=minimal" });
+    const db = "app";
+    const coll = "query_page_cap";
+    const base = `/api/${db}/${coll}`;
+    const rows = Array.from({ length: 260 }, (_, index) => ({
+      _id: `row-${String(index).padStart(3, "0")}`,
+      status: "active",
+      index,
+    }));
+
+    const created = await c.post(`${base}/object`, rows);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+
+    const defaultPage = await c.get(`${base}/object?$refDepth=0`);
+    assert.equal(defaultPage.status, 200, JSON.stringify(defaultPage.body));
+    assert.equal(defaultPage.body.length, 250);
+
+    const cappedBodyPage = await c.post(`${base}/search`, {
+      status: "active",
+      $pageSize: 500,
+      $refDepth: 0,
+    });
+    assert.equal(cappedBodyPage.status, 200, JSON.stringify(cappedBodyPage.body));
+    assert.equal(cappedBodyPage.body.length, 250);
+
+    const secondPage = await c.post(`${base}/search`, {
+      status: "active",
+      $page: 2,
+      $pageSize: 250,
+      $refDepth: 0,
+    });
+    assert.equal(secondPage.status, 200, JSON.stringify(secondPage.body));
+    assert.equal(secondPage.body.length, 10);
+  } finally {
+    s.server.close();
+  }
+});
+
 test("public query responses expose planner path headers", async () => {
   const s = await startTestServer({ port: 0 });
   try {
@@ -1423,6 +1720,33 @@ test("public query responses expose planner path headers", async () => {
     assert.equal(aggregate.status, 200);
     assert.deepEqual(aggregate.body, [{ total: 6 }]);
     assert.equal(aggregate.headers.get("x-spread-db-query-path"), "aggregate-column-summary");
+
+    const groupedCountQuery = encodeURIComponent(JSON.stringify({
+      status: "active",
+      $aggregate: {
+        groupBy: "status",
+        fields: { n: { $count: true } },
+      },
+    }));
+    const groupedCount = await c.get(`${base}?q=${groupedCountQuery}`);
+    assert.equal(groupedCount.status, 200);
+    assert.deepEqual(groupedCount.body, [{ status: "active", n: 2 }]);
+    assert.equal(groupedCount.headers.get("x-spread-db-query-path"), "aggregate-group-count-index");
+
+    const groupedMetricQuery = encodeURIComponent(JSON.stringify({
+      status: "active",
+      $aggregate: {
+        groupBy: "status",
+        fields: {
+          total: { $sum: "score" },
+          n: { $count: true },
+        },
+      },
+    }));
+    const groupedMetric = await c.get(`${base}?q=${groupedMetricQuery}`);
+    assert.equal(groupedMetric.status, 200);
+    assert.deepEqual(groupedMetric.body, [{ status: "active", total: 3, n: 2 }]);
+    assert.equal(groupedMetric.headers.get("x-spread-db-query-path"), "aggregate-group-forward-index");
   } finally {
     s.server.close();
   }
@@ -1483,7 +1807,7 @@ test("sharded object-db aggregate merges shard partials without fetching raw obj
       { status: "done", score: 30, average: 15, n: 2 },
       { status: "new", score: 3, average: 1.5, n: 2 },
     ]);
-    assert.equal(result.headers.get("x-spread-db-query-path"), "aggregate-group-index");
+    assert.equal(result.headers.get("x-spread-db-query-path"), "aggregate-group-forward-index");
     assert.equal(
       forwarded.some((entry) => entry.method === "GET" && entry.url.includes("%22%24aggregate%22")),
       true,
@@ -1556,6 +1880,16 @@ test("public vector search supports GET query syntax and POST body payloads", as
     const replaced = await c.put(`${base}/near`, redacted.body);
     assert.equal(replaced.status, 200);
     assert.deepEqual(s.node.getVector("app", "docs", "near"), [1, 0, 0]);
+
+    const vectorPatched = await c.patch(`${base}/near`, { $set: { _vec: [0, 0, 1] } });
+    assert.equal(vectorPatched.status, 200);
+    assert.equal(vectorPatched.body._vec, undefined);
+    assert.deepEqual(s.node.getVector("app", "docs", "near"), [0, 0, 1]);
+
+    const vectorRemoved = await c.patch(`${base}/near`, { $unset: ["_vec"] });
+    assert.equal(vectorRemoved.status, 200);
+    assert.equal(vectorRemoved.body._vec, undefined);
+    assert.equal(s.node.getVector("app", "docs", "near"), null);
   } finally {
     s.server.close();
   }
@@ -1650,9 +1984,8 @@ test("public interface lists databases, collections, and collection meta", async
 
     await c.post("/api/app/orders/object", { _id: "o1", status: "paid" });
     const indexStats = s.node.indexStats("app", "orders");
-    assert.equal(indexStats.length, 1);
-    assert.equal(indexStats[0].path, "status");
-    assert.equal(indexStats[0].entries, 1);
+    const statusIndex = indexStats.find((index) => index.type === "field" && index.path === "status");
+    assert.equal(statusIndex.entries, 1);
 
     const removed = await c.del("/api/app/collections/orders");
     assert.equal(removed.status, 204);
@@ -1730,11 +2063,15 @@ test("serves the console UI at /", async () => {
     assert.match(r.headers.get("content-type"), /text\/html/);
     const html = await r.text();
     assert.match(html, /spread-db console/);
+    assert.match(html, /id="object-file"/);
+    assert.match(html, /id="download-file-btn"/);
 
     const docs = await fetch(`http://localhost:${s.port}/API.md`);
     assert.equal(docs.status, 200);
     assert.match(docs.headers.get("content-type"), /text\/markdown/);
-    assert.match(await docs.text(), /# spread-db API/);
+    const docsText = await docs.text();
+    assert.match(docsText, /# spread-db API/);
+    assert.match(docsText, /## File Handling/);
   } finally {
     s.server.close();
   }
@@ -1777,7 +2114,7 @@ test("replication across two HTTP nodes", async () => {
     assert.equal(onB.status, 200);
     assert.deepEqual(onB.body, { _id: "i1", qty: 5 });
 
-    await cb.patch("/api/app/items/object/i1", { qty: 6 });
+    await cb.patch("/api/app/items/object/i1", { $set: { qty: 6 } });
     await a.node.syncAll();
     const onA = await ca.get("/api/app/items/object/i1");
     assert.equal(onA.body.qty, 6);

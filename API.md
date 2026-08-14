@@ -33,7 +33,7 @@ Each collection also has a small `meta` JavaScript object. It is kept in memory 
 
 Objects are plain dynamic JSON-style records. They can have different shapes in the same collection, and values can be strings, numbers, booleans, arrays, nested objects, or `null`.
 
-Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact URL-safe id. `PUT` replaces the full object, `PATCH` merges fields, and `DELETE` creates a replicated delete. Special fields such as `_vec` are handled by storage features and are hidden from normal read responses.
+Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact URL-safe id. `PUT` replaces the full object, `PATCH` applies Mongo-like `$set` and `$unset` operators, and `DELETE` creates a replicated delete. Special fields such as `_vec` are handled by storage features and are hidden from normal read responses.
 
 Public object routes use this shape:
 
@@ -411,7 +411,7 @@ Response:
 
 ### Patch One
 
-`PATCH` is a partial update.
+`PATCH` is a Mongo-like partial update. Use `$set` for dot-path writes and `$unset` for dot-path removals. `_id` cannot be changed.
 
 Request:
 
@@ -421,7 +421,11 @@ Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 {
-  "score": 12
+  "$set": {
+    "score": 12,
+    "profile.city": "Hamburg"
+  },
+  "$unset": ["legacyFlag"]
 }
 ```
 
@@ -431,11 +435,136 @@ Response:
 {
   "_id": "object-1",
   "status": "archived",
-  "score": 12
+  "score": 12,
+  "profile": {
+    "city": "Hamburg"
+  }
 }
 ```
 
 ### Delete One
+
+Request:
+
+```http
+DELETE {URL}/api/{db}/{collection}/object/object-1
+Authorization: Bearer <accessToken>
+```
+
+Response:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+## File Handling
+
+File handling is object-backed. One object can wrap one S3-backed blob, while the database object stores only a small `_file` descriptor. The S3 bucket should stay private; blob reads go through the API and use the same read permissions as the wrapping object.
+
+```json
+{
+  "_file": {
+    "storage": "s3",
+    "key": "spread-db/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
+    "mimeType": "application/pdf"
+  }
+}
+```
+
+`_file.key` is derived by the server from `{db}`, `{collection}`, `_id`, and a generated file id. Clients should not invent or change it. Replacing a file writes a new blob key, commits the object pointer, then removes the old blob best-effort. Bulk file uploads are not supported; use one multipart request per file object.
+
+### Create Object With File
+
+Request:
+
+```http
+POST {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: multipart/form-data
+
+part "object":
+{
+  "_id": "object-1",
+  "name": "invoice.pdf",
+  "status": "received"
+}
+
+part "file":
+<binary file content>
+```
+
+Response:
+
+```json
+{
+  "_id": "object-1",
+  "name": "invoice.pdf",
+  "status": "received",
+  "_file": {
+    "storage": "s3",
+    "key": "spread-db/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
+    "mimeType": "application/pdf"
+  }
+}
+```
+
+### Read File Blob
+
+Request:
+
+```http
+GET {URL}/api/{db}/{collection}/object/object-1/blob
+Authorization: Bearer <accessToken>
+```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/pdf
+
+<binary file content>
+```
+
+### Replace Object With File
+
+`PUT` replaces the full wrapping object and stores the new file under a new server-derived blob key. No old file version is exposed by spread-db; old blob cleanup is best-effort after the object pointer is durable.
+
+Request:
+
+```http
+PUT {URL}/api/{db}/{collection}/object/object-1
+Authorization: Bearer <accessToken>
+Content-Type: multipart/form-data
+
+part "object":
+{
+  "name": "invoice-final.pdf",
+  "status": "approved"
+}
+
+part "file":
+<binary file content>
+```
+
+Response:
+
+```json
+{
+  "_id": "object-1",
+  "name": "invoice-final.pdf",
+  "status": "approved",
+  "_file": {
+    "storage": "s3",
+    "key": "spread-db/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
+    "mimeType": "application/pdf"
+  }
+}
+```
+
+### Delete File Object
+
+Delete the wrapping object through normal object CRUD. The object delete is durable first; blob deletion is then attempted best-effort.
 
 Request:
 
@@ -542,8 +671,8 @@ Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 [
-  { "_id": "object-1", "score": 51 },
-  { "_id": "object-2", "score": 13 }
+  { "_id": "object-1", "$set": { "score": 51 }, "$unset": ["legacyFlag"] },
+  { "_id": "object-2", "$set": { "score": 13 } }
 ]
 ```
 
@@ -552,6 +681,7 @@ Response:
 ```json
 {
   "updated": 2,
+  "skipped": [],
   "items": [
     { "_id": "object-1", "status": "active", "score": 51 },
     { "_id": "object-2", "status": "archived", "score": 13 }
@@ -587,7 +717,7 @@ The delete body may also be a plain array of ids.
 
 ## Query
 
-Query responses are plain arrays. Use GET for small URL-safe queries and POST `/search` for larger payloads.
+Query responses are plain arrays. Use GET for small URL-safe queries and POST `/search` for larger payloads. Normal object queries default to `250` rows and cap each page at `250`; use `offset` / `$skip` or `$page` to read more.
 
 ### GET Query
 
@@ -621,9 +751,13 @@ Content-Type: application/json
 {
   "status": "active",
   "$sort": { "score": -1 },
+  "$page": 1,
+  "$pageSize": 50,
   "$refDepth": 1
 }
 ```
+
+You may also use `$limit` and `$skip` in the POST body. URL `limit` / `offset` parameters take precedence when both are present. Page size is capped at `250`.
 
 Response:
 

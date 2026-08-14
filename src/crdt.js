@@ -230,8 +230,7 @@ export class CRDTNode {
   }
 
   countShards(db, coll, query = {}, shards = []) {
-    const includeId = this._includeShardId(db, coll, shards);
-    return this.count(db, coll, query, includeId ? { includeId } : {});
+    return this.count(db, coll, query, this._shardQueryOptions(db, coll, shards));
   }
 
   aggregate(db, coll, query = {}, spec = {}, options = {}) {
@@ -242,8 +241,7 @@ export class CRDTNode {
   }
 
   aggregateShards(db, coll, query = {}, spec = {}, shards = []) {
-    const includeId = this._includeShardId(db, coll, shards);
-    return this.aggregate(db, coll, query, spec, includeId ? { includeId } : {});
+    return this.aggregate(db, coll, query, spec, this._shardQueryOptions(db, coll, shards));
   }
 
   aggregatePath(db, coll, query = {}, spec = {}, options = {}) {
@@ -251,8 +249,7 @@ export class CRDTNode {
   }
 
   aggregatePathShards(db, coll, query = {}, spec = {}, shards = []) {
-    const includeId = this._includeShardId(db, coll, shards);
-    return this.aggregatePath(db, coll, query, spec, includeId ? { includeId } : {});
+    return this.aggregatePath(db, coll, query, spec, this._shardQueryOptions(db, coll, shards));
   }
 
   expandReferences(database, object, depth = 1) {
@@ -426,13 +423,14 @@ export class CRDTNode {
     for (const c of snap.collections || []) {
       for (const obj of c.objects || []) {
         const coll = this.db.collection(c.db, c.coll);
+        const shard = obj.shard || c.shard || this.shardForObject(c.db, c.coll, obj.id);
         if (obj.deleted) {
           if (obj.ts) touch(this.clock, obj.ts);
           touch(this.clock, obj.deleted);
-          if (coll.deleteObject(obj.id, obj.deleted)) count++;
+          if (coll.deleteObject(obj.id, obj.deleted, shard)) count++;
         } else if (obj.ts) {
           touch(this.clock, obj.ts);
-          if (coll.putObject(obj.id, obj.value || {}, obj.ts)) count++;
+          if (coll.putObject(obj.id, obj.value || {}, obj.ts, shard)) count++;
         }
       }
     }
@@ -610,6 +608,16 @@ export class CRDTNode {
     return (id) => shardSet.has(this.shardForObject(database, collection, id));
   }
 
+  _shardQueryOptions(database, collection, shards = []) {
+    const shardSet = new Set((shards || []).filter(Boolean));
+    if (!shardSet.size) return {};
+    const scopeShards = [...shardSet];
+    const includeIds = this.db.idsForShards(database, collection, [...shardSet]);
+    if (includeIds) return { includeIds, scopeShards };
+    const includeId = this._includeShardId(database, collection, [...shardSet]);
+    return includeId ? { includeId, scopeShards } : {};
+  }
+
   _scheduleVectorIndexWarmup() {
     if (!this.vectorWarmupEnabled || this.vectorWarmupScheduled) return;
     this.vectorWarmupScheduled = true;
@@ -701,7 +709,11 @@ export class CRDTNode {
       includeObject: (database, collection, id) => {
         return this.shardForObject(database, collection, id) === scope.shard;
       },
-    });
+    }).map((collection) => ({
+      ...collection,
+      shard: scope.shard,
+      objects: collection.objects.map((object) => ({ ...object, shard: object.shard || scope.shard })),
+    }));
   }
 
   _opsAfter(after, limit, scope) {

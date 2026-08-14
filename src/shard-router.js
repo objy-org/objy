@@ -95,19 +95,20 @@ export class ShardRequestRouter {
     let count = options.includeCount ? 0 : undefined;
     const shardOptions = shardFetchOptions(options);
     const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
-    if (localShards.length) {
-      const local = this.findLocalShards(database, collection, criteria, shardOptions, localShards);
-      if (options.includeCount) count += local.count;
-      all.push(...local.objects);
-      if (local.path) paths.push(local.path);
-    }
-    const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+    const remoteResults = await remoteAfterLocalWork(this.forwardRemoteTargets(targets, (target) => (
       this.forwardToShard(req, target.shard, objectPath(database, collection), {
         method: "GET",
         query: queryForFind(criteria, shardOptions),
         retryStatuses: [409, 503, 504],
       })
-    ));
+    )), () => {
+      if (localShards.length) {
+        const local = this.findLocalShards(database, collection, criteria, shardOptions, localShards);
+        if (options.includeCount) count += local.count;
+        all.push(...local.objects);
+        if (local.path) paths.push(local.path);
+      }
+    });
     for (const { remote } of remoteResults) {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote query failed", remote.body);
       const objects = responseObjects(remote.body);
@@ -159,18 +160,19 @@ export class ShardRequestRouter {
       const partials = [];
       const paths = [];
       const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
-      if (localShards.length) {
-        partials.push(...this.node.aggregateShards(database, collection, criteria, partialAggregateSpec(spec), localShards));
-        paths.push(publicAggregatePath(this.node.aggregatePathShards(database, collection, criteria, partialAggregateSpec(spec), localShards)));
-      }
       const partialSpec = partialAggregateSpec(spec);
-      const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+      const remoteResults = await remoteAfterLocalWork(this.forwardRemoteTargets(targets, (target) => (
         this.forwardToShard(req, target.shard, objectPath(database, collection), {
           method: "GET",
           query: queryForAggregate(criteria, partialSpec),
           retryStatuses: [409, 503, 504],
         })
-      ));
+      )), () => {
+        if (localShards.length) {
+          partials.push(...this.node.aggregateShards(database, collection, criteria, partialSpec, localShards));
+          paths.push(publicAggregatePath(this.node.aggregatePathShards(database, collection, criteria, partialSpec, localShards)));
+        }
+      });
       for (const { remote } of remoteResults) {
         if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote aggregate failed", remote.body);
         partials.push(...responseObjects(remote.body));
@@ -186,18 +188,19 @@ export class ShardRequestRouter {
     const rows = [];
     const paths = [];
     const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
-    if (localShards.length) {
-      const local = this.findLocalShards(database, collection, criteria, {}, localShards);
-      rows.push(...local.objects);
-      if (local.path) paths.push(`aggregate-${local.path}`);
-    }
-    const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+    const remoteResults = await remoteAfterLocalWork(this.forwardRemoteTargets(targets, (target) => (
       this.forwardToShard(req, target.shard, objectPath(database, collection), {
         method: "GET",
         query: queryForCriteria(criteria),
         retryStatuses: [409, 503, 504],
       })
-    ));
+    )), () => {
+      if (localShards.length) {
+        const local = this.findLocalShards(database, collection, criteria, {}, localShards);
+        rows.push(...local.objects);
+        if (local.path) paths.push(`aggregate-${local.path}`);
+      }
+    });
     for (const { remote } of remoteResults) {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote aggregate scan failed", remote.body);
       rows.push(...responseObjects(remote.body));
@@ -240,17 +243,17 @@ export class ShardRequestRouter {
 
     const all = [];
     const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
-    if (localShards.length) {
-      all.push(...this.vectorSearchLocalShards(database, collection, criteria, vector, localShards, options));
-    }
-
-    const remoteResults = await this.forwardRemoteTargets(targets, (target) => (
+    const remoteResults = await remoteAfterLocalWork(this.forwardRemoteTargets(targets, (target) => (
       this.forwardToShard(req, target.shard, searchPath(database, collection), {
         method: "POST",
         body: queryForVectorSearch(criteria, vector, options),
         retryStatuses: [409, 503, 504],
       })
-    ));
+    )), () => {
+      if (localShards.length) {
+        all.push(...this.vectorSearchLocalShards(database, collection, criteria, vector, localShards, options));
+      }
+    });
     for (const { remote } of remoteResults) {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote vector search failed", remote.body);
       all.push(...responseObjects(remote.body));
@@ -331,6 +334,11 @@ export class ShardRequestRouter {
     return this.forwardToShard(req, shard, path, options);
   }
 
+  async forwardToObjectRaw(req, database, collection, id, path, options = {}) {
+    const shard = this.shardForObject(database, collection, id);
+    return this.forwardToShardRaw(req, shard, path, options);
+  }
+
   async forwardRemoteTargets(targets, forward) {
     return Promise.all(targets
       .filter((target) => !target.local)
@@ -357,6 +365,34 @@ export class ShardRequestRouter {
         last = {
           status: err.status || 503,
           body: { error: err.message },
+        };
+      }
+    }
+    return last;
+  }
+
+  async forwardToShardRaw(req, shard, path, {
+    method = "GET",
+    body,
+    contentType,
+    query,
+    retryStatuses = [409, 502, 503, 504],
+    timeoutMs,
+  } = {}) {
+    const peers = this.node.routingPeersForShard(shard);
+    if (!peers.length) throw httpError(503, `no remote peer available for shard ${shard}`);
+
+    let last = null;
+    for (const peer of peers) {
+      try {
+        const response = await this.forwardRaw(req, peer, shard, path, { method, body, contentType, query, timeoutMs });
+        last = response;
+        if (!retryStatuses.includes(response.status)) return response;
+      } catch (err) {
+        last = {
+          status: err.status || 503,
+          body: { error: err.message },
+          headers: {},
         };
       }
     }
@@ -405,6 +441,39 @@ export class ShardRequestRouter {
       return {
         status: response.status,
         body: text ? JSON.parse(text) : null,
+        headers: Object.fromEntries(response.headers),
+      };
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw httpError(504, `forward timeout after ${forwardTimeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async forwardRaw(req, peer, shard, path, { method = "GET", body, contentType, query, timeoutMs } = {}) {
+    const suffix = query ? `?${query}` : "";
+    const headers = forwardedHeaders(req, shard, body !== undefined);
+    if (contentType) headers["content-type"] = contentType;
+    const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
+    timer.unref?.();
+    try {
+      const response = await fetch(`${peer.url}${path}${suffix}`, {
+        method,
+        headers,
+        body,
+        signal: controller.signal,
+      });
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const contentResponseType = response.headers.get("content-type") || "";
+      const isJson = contentResponseType.toLowerCase().includes("application/json");
+      return {
+        status: response.status,
+        body: isJson && buffer.length ? JSON.parse(buffer.toString("utf8")) : buffer,
         headers: Object.fromEntries(response.headers),
       };
     } catch (err) {
@@ -486,6 +555,16 @@ function queryForVectorSearch(criteria, vector = {}, options = {}) {
     $refDepth: 0,
     ...(options.sortBy ? { $sort: { [options.sortBy]: options.sort === "desc" ? "desc" : "asc" } } : {}),
   };
+}
+
+async function remoteAfterLocalWork(remoteResultsPromise, localWork) {
+  try {
+    localWork();
+    return await remoteResultsPromise;
+  } catch (err) {
+    await remoteResultsPromise.catch(() => {});
+    throw err;
+  }
 }
 
 function partialAggregateSpec(spec = {}) {

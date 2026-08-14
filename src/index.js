@@ -1,6 +1,7 @@
 import { shardMapFromHttp, startServer } from "./server.js";
 import { CRDTNode } from "./crdt.js";
 import { loadConfig } from "./config.js";
+import { createFileService } from "./files.js";
 import { createPersistence } from "./persistence.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { createShardMapStore } from "./shard-map-store.js";
@@ -32,6 +33,7 @@ const replication = createReplicationScheduler({
   maxScopesPerHint: config.cluster.hints.maxScopesPerHint,
 });
 const persistence = createPersistence(node, config.persistence);
+const files = createFileService(config.files, config.persistence);
 if (persistence) {
   const restored = await persistence.restore();
   persistence.start();
@@ -44,6 +46,7 @@ const state = await startServer({
   shardMapStore,
   auth: config.auth,
   persistence,
+  files,
   memoryGuard: config.memoryGuard,
   clusterSecret: config.cluster.secret,
   forwardTimeoutMs: config.cluster.forwardTimeoutMs,

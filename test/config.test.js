@@ -26,6 +26,19 @@ test("normalizes a single-node config with runtime defaults", () => {
   assert.equal(config.node.url, "http://localhost:8080");
   assert.equal(config.server.port, 8080);
   assert.equal(config.storage.engine, "shape");
+  assert.deepEqual(config.files, {
+    mode: "off",
+    prefix: "spread-db/files",
+    maxUploadBytes: 256 * 1024 * 1024,
+    s3: {
+      bucket: "spread-db",
+      endpoint: undefined,
+      region: "us-east-1",
+      accessKeyId: undefined,
+      secretAccessKey: undefined,
+      forcePathStyle: undefined,
+    },
+  });
   assert.deepEqual(config.vector, {
     enabled: true,
     field: "_vec",
@@ -286,6 +299,27 @@ test("rejects mismatched Hetzner object storage region and endpoint", () => {
     }),
     /persistence\.s3\.region must be fsn1/,
   );
+});
+
+test("file storage can inherit persistence S3 settings when enabled", () => {
+  const config = normalizeConfig({
+    node: { id: "node-a" },
+    files: {
+      mode: "s3",
+    },
+    persistence: {
+      mode: "s3",
+      s3: {
+        bucket: "spread-db",
+        endpoint: "https://fsn1.your-objectstorage.com",
+      },
+    },
+    auth: TEST_AUTH,
+  });
+
+  assert.equal(config.files.s3.bucket, "spread-db");
+  assert.equal(config.files.s3.endpoint, "https://fsn1.your-objectstorage.com");
+  assert.equal(config.files.s3.region, "fsn1");
 });
 
 test("runtime pieces can be started from normalized config", async () => {

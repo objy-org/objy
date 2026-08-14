@@ -71,6 +71,21 @@ Sharding is object-based. For any `{ database, collection, _id }`, the shard map
 | Index layer | Maintains field, column, and vector index readiness. |
 | Interfaces | Mount public, cluster, and optional plugin routes. |
 
+## Pluggable Components
+
+spread-db is built around small replaceable layers. The core database owns object clocks, shard routing, replication, persistence coordination, and index readiness. Everything around that should stay swappable.
+
+The two most important extension points are:
+
+| Component | What can be changed |
+| --- | --- |
+| Storage engine | Replace how objects are represented in memory while keeping the same database/collection/object behavior. |
+| Interfaces | Add, remove, or replace HTTP-facing route modules without changing the storage or replication layers. |
+
+Storage engines should expose the same object-level behavior: bulk insert, replace, update, delete, reads, scans, metadata access, and index maintenance hooks. Single-object operations are treated as bulks of one, so custom storage should be designed bulk-first.
+
+Interface plugins should stay thin. They translate transport concerns into database operations, but should not own storage, replication, sharding, or permission logic. The default setup uses separate public and cluster interfaces; custom interfaces can be added for specialized protocols, admin tooling, import flows, or private operational routes.
+
 ## Configuration
 
 The default config path is:
@@ -111,6 +126,19 @@ This sample shows the runtime defaults explicitly. Values like node identity and
         "maxStringLength": 256,
         "maxKeyBytes": 512
       }
+    }
+  },
+  "files": {
+    "mode": "off",
+    "prefix": "spread-db/files",
+    "maxUploadBytes": 268435456,
+    "s3": {
+      "bucket": "spread-db",
+      "endpoint": null,
+      "region": "us-east-1",
+      "accessKeyId": null,
+      "secretAccessKey": null,
+      "forcePathStyle": null
     }
   },
   "vector": {
@@ -215,6 +243,8 @@ This sample shows the runtime defaults explicitly. Values like node identity and
 `server` controls the local HTTP listener.
 
 `storage` selects the in-memory engine. The runtime default is `shape`. For the current object-store path, set `storage.engine` to `object`; the value directory then pools repeated small values to reduce object memory pressure.
+
+`files` enables object-backed blobs. When set to `s3`, file bytes live in S3 under server-derived per-write keys, while the database stores only a small `_file` metadata object on the wrapping object. If `files.s3` is omitted, the file layer can reuse the persistence S3 settings.
 
 `vector` controls the `_vec` field and HNSW tuning used by vector search.
 
