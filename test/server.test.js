@@ -356,6 +356,8 @@ test("api config reports cluster shards peers and node RSS", async () => {
 
     const session = await login(urlA);
     const authed = api(urlA, session.accessToken);
+    assert.equal((await authed.post("/api/databases", { name: "config_empty" })).status, 201);
+    assert.equal((await authed.post("/api/config_empty/collections", { name: "plain" })).status, 201);
     const status = await authed.get("/api/config");
 
     assert.equal(status.status, 200, JSON.stringify(status.body));
@@ -406,6 +408,11 @@ test("api config reports cluster shards peers and node RSS", async () => {
       entry.collection === "users" &&
       entry.fieldIndexes.some((index) => index.path === "username" && index.status === "ready")
     )));
+    assert.equal(status.body.nodes.some((nodeStatus) => (
+      (nodeStatus.indexes.collections || []).some((entry) => (
+        entry.database === "config_empty" && entry.collection === "plain"
+      ))
+    )), false);
     assert.equal(status.body.shards.find((shard) => shard.name === "shard-b").peers[0].online, true);
   } finally {
     a.server.close();

@@ -1024,7 +1024,7 @@
 
   .index-row {
     display: grid;
-    grid-template-columns: minmax(170px, 1.2fr) 82px minmax(0, 1fr) minmax(0, 1fr) 100px;
+    grid-template-columns: minmax(170px, 1.2fr) 82px minmax(0, 2fr);
     gap: 10px;
     align-items: start;
     padding: 9px 10px;
@@ -1229,7 +1229,7 @@
     .top-stats { flex-wrap: wrap; overflow: visible; }
     .cluster-hero { grid-template-columns: 1fr; }
     .index-table { overflow-x: auto; }
-    .index-row { min-width: 720px; }
+    .index-row { min-width: 520px; }
     .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
     .sidebar { border-right: 0; border-bottom: 1px solid var(--line-soft); }
     .tree { max-height: 260px; }
@@ -1410,10 +1410,6 @@
               <button id="delete-object-btn" class="danger" disabled>
                 <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
                 Delete
-              </button>
-              <button id="copy-id-btn" class="secondary" disabled>
-                <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-                ID
               </button>
               <button id="reload-object-btn" class="secondary" disabled>
                 <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.2-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.2 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
@@ -1767,7 +1763,6 @@ function renderActionState() {
   $("download-file-btn").disabled = !hasFile;
   $("edit-object-btn").disabled = !hasObject;
   $("delete-object-btn").disabled = !hasObject;
-  $("copy-id-btn").disabled = !hasObject;
   $("reload-object-btn").disabled = !hasObject;
 }
 
@@ -2070,9 +2065,7 @@ function renderClusterStatus(config) {
   const peers = Array.isArray(config.peers) ? config.peers : [];
   const rss = configRss(config, nodes);
   const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
-  const readyIndexes = nodes.filter((nodeStatus) => nodeStatus.indexes?.status === "ready").length;
   const nodesTone = !nodes.length ? "warn" : online === nodes.length ? "ok" : "bad";
-  const indexesTone = !nodes.length ? "warn" : readyIndexes === nodes.length ? "ok" : "warn";
   const workerCount = nodes.reduce((sum, nodeStatus) => {
     const workers = nodeStatus.indexes?.workers || {};
     return sum
@@ -2087,7 +2080,6 @@ function renderClusterStatus(config) {
     topStat("peers", peers.length, peers.length ? "ok" : "warn", `${peers.length} configured peers`),
     memoryStat("rss logical", rss.cluster, rssClusterTitle(rss)),
     ...rss.nodes.map((entry) => memoryStat(rssNodeLabel(entry), entry, rssNodeTitle(entry), "node-rss")),
-    topStat("indexes", `${readyIndexes}/${nodes.length}`, indexesTone, indexTitle(nodes)),
     topStat("workers", workerCount, workerCount ? "warn" : "ok", `${workerCount} active index workers`),
   ].join("");
 }
@@ -2304,7 +2296,9 @@ function renderIndexDetails(nodes) {
   const rows = [];
   for (const nodeStatus of nodes) {
     const collections = Array.isArray(nodeStatus.indexes?.collections) ? nodeStatus.indexes.collections : [];
-    for (const item of collections) rows.push({ node: nodeName(nodeStatus), ...item });
+    for (const item of collections) {
+      if (hasIndexState(item)) rows.push({ node: nodeName(nodeStatus), ...item });
+    }
   }
   return `
     <section class="cluster-section">
@@ -2314,7 +2308,7 @@ function renderIndexDetails(nodes) {
       </div>
       <div class="index-table">
         <div class="index-row header">
-          <span>Context</span><span>Status</span><span>Field indexes</span><span>Column indexes</span><span>Vector</span>
+          <span>Context</span><span>Status</span><span>Indexes</span>
         </div>
         ${rows.length ? rows.map(indexRow).join("") : `<div class="cluster-row"><span>No index state available.</span><span></span></div>`}
       </div>
@@ -2324,18 +2318,12 @@ function renderIndexDetails(nodes) {
 
 function indexRow(item) {
   const context = `${item.node} · ${item.database || "_"} / ${item.collection || "_"}`;
-  const fields = indexPathList(item.fieldIndexes);
-  const columns = indexPathList(item.columnIndexes, true);
-  const vector = item.vector
-    ? `${statusLabel(item.vector.status)} · ${formatNumber(item.vector.stored)} stored`
-    : "none";
+  const summary = indexSummary(item);
   return `
     <div class="index-row">
       <span class="cluster-context" title="${escapeHtml(context)}">${escapeHtml(context)}</span>
       <span class="state-text ${item.status === "ready" ? "" : "warn"}">${escapeHtml(statusLabel(item.status))}</span>
-      <span title="${escapeHtml(fields)}">${escapeHtml(fields)}</span>
-      <span title="${escapeHtml(columns)}">${escapeHtml(columns)}</span>
-      <span title="${escapeHtml(vector)}">${escapeHtml(vector)}</span>
+      <span title="${escapeHtml(summary)}">${escapeHtml(summary)}</span>
     </div>
   `;
 }
@@ -2407,6 +2395,38 @@ function indexPathList(indexes, includePending = false) {
     const pending = includePending && Number(index.pendingEntries) > 0 ? ` (${formatNumber(index.pendingEntries)} pending)` : "";
     return `${path}${pending}`;
   }).join(", ");
+}
+
+function indexSummary(item) {
+  const parts = [];
+  if (Array.isArray(item.fieldIndexes) && item.fieldIndexes.length) {
+    parts.push(`field: ${indexPathList(item.fieldIndexes)}`);
+  }
+  if (Array.isArray(item.columnIndexes) && item.columnIndexes.length) {
+    parts.push(`column: ${indexPathList(item.columnIndexes, true)}`);
+  }
+  if (hasVectorState(item.vector)) {
+    parts.push(`vector: ${statusLabel(item.vector.status)} · ${formatNumber(item.vector.stored)} stored`);
+  }
+  return parts.join(" · ") || "none";
+}
+
+function hasIndexState(item) {
+  return Boolean(
+    (Array.isArray(item?.fieldIndexes) && item.fieldIndexes.length) ||
+      (Array.isArray(item?.columnIndexes) && item.columnIndexes.length) ||
+      hasVectorState(item?.vector),
+  );
+}
+
+function hasVectorState(vector) {
+  return Boolean(
+    Number(vector?.stored) > 0 ||
+      Number(vector?.indexes) > 0 ||
+      Number(vector?.nodes) > 0 ||
+      (Array.isArray(vector?.indexStates) && vector.indexStates.length > 0) ||
+      (vector?.status && vector.status !== "ready"),
+  );
 }
 
 function activeWorkerCount(nodeStatus) {
@@ -2574,7 +2594,6 @@ function clusterTitle({ nodes, shards, peers }) {
     nodeMemoryTitle(nodes),
     shardTitle(shards),
     `${peers.length} configured peers`,
-    indexTitle(nodes),
   ].filter(Boolean).join("\n");
 }
 
@@ -2590,11 +2609,6 @@ function shardTitle(shards) {
     const online = peers.filter((peer) => peer.online).length;
     return `${shard.name || "default"}: ${online}/${peers.length} peers online`;
   }).join("\n");
-}
-
-function indexTitle(nodes) {
-  if (!nodes.length) return "No index status";
-  return nodes.map((nodeStatus) => `${nodeName(nodeStatus)}: ${statusLabel(nodeStatus.indexes?.status)}`).join("\n");
 }
 
 function isNodeOnline(nodeStatus) {
@@ -2866,16 +2880,6 @@ function formatQuery() {
     $("query").value = JSON.stringify(JSON.parse(raw), null, 2);
   } catch (err) {
     showToast(`Invalid query: ${err.message}`, true);
-  }
-}
-
-async function copySelectedId() {
-  if (!state.selected?._id) return;
-  try {
-    await navigator.clipboard.writeText(state.selected._id);
-    showToast("Object _id copied");
-  } catch {
-    showToast("Clipboard unavailable", true);
   }
 }
 
@@ -3224,7 +3228,6 @@ $("add-object-btn").addEventListener("click", () => openObjectModal("add"));
 $("edit-object-btn").addEventListener("click", () => openObjectModal("edit"));
 $("delete-object-btn").addEventListener("click", openDeleteObjectModal);
 $("download-file-btn").addEventListener("click", openSelectedFile);
-$("copy-id-btn").addEventListener("click", copySelectedId);
 $("reload-object-btn").addEventListener("click", reloadObject);
 $("object-file").addEventListener("change", updateObjectFileSummary);
 $("db-modal-save").addEventListener("click", saveDatabase);
