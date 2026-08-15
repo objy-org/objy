@@ -483,16 +483,18 @@ class Collection {
         background: true,
       },
     };
+    const hasVector = hasVectorIndexValue(vector);
+    const statuses = [
+      ...fieldIndexes.map((index) => index.status),
+      ...columnIndexes.map((index) => index.status),
+      ...(hasVector ? [vector.status] : []),
+    ];
 
     return {
-      status: overallIndexStatus([
-        ...fieldIndexes.map((index) => index.status),
-        ...columnIndexes.map((index) => index.status),
-        vector.status,
-      ]),
+      status: overallIndexStatus(statuses),
       fieldIndexes,
       columnIndexes,
-      vector,
+      ...(hasVector ? { vector } : {}),
       workers,
     };
   }
@@ -2115,6 +2117,24 @@ function overallIndexStatus(statuses = []) {
   return "ready";
 }
 
+function hasCollectionIndexReadiness(readiness = {}) {
+  return Boolean(
+    readiness.fieldIndexes?.length ||
+      readiness.columnIndexes?.length ||
+      hasVectorIndexValue(readiness.vector),
+  );
+}
+
+function hasVectorIndexValue(vector = null) {
+  return Boolean(
+    Number(vector?.stored) > 0 ||
+      Number(vector?.indexes) > 0 ||
+      Number(vector?.nodes) > 0 ||
+      (Array.isArray(vector?.indexStates) && vector.indexStates.length > 0) ||
+      (vector?.status && vector.status !== "ready"),
+  );
+}
+
 function normalizeVectorWarmupPlans(plans = []) {
   const source = Array.isArray(plans) && plans.length ? plans : [{ key: "all" }];
   const out = [];
@@ -2332,7 +2352,7 @@ export class Store {
     for (const [dbName, db] of this.dbs) {
       for (const [collName, collection] of db.collections) {
         const stats = collection.vectorStats();
-        if (!stats.field && stats.stored === 0 && stats.nodes === 0) continue;
+        if (!hasVectorIndexValue(stats)) continue;
         out.push({ database: dbName, collection: collName, ...stats });
       }
     }
@@ -2359,11 +2379,13 @@ export class Store {
         const readiness = collection.indexReadiness();
         workers.columnIndex.active += readiness.workers.columnIndex.active;
         workers.vectorIndex.active += readiness.workers.vectorIndex.active;
-        collections.push({
-          database: dbName,
-          collection: collName,
-          ...readiness,
-        });
+        if (hasCollectionIndexReadiness(readiness)) {
+          collections.push({
+            database: dbName,
+            collection: collName,
+            ...readiness,
+          });
+        }
       }
     }
 
