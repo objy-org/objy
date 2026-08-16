@@ -439,13 +439,12 @@
 
   .db-row, .coll-row {
     width: 100%;
-    border: 0;
-    border-radius: 0;
     background: transparent;
     color: var(--text);
     min-height: 38px;
-    padding: 8px 10px;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 30px;
+    align-items: center;
     font-weight: 750;
   }
 
@@ -474,7 +473,6 @@
 
   .coll-row {
     color: var(--muted);
-    padding-left: 28px;
     font-weight: 650;
   }
 
@@ -495,6 +493,44 @@
     color: var(--faint);
     font-size: 11px;
     font-weight: 800;
+  }
+
+  .tree-select, .tree-delete {
+    min-height: 38px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+  }
+
+  .tree-select {
+    min-width: 0;
+    width: 100%;
+    padding: 8px 10px;
+    justify-content: flex-start;
+  }
+
+  .coll-select {
+    padding-left: 28px;
+  }
+
+  .tree-delete {
+    width: 28px;
+    min-height: 28px;
+    padding: 0;
+    margin-right: 4px;
+    color: var(--faint);
+  }
+
+  .tree-delete:hover {
+    background: rgba(255, 104, 96, .11);
+    color: #ffd7d4;
+    filter: none;
+  }
+
+  .tree-delete svg {
+    width: 14px;
+    height: 14px;
   }
 
   .main {
@@ -1350,10 +1386,6 @@
               <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
               Meta
             </button>
-            <button id="delete-coll-btn" class="danger" disabled>
-              <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-              Collection
-            </button>
           </div>
         </div>
         <div class="query-row">
@@ -1553,7 +1585,7 @@
 <div class="modal-backdrop" id="delete-collection-modal" role="dialog" aria-modal="true" aria-labelledby="delete-collection-title">
   <div class="modal small">
     <div class="modal-head">
-      <h2 id="delete-collection-title">Delete Collection</h2>
+      <h2 id="delete-collection-title">Delete</h2>
       <button class="ghost icon-only" data-close-modal="delete-collection-modal" title="Close" aria-label="Close">
         <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
@@ -1629,6 +1661,7 @@ const state = {
   selected: null,
   objectMode: "add",
   collapsedDbs: new Set(),
+  deleteTarget: null,
 };
 
 function defaultServer() {
@@ -1758,7 +1791,6 @@ function renderActionState() {
   $("add-coll-btn").disabled = !signedIn;
   $("refresh-cluster-btn").disabled = !signedIn;
   $("edit-meta-btn").disabled = !hasCollection;
-  $("delete-coll-btn").disabled = !hasCollection;
   $("add-object-btn").disabled = !hasCollection;
   $("download-file-btn").disabled = !hasFile;
   $("edit-object-btn").disabled = !hasObject;
@@ -2659,14 +2691,22 @@ function renderTree() {
     block.className = "db-block";
     const collapsed = state.collapsedDbs.has(db);
 
-    const dbRow = document.createElement("button");
+    const dbRow = document.createElement("div");
     dbRow.className = "db-row";
-    dbRow.type = "button";
     dbRow.setAttribute("aria-expanded", String(!collapsed));
-    dbRow.innerHTML = `<svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="db-name"></span><span class="count-chip"></span>`;
+    dbRow.innerHTML = `
+      <button class="tree-select db-select" type="button" title="Toggle database">
+        <svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+        <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+        <span class="db-name"></span>
+        <span class="count-chip"></span>
+      </button>
+      ${db === "_global" ? "" : `<button class="tree-delete" type="button" title="Delete database" aria-label="Delete database"><svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>`}
+    `;
     dbRow.querySelector(".db-name").textContent = db;
     dbRow.querySelector(".count-chip").textContent = String((state.tree[db] || []).length);
-    dbRow.addEventListener("click", () => toggleDatabase(db));
+    dbRow.querySelector(".tree-select").addEventListener("click", () => toggleDatabase(db));
+    dbRow.querySelector(".tree-delete")?.addEventListener("click", () => openDeleteDatabaseModal(db));
     block.appendChild(dbRow);
 
     const list = document.createElement("div");
@@ -2674,12 +2714,18 @@ function renderTree() {
     list.hidden = collapsed;
     for (const collection of [...(state.tree[db] || [])].sort()) {
       const active = state.active?.db === db && state.active?.collection === collection;
-      const row = document.createElement("button");
+      const row = document.createElement("div");
       row.className = "coll-row" + (active ? " active" : "");
-      row.type = "button";
-      row.innerHTML = `<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg><span class="coll-name"></span>`;
+      row.innerHTML = `
+        <button class="tree-select coll-select" type="button" title="Open collection">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>
+          <span class="coll-name"></span>
+        </button>
+        <button class="tree-delete" type="button" title="Delete collection" aria-label="Delete collection"><svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      `;
       row.querySelector(".coll-name").textContent = collection;
-      row.addEventListener("click", () => selectCollection(db, collection));
+      row.querySelector(".tree-select").addEventListener("click", () => selectCollection(db, collection));
+      row.querySelector(".tree-delete").addEventListener("click", () => openDeleteCollectionModal(db, collection));
       list.appendChild(row);
     }
     block.appendChild(list);
@@ -3107,29 +3153,47 @@ async function deleteSelectedObject() {
   await loadObjects();
 }
 
-function openDeleteCollectionModal() {
-  if (!state.active) return showToast("Select a collection first", true);
+function openDeleteDatabaseModal(db) {
+  if (!db) return;
+  state.deleteTarget = { type: "database", db };
   clearModalError("delete-collection-modal");
-  $("delete-collection-name").textContent = `${state.active.db}/${state.active.collection}`;
+  $("delete-collection-title").textContent = "Delete Database";
+  $("delete-collection-name").textContent = db;
   openModal("delete-collection-modal", "delete-collection-confirm");
 }
 
-async function deleteActiveCollection() {
-  if (!state.active) return;
+function openDeleteCollectionModal(db = state.active?.db, collection = state.active?.collection) {
+  if (!db || !collection) return showToast("Select a collection first", true);
+  state.deleteTarget = { type: "collection", db, collection };
   clearModalError("delete-collection-modal");
-  const { db, collection } = state.active;
-  const result = await apiFetch("DELETE", `/api/${enc(db)}/collections/${enc(collection)}`);
-  if (!result.ok) return setModalError("delete-collection-modal", result.body?.error || "Could not delete collection");
+  $("delete-collection-title").textContent = "Delete Collection";
+  $("delete-collection-name").textContent = `${db}/${collection}`;
+  openModal("delete-collection-modal", "delete-collection-confirm");
+}
+
+async function deleteSelectedContext() {
+  if (!state.deleteTarget) return;
+  clearModalError("delete-collection-modal");
+  const target = state.deleteTarget;
+  const result = target.type === "database"
+    ? await apiFetch("DELETE", `/api/databases/${enc(target.db)}`)
+    : await apiFetch("DELETE", `/api/${enc(target.db)}/collections/${enc(target.collection)}`);
+  if (!result.ok) {
+    return setModalError("delete-collection-modal", result.body?.error || `Could not delete ${target.type}`);
+  }
   closeModal("delete-collection-modal");
-  showToast("Collection deleted");
-  state.active = null;
-  state.collectionMeta = null;
-  state.objects = [];
-  state.selected = null;
-  setBreadcrumb();
-  setMeta("");
-  renderObjects();
-  renderDetail(null);
+  showToast(target.type === "database" ? "Database deleted" : "Collection deleted");
+  if (target.type === "database" || (state.active?.db === target.db && state.active?.collection === target.collection)) {
+    state.active = null;
+    state.collectionMeta = null;
+    state.objects = [];
+    state.selected = null;
+    setBreadcrumb();
+    setMeta("");
+    renderObjects();
+    renderDetail(null);
+  }
+  state.deleteTarget = null;
   await loadTree();
 }
 
@@ -3221,7 +3285,6 @@ $("cluster-status").addEventListener("click", (event) => {
 $("add-db-btn").addEventListener("click", openDatabaseModal);
 $("add-coll-btn").addEventListener("click", openCollectionModal);
 $("edit-meta-btn").addEventListener("click", openMetaModal);
-$("delete-coll-btn").addEventListener("click", openDeleteCollectionModal);
 $("load-objects-btn").addEventListener("click", loadObjects);
 $("format-query-btn").addEventListener("click", formatQuery);
 $("add-object-btn").addEventListener("click", () => openObjectModal("add"));
@@ -3235,7 +3298,7 @@ $("collection-modal-save").addEventListener("click", saveCollection);
 $("meta-modal-save").addEventListener("click", saveCollectionMeta);
 $("object-modal-save").addEventListener("click", saveObject);
 $("delete-object-confirm").addEventListener("click", deleteSelectedObject);
-$("delete-collection-confirm").addEventListener("click", deleteActiveCollection);
+$("delete-collection-confirm").addEventListener("click", deleteSelectedContext);
 
 document.querySelectorAll("[data-close-modal]").forEach((button) => {
   button.addEventListener("click", () => closeModal(button.dataset.closeModal));

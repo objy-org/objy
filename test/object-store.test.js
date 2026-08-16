@@ -104,6 +104,58 @@ test("object row store promotes values only after runtime repeats on the same pa
   assert.equal(stats.refs, 1);
 });
 
+test("object row store avoids structured value dictionary keys by default", () => {
+  const store = new ObjectRowStore({
+    valueDirectory: {
+      minRefs: 2,
+      maxStringLength: 32,
+      maxKeyBytes: 1024,
+    },
+  });
+
+  store.rebuild("a", [["payload", { kind: "same", score: 1 }]]);
+  store.rebuild("b", [["payload", { kind: "same", score: 1 }]]);
+
+  const stats = store.shapeStats()[0].valueDirectory;
+  assert.equal(stats.poolStructuredValues, false);
+  assert.equal([...store.valueDirectory.pool.keys()].some((key) => key.startsWith("object:")), false);
+  assert.ok([...store.valueDirectory.pool.keys()].some((key) => key === "string:same"));
+});
+
+test("object row store can opt into structured value dictionary keys", () => {
+  const store = new ObjectRowStore({
+    valueDirectory: {
+      minRefs: 2,
+      maxStringLength: 32,
+      maxKeyBytes: 1024,
+      poolStructuredValues: true,
+    },
+  });
+
+  store.rebuild("a", [["payload", { kind: "same", score: 1 }]]);
+  store.rebuild("b", [["payload", { kind: "same", score: 1 }]]);
+
+  const stats = store.shapeStats()[0].valueDirectory;
+  assert.equal(stats.poolStructuredValues, true);
+  assert.ok([...store.valueDirectory.pool.keys()].some((key) => key.startsWith("object:")));
+});
+
+test("object row store does not recurse into large containers", () => {
+  const store = new ObjectRowStore({
+    valueDirectory: {
+      minRefs: 2,
+      maxNestedContainerEntries: 1,
+    },
+  });
+
+  store.rebuild("a", [["payload", ["same", "same"]]]);
+  store.rebuild("b", [["payload", ["same", "same"]]]);
+
+  const stats = store.shapeStats()[0].valueDirectory;
+  assert.equal(stats.maxNestedContainerEntries, 1);
+  assert.equal(stats.entries, 0);
+});
+
 test("object row store does not expose mutable internal objects", () => {
   const store = new ObjectRowStore();
   store.rebuild("a", [["nested", { score: 1 }]]);

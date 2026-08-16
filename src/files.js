@@ -35,14 +35,26 @@ export class FileService {
 
   keyPrefix(database, collection, id) {
     return [
-      this.prefix,
-      "db",
-      encodeKeyPart(database),
-      "collection",
-      encodeKeyPart(collection),
+      this.collectionPrefix(database, collection),
       "object",
       encodeKeyPart(id),
       "blob",
+    ].join("/");
+  }
+
+  databasePrefix(database) {
+    return [
+      this.prefix,
+      "db",
+      encodeKeyPart(database),
+    ].join("/");
+  }
+
+  collectionPrefix(database, collection) {
+    return [
+      this.databasePrefix(database),
+      "collection",
+      encodeKeyPart(collection),
     ].join("/");
   }
 
@@ -119,6 +131,14 @@ export class FileService {
     if (!key) return false;
     await this.storage.delete([key]);
     return true;
+  }
+
+  async deleteCollectionFiles(database, collection) {
+    await this.storage.deletePrefix(`${this.collectionPrefix(database, collection)}/`);
+  }
+
+  async deleteDatabaseFiles(database) {
+    await this.storage.deletePrefix(`${this.databasePrefix(database)}/`);
   }
 }
 

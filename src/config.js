@@ -97,6 +97,8 @@ function normalizeValueDirectoryConfig(config = {}) {
     maxPaths: positiveInt(config.maxPaths, 1_024),
     maxStringLength: positiveInt(config.maxStringLength, 256),
     maxKeyBytes: positiveInt(config.maxKeyBytes, 512),
+    poolStructuredValues: config.poolStructuredValues === true,
+    maxNestedContainerEntries: positiveInt(config.maxNestedContainerEntries, 64),
   };
 }
 
@@ -150,7 +152,7 @@ function normalizePersistenceConfig(config = {}) {
   return {
     mode,
     prefix: config.prefix || "spread-db",
-    flushMs: positiveInt(config.flushMs, 1000),
+    flushMs: positiveInt(config.flushMs, 5000),
     opBatchSize: positiveInt(config.opBatchSize, 1000),
     snapshotMs: positiveInt(config.snapshotMs, 60_000),
     segmentBytes: positiveInt(config.segmentBytes, 16 * 1024 * 1024),

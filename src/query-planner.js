@@ -12,7 +12,6 @@ export const QUERY_PATH_HEADER = "x-spread-db-query-path";
 export const AGGREGATE_PATH = {
   COLUMN_SUMMARY: "aggregate-column-summary",
   COLUMN_SCAN: "aggregate-column-scan",
-  GROUP_COUNT_INDEX: "aggregate-group-count-index",
   GROUP_FORWARD_INDEX: "aggregate-group-forward-index",
   GROUP_INDEX: "aggregate-group-index",
   GROUP_COLUMN_SCAN: "aggregate-group-column-scan",
@@ -143,21 +142,6 @@ export function planAggregate(criteria = {}, spec = {}, options = {}, adapter) {
   if (!idPlan) return aggregateScanPlan(normalized, "criteria cannot be narrowed by indexes");
 
   const scopeShards = Array.isArray(options.scopeShards) ? options.scopeShards : null;
-  if (normalized.groupBy.length === 1 && isRowCountOnlyAggregate(normalized) && !includeId && (!includeIds || scopeShards?.length)) {
-    const groupCountIndex = adapter.groupCountIndex?.(criteria, normalized.groupBy[0], {
-      scopeShards,
-    });
-    if (groupCountIndex) {
-      return {
-        path: AGGREGATE_PATH.GROUP_COUNT_INDEX,
-        normalized,
-        groupBy: normalized.groupBy[0],
-        groupCountIndex,
-        reason: "count-only grouped aggregate can be answered from aggregate count indexes",
-      };
-    }
-  }
-
   if (normalized.groupBy.length === 1 && !isRowCountOnlyAggregate(normalized) && idPlan.exact && idPlan.ids instanceof Set &&
       adapter.hasGroupForwardIndex?.(normalized.groupBy[0])) {
     return {

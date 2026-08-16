@@ -9,6 +9,8 @@ const DEFAULT_VALUE_DIRECTORY = Object.freeze({
   maxPaths: 1_024,
   maxStringLength: 256,
   maxKeyBytes: 512,
+  poolStructuredValues: false,
+  maxNestedContainerEntries: 64,
 });
 
 export class ObjectRowStore {
@@ -17,7 +19,7 @@ export class ObjectRowStore {
     this.valueDirectory = new ValueDirectory(options.valueDirectory);
   }
 
-  rebuild(id, live) {
+  rebuild(id, live, options = {}) {
     const old = this.rows.get(id);
     if (old) this.valueDirectory.releaseAll(old.refs);
     this.rows.delete(id);
@@ -25,7 +27,8 @@ export class ObjectRowStore {
     if (!live.length) return;
     const refs = [];
     const value = {};
-    for (const [key, item] of live) value[key] = this.valueDirectory.store(item, refs, key);
+    const storeOptions = { trusted: options.trusted === true };
+    for (const [key, item] of live) value[key] = this.valueDirectory.store(item, refs, key, storeOptions);
     this.rows.set(id, { value, refs });
   }
 
@@ -72,13 +75,15 @@ class ValueDirectory {
     this.maxPaths = positiveInt(config.maxPaths, DEFAULT_VALUE_DIRECTORY.maxPaths);
     this.maxStringLength = positiveInt(config.maxStringLength, DEFAULT_VALUE_DIRECTORY.maxStringLength);
     this.maxKeyBytes = positiveInt(config.maxKeyBytes, DEFAULT_VALUE_DIRECTORY.maxKeyBytes);
+    this.poolStructuredValues = config.poolStructuredValues === true;
+    this.maxNestedContainerEntries = positiveInt(config.maxNestedContainerEntries, DEFAULT_VALUE_DIRECTORY.maxNestedContainerEntries);
     this.pool = new Map();
     this.pathCandidates = new Map();
     this.candidateCount = 0;
   }
 
-  store(value, refs, path = "$") {
-    if (!this.enabled) return cloneValue(value);
+  store(value, refs, path = "$", options = {}) {
+    if (!this.enabled) return cloneValue(value, options);
 
     const key = this.keyFor(value);
     if (key) {
@@ -101,17 +106,22 @@ class ValueDirectory {
       }
     }
 
-    return this.cloneWithNestedPooling(value, refs, path);
+    return this.cloneWithNestedPooling(value, refs, path, options);
   }
 
-  cloneWithNestedPooling(value, refs, path) {
-    if (Array.isArray(value)) return value.map((item) => this.store(item, refs, `${path}[]`));
+  cloneWithNestedPooling(value, refs, path, options = {}) {
+    if (Array.isArray(value)) {
+      if (value.length > this.maxNestedContainerEntries) return cloneValue(value, options);
+      return value.map((item) => this.store(item, refs, `${path}[]`, options));
+    }
     if (isPlainObject(value)) {
+      const entries = Object.entries(value);
+      if (entries.length > this.maxNestedContainerEntries) return cloneValue(value, options);
       return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, this.store(item, refs, `${path}.${key}`)]),
+        entries.map(([key, item]) => [key, this.store(item, refs, `${path}.${key}`, options)]),
       );
     }
-    return cloneValue(value);
+    return cloneValue(value, options);
   }
 
   releaseAll(refs) {
@@ -188,6 +198,7 @@ class ValueDirectory {
       if (value.length > this.maxStringLength) return null;
       return `string:${value}`;
     }
+    if (!this.poolStructuredValues) return null;
     if (Array.isArray(value) || isPlainObject(value)) {
       const key = stableKey(value);
       if (!key || key.length > this.maxKeyBytes) return null;
@@ -222,12 +233,15 @@ class ValueDirectory {
       maxPaths: this.maxPaths,
       maxStringLength: this.maxStringLength,
       maxKeyBytes: this.maxKeyBytes,
+      poolStructuredValues: this.poolStructuredValues,
+      maxNestedContainerEntries: this.maxNestedContainerEntries,
     };
   }
 }
 
-function cloneValue(value) {
+function cloneValue(value, options = {}) {
   if (value === null || typeof value !== "object") return value;
+  if (options.trusted) return value;
   return structuredClone(value);
 }
 

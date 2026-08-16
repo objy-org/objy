@@ -148,6 +148,8 @@ test("loads node identity overrides from cli arguments", () => {
           maxPaths: 64,
           maxStringLength: 64,
           maxKeyBytes: 128,
+          poolStructuredValues: true,
+          maxNestedContainerEntries: 16,
         },
       },
     },
@@ -188,6 +190,8 @@ test("loads node identity overrides from cli arguments", () => {
   assert.equal(config.storage.object.valueDirectory.maxPaths, 64);
   assert.equal(config.storage.object.valueDirectory.maxStringLength, 64);
   assert.equal(config.storage.object.valueDirectory.maxKeyBytes, 128);
+  assert.equal(config.storage.object.valueDirectory.poolStructuredValues, true);
+  assert.equal(config.storage.object.valueDirectory.maxNestedContainerEntries, 16);
   assert.deepEqual(config.memoryGuard, {
     enabled: true,
     limitMb: 1024,
