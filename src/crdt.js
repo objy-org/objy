@@ -286,6 +286,12 @@ export class CRDTNode {
     return this.db.getDatabaseMeta(db);
   }
 
+  removeDatabase(db) {
+    const removed = this.db.deleteDatabase(db);
+    if (removed) this._notifyChange({ kind: "dropDatabase", database: db });
+    return removed;
+  }
+
   createCollection(db, coll, meta = {}) {
     const next = this.db.createCollection(db, coll, meta);
     this._notifyChange({ kind: "meta", database: db, collection: coll, meta: next });
@@ -419,20 +425,28 @@ export class CRDTNode {
   }
 
   applySnapshot(fromId, snap, cursorKey = fromId) {
-    let count = 0;
+    const batches = new Map();
     for (const c of snap.collections || []) {
       for (const obj of c.objects || []) {
-        const coll = this.db.collection(c.db, c.coll);
         const shard = obj.shard || c.shard || this.shardForObject(c.db, c.coll, obj.id);
         if (obj.deleted) {
           if (obj.ts) touch(this.clock, obj.ts);
           touch(this.clock, obj.deleted);
-          if (coll.deleteObject(obj.id, obj.deleted, shard)) count++;
         } else if (obj.ts) {
           touch(this.clock, obj.ts);
-          if (coll.putObject(obj.id, obj.value || {}, obj.ts, shard)) count++;
         }
+        const key = `${c.db}\0${c.coll}`;
+        let batch = batches.get(key);
+        if (!batch) {
+          batch = { db: c.db, coll: c.coll, objects: [] };
+          batches.set(key, batch);
+        }
+        batch.objects.push({ ...obj, shard });
       }
+    }
+    let count = 0;
+    for (const batch of batches.values()) {
+      count += this.db.applySnapshotObjects(batch.db, batch.coll, batch.objects, { trustedValues: true });
     }
     this.lastSeen.set(cursorKey, snap.lastSeq || 0);
     if (count) this._notifyChange({ kind: "snapshot", snapshot: snap });

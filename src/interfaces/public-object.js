@@ -1,4 +1,4 @@
-import { USERS_COLLECTION } from "../auth.js";
+import { GLOBAL_DATABASE, USERS_COLLECTION } from "../auth.js";
 import { aggregateRows } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
 import { json, readJson } from "../http-router.js";
@@ -39,6 +39,7 @@ import { isValidVector } from "../vector.js";
 
 const DEFAULT_PUBLIC_QUERY_LIMIT = 250;
 const MAX_PUBLIC_QUERY_LIMIT = 250;
+const READ_ONLY_DATABASES = new Set([GLOBAL_DATABASE]);
 
 export function createPublicObjectInterface() {
   return {
@@ -61,12 +62,13 @@ export function createPublicObjectInterface() {
 
       router.post("/api/databases", secure(async (req, res) => {
         if (rejectUnlessGlobalAdmin(req, res, auth)) return;
-        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const body = await readJson(req);
         const name = body?.name;
         if (typeof name !== "string" || name.length === 0) {
           return json(res, 400, { error: "body.name must be a non-empty string" });
         }
+        if (rejectIfReadOnlyDatabaseWrite(res, name)) return;
+        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         if (body.meta !== undefined && !isPlainObject(body.meta)) {
           return json(res, 400, { error: "body.meta must be a plain object" });
         }
@@ -136,6 +138,32 @@ export function createPublicObjectInterface() {
         }
       }));
 
+      router.delete("/api/databases/:database", secure(async (req, res) => {
+        if (rejectUnlessGlobalAdmin(req, res, auth)) return;
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
+        try {
+          const removed = node.removeDatabase(req.params.database);
+          if (!removed) {
+            return routing.isForwarded(req)
+              ? json(res, 204)
+              : json(res, 404, { error: "database not found" });
+          }
+          await afterLocalWrite(durability);
+          await files?.deleteDatabaseFiles?.(req.params.database);
+          if (!routing.isForwarded(req)) {
+            const remote = await routing.forwardToAllPeers(
+              req,
+              `/api/databases/${encodeURIComponent(req.params.database)}`,
+              { method: "DELETE" },
+            );
+            if (!ok(remote.status)) throw remoteError(remote, "database delete fan-out failed");
+          }
+          json(res, 204);
+        } catch (err) {
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+        }
+      }));
+
       router.get("/api/:database/collections", secure((req, res) => {
         if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         json(res, 200, {
@@ -145,6 +173,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.post("/api/:database/collections", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const body = await readJson(req);
@@ -171,6 +200,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.delete("/api/:database/collections/:collection", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         try {
@@ -181,6 +211,7 @@ export function createPublicObjectInterface() {
               : json(res, 404, { error: "collection not found" });
           }
           await afterLocalWrite(durability);
+          await files?.deleteCollectionFiles?.(req.params.database, req.params.collection);
           if (!routing.isForwarded(req)) {
             const remote = await routing.forwardToAllPeers(
               req,
@@ -206,6 +237,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.put("/api/:database/:collection/meta", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const body = await readJson(req);
@@ -303,6 +335,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.post("/api/:database/:collection/object", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isMultipartRequest(req)) {
           return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files });
         }
@@ -325,7 +358,7 @@ export function createPublicObjectInterface() {
           for (const group of groups) {
             if (!group.local) continue;
             const prepared = auth.prepareWriteObjects(req.params.database, req.params.collection, group.items, { partial: false });
-            assertCreateAllowed(req, prepared);
+            assertCreateAllowed(req, prepared, req.params.database);
             preparedByGroup.set(group, prepared);
           }
           if (preparedByGroup.size && rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
@@ -390,6 +423,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.put("/api/:database/:collection/object", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         const body = await readJson(req);
         if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
@@ -419,6 +453,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.patch("/api/:database/:collection/object", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         const body = await readJson(req);
         if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
@@ -443,6 +478,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.delete("/api/:database/:collection/object", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         let ids;
         try {
           ids = parseBulkIds(await readJson(req, null));
@@ -457,6 +493,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.put("/api/:database/:collection/object/:id", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isMultipartRequest(req)) {
           return multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files });
         }
@@ -514,6 +551,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.patch("/api/:database/:collection/object/:id", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         const body = await readJson(req);
         const error = validatePlainObjects([body || {}]);
         if (error) return json(res, 400, error);
@@ -577,6 +615,7 @@ export function createPublicObjectInterface() {
       }));
 
       router.delete("/api/:database/:collection/object/:id", secure(async (req, res) => {
+        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         try {
           if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
             const remote = await routing.forwardToObject(
@@ -594,7 +633,7 @@ export function createPublicObjectInterface() {
         }
         const existing = node.get(req.params.database, req.params.collection, req.params.id);
         if (!existing) return json(res, 404, { error: "not found" });
-        assertDeleteAllowed(req, [existing]);
+        assertDeleteAllowed(req, [existing], req.params.database);
         if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const ok = node.remove(req.params.database, req.params.collection, req.params.id);
         if (!ok) return json(res, 404, { error: "not found" });
@@ -650,7 +689,7 @@ async function multipartCreateObject({ req, res, node, auth, routing, durability
     }
     const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
     const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
-    assertCreateAllowed(req, [prepared]);
+    assertCreateAllowed(req, [prepared], req.params.database);
     await files.put(req.params.database, req.params.collection, item._id, objectWithFile._file, file);
     const [row] = node.insertMany(req.params.database, req.params.collection, [prepared]);
     await afterLocalWrite(durability);
@@ -1019,7 +1058,7 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
   for (const group of groups) {
     if (!group.local) continue;
     const existing = existingObjectsForIds(node, database, collection, group.items);
-    assertDeleteAllowed(req, existing);
+    assertDeleteAllowed(req, existing, database);
     existingByGroup.set(group, new Map(existing.map((object) => [String(object._id), object])));
   }
   if (groups.some((group) => group.local)) assertMemoryGuardAcceptsWrites(memoryGuard);
@@ -1189,6 +1228,16 @@ function rejectUnlessDatabaseAdmin(req, res, auth) {
   return true;
 }
 
+function rejectIfReadOnlyDatabaseWrite(res, database) {
+  if (!isReadOnlyDatabase(database)) return false;
+  json(res, 403, { error: `database is read-only: ${database}` });
+  return true;
+}
+
+function isReadOnlyDatabase(database) {
+  return READ_ONLY_DATABASES.has(database);
+}
+
 function isGlobalAdminRequest(req, auth) {
   return auth.enabled === false || (req.auth?.claims?.globalUser === true && isAdminRequest(req, auth));
 }
@@ -1205,7 +1254,8 @@ function assertReadAllowed(req, object) {
   if (!canRead(permissionUser(req), object)) throw permissionError("read", object?._id);
 }
 
-function assertCreateAllowed(req, objects = []) {
+function assertCreateAllowed(req, objects = [], database = null) {
+  assertDatabaseWritable(database);
   const user = permissionUser(req);
   for (const object of objects || []) {
     if (!canCreate(user, object)) throw permissionError("create", object?._id);
@@ -1213,6 +1263,7 @@ function assertCreateAllowed(req, objects = []) {
 }
 
 function assertUpsertAllowed(req, node, database, collection, objects = [], { partial = false } = {}) {
+  assertDatabaseWritable(database);
   const user = permissionUser(req);
   const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
   for (const object of objects || []) {
@@ -1224,6 +1275,7 @@ function assertUpsertAllowed(req, node, database, collection, objects = [], { pa
 }
 
 function assertUpdateAllowed(req, node, database, collection, objects = []) {
+  assertDatabaseWritable(database);
   const user = permissionUser(req);
   const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
   for (const object of objects || []) {
@@ -1232,11 +1284,16 @@ function assertUpdateAllowed(req, node, database, collection, objects = []) {
   }
 }
 
-function assertDeleteAllowed(req, objects = []) {
+function assertDeleteAllowed(req, objects = [], database = null) {
+  assertDatabaseWritable(database);
   const user = permissionUser(req);
   for (const object of objects || []) {
     if (!canDelete(user, object)) throw permissionError("delete", object?._id);
   }
+}
+
+function assertDatabaseWritable(database) {
+  if (isReadOnlyDatabase(database)) throw permissionError("write", database);
 }
 
 function existingObjectsForIds(node, database, collection, ids = []) {

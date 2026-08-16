@@ -35,12 +35,15 @@
   "persistence": {
     "mode": "s3",
     "prefix": "spread-db",
-    "flushMs": 1000,
+    "flushMs": 5000,
     "opBatchSize": 1000,
     "snapshotMs": 60000,
     "segmentBytes": 16777216,
     "compactJournals": true,
-    "restoreMode": "reshard",
+    "snapshotRetention": {
+      "keepLatest": 5
+    },
+    "restoreMode": "scoped",
     "s3": {
       "bucket": "spread-db",
       "endpoint": "http://localhost:9000",

@@ -534,7 +534,19 @@ test("auth works from any database collection and limits tokens to that database
 });
 
 test("context endpoints require global or database admin tokens", async () => {
-  const s = await startTestServer({ port: 0 });
+  const s = await startTestServer({
+    port: 0,
+    auth: {
+      ...TEST_AUTH,
+      users: [
+        {
+          _id: "global-reader",
+          username: "global-reader",
+          password: "secret",
+        },
+      ],
+    },
+  });
   try {
     const base = `http://localhost:${s.port}`;
     const root = await login(base);
@@ -545,11 +557,6 @@ test("context endpoints require global or database admin tokens", async () => {
     assert.equal((await admin.post(`/api/${db}/collections`, { name: "users", indexes: ["username"] })).status, 201);
     assert.equal((await admin.post(`/api/${db}/collections`, { name: "docs", indexes: ["owner"] })).status, 201);
 
-    assert.equal((await admin.post("/api/_global/users/object", {
-      _id: "global-reader",
-      username: "global-reader",
-      password: "secret",
-    })).status, 201);
     const globalReaderSession = await login(base, "global-reader", "secret");
     const globalReader = api(base, globalReaderSession.accessToken);
     assert.deepEqual((await globalReader.get("/api/databases")).body.databases, ["_global"]);
@@ -687,14 +694,19 @@ test("database creation can bootstrap a routed admin user", async () => {
   }
 });
 
-test("global users are password-hashed and can log in", async () => {
+test("user objects are password-hashed and can log in", async () => {
   const s = await startTestServer({ port: 0 });
   try {
     const base = `http://localhost:${s.port}`;
     const root = await login(base);
     const authed = api(base, root.accessToken);
+    const db = "app";
+    const coll = "users";
+    const path = `/api/${db}/${coll}/object`;
 
-    const created = await authed.post("/api/_global/users/object", {
+    assert.equal((await authed.post(`/api/${db}/collections`, { name: coll, indexes: ["username"] })).status, 201);
+
+    const created = await authed.post(path, {
       _id: "ada",
       username: "ada",
       password: "s3cret",
@@ -703,40 +715,40 @@ test("global users are password-hashed and can log in", async () => {
     assert.equal(created.status, 201);
     assert.equal(created.body.password, undefined);
 
-    const stored = s.node.get("_global", "users", "ada");
+    const stored = s.node.get(db, coll, "ada");
     assert.match(stored.password, /^pbkdf2\$sha256\$/);
 
-    const duplicate = await authed.post("/api/_global/users/object", {
+    const duplicate = await authed.post(path, {
       _id: "ada-2",
       username: "ada",
       password: "other",
     });
     assert.equal(duplicate.status, 409);
 
-    const duplicateBatch = await authed.post("/api/_global/users/object", [
+    const duplicateBatch = await authed.post(path, [
       { username: "grace", password: "first" },
       { username: "grace", password: "second" },
     ]);
     assert.equal(duplicateBatch.status, 409);
 
-    const session = await api(base, null).post("/api/_global/users/auth", { username: "ada", password: "s3cret" });
+    const session = await api(base, null).post(`/api/${db}/${coll}/auth`, { username: "ada", password: "s3cret" });
     assert.equal(session.status, 200);
     assert.equal(session.body.user.password, undefined);
 
-    const fetched = await authed.get("/api/_global/users/object/ada");
+    const fetched = await authed.get(`${path}/ada`);
     assert.equal(fetched.status, 200);
     assert.equal(fetched.body.password, undefined);
-    const previousHash = s.node.get("_global", "users", "ada").password;
-    const replacedRedacted = await authed.put("/api/_global/users/object/ada", {
+    const previousHash = s.node.get(db, coll, "ada").password;
+    const replacedRedacted = await authed.put(`${path}/ada`, {
       ...fetched.body,
       displayName: "Ada Lovelace",
     });
     assert.equal(replacedRedacted.status, 200);
     assert.equal(replacedRedacted.body.password, undefined);
-    assert.equal(s.node.get("_global", "users", "ada").password, previousHash);
-    assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "ada", password: "s3cret" })).status, 200);
+    assert.equal(s.node.get(db, coll, "ada").password, previousHash);
+    assert.equal((await api(base, null).post(`/api/${db}/${coll}/auth`, { username: "ada", password: "s3cret" })).status, 200);
 
-    const bulkResponse = await fetch(`${base}/api/_global/users/object`, {
+    const bulkResponse = await fetch(`${base}${path}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${root.accessToken}`,
@@ -751,16 +763,88 @@ test("global users are password-hashed and can log in", async () => {
     const bulkBody = await bulkResponse.json();
     assert.equal(bulkResponse.status, 201);
     assert.deepEqual(bulkBody, { inserted: 2 });
-    assert.match(s.node.get("_global", "users", "bulk-user").password, /^pbkdf2\$sha256\$/);
-    assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "bulk-user", password: "bulk-secret" })).status, 200);
+    assert.match(s.node.get(db, coll, "bulk-user").password, /^pbkdf2\$sha256\$/);
+    assert.equal((await api(base, null).post(`/api/${db}/${coll}/auth`, { username: "bulk-user", password: "bulk-secret" })).status, 200);
 
-    const patched = await authed.patch("/api/_global/users/object/ada", { $set: { password: "new-secret" } });
+    const patched = await authed.patch(`${path}/ada`, { $set: { password: "new-secret" } });
     assert.equal(patched.status, 200);
     assert.equal(patched.body.password, undefined);
-    assert.match(s.node.get("_global", "users", "ada").password, /^pbkdf2\$sha256\$/);
+    assert.match(s.node.get(db, coll, "ada").password, /^pbkdf2\$sha256\$/);
 
-    assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "ada", password: "s3cret" })).status, 401);
-    assert.equal((await api(base, null).post("/api/_global/users/auth", { username: "ada", password: "new-secret" })).status, 200);
+    assert.equal((await api(base, null).post(`/api/${db}/${coll}/auth`, { username: "ada", password: "s3cret" })).status, 401);
+    assert.equal((await api(base, null).post(`/api/${db}/${coll}/auth`, { username: "ada", password: "new-secret" })).status, 200);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("_global object writes are blocked through the public API", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const base = `http://localhost:${s.port}`;
+    const root = await login(base);
+    const admin = api(base, root.accessToken);
+
+    assert.equal((await admin.get("/api/_global/users/object/admin")).status, 200);
+    assert.equal((await admin.post("/api/_global/users/object", {
+      _id: "blocked-single",
+      username: "blocked-single",
+      password: "secret",
+    })).status, 403);
+    assert.equal((await admin.post("/api/_global/users/object", [
+      { _id: "blocked-bulk", username: "blocked-bulk", password: "secret" },
+    ])).status, 403);
+    assert.equal((await admin.put("/api/_global/users/object/admin", {
+      username: "admin",
+      password: "changed",
+    })).status, 403);
+    assert.equal((await admin.put("/api/_global/users/object", [
+      { _id: "admin", username: "admin", password: "changed" },
+    ])).status, 403);
+    assert.equal((await admin.patch("/api/_global/users/object/admin", {
+      $set: { displayName: "Changed" },
+    })).status, 403);
+    assert.equal((await admin.patch("/api/_global/users/object", [
+      { _id: "admin", $set: { displayName: "Changed" } },
+    ])).status, 403);
+    assert.equal((await admin.del("/api/_global/users/object/admin")).status, 403);
+    assert.equal((await admin.del("/api/_global/users/object", { ids: ["admin"] })).status, 403);
+
+    const stored = s.node.get("_global", "users", "admin");
+    assert.equal(stored.displayName, undefined);
+    assert.equal((await api(base, null).post("/api/_global/users/auth", {
+      username: "admin",
+      password: "123",
+    })).status, 200);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("_global schema writes are blocked even for global admins", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const base = `http://localhost:${s.port}`;
+    const session = await login(base);
+    const c = api(base, session.accessToken);
+
+    assert.equal((await c.post("/api/databases", {
+      name: "_global",
+      meta: { changed: true },
+    })).status, 403);
+    assert.equal((await c.post("/api/_global/collections", {
+      name: "audit",
+    })).status, 403);
+    assert.equal((await c.put("/api/_global/users/meta", {
+      indexes: ["username", "role"],
+    })).status, 403);
+    assert.equal((await c.del("/api/_global/collections/users")).status, 403);
+
+    assert.equal(s.node.getDatabaseMeta("_global").changed, undefined);
+    assert.equal(s.node.getCollectionMeta("_global", "audit"), null);
+    const usersMeta = s.node.getCollectionMeta("_global", "users");
+    assert.deepEqual(usersMeta.indexes, ["username"]);
+    assert.equal((await c.get("/api/_global/users/object/admin")).status, 200);
   } finally {
     s.server.close();
   }
@@ -1738,7 +1822,7 @@ test("public query responses expose planner path headers", async () => {
     const groupedCount = await c.get(`${base}?q=${groupedCountQuery}`);
     assert.equal(groupedCount.status, 200);
     assert.deepEqual(groupedCount.body, [{ status: "active", n: 2 }]);
-    assert.equal(groupedCount.headers.get("x-spread-db-query-path"), "aggregate-group-count-index");
+    assert.equal(groupedCount.headers.get("x-spread-db-query-path"), "aggregate-group-index");
 
     const groupedMetricQuery = encodeURIComponent(JSON.stringify({
       status: "active",
@@ -1998,6 +2082,11 @@ test("public interface lists databases, collections, and collection meta", async
     assert.equal(removed.status, 204);
     assert.deepEqual((await c.get("/api/app/collections")).body.collections, ["users"]);
     assert.equal((await c.get("/api/app/orders/meta")).status, 404);
+
+    assert.equal((await c.del("/api/databases/_global")).status, 403);
+    const removedDb = await c.del("/api/databases/app");
+    assert.equal(removedDb.status, 204);
+    assert.deepEqual((await c.get("/api/databases")).body.databases, ["_global"]);
   } finally {
     s.server.close();
   }

@@ -12,7 +12,7 @@ export class PersistenceManager {
     node,
     storage,
     prefix = DEFAULT_PREFIX,
-    flushMs = 1000,
+    flushMs = 5000,
     opBatchSize = 1000,
     snapshotMs = 60_000,
     segmentBytes = DEFAULT_SEGMENT_BYTES,
@@ -52,6 +52,7 @@ export class PersistenceManager {
     this.pending = new Map();
     this.dirtyScopes = new Map();
     this.pendingDatabases = new Map();
+    this.pendingDatabaseDrops = new Set();
     this.pendingMeta = new Map();
     this.pendingCollectionDrops = new Set();
     this.localWalPending = [];
@@ -81,6 +82,7 @@ export class PersistenceManager {
       localWalRecords: 0,
       localWalOps: 0,
       localWalDatabases: 0,
+      localWalDatabaseDrops: 0,
       localWalMetadata: 0,
       localWalCollectionDrops: 0,
       localWalSkippedPartialRecords: 0,
@@ -92,16 +94,26 @@ export class PersistenceManager {
     stats.databases = await this._restoreDatabaseMetadata(keys);
     stats.metadata = await this._restoreMetadata(keys);
 
-    for (const scope of scopes) {
-      stats.scopes++;
-      const restored = await this._restoreSnapshot(scope);
-      if (restored) {
-        stats.snapshots++;
-        stats.snapshotObjects += restored.objects;
-        if (restored.node === this.node.id) maxLocalSeq = Math.max(maxLocalSeq, restored.seq);
+    const restoredByScope = new Map();
+    this.node.db.beginBulkLoad?.();
+    try {
+      for (const scope of scopes) {
+        stats.scopes++;
+        const restored = await this._restoreSnapshot(scope);
+        restoredByScope.set(scopeKey(scope), restored);
+        if (restored) {
+          stats.snapshots++;
+          stats.snapshotObjects += restored.objects;
+          if (restored.node === this.node.id) maxLocalSeq = Math.max(maxLocalSeq, restored.seq);
+        }
       }
+    } finally {
+      this.node.db.endBulkLoad?.();
+    }
+
+    for (const scope of scopes) {
       if (this.restoreSnapshotId) continue;
-      const snapshotCursors = restored?.cursors || {};
+      const snapshotCursors = restoredByScope.get(scopeKey(scope))?.cursors || {};
 
       const journalKeys = keys.filter((key) => key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`));
       for (const key of journalKeys.sort()) {
@@ -146,6 +158,7 @@ export class PersistenceManager {
       stats.localWalRecords = local.records;
       stats.localWalOps = local.ops;
       stats.localWalDatabases = local.databases;
+      stats.localWalDatabaseDrops = local.databaseDrops;
       stats.localWalMetadata = local.metadata;
       stats.localWalCollectionDrops = local.collectionDrops;
       stats.localWalSkippedPartialRecords = local.skippedPartialRecords;
@@ -238,6 +251,7 @@ export class PersistenceManager {
       dirtyScopes: this.dirtyScopes.size,
       dirtyOps: [...this.dirtyScopes.values()].reduce((sum, dirty) => sum + dirty.ops, 0),
       pendingDatabases: this.pendingDatabases.size,
+      pendingDatabaseDrops: this.pendingDatabaseDrops.size,
       pendingMetadata: this.pendingMeta.size,
       pendingCollectionDrops: this.pendingCollectionDrops.size,
       ack: this.ack,
@@ -254,6 +268,10 @@ export class PersistenceManager {
   _onChange(change) {
     if (change.kind === "database") {
       this._queueDatabase(change);
+      return;
+    }
+    if (change.kind === "dropDatabase") {
+      this._queueDatabaseDrop(change);
       return;
     }
     if (change.kind === "dropCollection") {
@@ -273,10 +291,31 @@ export class PersistenceManager {
   _queueDatabase(change) {
     if (!change.database || !change.meta) return;
     this.pendingDatabases.set(change.database, clone(change.meta));
+    this.pendingDatabaseDrops.delete(change.database);
     this._queueLocalWal({
       type: "database",
       database: change.database,
       meta: clone(change.meta),
+    });
+  }
+
+  _queueDatabaseDrop(change) {
+    if (!change.database) return;
+    this.pendingDatabaseDrops.add(change.database);
+    this.pendingDatabases.delete(change.database);
+    for (const key of [...this.pendingMeta.keys()]) {
+      if (parseCollectionKey(key).database === change.database) this.pendingMeta.delete(key);
+    }
+    for (const key of [...this.pendingCollectionDrops]) {
+      if (parseCollectionKey(key).database === change.database) this.pendingCollectionDrops.delete(key);
+    }
+    for (const key of [...this.pending.keys()]) {
+      if (parseScopeKey(key).database === change.database) this.pending.delete(key);
+    }
+    this._removePendingLocalWalForDatabase(change.database);
+    this._queueLocalWal({
+      type: "dropDatabase",
+      database: change.database,
     });
   }
 
@@ -368,6 +407,22 @@ export class PersistenceManager {
     });
   }
 
+  _removePendingLocalWalForDatabase(database) {
+    if (!this.localWalPending.length) return;
+    this.localWalPending = this.localWalPending.filter((record) => {
+      if (record.type === "ops") {
+        record.ops = (record.ops || []).filter((op) => op.db !== database);
+        record.count = record.ops.length;
+        delete record.database;
+        delete record.collection;
+        delete record.shard;
+        Object.assign(record, commonScope(record.ops), seqRange(record.ops));
+        return record.ops.length > 0;
+      }
+      return record.database !== database;
+    });
+  }
+
   _markDirty(key, op) {
     const dirty = this.dirtyScopes.get(key) || { ops: 0, version: 0, lastSeq: 0 };
     dirty.ops++;
@@ -379,25 +434,32 @@ export class PersistenceManager {
 
   async _flushOnce() {
     if (this.flushPaused) return { scopes: 0, ops: 0 };
-    if (!this.pending.size && !this.pendingDatabases.size && !this.pendingMeta.size && !this.pendingCollectionDrops.size) {
-      return { scopes: 0, ops: 0, databases: 0, metadata: 0, collectionDrops: 0 };
+    if (!this.pending.size && !this.pendingDatabases.size && !this.pendingDatabaseDrops.size && !this.pendingMeta.size && !this.pendingCollectionDrops.size) {
+      return { scopes: 0, ops: 0, databases: 0, databaseDrops: 0, metadata: 0, collectionDrops: 0 };
     }
 
     const batches = this.pending;
     const databases = this.pendingDatabases;
+    const databaseDrops = this.pendingDatabaseDrops;
     const metadata = this.pendingMeta;
     const collectionDrops = this.pendingCollectionDrops;
     this.pending = new Map();
     this.pendingDatabases = new Map();
+    this.pendingDatabaseDrops = new Set();
     this.pendingMeta = new Map();
     this.pendingCollectionDrops = new Set();
     let scopeCount = 0;
     let opCount = 0;
     let databaseCount = 0;
+    let databaseDropCount = 0;
     let metadataCount = 0;
     let collectionDropCount = 0;
 
     try {
+      for (const database of databaseDrops) {
+        await this._deleteDatabase(database);
+        databaseDropCount++;
+      }
       for (const key of collectionDrops) {
         const target = parseCollectionKey(key);
         await this._deleteCollection(target);
@@ -422,12 +484,14 @@ export class PersistenceManager {
         scopes: scopeCount,
         ops: opCount,
         databases: databaseCount,
+        databaseDrops: databaseDropCount,
         metadata: metadataCount,
         collectionDrops: collectionDropCount,
       };
     } catch (err) {
       this._requeueBatches(batches);
       this._requeueDatabases(databases);
+      this._requeueDatabaseDrops(databaseDrops);
       this._requeueMetadata(metadata);
       this._requeueCollectionDrops(collectionDrops);
       this.lastError = err;
@@ -446,6 +510,7 @@ export class PersistenceManager {
         records: records.length,
         ops: records.reduce((sum, record) => sum + (record.type === "ops" ? Number(record.count) || 0 : 0), 0),
         databases: records.filter((record) => record.type === "database").length,
+        databaseDrops: records.filter((record) => record.type === "dropDatabase").length,
         metadata: records.filter((record) => record.type === "meta").length,
         collectionDrops: records.filter((record) => record.type === "dropCollection").length,
         bytes: written.bytes,
@@ -459,7 +524,7 @@ export class PersistenceManager {
 
   async _truncateLocalWalIfDurable() {
     if (!this.localWal || this.localWalPending.length || this.localWalFlushing) return;
-    if (this.pending.size || this.pendingDatabases.size || this.pendingMeta.size || this.pendingCollectionDrops.size) return;
+    if (this.pending.size || this.pendingDatabases.size || this.pendingDatabaseDrops.size || this.pendingMeta.size || this.pendingCollectionDrops.size) return;
     await this.localWal.truncate();
   }
 
@@ -474,6 +539,10 @@ export class PersistenceManager {
     for (const [database, meta] of databases) {
       if (!this.pendingDatabases.has(database)) this.pendingDatabases.set(database, meta);
     }
+  }
+
+  _requeueDatabaseDrops(databaseDrops) {
+    for (const database of databaseDrops) this.pendingDatabaseDrops.add(database);
   }
 
   _requeueMetadata(metadata) {
@@ -504,6 +573,10 @@ export class PersistenceManager {
 
   async _deleteCollection({ database, collection }) {
     await this.storage.deletePrefix(`${collectionPrefix(this.prefix, database, collection)}/`);
+  }
+
+  async _deleteDatabase(database) {
+    await this.storage.deletePrefix(`${databasePrefix(this.prefix, database)}/`);
   }
 
   async _writeJournalBatch(scope, ops) {
@@ -756,6 +829,7 @@ export class PersistenceManager {
       records: records.length,
       ops: 0,
       databases: 0,
+      databaseDrops: 0,
       metadata: 0,
       collectionDrops: 0,
       skippedPartialRecords,
@@ -783,6 +857,12 @@ export class PersistenceManager {
       if (record.type === "database" && record.database && record.meta && isPlainObject(record.meta)) {
         this.node.db.setDatabaseMeta(record.database, clone(record.meta));
         stats.databases++;
+        continue;
+      }
+
+      if (record.type === "dropDatabase" && record.database) {
+        this.node.db.deleteDatabase(record.database);
+        stats.databaseDrops++;
         continue;
       }
 
@@ -855,7 +935,7 @@ export function createPersistence(node, config = {}) {
     node,
     storage,
     prefix: config.prefix || "spread-db",
-    flushMs: config.flushMs ?? 1000,
+    flushMs: config.flushMs ?? 5000,
     opBatchSize: config.opBatchSize ?? 1000,
     snapshotMs: config.snapshotMs ?? 60_000,
     segmentBytes: config.segmentBytes ?? DEFAULT_SEGMENT_BYTES,
@@ -948,13 +1028,14 @@ function rememberRestoredCursors(node, sourceNode, ops) {
 }
 
 function emptyLocalFlushStats() {
-  return { records: 0, ops: 0, databases: 0, metadata: 0, collectionDrops: 0, bytes: 0 };
+  return { records: 0, ops: 0, databases: 0, databaseDrops: 0, metadata: 0, collectionDrops: 0, bytes: 0 };
 }
 
 function mergeLocalFlushStats(target, source = {}) {
   target.records += Number(source.records) || 0;
   target.ops += Number(source.ops) || 0;
   target.databases += Number(source.databases) || 0;
+  target.databaseDrops += Number(source.databaseDrops) || 0;
   target.metadata += Number(source.metadata) || 0;
   target.collectionDrops += Number(source.collectionDrops) || 0;
   target.bytes += Number(source.bytes) || 0;

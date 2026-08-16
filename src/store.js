@@ -17,7 +17,6 @@ import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, Ve
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
 const VECTOR_BUILD_BATCH_SIZE = 4096;
-const ALL_COUNT_SCOPE = "";
 
 class Collection {
   constructor(name, options = {}) {
@@ -32,7 +31,6 @@ class Collection {
     this.indexes = new Map();
     this.columnIndexes = new Map();
     this.columnBuilds = new Set();
-    this.groupCounts = new GroupCountIndex();
     this.shardIds = new Map();
     this.unshardedLiveCount = 0;
     this.collectionMeta = normalizeCollectionMeta();
@@ -52,19 +50,58 @@ class Collection {
     return this.putObjects([{ id, value: {}, ts }]).length === 1;
   }
 
-  putObject(id, value, ts, shard = null) {
-    return this.putObjects([{ id, value, ts, shard }]).length === 1;
+  putObject(id, value, ts, shard = null, options = {}) {
+    return this.putObjects([{ id, value, ts, shard }], options).length === 1;
   }
 
-  putObjects(rows) {
+  putObjects(rows, options = {}) {
     const applied = [];
     for (const row of rows || []) {
-      if (this._putObject(row.id, row.value, row.ts, row.shard)) applied.push(row);
+      if (this._putObject(row.id, row.value, row.ts, row.shard, options)) applied.push(row);
     }
     return applied;
   }
 
-  _putObject(id, value, ts, shard = null) {
+  applySnapshotObjects(rows, options = {}) {
+    let applied = 0;
+    for (const row of rows || []) {
+      if (this._applySnapshotObject(row, options)) applied++;
+    }
+    if (applied && !options.deferDerivedIndexes) this.rebuildDerivedState();
+    return applied;
+  }
+
+  _applySnapshotObject(row = {}, options = {}) {
+    if (row.id === undefined || row.id === null) return false;
+    const id = String(row.id);
+    const m = this._ensureMeta(id);
+
+    if (row.deleted) {
+      const last = m.deleted || m.ts;
+      if (last && !gt(row.deleted, last)) return false;
+      if (row.ts) m.ts = row.ts;
+      m.deleted = row.deleted;
+      m.shard = normalizeShard(row.shard) || m.shard || null;
+      this.store.removeObject(id);
+      this._removeVector(id);
+      return true;
+    }
+
+    if (!row.ts) return false;
+    if (m.deleted && !gt(row.ts, m.deleted)) return false;
+    if (m.ts && !gt(row.ts, m.ts)) return false;
+    const prepared = this._prepareStoredValue(row.value || {});
+    m.ts = row.ts;
+    m.deleted = null;
+    m.shard = normalizeShard(row.shard) || m.shard || null;
+    this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "_id"), {
+      trusted: options.trustedValues === true,
+    });
+    this._applyVectorUpdate(id, prepared.vector);
+    return true;
+  }
+
+  _putObject(id, value, ts, shard = null, options = {}) {
     const m = this._ensureMeta(id);
     if (m.deleted && !gt(ts, m.deleted)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
@@ -76,12 +113,13 @@ class Collection {
     m.ts = ts;
     m.deleted = null;
     m.shard = nextShard;
-    this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "_id"));
+    this.store.rebuild(id, Object.entries(prepared.value).filter(([key]) => key !== "_id"), {
+      trusted: options.trustedValues === true,
+    });
     this._applyVectorUpdate(id, prepared.vector);
-    const after = this.readForQuery(id);
+    const after = queryObjectFromStoredValue(id, prepared.value);
     this._refreshIndexes(id, before, after);
     this._refreshColumnIndexes(id, after);
-    this._refreshGroupCounts(before, after, previousShard, nextShard);
     if (!wasLive) {
       this.liveCount++;
       this._addShardId(id, nextShard);
@@ -117,7 +155,6 @@ class Collection {
     this._removeVector(id);
     this._refreshIndexes(id, before, undefined);
     this._refreshColumnIndexes(id, undefined);
-    this._refreshGroupCounts(before, undefined, previousShard, null);
     if (wasLive) {
       this.liveCount--;
       this._removeShardId(id, previousShard);
@@ -311,7 +348,6 @@ class Collection {
       ...this.collectionMeta,
       indexes: unique([...this.collectionMeta.indexes, key]),
     });
-    this._rebuildGroupCounts();
   }
 
   dropIndex(path) {
@@ -321,7 +357,6 @@ class Collection {
       ...this.collectionMeta,
       indexes: this.collectionMeta.indexes.filter((index) => index !== key),
     });
-    this._rebuildGroupCounts();
     return removed;
   }
 
@@ -356,14 +391,26 @@ class Collection {
         pendingEntries: index.pendingEntries,
         ...(index.error ? { error: index.error } : {}),
       })),
-      {
-        type: "aggregateCount",
-        status: "ready",
-        fields: this.groupCounts.fieldCount,
-        pairs: this.groupCounts.pairCount,
-        entries: this.groupCounts.entries,
-      },
     ];
+  }
+
+  rebuildDerivedState() {
+    const fieldPaths = [...this.indexes.keys()];
+    this.indexes = new Map(fieldPaths.map((path) => [path, new FieldIndex(path)]));
+    this.liveCount = 0;
+    this.shardIds.clear();
+    this.unshardedLiveCount = 0;
+
+    for (const [id, m] of this.meta) {
+      if (m.deleted) continue;
+      this.liveCount++;
+      this._addShardId(id, m.shard || null);
+      const object = this.readForQuery(id);
+      if (!object) continue;
+      this._addToIndexes(object);
+    }
+
+    this._rebuildColumnIndexes();
   }
 
   async awaitColumnIndexes() {
@@ -569,17 +616,9 @@ class Collection {
       hasGroupForwardIndex: (path) => this.indexes.get(String(path))?.canReadValuesById === true,
       fieldIndex: (path) => this.indexes.get(String(path)) || null,
       columnIndex: (path) => this.columnIndexes.get(String(path)) || null,
-      groupCountIndex: (criteria, groupBy, options) => this._groupCountPlan(criteria, groupBy, options),
       idsForAll: (includeId) => this._idSetForAll(includeId),
       filterIds: (ids, includeId) => filterIds(ids, includeId),
     };
-  }
-
-  _groupCountPlan(criteria, groupBy, options = {}) {
-    return this.groupCounts.plan(criteria, groupBy, {
-      indexes: this.indexes,
-      scopeShards: options.scopeShards,
-    });
   }
 
   _idSetForAll(includeId = null) {
@@ -742,12 +781,6 @@ class Collection {
     }
   }
 
-  _refreshGroupCounts(before, after, beforeShard, afterShard) {
-    if (!this.groupCounts.fieldCount) return;
-    if (before) this.groupCounts.remove(before, beforeShard);
-    if (after) this.groupCounts.add(after, afterShard);
-  }
-
   _addToIndexes(object) {
     for (const index of this.indexes.values()) index.add(object);
   }
@@ -785,7 +818,6 @@ class Collection {
     for (const path of wanted) {
       if (!this.indexes.has(path)) this._createIndexFromMeta(path);
     }
-    this._rebuildGroupCounts();
   }
 
   _createIndexFromMeta(path) {
@@ -795,15 +827,6 @@ class Collection {
       index.add(object);
     }
     this.indexes.set(path, index);
-  }
-
-  _rebuildGroupCounts() {
-    this.groupCounts.reset([...this.indexes.keys()]);
-    if (!this.groupCounts.fieldCount) return;
-    for (const id of this._liveIdIterator()) {
-      const object = this.readForQuery(id);
-      if (object) this.groupCounts.add(object, this.meta.get(id)?.shard || null);
-    }
   }
 
   _applyMetaColumnIndexes() {
@@ -822,6 +845,19 @@ class Collection {
     }
 
     if (toBuild.length) this._startColumnIndexBuild(toBuild);
+  }
+
+  _rebuildColumnIndexes() {
+    const paths = [...this.columnIndexes.keys()];
+    if (!paths.length) return;
+    if (this.liveCount === 0) {
+      for (const index of this.columnIndexes.values()) {
+        const buildId = index.startBuild();
+        index.install(new Map(), new Set(), buildId);
+      }
+      return;
+    }
+    this._startColumnIndexBuild(paths);
   }
 
   _startColumnIndexBuild(paths) {
@@ -926,8 +962,6 @@ class Collection {
           spec,
           plan.normalized,
         );
-      case AGGREGATE_PATH.GROUP_COUNT_INDEX:
-        return this._aggregateGroupCountIndex(plan, spec);
       case AGGREGATE_PATH.GROUP_FORWARD_INDEX:
         return this._aggregateGroupForwardIndex(plan, criteria, spec);
       case AGGREGATE_PATH.GROUP_INDEX:
@@ -1007,20 +1041,6 @@ class Collection {
       plan.columns,
     );
     return finishGroupedColumnAggregate(grouped, spec, plan.normalized);
-  }
-
-  _aggregateGroupCountIndex(plan, spec) {
-    const groups = [];
-    let rowsSeen = 0;
-    for (const [groupValue, count] of this.groupCounts.counts(plan.groupCountIndex)) {
-      if (count <= 0) continue;
-      rowsSeen += count;
-      groups.push({
-        groupValues: { [plan.groupBy]: groupValue === undefined ? null : groupValue },
-        state: rowCountOnlyState(plan.normalized, count),
-      });
-    }
-    return finishGroupedColumnAggregate({ rowsSeen, groups }, spec, plan.normalized);
   }
 
   _findWithOrderedIndex(criteria, options, plan = this._planRead(criteria, options)) {
@@ -1335,161 +1355,6 @@ class FieldIndex {
         .map(([key]) => key);
     }
     return this.sortedOrderedKeys;
-  }
-}
-
-class GroupCountIndex {
-  constructor(fields = []) {
-    this.reset(fields);
-  }
-
-  reset(fields = []) {
-    this.fields = unique((fields || []).map(String).filter(Boolean));
-    this.groups = new Map();
-    this.pairs = new Map();
-    this.entries = 0;
-  }
-
-  get fieldCount() {
-    return this.fields.length;
-  }
-
-  get pairCount() {
-    return this.pairs.size;
-  }
-
-  add(object, shard = null) {
-    this._apply(object, shard, 1);
-  }
-
-  remove(object, shard = null) {
-    this._apply(object, shard, -1);
-  }
-
-  plan(criteria, groupBy, { indexes, scopeShards } = {}) {
-    const groupField = String(groupBy || "");
-    if (!this.fields.includes(groupField)) return null;
-    const filter = aggregateCountFilter(criteria, indexes);
-    if (!filter) return null;
-    if (filter.path && !this.fields.includes(filter.path)) return null;
-    return {
-      groupField,
-      filterField: filter.path,
-      filterValue: filter.value,
-      scopeShards: normalizeScopeShards(scopeShards),
-    };
-  }
-
-  *counts(plan) {
-    const scopes = readCountScopes(plan.scopeShards);
-    if (!plan.filterField) {
-      yield* this._countsFromScopeMap(this.groups.get(plan.groupField), scopes);
-      return;
-    }
-
-    const pair = this.pairs.get(pairKey(plan.groupField, plan.filterField));
-    const filter = pair?.get(indexValueKey(plan.filterValue));
-    yield* this._countsFromScopeMap(filter, scopes);
-  }
-
-  _apply(object, shard, delta) {
-    if (!object?._id || !this.fields.length) return;
-    const values = new Map();
-    for (const field of this.fields) {
-      const value = getPathValue(object, field);
-      values.set(field, {
-        groupValue: value,
-        groupKey: orderedValueKey(value),
-        filterValues: uniqueIndexValues(indexedStoredValues(value)),
-      });
-    }
-
-    const scopes = writeCountScopes(shard);
-    for (const groupField of this.fields) {
-      const group = values.get(groupField);
-      for (const scope of scopes) {
-        this._incrementGroup(groupField, scope, group.groupKey, group.groupValue, delta);
-      }
-
-      for (const filterField of this.fields) {
-        const filter = values.get(filterField);
-        for (const filterValue of filter.filterValues) {
-          const filterKey = indexValueKey(filterValue);
-          for (const scope of scopes) {
-            this._incrementPair(groupField, filterField, filterKey, scope, group.groupKey, group.groupValue, delta);
-          }
-        }
-      }
-    }
-  }
-
-  *_countsFromScopeMap(scopeMap, scopes) {
-    if (!scopeMap) return;
-    if (scopes.length === 1) {
-      for (const bucket of scopeMap.get(scopes[0])?.values() || []) yield [bucket.value, bucket.count];
-      return;
-    }
-
-    const merged = new Map();
-    for (const scope of scopes) {
-      for (const [groupKey, bucket] of scopeMap.get(scope)?.entries() || []) {
-        const current = merged.get(groupKey);
-        if (current) current.count += bucket.count;
-        else merged.set(groupKey, { value: bucket.value, count: bucket.count });
-      }
-    }
-    for (const bucket of merged.values()) yield [bucket.value, bucket.count];
-  }
-
-  _incrementGroup(groupField, scope, groupKey, groupValue, delta) {
-    let scopeMap = this.groups.get(groupField);
-    if (!scopeMap) {
-      scopeMap = new Map();
-      this.groups.set(groupField, scopeMap);
-    }
-    this._incrementScopeBucket(scopeMap, scope, groupKey, groupValue, delta);
-  }
-
-  _incrementPair(groupField, filterField, filterKey, scope, groupKey, groupValue, delta) {
-    const key = pairKey(groupField, filterField);
-    let pair = this.pairs.get(key);
-    if (!pair) {
-      pair = new Map();
-      this.pairs.set(key, pair);
-    }
-
-    let scopeMap = pair.get(filterKey);
-    if (!scopeMap) {
-      scopeMap = new Map();
-      pair.set(filterKey, scopeMap);
-    }
-    this._incrementScopeBucket(scopeMap, scope, groupKey, groupValue, delta);
-
-    if (isEmptyScopeMap(scopeMap)) pair.delete(filterKey);
-    if (pair.size === 0) this.pairs.delete(key);
-  }
-
-  _incrementScopeBucket(scopeMap, scope, groupKey, groupValue, delta) {
-    let buckets = scopeMap.get(scope);
-    if (!buckets) {
-      buckets = new Map();
-      scopeMap.set(scope, buckets);
-    }
-
-    const bucket = buckets.get(groupKey);
-    if (!bucket) {
-      if (delta <= 0) return;
-      buckets.set(groupKey, { value: groupValue, count: delta });
-      this.entries++;
-    } else {
-      bucket.count += delta;
-      if (bucket.count <= 0) {
-        buckets.delete(groupKey);
-        this.entries--;
-      }
-    }
-
-    if (buckets.size === 0) scopeMap.delete(scope);
   }
 }
 
@@ -1857,60 +1722,6 @@ function sameAggregateTypeLessThan(left, right) {
   return compareSortValues(left, right) < 0;
 }
 
-function aggregateCountFilter(criteria = {}, indexes = new Map()) {
-  if (isEmptyCriteria(criteria)) return { path: null, value: null };
-  const entries = Object.entries(criteria || {});
-  if (entries.length !== 1) return null;
-
-  const [[path, expected]] = entries;
-  if (path === "$and" && Array.isArray(expected)) {
-    const children = expected.filter((child) => !isEmptyCriteria(child));
-    if (children.length !== 1) return null;
-    return aggregateCountFilter(children[0], indexes);
-  }
-  if (path.startsWith("$")) return null;
-
-  const index = indexes.get(String(path));
-  if (!index) return null;
-
-  const containsValue = indexableContainsValue(expected);
-  if (containsValue !== null) {
-    return index.idsForContains(containsValue) === null ? null : { path: String(path), value: containsValue };
-  }
-
-  const values = indexableConstraintValues(expected);
-  if (values === null) return null;
-  const uniqueValues = uniqueIndexValues(values);
-  return uniqueValues.length === 1 ? { path: String(path), value: uniqueValues[0] } : null;
-}
-
-function readCountScopes(scopeShards = null) {
-  const shards = normalizeScopeShards(scopeShards);
-  return shards.length ? shards : [ALL_COUNT_SCOPE];
-}
-
-function writeCountScopes(shard) {
-  const normalized = normalizeShard(shard);
-  return normalized ? [ALL_COUNT_SCOPE, normalized] : [ALL_COUNT_SCOPE];
-}
-
-function normalizeScopeShards(scopeShards = null) {
-  return unique((Array.isArray(scopeShards) ? scopeShards : [])
-    .map(normalizeShard)
-    .filter(Boolean));
-}
-
-function pairKey(groupField, filterField) {
-  return `${groupField}\0${filterField}`;
-}
-
-function isEmptyScopeMap(scopeMap) {
-  for (const buckets of scopeMap.values()) {
-    if (buckets.size > 0) return false;
-  }
-  return true;
-}
-
 function postWorkerBatch(worker, ackResolvers, rows) {
   return new Promise((resolve, reject) => {
     ackResolvers.push(resolve);
@@ -2101,6 +1912,11 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function queryObjectFromStoredValue(id, value = {}) {
+  const { _id, ...rest } = value || {};
+  return { ...rest, _id: id };
+}
+
 function annotateVectorIndexError(err, database, collection) {
   if (err?.code !== "VECTOR_INDEX_WARMING") return err;
   err.body = {
@@ -2193,6 +2009,8 @@ export class Store {
   constructor(options = {}) {
     this.options = options;
     this.dbs = new Map();
+    this.bulkLoadDepth = 0;
+    this.bulkLoadDirty = new Set();
   }
 
   db(name) {
@@ -2223,6 +2041,10 @@ export class Store {
 
   hasDatabase(dbName) {
     return this.dbs.has(dbName);
+  }
+
+  deleteDatabase(dbName) {
+    return this.dbs.delete(dbName);
   }
 
   createCollection(dbName, collName, meta = {}) {
@@ -2300,6 +2122,29 @@ export class Store {
       });
     }
     flush();
+    return applied;
+  }
+
+  beginBulkLoad() {
+    this.bulkLoadDepth++;
+  }
+
+  endBulkLoad() {
+    if (this.bulkLoadDepth <= 0) return;
+    this.bulkLoadDepth--;
+    if (this.bulkLoadDepth > 0) return;
+    const dirty = [...this.bulkLoadDirty];
+    this.bulkLoadDirty.clear();
+    for (const collection of dirty) collection.rebuildDerivedState();
+  }
+
+  applySnapshotObjects(dbName, collName, rows, options = {}) {
+    const collection = this.collection(dbName, collName);
+    const applied = collection.applySnapshotObjects(rows, {
+      ...options,
+      deferDerivedIndexes: this.bulkLoadDepth > 0,
+    });
+    if (applied && this.bulkLoadDepth > 0) this.bulkLoadDirty.add(collection);
     return applied;
   }
 

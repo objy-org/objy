@@ -200,7 +200,7 @@ This sample shows the runtime defaults explicitly. Values like node identity and
   "persistence": {
     "mode": "off",
     "prefix": "spread-db",
-    "flushMs": 1000,
+    "flushMs": 5000,
     "opBatchSize": 1000,
     "snapshotMs": 60000,
     "segmentBytes": 16777216,

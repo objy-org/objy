@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const ARG_KEYS = new Set(["config", "only", "release", "dryRun", "help"]);
 const args = parseArgs(process.argv.slice(2));
 if (args.help) usage(0);
 
@@ -18,13 +19,11 @@ async function main() {
   if (!args.config) usage(1);
   const configPath = resolve(cwd, args.config);
   const cluster = readJson(configPath);
-  const baseConfigPath = resolve(dirname(configPath), args.baseConfig || cluster.baseConfig || "hetzner.single.json");
-  const base = readJson(baseConfigPath);
   const nodes = normalizeNodes(cluster.nodes);
   const selected = args.only ? nodes.filter((node) => node.id === args.only || node.name === args.only) : nodes;
   if (!selected.length) throw new Error(`no nodes selected${args.only ? ` by --only ${args.only}` : ""}`);
 
-  const shardMap = cluster.shardMap || buildShardMap(nodes);
+  const shardMap = cluster.shardMap || buildShardMap(nodes, cluster);
   const release = args.release || timestampRelease();
   const temp = mkdtempSync(join(tmpdir(), "spread-db-cluster-deploy-"));
 
@@ -36,7 +35,7 @@ async function main() {
     log(`shards ${Object.entries(shardMap.shards).map(([name, shard]) => `${name}:${shard.peers.map((peer) => peer.url).join(",")}`).join(" ")}`);
 
     for (const node of selected) {
-      const nodeConfig = makeNodeConfig(base, cluster, node);
+      const nodeConfig = makeNodeConfig(cluster, node);
       const nodeConfigPath = join(temp, `${node.id}.json`);
       writeFileSync(nodeConfigPath, `${JSON.stringify(nodeConfig, null, 2)}\n`);
 
@@ -61,11 +60,14 @@ async function main() {
   }
 }
 
-function makeNodeConfig(base, cluster, node) {
-  const port = positiveInt(node.port || node.node?.port || cluster.node?.port || base.node?.port || base.server?.port, 8080);
-  const url = trimTrailingSlash(node.url || node.node?.url || `http://${node.host}:${port}`);
+function makeNodeConfig(cluster, node) {
+  const base = deployBaseConfig(cluster);
+  const port = positiveInt(node.port || node.node?.port || cluster.node?.port || cluster.server?.port, 8080);
+  const host = node.host || node.ip;
+  const url = trimTrailingSlash(node.url || node.node?.url || (host ? `http://${host}:${port}` : ""));
   const shard = node.shard || node.shards?.[0] || cluster.cluster?.shardName || base.cluster?.shardName || "shard-0";
   const sshHost = node.ssh?.host || node.sshHost || node.host || node.ip;
+  if (!url) throw new Error(`node ${node.id} needs url or host`);
   if (!sshHost) throw new Error(`node ${node.id} needs ssh.host or host`);
   const files = mergeOptionalConfig(cluster.files, node.files);
 
@@ -86,20 +88,22 @@ function makeNodeConfig(base, cluster, node) {
       shardName: shard,
     }),
     ...(files !== undefined ? { files } : {}),
-    storage: cluster.storage || {},
-    auth: cluster.auth || {},
-    persistence: cluster.persistence || {},
-    s3: cluster.s3 || {},
   });
 }
 
-function buildShardMap(nodes) {
+function deployBaseConfig(cluster) {
+  const { nodes: _nodes, shardMap: _shardMap, ...base } = cluster;
+  return base;
+}
+
+function buildShardMap(nodes, cluster = {}) {
   const shards = {};
   for (const node of nodes) {
     const shard = node.shard || node.shards?.[0];
     if (!shard) throw new Error(`node ${node.id} needs shard for generated shard map`);
-    const port = positiveInt(node.port || node.node?.port, 8080);
-    const url = trimTrailingSlash(node.url || node.node?.url || `http://${node.host}:${port}`);
+    const port = positiveInt(node.port || node.node?.port || cluster.node?.port || cluster.server?.port, 8080);
+    const host = node.host || node.ip;
+    const url = trimTrailingSlash(node.url || node.node?.url || (host ? `http://${host}:${port}` : ""));
     if (!url) throw new Error(`node ${node.id} needs url or host`);
     const entry = shards[shard] || { peers: [] };
     entry.peers.push({ url });
@@ -145,7 +149,9 @@ function parseArgs(argv) {
     else if (arg === "--dry-run") out.dryRun = true;
     else if (arg.startsWith("--")) {
       const [key, inline] = arg.slice(2).split("=", 2);
-      out[toCamel(key)] = inline !== undefined ? inline : argv[++i];
+      const normalized = toCamel(key);
+      if (!ARG_KEYS.has(normalized)) throw new Error(`unknown option: --${key}`);
+      out[normalized] = inline !== undefined ? inline : argv[++i];
     } else {
       positional.push(arg);
     }
@@ -160,13 +166,12 @@ usage:
   node scripts/deploy-hetzner-cluster.js --config deploy/hetzner.cluster.json
 
 optional:
-  --base-config deploy/hetzner.single.json
   --only hetzner-2
   --release 20260813T120000Z
   --dry-run
 
-The cluster config references one base deploy config for shared S3/auth/storage
-settings and lists each peer with its own SSH host, public URL, and shard.
+The cluster config contains shared deploy/runtime settings and lists each peer
+with its own SSH host, public URL, and shard.
 `);
   process.exit(code);
 }

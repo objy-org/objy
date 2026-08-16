@@ -113,7 +113,7 @@ function parseArgs(argv) {
 function usage(code) {
   console.log(`
 usage:
-  node scripts/deploy-hetzner.js --config deploy/hetzner.single.json
+  node scripts/deploy-hetzner.js --config path/to/node.deploy.json
 
 optional overrides:
   --host root@123.123.123.123
@@ -197,7 +197,7 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
     },
     persistence: {
       prefix: raw.persistence?.prefix || DEFAULT_PREFIX,
-      flushMs: positiveInt(raw.persistence?.flushMs, 1000),
+      flushMs: positiveInt(raw.persistence?.flushMs, 5000),
       opBatchSize: positiveInt(raw.persistence?.opBatchSize, 10_000),
       snapshotMs: positiveInt(raw.persistence?.snapshotMs, 3_600_000),
       snapshotRole: raw.persistence?.snapshotRole || "primary",
@@ -208,7 +208,7 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
       restoreMode: raw.persistence?.restoreMode || "reshard",
       restoreSnapshotId: raw.persistence?.restoreSnapshotId || null,
       localWalFsync: raw.persistence?.localWal?.fsync !== false,
-      localWalFlushMs: positiveInt(raw.persistence?.localWal?.flushMs, 1000),
+      localWalFlushMs: positiveInt(raw.persistence?.localWal?.flushMs, 5000),
       s3,
     },
     health: {

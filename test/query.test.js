@@ -589,18 +589,14 @@ test("indexed grouped count aggregates use bucket counts", async () => {
     $sort: { "properties.department.value": 1 },
   };
   const collection = n.db.collection("db", "assets");
-  assert.equal(collection._planAggregate({ applications: "assetmanagement" }, spec).path, AGGREGATE_PATH.GROUP_COUNT_INDEX);
-  assert.equal(collection._planAggregate({ applications: { $contains: "assetmanagement" } }, spec).path, AGGREGATE_PATH.GROUP_COUNT_INDEX);
+  assert.equal(collection._planAggregate({ applications: "assetmanagement" }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
+  assert.equal(collection._planAggregate({ applications: { $contains: "assetmanagement" } }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
 
   const groupIndex = collection.indexes.get("properties.department.value");
   const originalIterateGroups = groupIndex.iterateGroups;
-  const originalIterateGroupCounts = groupIndex.iterateGroupCounts;
   const originalReadForQuery = collection.readForQuery;
   groupIndex.iterateGroups = function* () {
     throw new Error("grouped count aggregate walked IDs");
-  };
-  groupIndex.iterateGroupCounts = function* () {
-    throw new Error("grouped count aggregate intersected ID buckets");
   };
   collection.readForQuery = () => {
     throw new Error("grouped count aggregate read objects");
@@ -622,7 +618,6 @@ test("indexed grouped count aggregates use bucket counts", async () => {
     );
   } finally {
     groupIndex.iterateGroups = originalIterateGroups;
-    groupIndex.iterateGroupCounts = originalIterateGroupCounts;
     collection.readForQuery = originalReadForQuery;
   }
 
