@@ -384,7 +384,7 @@
   .tree-panel {
     min-height: 0;
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto 1fr;
     overflow: hidden;
   }
 
@@ -414,6 +414,27 @@
 
   .tree-head.actions-only {
     justify-content: flex-end;
+  }
+
+  .tree-filter {
+    padding: 0 16px 10px;
+  }
+
+  .tree-filter input {
+    height: 34px;
+    padding: 7px 10px;
+  }
+
+  .pager {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .pager .pill {
+    min-width: 56px;
+    justify-content: center;
   }
 
   .section-title {
@@ -1368,6 +1389,9 @@
             </button>
           </div>
         </div>
+        <div class="tree-filter">
+          <input id="tree-filter" type="search" placeholder="Search databases / collections" autocomplete="off" />
+        </div>
         <div class="tree" id="tree">
           <div class="empty">Sign in to load databases.</div>
         </div>
@@ -1416,6 +1440,15 @@
             <span class="section-title">Objects</span>
             <div class="object-actions">
               <span class="pill" id="object-count">0 shown</span>
+              <div class="pager" aria-label="Object pages">
+                <button id="prev-page-btn" class="secondary icon-only" title="Previous page" aria-label="Previous page" disabled>
+                  <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <span class="pill" id="object-page">page 1</span>
+                <button id="next-page-btn" class="secondary icon-only" title="Next page" aria-label="Next page" disabled>
+                  <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+              </div>
               <button id="add-object-btn" class="secondary" disabled>
                 <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
                 Object
@@ -1658,9 +1691,12 @@ const state = {
   apiDocs: null,
   apiDocsSource: "",
   objects: [],
+  objectPage: 1,
+  objectHasMore: false,
   selected: null,
   objectMode: "add",
   collapsedDbs: new Set(),
+  treeFilter: "",
   deleteTarget: null,
 };
 
@@ -1728,8 +1764,12 @@ function clearSession(render = true) {
   state.collectionMeta = null;
   state.cluster = null;
   state.objects = [];
+  state.objectPage = 1;
+  state.objectHasMore = false;
   state.selected = null;
   state.collapsedDbs.clear();
+  state.treeFilter = "";
+  $("tree-filter").value = "";
   localStorage.removeItem(STORE_KEY);
   if (render) {
     renderSession();
@@ -1796,6 +1836,7 @@ function renderActionState() {
   $("edit-object-btn").disabled = !hasObject;
   $("delete-object-btn").disabled = !hasObject;
   $("reload-object-btn").disabled = !hasObject;
+  updateObjectPaging(false);
 }
 
 function authHeaders() {
@@ -2043,17 +2084,18 @@ async function loadTree() {
     return;
   }
 
+  const previousDbs = new Set(Object.keys(state.tree));
   const names = Array.isArray(dbs.body?.databases) ? dbs.body.databases : [];
   const entries = await Promise.all(names.map(async (db) => {
     const result = await apiFetch("GET", `/api/${enc(db)}/collections`);
     return [db, result.ok && Array.isArray(result.body?.collections) ? result.body.collections : []];
   }));
   state.tree = Object.fromEntries(entries);
+  for (const db of names) {
+    if (!previousDbs.has(db) && state.active?.db !== db) state.collapsedDbs.add(db);
+  }
   renderTree();
   renderActionState();
-
-  const first = pickFirstCollection();
-  if (!state.active && first) await selectCollection(first.db, first.collection);
 }
 
 async function loadClusterStatus() {
@@ -2096,8 +2138,6 @@ function renderClusterStatus(config) {
   const shards = Array.isArray(config.shards) ? config.shards : [];
   const peers = Array.isArray(config.peers) ? config.peers : [];
   const rss = configRss(config, nodes);
-  const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
-  const nodesTone = !nodes.length ? "warn" : online === nodes.length ? "ok" : "bad";
   const workerCount = nodes.reduce((sum, nodeStatus) => {
     const workers = nodeStatus.indexes?.workers || {};
     return sum
@@ -2106,14 +2146,15 @@ function renderClusterStatus(config) {
   }, 0);
 
   root.title = clusterTitle({ nodes, shards, peers });
-  root.innerHTML = [
-    topStat("nodes", `${online}/${nodes.length}`, nodesTone, `${online} of ${nodes.length} nodes online`),
+  const stats = [
     topStat("shards", shards.length, shards.length ? "ok" : "warn", shardTitle(shards)),
-    topStat("peers", peers.length, peers.length ? "ok" : "warn", `${peers.length} configured peers`),
     memoryStat("rss logical", rss.cluster, rssClusterTitle(rss)),
     ...rss.nodes.map((entry) => memoryStat(rssNodeLabel(entry), entry, rssNodeTitle(entry), "node-rss")),
-    topStat("workers", workerCount, workerCount ? "warn" : "ok", `${workerCount} active index workers`),
-  ].join("");
+  ];
+  if (workerCount > 0) {
+    stats.push(topStat("workers", workerCount, "warn", `${workerCount} active index workers`));
+  }
+  root.innerHTML = stats.join("");
 }
 
 async function openClusterStatsModal() {
@@ -2659,19 +2700,10 @@ function formatMemory(bytes) {
   return `${mib.toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
 }
 
-function pickFirstCollection() {
-  const names = Object.keys(state.tree).sort();
-  for (const db of names) {
-    const collections = [...(state.tree[db] || [])].sort();
-    const preferred = collections.find((name) => db !== "_global" || name !== "users") || collections[0];
-    if (preferred) return { db, collection: preferred };
-  }
-  return null;
-}
-
 function renderTree() {
   const root = $("tree");
   const dbs = Object.keys(state.tree).sort();
+  const filter = state.treeFilter.trim().toLowerCase();
   if (!state.accessToken) {
     root.innerHTML = `<div class="empty">Sign in to load databases.</div>`;
     return;
@@ -2686,10 +2718,18 @@ function renderTree() {
   }
 
   root.innerHTML = "";
+  let rendered = 0;
   for (const db of dbs) {
+    const dbMatches = filter && db.toLowerCase().includes(filter);
+    const collections = [...(state.tree[db] || [])].sort();
+    const visibleCollections = filter
+      ? collections.filter((collection) => dbMatches || collection.toLowerCase().includes(filter))
+      : collections;
+    if (filter && !dbMatches && visibleCollections.length === 0) continue;
+
     const block = document.createElement("div");
     block.className = "db-block";
-    const collapsed = state.collapsedDbs.has(db);
+    const collapsed = filter ? false : state.collapsedDbs.has(db);
 
     const dbRow = document.createElement("div");
     dbRow.className = "db-row";
@@ -2712,7 +2752,7 @@ function renderTree() {
     const list = document.createElement("div");
     list.className = "coll-list";
     list.hidden = collapsed;
-    for (const collection of [...(state.tree[db] || [])].sort()) {
+    for (const collection of visibleCollections) {
       const active = state.active?.db === db && state.active?.collection === collection;
       const row = document.createElement("div");
       row.className = "coll-row" + (active ? " active" : "");
@@ -2730,7 +2770,9 @@ function renderTree() {
     }
     block.appendChild(list);
     root.appendChild(block);
+    rendered++;
   }
+  if (!rendered) root.innerHTML = `<div class="empty">No matching databases or collections.</div>`;
 }
 
 function toggleDatabase(db) {
@@ -2744,6 +2786,8 @@ async function selectCollection(db, collection) {
   state.active = { db, collection };
   state.selected = null;
   state.collectionMeta = null;
+  state.objectPage = 1;
+  state.objectHasMore = false;
   setBreadcrumb();
   renderTree();
   renderDetail(null);
@@ -2804,21 +2848,29 @@ async function loadObjects({ selectId = null } = {}) {
   if (!state.active) return;
   const parsed = parseQuery();
   if (!parsed.ok) return showToast(`Invalid query: ${parsed.error}`, true);
-  parsed.params.set("limit", $("limit").value);
+  const limit = objectLimit();
+  const offset = Math.max(0, state.objectPage - 1) * limit;
+  parsed.params.set("limit", String(limit));
+  parsed.params.set("offset", String(offset));
   const query = parsed.params.toString();
   $("objects").innerHTML = `<div class="empty">Loading objects...</div>`;
+  updateObjectPaging(true);
   const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, query ? `?${query}` : ""));
   if (!result.ok) {
     $("objects").innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load objects")}</div>`;
     $("object-count").textContent = "0 shown";
     state.objects = [];
+    state.objectHasMore = false;
     state.selected = null;
     renderDetail(null);
+    updateObjectPaging(false);
     return;
   }
   state.objects = Array.isArray(result.body) ? result.body : [];
-  $("object-count").textContent = `${state.objects.length} shown`;
+  state.objectHasMore = state.objects.length === limit;
+  $("object-count").textContent = objectRangeText(offset, state.objects.length);
   renderObjects();
+  updateObjectPaging(false);
   const selected = selectId === null
     ? null
     : state.objects.find((object) => String(object._id) === String(selectId));
@@ -2832,6 +2884,7 @@ function renderObjects() {
   if (!state.active) {
     root.innerHTML = `<div class="empty">Pick a collection from the tree.</div>`;
     $("object-count").textContent = "0 shown";
+    updateObjectPaging(false);
     return;
   }
   if (!state.objects.length) {
@@ -2854,6 +2907,38 @@ function renderObjects() {
     card.addEventListener("click", () => showObject(object));
     root.appendChild(card);
   }
+}
+
+function objectLimit() {
+  const value = Number($("limit").value);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 50;
+}
+
+function objectRangeText(offset, count) {
+  if (!count) return "0 shown";
+  return `${offset + 1}-${offset + count} shown`;
+}
+
+function updateObjectPaging(loading = false) {
+  const hasCollection = !!state.active;
+  $("object-page").textContent = `page ${state.objectPage}`;
+  $("prev-page-btn").disabled = loading || !hasCollection || state.objectPage <= 1;
+  $("next-page-btn").disabled = loading || !hasCollection || !state.objectHasMore;
+}
+
+async function changeObjectPage(delta) {
+  if (!state.active) return;
+  const next = Math.max(1, state.objectPage + delta);
+  if (next === state.objectPage) return;
+  if (delta > 0 && !state.objectHasMore) return;
+  state.objectPage = next;
+  await loadObjects();
+}
+
+async function reloadObjectsFromFirstPage() {
+  state.objectPage = 1;
+  state.objectHasMore = false;
+  await loadObjects();
 }
 
 function previewObject(object) {
@@ -3187,6 +3272,8 @@ async function deleteSelectedContext() {
     state.active = null;
     state.collectionMeta = null;
     state.objects = [];
+    state.objectPage = 1;
+    state.objectHasMore = false;
     state.selected = null;
     setBreadcrumb();
     setMeta("");
@@ -3285,8 +3372,15 @@ $("cluster-status").addEventListener("click", (event) => {
 $("add-db-btn").addEventListener("click", openDatabaseModal);
 $("add-coll-btn").addEventListener("click", openCollectionModal);
 $("edit-meta-btn").addEventListener("click", openMetaModal);
-$("load-objects-btn").addEventListener("click", loadObjects);
+$("load-objects-btn").addEventListener("click", reloadObjectsFromFirstPage);
 $("format-query-btn").addEventListener("click", formatQuery);
+$("limit").addEventListener("change", reloadObjectsFromFirstPage);
+$("tree-filter").addEventListener("input", (event) => {
+  state.treeFilter = event.target.value;
+  renderTree();
+});
+$("prev-page-btn").addEventListener("click", () => changeObjectPage(-1));
+$("next-page-btn").addEventListener("click", () => changeObjectPage(1));
 $("add-object-btn").addEventListener("click", () => openObjectModal("add"));
 $("edit-object-btn").addEventListener("click", () => openObjectModal("edit"));
 $("delete-object-btn").addEventListener("click", openDeleteObjectModal);
