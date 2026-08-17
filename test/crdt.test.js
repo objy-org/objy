@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CRDTNode, localPeer } from "../src/crdt.js";
+import { MemoryObjectStorage } from "../src/object-storage.js";
+import { PersistenceManager } from "../src/persistence.js";
 
 function pair() {
   const a = new CRDTNode({ id: "a" });
@@ -304,9 +306,10 @@ test("retention buffer keeps ops beyond the ack watermark", async () => {
   assert.equal(a.log.length, 5);
 });
 
-test("far-behind peer recovers via snapshot after 410", async () => {
+test("far-behind peer recovers via durable catch-up after 410", async () => {
   const a = new CRDTNode({ id: "a", retainOps: 0 });
   const b = new CRDTNode({ id: "b" });
+  const storage = new MemoryObjectStorage();
   a.addPeer(localPeer(b));
   b.addPeer(localPeer(a));
   for (let i = 0; i < 30; i++) a.insert("db", "c", { _id: `o${i}`, v: i });
@@ -314,8 +317,11 @@ test("far-behind peer recovers via snapshot after 410", async () => {
   a.remove("db", "c", "o5");
   await b.syncAll();
   assert.ok(a.trimmed > 0, "log has been truncated");
+  await new PersistenceManager({ node: a, storage, segmentBytes: 1024 }).checkpoint();
 
   const fresh = new CRDTNode({ id: "fresh" });
+  const freshPersistence = new PersistenceManager({ node: fresh, storage });
+  fresh.setLogTruncatedHandler(({ scope }) => freshPersistence.restoreScope(scope));
   fresh.addPeer(localPeer(a));
   await fresh.syncAll();
   assert.equal(fresh.count("db", "c"), 29);
@@ -327,9 +333,10 @@ test("far-behind peer recovers via snapshot after 410", async () => {
   assert.equal(fresh.get("db", "c", "o1").v, 100, "post-snapshot ops flow incrementally");
 });
 
-test("empty objects survive snapshot recovery", async () => {
+test("empty objects survive durable catch-up", async () => {
   const a = new CRDTNode({ id: "a", retainOps: 0 });
   const b = new CRDTNode({ id: "b" });
+  const storage = new MemoryObjectStorage();
   a.addPeer(localPeer(b));
   b.addPeer(localPeer(a));
 
@@ -337,8 +344,11 @@ test("empty objects survive snapshot recovery", async () => {
   a.insert("db", "c", { _id: "filled", v: 1 });
   await b.syncAll();
   assert.equal(a.trimmed, 2);
+  await new PersistenceManager({ node: a, storage, segmentBytes: 1024 }).checkpoint();
 
   const fresh = new CRDTNode({ id: "fresh" });
+  const freshPersistence = new PersistenceManager({ node: fresh, storage });
+  fresh.setLogTruncatedHandler(({ scope }) => freshPersistence.restoreScope(scope));
   fresh.addPeer(localPeer(a));
   await fresh.syncAll();
 

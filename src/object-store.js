@@ -110,6 +110,7 @@ class ValueDirectory {
   }
 
   cloneWithNestedPooling(value, refs, path, options = {}) {
+    if (options.trusted && !this.poolStructuredValues) return value;
     if (Array.isArray(value)) {
       if (value.length > this.maxNestedContainerEntries) return cloneValue(value, options);
       return value.map((item) => this.store(item, refs, `${path}[]`, options));

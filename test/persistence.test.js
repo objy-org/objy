@@ -62,6 +62,49 @@ test("local WAL restores acknowledged writes before S3 journal flush", async () 
   }
 });
 
+test("local WAL splits large bulk writes into smaller durable records", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "spread-db-wal-split-"));
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({
+    node,
+    storage,
+    flushMs: 0,
+    snapshotMs: 0,
+    ack: "localWal",
+    localWal: { mode: "on", dir, fsync: true, maxRecordBytes: 900, maxOpsPerRecord: 2 },
+  });
+
+  try {
+    persistence.start();
+    node.insertMany("app", "events", Array.from({ length: 5 }, (_, i) => ({
+      _id: `e${i}`,
+      payload: "x".repeat(250),
+    })));
+    const flushed = await persistence.afterWrite();
+    const lines = readFileSync(join(dir, "n1", "wal.jsonl"), "utf8").trim().split("\n");
+
+    assert.ok(flushed.records > 1);
+    assert.equal(lines.length, flushed.records);
+
+    const fresh = new CRDTNode({ id: "n1" });
+    const restored = await new PersistenceManager({
+      node: fresh,
+      storage,
+      flushMs: 0,
+      snapshotMs: 0,
+      ack: "localWal",
+      localWal: { mode: "on", dir, fsync: true, maxRecordBytes: 900, maxOpsPerRecord: 2 },
+    }).restore();
+
+    assert.equal(restored.localWalOps, 5);
+    assert.equal(fresh.count("app", "events"), 5);
+  } finally {
+    await persistence.stop().catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("journaled writes restore by database, collection, and shard", async () => {
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "n1" });
@@ -74,6 +117,7 @@ test("journaled writes restore by database, collection, and shard", async () => 
 
   const keys = await storage.list("spread-db/");
   assert.ok(keys.some((key) => key.startsWith("spread-db/db/app/collection/users/shard/default/journal/n1/")));
+  assert.ok(keys.some((key) => key.endsWith(".jsonl")));
 
   const fresh = new CRDTNode({ id: "n1" });
   const restored = await new PersistenceManager({ node: fresh, storage }).restore();
@@ -81,6 +125,34 @@ test("journaled writes restore by database, collection, and shard", async () => 
   assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada", active: true });
   assert.equal(fresh.seq, 2);
   assert.equal(fresh.trimmed, 2);
+});
+
+test("journal flush splits large batches by byte budget", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({
+    node,
+    storage,
+    flushMs: 0,
+    snapshotMs: 0,
+    opBatchSize: 100,
+    journalMaxBytes: 900,
+  });
+  persistence.start();
+
+  node.insertMany("app", "events", Array.from({ length: 6 }, (_, i) => ({
+    _id: `e${i}`,
+    payload: "x".repeat(250),
+  })));
+  await persistence.stop();
+
+  const keys = await storage.list("spread-db/db/app/collection/events/shard/default/journal/n1/");
+  assert.ok(keys.length > 1);
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  const restored = await new PersistenceManager({ node: fresh, storage }).restore();
+  assert.equal(restored.journalOps, 6);
+  assert.equal(fresh.count("app", "events"), 6);
 });
 
 test("snapshots restore full objects and tombstones", async () => {
@@ -96,12 +168,59 @@ test("snapshots restore full objects and tombstones", async () => {
   assert.equal(written.scopes, 1);
   assert.equal(written.objects, 2);
   assert.ok(await storage.get("spread-db/db/app/collection/users/shard/default/latest.json"));
+  assert.ok((await storage.list("spread-db/")).some((key) => key.includes("/snapshots/") && key.endsWith(".jsonl")));
 
   const fresh = new CRDTNode({ id: "fresh" });
   const restored = await new PersistenceManager({ node: fresh, storage }).restore();
   assert.equal(restored.snapshots, 1);
   assert.equal(fresh.get("app", "users", "u1"), undefined);
   assert.deepEqual(fresh.get("app", "users", "u2"), { _id: "u2", name: "Grace" });
+});
+
+test("restore reads legacy JSON snapshot and journal segments", async () => {
+  const storage = new MemoryObjectStorage();
+  const writer = new CRDTNode({ id: "legacy-writer" });
+  writer.insert("app", "users", { _id: "u1", name: "Ada" });
+
+  const scopePrefix = "spread-db/db/app/collection/users/shard/default";
+  const snapshotId = "20260817T000000000Z-000001-legacy";
+  const segmentKey = `${scopePrefix}/snapshots/${snapshotId}/segment-000000.json`;
+  const snapshot = writer.snapshot({ database: "app", collection: "users" });
+  await storage.put(segmentKey, JSON.stringify(snapshot.collections[0].objects));
+  await storage.put(`${scopePrefix}/latest.json`, JSON.stringify({
+    version: 1,
+    id: snapshotId,
+    node: writer.id,
+    seq: writer.seq,
+    createdAt: "2026-08-17T00:00:00.000Z",
+    database: "app",
+    collection: "users",
+    shard: "default",
+    cursors: { [writer.id]: writer.seq },
+    objectCount: 1,
+    segments: [{ key: segmentKey, count: 1 }],
+  }));
+
+  writer.update("app", "users", "u1", { active: true });
+  await storage.put(
+    `${scopePrefix}/journal/${writer.id}/1723852800000-0000000000000002-0000000000000002-legacy.json`,
+    JSON.stringify({ version: 1, node: writer.id, ops: [writer.log.at(-1)] }),
+  );
+
+  const streamingStorage = {
+    get: async (key) => {
+      if (key === segmentKey) throw new Error("legacy snapshot segment must be streamed");
+      return storage.get(key);
+    },
+    getStream: (key) => storage.getStream(key),
+    list: (prefix) => storage.list(prefix),
+  };
+  const fresh = new CRDTNode({ id: "fresh" });
+  const restored = await new PersistenceManager({ node: fresh, storage: streamingStorage }).restore();
+
+  assert.equal(restored.snapshots, 1);
+  assert.equal(restored.journalOps, 1);
+  assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada", active: true });
 });
 
 test("restore seeds replication cursors from persisted source nodes", async () => {
@@ -174,12 +293,50 @@ test("collection metadata persists outside shard snapshots and restores indexes"
     owner: "events-team",
   });
   assert.deepEqual(fresh.get("app", "orders", "o1"), { _id: "o1", status: "paid", amount: 10 });
+  await fresh.awaitIndexes("app", "orders");
   assert.equal(fresh.indexStats("app", "orders")[0].entries, 1);
   assert.equal(fresh.indexStats("app", "orders")[0].orderedEntries, 1);
   assert.deepEqual(
     fresh.find("app", "orders", {}, { sortBy: "status", limit: 1 }).map((order) => order._id),
     ["o1"],
   );
+});
+
+test("restore makes objects readable before configured indexes finish warming", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
+  persistence.start();
+  node.setCollectionMeta("app", "orders", {
+    indexes: ["status"],
+    columnIndexes: ["amount"],
+  });
+  node.insertMany("app", "orders", Array.from({ length: 50 }, (_, i) => ({
+    _id: `o${i}`,
+    status: i % 2 ? "open" : "paid",
+    amount: i,
+  })));
+  await persistence.checkpoint();
+  await persistence.stop();
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  await new PersistenceManager({ node: fresh, storage }).restore();
+  const readiness = fresh.indexReadiness().collections.find((entry) => entry.database === "app" && entry.collection === "orders");
+
+  assert.equal(readiness.fieldIndexes.find((index) => index.path === "status").status, "pending");
+  assert.equal(fresh.queryPath("app", "orders", { status: "paid" }), "scan");
+  assert.equal(fresh.count("app", "orders", { status: "paid" }), 25);
+
+  fresh.startIndexWarmup();
+  assert.equal(
+    fresh.indexReadiness().collections
+      .find((entry) => entry.database === "app" && entry.collection === "orders")
+      .fieldIndexes.find((index) => index.path === "status").status,
+    "building",
+  );
+  await fresh.awaitIndexes("app", "orders");
+  assert.equal(fresh.queryPath("app", "orders", { status: "paid" }), "index-exact");
+  assert.equal(fresh.indexStats("app", "orders").find((entry) => entry.type === "field" && entry.path === "status").entries, 50);
 });
 
 test("collection removal deletes the persisted collection prefix", async () => {

@@ -35,6 +35,7 @@ const replication = createReplicationScheduler({
 const persistence = createPersistence(node, config.persistence);
 const files = createFileService(config.files, config.persistence);
 if (persistence) {
+  node.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
   const restored = await persistence.restore();
   persistence.start();
   console.log(`persistence restored ${restored.snapshotObjects} snapshot objects and ${restored.journalOps} journal ops`);
@@ -42,6 +43,7 @@ if (persistence) {
 
 const state = await startServer({
   port: config.server.port,
+  maxJsonBytes: config.server.maxJsonBytes,
   node,
   shardMapStore,
   auth: config.auth,
@@ -52,6 +54,7 @@ const state = await startServer({
   forwardTimeoutMs: config.cluster.forwardTimeoutMs,
   replicationTimeoutMs: config.cluster.replicationTimeoutMs,
   replication,
+  imports: config.imports,
 });
 replication.start();
 console.log(`spread-db node ${state.node.id} listening on http://localhost:${state.port}`);

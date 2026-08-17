@@ -57,6 +57,14 @@ test("normalizes a single-node config with runtime defaults", () => {
   });
   assert.equal(config.node.retainOps, 256);
   assert.equal(config.node.syncBatchSize, 1024);
+  assert.equal(config.server.maxJsonBytes, 64 * 1024 * 1024);
+  assert.deepEqual(config.imports, {
+    maxBulkObjects: 10_000,
+    maxBulkBytes: 64 * 1024 * 1024,
+    maxObjectBytes: 8 * 1024 * 1024,
+    maxPendingPersistenceBytes: 256 * 1024 * 1024,
+    retryAfterMs: 1000,
+  });
   assert.equal(config.cluster.syncMs, 2500);
   assert.equal(config.cluster.forwardTimeoutMs, 60000);
   assert.equal(config.cluster.replicationTimeoutMs, 60000);
@@ -69,6 +77,7 @@ test("normalizes a single-node config with runtime defaults", () => {
   assert.equal(config.auth.jwtSecret, "test-jwt-secret");
   assert.equal(config.persistence.mode, "off");
   assert.equal(config.persistence.ack, "memory");
+  assert.equal(config.persistence.journalMaxBytes, 4 * 1024 * 1024);
   assert.deepEqual(config.persistence.snapshotRetention, {
     keepLatest: 0,
     keepForMs: 0,
@@ -83,6 +92,8 @@ test("normalizes a single-node config with runtime defaults", () => {
     dir: ".spread-db/wal",
     fsync: true,
     flushMs: 0,
+    maxRecordBytes: 4 * 1024 * 1024,
+    maxOpsPerRecord: 1000,
   });
 });
 
@@ -101,6 +112,16 @@ test("loads node identity overrides from cli arguments", () => {
   const path = join(dir, "cluster.json");
   writeFileSync(path, JSON.stringify({
     node: { retainOps: 0, syncBatchSize: 4096 },
+    server: {
+      maxJsonBytes: 123456,
+    },
+    imports: {
+      maxBulkObjects: 12,
+      maxBulkBytes: 345678,
+      maxObjectBytes: 45678,
+      maxPendingPersistenceBytes: 567890,
+      retryAfterMs: 2500,
+    },
     cluster: {
       syncMs: 250,
       forwardTimeoutMs: 1250,
@@ -121,6 +142,7 @@ test("loads node identity overrides from cli arguments", () => {
       mode: "memory",
       restoreMode: "reshard",
       flushMs: 25,
+      journalMaxBytes: 4096,
       snapshotDirtyOnly: false,
       snapshotRole: "none",
       snapshotRetention: {
@@ -137,6 +159,8 @@ test("loads node identity overrides from cli arguments", () => {
         dir: ".tmp/wal",
         fsync: false,
         flushMs: 10,
+        maxRecordBytes: 2048,
+        maxOpsPerRecord: 3,
       },
     },
     storage: {
@@ -174,6 +198,14 @@ test("loads node identity overrides from cli arguments", () => {
   assert.equal(config.node.retainOps, 0);
   assert.equal(config.node.syncBatchSize, 4096);
   assert.equal(config.server.port, 9010);
+  assert.equal(config.server.maxJsonBytes, 123456);
+  assert.deepEqual(config.imports, {
+    maxBulkObjects: 12,
+    maxBulkBytes: 345678,
+    maxObjectBytes: 45678,
+    maxPendingPersistenceBytes: 567890,
+    retryAfterMs: 2500,
+  });
   assert.equal(config.cluster.syncMs, 250);
   assert.equal(config.cluster.forwardTimeoutMs, 1250);
   assert.equal(config.cluster.replicationTimeoutMs, 5000);
@@ -202,6 +234,7 @@ test("loads node identity overrides from cli arguments", () => {
   assert.equal(config.persistence.mode, "memory");
   assert.equal(config.persistence.restoreMode, "reshard");
   assert.equal(config.persistence.flushMs, 25);
+  assert.equal(config.persistence.journalMaxBytes, 4096);
   assert.equal(config.persistence.snapshotDirtyOnly, false);
   assert.equal(config.persistence.snapshotRole, "none");
   assert.deepEqual(config.persistence.snapshotRetention, {
@@ -219,6 +252,8 @@ test("loads node identity overrides from cli arguments", () => {
     dir: ".tmp/wal",
     fsync: false,
     flushMs: 10,
+    maxRecordBytes: 2048,
+    maxOpsPerRecord: 3,
   });
 });
 

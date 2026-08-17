@@ -38,6 +38,7 @@ export class CRDTNode {
     this.vectorWarmupEnabled = false;
     this.vectorWarmupScheduled = false;
     this.vectorWarmupPromise = Promise.resolve([]);
+    this.logTruncatedHandler = null;
   }
 
   nextTs() {
@@ -334,6 +335,18 @@ export class CRDTNode {
     return this.db.awaitColumnIndexes(db, coll);
   }
 
+  awaitFieldIndexes(db, coll) {
+    return this.db.awaitFieldIndexes(db, coll);
+  }
+
+  awaitIndexes(db, coll) {
+    return this.db.awaitIndexes(db, coll);
+  }
+
+  startIndexWarmup() {
+    return this.db.startIndexWarmup();
+  }
+
   vectorSearch(db, coll, queryVec, limit = 20, options = {}) {
     return this.db.vectorSearch(db, coll, queryVec, limit, options);
   }
@@ -391,13 +404,22 @@ export class CRDTNode {
       if (!res) return total;
 
       if (res.status === 410) {
-        const snap = await peer.snapshot(scope);
-        if (!snap) return total;
-        this._bindPeer(peer, snap.node, key);
-        const remoteKey = this._cursorKey(snap.node, scope);
-        const applied = this.applySnapshot(snap.node, snap, remoteKey);
-        await this._ack(peer, snap.lastSeq || 0, scope);
-        return total + applied;
+        const remoteId = res.nodeId || res.node || peer.nodeId;
+        if (remoteId) this._bindPeer(peer, remoteId, key);
+        const remoteKey = this._cursorKey(remoteId || key, scope);
+        const before = this.lastSeen.get(remoteKey) || after;
+        const restored = await this._handleLogTruncated({ peer, scope, after, response: res, remoteId });
+        const seen = this.lastSeen.get(remoteKey) || 0;
+        if (!restored || seen <= before) {
+          const err = new Error("replication log truncated and durable catch-up did not advance");
+          err.code = "LOG_TRUNCATED";
+          err.scope = scope;
+          err.peer = peer;
+          err.response = res;
+          throw err;
+        }
+        total += Number(restored.applied || restored.snapshotObjects || restored.journalOps || 0);
+        continue;
       }
 
       const remoteId = res.nodeId || res.node || peer.nodeId;
@@ -413,6 +435,15 @@ export class CRDTNode {
 
       if (!ops.length || seen >= (res.lastSeq || seen)) return total;
     }
+  }
+
+  setLogTruncatedHandler(handler) {
+    this.logTruncatedHandler = typeof handler === "function" ? handler : null;
+  }
+
+  async _handleLogTruncated(event) {
+    if (!this.logTruncatedHandler) return null;
+    return this.logTruncatedHandler(event);
   }
 
   async _ack(peer, lastSeq, scope) {
@@ -450,6 +481,32 @@ export class CRDTNode {
     }
     this.lastSeen.set(cursorKey, snap.lastSeq || 0);
     if (count) this._notifyChange({ kind: "snapshot", snapshot: snap });
+    return count;
+  }
+
+  applySnapshotObjects(fromId, { database, collection, objects, lastSeq = 0, scope } = {}, cursorKey = fromId) {
+    if (!database || !collection) return 0;
+    const rows = Array.isArray(objects) ? objects : [];
+    for (const obj of rows) {
+      const shard = obj.shard || scope?.shard || this.shardForObject(database, collection, obj.id);
+      if (!obj.shard) obj.shard = shard;
+      if (obj.deleted) {
+        if (obj.ts) touch(this.clock, obj.ts);
+        touch(this.clock, obj.deleted);
+      } else if (obj.ts) {
+        touch(this.clock, obj.ts);
+      }
+    }
+    const count = this.db.applySnapshotObjects(database, collection, rows, { trustedValues: true });
+    this.lastSeen.set(cursorKey, lastSeq || 0);
+    if (count) this._notifyChange({
+      kind: "snapshot",
+      snapshot: {
+        node: fromId,
+        lastSeq,
+        collections: [{ db: database, coll: collection, objects: rows }],
+      },
+    });
     return count;
   }
 
@@ -906,7 +963,6 @@ export function localPeer(node) {
         ops,
       };
     },
-    snapshot: async (scope) => node.snapshot(scope),
     ack: async (id, seq, scope) => node.receiveAck(id, seq, scope),
   };
 }

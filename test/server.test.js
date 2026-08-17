@@ -1257,6 +1257,60 @@ test("public minimal bulk insert skips object readback", async () => {
   }
 });
 
+test("public JSON body limit returns 413 without accepting the write", async () => {
+  const s = await startTestServer({ port: 0, maxJsonBytes: 128 });
+  try {
+    const session = await login(`http://localhost:${s.port}`);
+    const response = await fetch(`http://localhost:${s.port}/api/app/items/object`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.accessToken}`,
+      },
+      body: JSON.stringify({ _id: "large", payload: "x".repeat(256) }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 413);
+    assert.equal(body.error, "payload too large");
+    assert.equal(s.node.get("app", "items", "large"), undefined);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("public bulk imports reject excessive batch and persistence backlog pressure", async () => {
+  const s = await startTestServer({
+    port: 0,
+    imports: {
+      maxBulkObjects: 1,
+      maxBulkBytes: 1024 * 1024,
+      maxObjectBytes: 1024 * 1024,
+      maxPendingPersistenceBytes: 1,
+      retryAfterMs: 1000,
+    },
+    durability: {
+      afterWrite: async () => ({ records: 0, ops: 0 }),
+      getStats: () => ({ pendingBytes: 2, localWal: { pendingBytes: 0 } }),
+    },
+  });
+  try {
+    const session = await login(`http://localhost:${s.port}`);
+    const c = api(`http://localhost:${s.port}`, session.accessToken);
+
+    const tooMany = await c.post("/api/app/items/object", [{ _id: "a" }, { _id: "b" }]);
+    assert.equal(tooMany.status, 413);
+    assert.equal(tooMany.body.error, "bulk write contains too many objects");
+
+    const backedUp = await c.post("/api/app/items/object", { _id: "c" });
+    assert.equal(backedUp.status, 503);
+    assert.equal(backedUp.headers.get("x-spread-db-pressure"), "persistence");
+    assert.equal(backedUp.body.error, "persistence backlog is full");
+  } finally {
+    s.server.close();
+  }
+});
+
 test("public bulk object routes reject duplicate _ids", async () => {
   const s = await startTestServer({ port: 0 });
   try {
@@ -2113,9 +2167,12 @@ test("collection meta endpoint rejects invalid index metadata", async () => {
   }
 });
 
-test("retention + snapshot recovery over HTTP", async () => {
+test("retention uses durable catch-up instead of HTTP snapshots", async () => {
   const { CRDTNode } = await import("../src/crdt.js");
-  const a = await startTestServer({ port: 0, node: new CRDTNode({ retainOps: 0 }) });
+  const storage = new MemoryObjectStorage();
+  const nodeA = new CRDTNode({ retainOps: 0 });
+  const persistenceA = new PersistenceManager({ node: nodeA, storage, segmentBytes: 1024 });
+  const a = await startTestServer({ port: 0, node: nodeA, persistence: persistenceA });
   const b = await startTestServer({ port: 0 });
   a.node.addPeer(httpPeer(`http://localhost:${b.port}`, a.node.id, { secret: TEST_CLUSTER_SECRET }));
   b.node.addPeer(httpPeer(`http://localhost:${a.port}`, b.node.id, { secret: TEST_CLUSTER_SECRET }));
@@ -2128,13 +2185,18 @@ test("retention + snapshot recovery over HTTP", async () => {
     await b.node.syncAll();
     assert.equal(b.node.count("app", "items"), 20);
     assert.equal(a.node.trimmed, a.node.seq, "acked log pruned to zero");
+    await persistenceA.checkpoint();
 
     const deniedPull = await fetch(`http://localhost:${a.port}/replicate?after=0`);
     assert.equal(deniedPull.status, 401);
     const pull = await fetch(`http://localhost:${a.port}/replicate?after=0`, { headers: clusterHeaders() });
     assert.equal(pull.status, 410);
+    const snapshot = await fetch(`http://localhost:${a.port}/replicate/snapshot`, { headers: clusterHeaders() });
+    assert.equal(snapshot.status, 404);
 
-    const fresh = await startTestServer({ port: 0 });
+    const nodeFresh = new CRDTNode();
+    const persistenceFresh = new PersistenceManager({ node: nodeFresh, storage });
+    const fresh = await startTestServer({ port: 0, node: nodeFresh, persistence: persistenceFresh });
     try {
       fresh.node.addPeer(httpPeer(`http://localhost:${a.port}`, fresh.node.id, { secret: TEST_CLUSTER_SECRET }));
       await fresh.node.syncAll();
