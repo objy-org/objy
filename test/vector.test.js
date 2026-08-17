@@ -99,9 +99,9 @@ test("snapshots persist vectors but not vector indexes", async () => {
   const keys = await storage.list("spread-db/");
   assert.equal(keys.some((key) => /hnsw|vector-index/i.test(key)), false);
 
-  const segmentKey = keys.find((key) => key.includes("/snapshots/") && key.endsWith(".json") && key.includes("segment-"));
+  const segmentKey = keys.find((key) => key.includes("/snapshots/") && key.endsWith(".jsonl") && key.includes("segment-"));
   assert.ok(segmentKey);
-  const rows = JSON.parse(await storage.get(segmentKey));
+  const rows = (await storage.get(segmentKey)).trim().split("\n").map((line) => JSON.parse(line));
   assert.deepEqual(rows.find((row) => row.id === "near").value._vec, [1, 0]);
 
   const fresh = new CRDTNode({ id: "fresh" });

@@ -4,6 +4,14 @@ import { normalizeAuthConfig } from "./auth.js";
 import { normalizeVectorConfig } from "./vector.js";
 
 export const DEFAULT_CONFIG_PATH = "spread-db.config.json";
+export const DEFAULT_MAX_JSON_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_IMPORT_CONFIG = {
+  maxBulkObjects: 10_000,
+  maxBulkBytes: DEFAULT_MAX_JSON_BYTES,
+  maxObjectBytes: 8 * 1024 * 1024,
+  maxPendingPersistenceBytes: 256 * 1024 * 1024,
+  retryAfterMs: 1000,
+};
 
 export function loadConfig(argv = process.argv.slice(2), cwd = process.cwd(), options = {}) {
   const configPath = resolve(cwd, configPathFromArgs(argv) || DEFAULT_CONFIG_PATH);
@@ -32,7 +40,9 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
     },
     server: {
       port,
+      maxJsonBytes: positiveInt(serverConfig.maxJsonBytes, DEFAULT_MAX_JSON_BYTES),
     },
+    imports: normalizeImportConfig(config.imports),
     storage: normalizeStorageConfig(config.storage),
     files: normalizeFilesConfig(config.files, config.persistence),
     vector: normalizeVectorConfig(config.vector),
@@ -154,6 +164,7 @@ function normalizePersistenceConfig(config = {}) {
     prefix: config.prefix || "spread-db",
     flushMs: positiveInt(config.flushMs, 5000),
     opBatchSize: positiveInt(config.opBatchSize, 1000),
+    journalMaxBytes: positiveInt(config.journalMaxBytes, 4 * 1024 * 1024),
     snapshotMs: positiveInt(config.snapshotMs, 60_000),
     segmentBytes: positiveInt(config.segmentBytes, 16 * 1024 * 1024),
     compactJournals: config.compactJournals !== false,
@@ -291,6 +302,18 @@ function normalizeLocalWalConfig(config = {}, ack = "memory") {
     dir: config.dir || ".spread-db/wal",
     fsync: config.fsync !== false,
     flushMs: positiveInt(config.flushMs, 0),
+    maxRecordBytes: positiveInt(config.maxRecordBytes, 4 * 1024 * 1024),
+    maxOpsPerRecord: positiveInt(config.maxOpsPerRecord, 1000),
+  };
+}
+
+function normalizeImportConfig(config = {}) {
+  return {
+    maxBulkObjects: positiveInt(config.maxBulkObjects, DEFAULT_IMPORT_CONFIG.maxBulkObjects),
+    maxBulkBytes: positiveInt(config.maxBulkBytes, DEFAULT_IMPORT_CONFIG.maxBulkBytes),
+    maxObjectBytes: positiveInt(config.maxObjectBytes, DEFAULT_IMPORT_CONFIG.maxObjectBytes),
+    maxPendingPersistenceBytes: positiveInt(config.maxPendingPersistenceBytes, DEFAULT_IMPORT_CONFIG.maxPendingPersistenceBytes),
+    retryAfterMs: positiveInt(config.retryAfterMs, DEFAULT_IMPORT_CONFIG.retryAfterMs),
   };
 }
 

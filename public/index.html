@@ -2137,7 +2137,7 @@ function renderClusterStatus(config) {
   const nodes = Array.isArray(config.nodes) ? config.nodes : [];
   const shards = Array.isArray(config.shards) ? config.shards : [];
   const peers = Array.isArray(config.peers) ? config.peers : [];
-  const rss = configRss(config, nodes);
+  const memory = configMemory(config, nodes);
   const workerCount = nodes.reduce((sum, nodeStatus) => {
     const workers = nodeStatus.indexes?.workers || {};
     return sum
@@ -2148,8 +2148,8 @@ function renderClusterStatus(config) {
   root.title = clusterTitle({ nodes, shards, peers });
   const stats = [
     topStat("shards", shards.length, shards.length ? "ok" : "warn", shardTitle(shards)),
-    memoryStat("rss logical", rss.cluster, rssClusterTitle(rss)),
-    ...rss.nodes.map((entry) => memoryStat(rssNodeLabel(entry), entry, rssNodeTitle(entry), "node-rss")),
+    memoryStat("heap logical", memory.cluster, memoryClusterTitle(memory)),
+    ...memory.nodes.map((entry) => memoryStat(memoryNodeLabel(entry), entry, memoryNodeTitle(entry), "node-rss")),
   ];
   if (workerCount > 0) {
     stats.push(topStat("workers", workerCount, "warn", `${workerCount} active index workers`));
@@ -2174,7 +2174,7 @@ function renderClusterStatsModal(config) {
   const nodes = Array.isArray(config.nodes) ? config.nodes : [];
   const shards = Array.isArray(config.shards) ? config.shards : [];
   const peers = Array.isArray(config.peers) ? config.peers : [];
-  const rss = configRss(config, nodes);
+  const memory = configMemory(config, nodes);
   const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
   const readyIndexes = nodes.filter((nodeStatus) => nodeStatus.indexes?.status === "ready").length;
   const workerCount = nodes.reduce((sum, nodeStatus) => sum + activeWorkerCount(nodeStatus), 0);
@@ -2189,7 +2189,7 @@ function renderClusterStatsModal(config) {
       </div>
       <div class="cluster-metrics">
         ${clusterMetric("nodes", `${online}/${nodes.length}`, "online", nodesTone(online, nodes.length))}
-        ${clusterMetric("shards", shards.length, `${coveredShardText(rss.cluster)}`, shards.length ? "ok" : "warn")}
+        ${clusterMetric("shards", shards.length, `${coveredShardText(memory.cluster)}`, shards.length ? "ok" : "warn")}
         ${clusterMetric("peers", peers.length, "configured", peers.length ? "ok" : "warn")}
         ${clusterMetric("indexes", `${readyIndexes}/${nodes.length}`, "nodes ready", readyIndexes === nodes.length ? "ok" : "warn")}
         ${clusterMetric("workers", workerCount, "active", workerCount ? "warn" : "ok")}
@@ -2197,7 +2197,7 @@ function renderClusterStatsModal(config) {
       </div>
     </section>
 
-    ${renderMemoryDetails(rss)}
+    ${renderMemoryDetails(memory)}
     ${renderShardDetails(shards)}
     ${renderNodeDetails(nodes)}
     ${renderIndexDetails(nodes)}
@@ -2220,8 +2220,8 @@ function clusterMetric(label, value, sub = "", tone = "") {
   `;
 }
 
-function renderMemoryDetails(rss) {
-  const selectedReplicas = Array.isArray(rss.cluster.selectedReplicas) ? rss.cluster.selectedReplicas : [];
+function renderMemoryDetails(memory) {
+  const selectedReplicas = Array.isArray(memory.cluster.selectedReplicas) ? memory.cluster.selectedReplicas : [];
   return `
     <section class="cluster-section">
       <div class="cluster-section-title">
@@ -2229,8 +2229,8 @@ function renderMemoryDetails(rss) {
         <span>logical capacity excludes extra replicas</span>
       </div>
       <div class="cluster-grid">
-        ${memoryPanel("Logical cluster", rss.cluster, coveredShardText(rss.cluster))}
-        ${memoryPanel("Physical processes", rss.physical, `${rss.physical.onlineNodeCount}/${rss.physical.nodeCount} nodes online`)}
+        ${memoryPanel("Logical cluster heap", memory.cluster, coveredShardText(memory.cluster))}
+        ${memoryPanel("Physical process heap", memory.physical, `${memory.physical.onlineNodeCount}/${memory.physical.nodeCount} nodes online`)}
         ${selectedReplicas.length ? selectedReplicaPanel(selectedReplicas) : ""}
       </div>
     </section>
@@ -2240,6 +2240,7 @@ function renderMemoryDetails(rss) {
 function memoryPanel(title, entry, subtitle = "") {
   const percent = memoryPercent(entry);
   const tone = memoryTone(percent);
+  const committed = Number(entry.committed);
   return `
     <div class="cluster-panel">
       <div class="cluster-panel-head">
@@ -2248,9 +2249,9 @@ function memoryPanel(title, entry, subtitle = "") {
       </div>
       ${meterHtml(percent, tone)}
       <div class="cluster-kv">
-        ${kv("RSS", formatMemory(entry.rss))}
-        ${kv("Capacity", formatMemory(entry.totalMemory))}
-        ${kv("Free", formatMemory(entry.freeMemory))}
+        ${kv("Heap", formatMemory(memoryUsed(entry)))}
+        ${kv("Limit", formatMemory(memoryTotal(entry)))}
+        ${Number.isFinite(committed) ? kv("Committed", formatMemory(committed)) : ""}
         ${kv("Nodes", `${entry.onlineNodeCount ?? 0}/${entry.nodeCount ?? 0}`)}
       </div>
       ${subtitle ? `<div class="cluster-subtle">${escapeHtml(subtitle)}</div>` : ""}
@@ -2353,10 +2354,10 @@ function nodePanel(nodeStatus) {
       </div>
       ${meterHtml(online ? percent : 0, tone)}
       <div class="cluster-kv">
-        ${kv("RSS", online ? formatMemory(memory.rss) : "offline")}
-        ${kv("Total", online ? formatMemory(memory.totalMemory) : "unknown")}
-        ${kv("Heap", formatMemory(nodeStatus.memory?.heapUsed))}
-        ${kv("Free", formatMemory(memory.freeMemory))}
+        ${kv("Heap", online ? formatMemory(memoryUsed(memory)) : "offline")}
+        ${kv("Limit", online ? formatMemory(memoryTotal(memory)) : "unknown")}
+        ${kv("Committed", formatMemory(memory.committed))}
+        ${kv("RSS", formatMemory(nodeStatus.memory?.rss))}
         ${kv("Writes", guard.acceptingWrites === false ? "blocked" : "accepting")}
         ${kv("Uptime", formatDuration(processInfo.uptimeMs))}
       </div>
@@ -2455,9 +2456,10 @@ function emptyPanel(message) {
 
 function nodeMemory(nodeStatus) {
   return {
+    used: nodeStatus.memory?.heapUsed ?? null,
+    total: nodeStatus.memory?.heapLimit ?? nodeStatus.memory?.heapTotal ?? null,
+    committed: nodeStatus.memory?.heapTotal ?? null,
     rss: nodeStatus.memory?.rss ?? null,
-    totalMemory: nodeStatus.memory?.systemTotal ?? null,
-    freeMemory: nodeStatus.memory?.systemFree ?? null,
   };
 }
 
@@ -2570,84 +2572,98 @@ function memoryStat(label, entry, title = "", extraClass = "") {
   `;
 }
 
-function configRss(config, nodes) {
-  const apiNodes = Array.isArray(config.rss?.nodes) ? config.rss.nodes : null;
-  const rssNodes = apiNodes || nodes.map((nodeStatus) => ({
+function configMemory(config, nodes) {
+  const apiNodes = Array.isArray(config.heap?.nodes) ? config.heap.nodes : null;
+  const memoryNodes = apiNodes || nodes.map((nodeStatus) => ({
     nodeId: nodeStatus.node?.id || null,
     url: nodeStatus.node?.url || nodeStatus.sourcePeer?.url || null,
     local: nodeStatus.local === true,
     reachable: nodeStatus.reachable !== false,
-    rss: nodeStatus.memory?.rss ?? null,
-    rssMb: nodeStatus.memory?.rssMb ?? null,
-    totalMemory: nodeStatus.memory?.systemTotal ?? null,
-    totalMemoryMb: nodeStatus.memory?.systemTotalMb ?? null,
-    freeMemory: nodeStatus.memory?.systemFree ?? null,
-    freeMemoryMb: nodeStatus.memory?.systemFreeMb ?? null,
-    rssPercent: nodeStatus.memory?.rssSystemPercent ?? null,
+    used: nodeStatus.memory?.heapUsed ?? null,
+    usedMb: nodeStatus.memory?.heapUsedMb ?? null,
+    total: nodeStatus.memory?.heapLimit ?? nodeStatus.memory?.heapTotal ?? null,
+    totalMb: nodeStatus.memory?.heapLimitMb ?? nodeStatus.memory?.heapTotalMb ?? null,
+    committed: nodeStatus.memory?.heapTotal ?? null,
+    committedMb: nodeStatus.memory?.heapTotalMb ?? null,
+    percent: percentValue(nodeStatus.memory?.heapUsed, nodeStatus.memory?.heapLimit ?? nodeStatus.memory?.heapTotal),
     error: nodeStatus.reachable === false ? nodeStatus.error : undefined,
   }));
-  const fallbackTotal = rssNodes.reduce((sum, entry) => sum + (Number(entry.rss) || 0), 0);
-  const fallbackMemory = rssNodes.reduce((sum, entry) => sum + (Number(entry.totalMemory) || 0), 0);
-  const fallbackFree = rssNodes.reduce((sum, entry) => sum + (Number(entry.freeMemory) || 0), 0);
-  const cluster = config.rss?.logical || config.rss?.cluster || {};
-  const physical = config.rss?.physical || config.rss?.cluster || {};
+  const fallbackUsed = memoryNodes.reduce((sum, entry) => sum + (Number(memoryUsed(entry)) || 0), 0);
+  const fallbackTotal = memoryNodes.reduce((sum, entry) => sum + (Number(memoryTotal(entry)) || 0), 0);
+  const fallbackCommitted = memoryNodes.reduce((sum, entry) => sum + (Number(entry.committed) || 0), 0);
+  const cluster = config.heap?.logical || config.heap?.cluster || {};
+  const physical = config.heap?.physical || config.heap?.cluster || {};
   return {
-    cluster: clusterMemory(cluster, rssNodes, { fallbackTotal, fallbackMemory, fallbackFree }),
-    physical: clusterMemory(physical, rssNodes, { fallbackTotal, fallbackMemory, fallbackFree }),
-    nodes: rssNodes,
+    cluster: clusterMemory(cluster, memoryNodes, { fallbackUsed, fallbackTotal, fallbackCommitted }),
+    physical: clusterMemory(physical, memoryNodes, { fallbackUsed, fallbackTotal, fallbackCommitted }),
+    nodes: memoryNodes,
   };
 }
 
-function clusterMemory(cluster, rssNodes, fallback) {
-  const { fallbackTotal, fallbackMemory, fallbackFree } = fallback;
+function clusterMemory(cluster, memoryNodes, fallback) {
+  const { fallbackUsed, fallbackTotal, fallbackCommitted } = fallback;
   return {
     ...cluster,
-    rss: Number.isFinite(Number(cluster.rss)) ? Number(cluster.rss) : fallbackTotal,
-    rssMb: Number.isFinite(Number(cluster.rssMb)) ? Number(cluster.rssMb) : fallbackTotal / 1024 / 1024,
-    totalMemory: Number.isFinite(Number(cluster.totalMemory)) ? Number(cluster.totalMemory) : fallbackMemory,
-    totalMemoryMb: Number.isFinite(Number(cluster.totalMemoryMb)) ? Number(cluster.totalMemoryMb) : fallbackMemory / 1024 / 1024,
-    freeMemory: Number.isFinite(Number(cluster.freeMemory)) ? Number(cluster.freeMemory) : fallbackFree,
-    freeMemoryMb: Number.isFinite(Number(cluster.freeMemoryMb)) ? Number(cluster.freeMemoryMb) : fallbackFree / 1024 / 1024,
-    rssPercent: Number.isFinite(Number(cluster.rssPercent)) ? Number(cluster.rssPercent) : memoryPercent({ rss: fallbackTotal, totalMemory: fallbackMemory }),
-    nodeCount: Number.isInteger(cluster.nodeCount) ? cluster.nodeCount : rssNodes.length,
-    onlineNodeCount: Number.isInteger(cluster.onlineNodeCount) ? cluster.onlineNodeCount : rssNodes.filter((entry) => entry.reachable).length,
-    offlineNodeCount: Number.isInteger(cluster.offlineNodeCount) ? cluster.offlineNodeCount : rssNodes.filter((entry) => !entry.reachable).length,
+    used: Number.isFinite(Number(cluster.used)) ? Number(cluster.used) : fallbackUsed,
+    usedMb: Number.isFinite(Number(cluster.usedMb)) ? Number(cluster.usedMb) : fallbackUsed / 1024 / 1024,
+    total: Number.isFinite(Number(cluster.total)) ? Number(cluster.total) : fallbackTotal,
+    totalMb: Number.isFinite(Number(cluster.totalMb)) ? Number(cluster.totalMb) : fallbackTotal / 1024 / 1024,
+    committed: Number.isFinite(Number(cluster.committed)) ? Number(cluster.committed) : fallbackCommitted,
+    committedMb: Number.isFinite(Number(cluster.committedMb)) ? Number(cluster.committedMb) : fallbackCommitted / 1024 / 1024,
+    percent: Number.isFinite(Number(cluster.percent)) ? Number(cluster.percent) : memoryPercent({ used: fallbackUsed, total: fallbackTotal }),
+    nodeCount: Number.isInteger(cluster.nodeCount) ? cluster.nodeCount : memoryNodes.length,
+    onlineNodeCount: Number.isInteger(cluster.onlineNodeCount) ? cluster.onlineNodeCount : memoryNodes.filter((entry) => entry.reachable).length,
+    offlineNodeCount: Number.isInteger(cluster.offlineNodeCount) ? cluster.offlineNodeCount : memoryNodes.filter((entry) => !entry.reachable).length,
   };
 }
 
-function rssClusterTitle(rss) {
-  const cluster = rss.cluster;
-  const physical = rss.physical;
+function memoryClusterTitle(memory) {
+  const cluster = memory.cluster;
+  const physical = memory.physical;
   const shards = Number.isFinite(Number(cluster.shardCount))
     ? `; shards ${cluster.coveredShardCount}/${cluster.shardCount}`
     : "";
-  return `Logical RSS ${formatMemory(cluster.rss)} of ${formatMemory(cluster.totalMemory)} (${formatPercent(memoryPercent(cluster))})${shards}; physical ${formatMemory(physical.rss)} of ${formatMemory(physical.totalMemory)}; ${physical.onlineNodeCount}/${physical.nodeCount} nodes online`;
+  return `Logical heap ${formatMemory(memoryUsed(cluster))} of ${formatMemory(memoryTotal(cluster))} (${formatPercent(memoryPercent(cluster))})${shards}; physical ${formatMemory(memoryUsed(physical))} of ${formatMemory(memoryTotal(physical))}; ${physical.onlineNodeCount}/${physical.nodeCount} nodes online`;
 }
 
-function rssNodeTitle(entry) {
+function memoryNodeTitle(entry) {
   const name = entry.nodeId || entry.url || "unknown";
   return entry.reachable
-    ? `${name}: ${formatMemory(entry.rss)} RSS of ${formatMemory(entry.totalMemory)} (${formatPercent(memoryPercent(entry))}); free ${formatMemory(entry.freeMemory)}`
+    ? `${name}: ${formatMemory(memoryUsed(entry))} heap of ${formatMemory(memoryTotal(entry))} (${formatPercent(memoryPercent(entry))}); committed ${formatMemory(entry.committed)}`
     : `${name}: offline${entry.error ? ` (${entry.error})` : ""}`;
 }
 
-function rssNodeLabel(entry) {
+function memoryNodeLabel(entry) {
   const label = entry.nodeId || entry.url || "node";
   const clean = String(label).replace(/^https?:\/\//, "");
   return clean.length > 18 ? `${clean.slice(0, 15)}...` : clean;
 }
 
 function memoryUsageText(entry) {
-  const total = Number(entry.totalMemory);
-  if (!Number.isFinite(total) || total <= 0) return formatMemory(entry.rss);
-  return `${formatMemory(entry.rss)} / ${formatMemory(total)}`;
+  const total = Number(memoryTotal(entry));
+  if (!Number.isFinite(total) || total <= 0) return formatMemory(memoryUsed(entry));
+  return `${formatMemory(memoryUsed(entry))} / ${formatMemory(total)}`;
 }
 
 function memoryPercent(entry) {
-  const value = Number(entry.rss);
-  const total = Number(entry.totalMemory);
-  if (!Number.isFinite(value) || !Number.isFinite(total) || total <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((value / total) * 1000) / 10));
+  const percent = Number(entry.percent);
+  if (Number.isFinite(percent)) return Math.max(0, Math.min(100, percent));
+  return percentValue(memoryUsed(entry), memoryTotal(entry)) || 0;
+}
+
+function memoryUsed(entry) {
+  return entry?.used ?? entry?.heapUsed ?? entry?.rss ?? null;
+}
+
+function memoryTotal(entry) {
+  return entry?.total ?? entry?.heapLimit ?? entry?.totalMemory ?? entry?.heapTotal ?? null;
+}
+
+function percentValue(value, total) {
+  const number = Number(value);
+  const denominator = Number(total);
+  if (!Number.isFinite(number) || !Number.isFinite(denominator) || denominator <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((number / denominator) * 1000) / 10));
 }
 
 function memoryTone(percent) {
@@ -2672,7 +2688,7 @@ function clusterTitle({ nodes, shards, peers }) {
 
 function nodeMemoryTitle(nodes) {
   if (!nodes.length) return "No nodes";
-  return nodes.map((nodeStatus) => `${nodeName(nodeStatus)}: ${nodeStatus.memory ? formatMemory(nodeStatus.memory.rss) : "offline"}`).join("\n");
+  return nodes.map((nodeStatus) => `${nodeName(nodeStatus)}: ${nodeStatus.memory ? formatMemory(nodeStatus.memory.heapUsed) : "offline"}`).join("\n");
 }
 
 function shardTitle(shards) {

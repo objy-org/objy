@@ -50,7 +50,7 @@ export function createClusterInterface() {
         const scope = scopeFromParams(req.query);
         if (node.needsSnapshot(after, scope)) {
           json(res, 410, {
-            error: "log truncated, snapshot required",
+            error: "log truncated, durable catch-up required",
             node: node.id,
             lastSeq: node.seq,
             trimmed: node.trimmed,
@@ -84,10 +84,6 @@ export function createClusterInterface() {
         }
       }));
 
-      router.get("/replicate/snapshot", secure((req, res) => {
-        json(res, 200, node.snapshot(scopeFromParams(req.query)));
-      }));
-
       router.post("/replicate", secure(async (req, res) => {
         const body = await readJson(req);
         node.applyRemote(String(body.node || ""), Array.isArray(body.ops) ? body.ops : []);
@@ -112,13 +108,6 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
       const r = await fetchWithTimeout(`${base}/replicate?${params}`, { headers: clusterHeaders(secret) }, timeout);
       const body = await r.json().catch(() => null);
       return { status: r.status, ...(body || {}) };
-    },
-    snapshot: async (scope) => {
-      const params = new URLSearchParams();
-      addScopeParams(params, scope);
-      const suffix = params.size ? `?${params}` : "";
-      const r = await fetchWithTimeout(`${base}/replicate/snapshot${suffix}`, { headers: clusterHeaders(secret) }, timeout);
-      return r.ok ? await r.json() : null;
     },
     ack: async (id, after, scope) => {
       await fetchWithTimeout(`${base}/replicate/ack`, {

@@ -19,6 +19,7 @@ import {
   mergeReadPermissionQuery,
   permissionError,
 } from "../permissions.js";
+import { DEFAULT_IMPORT_CONFIG } from "../config.js";
 import { matchesQuery, splitQueryControls } from "../query.js";
 import { QUERY_PATH_HEADER } from "../query-planner.js";
 import {
@@ -44,8 +45,9 @@ const READ_ONLY_DATABASES = new Set([GLOBAL_DATABASE]);
 export function createPublicObjectInterface() {
   return {
     name: "public-object",
-    register(router, { node, auth, routing, durability, memoryGuard, replicationScheduler, files }) {
+    register(router, { node, auth, routing, durability, memoryGuard, replicationScheduler, files, imports }) {
       const secure = secureRoute(auth);
+      const importLimits = normalizeImportLimits(imports);
 
       router.get("/api/databases", secure((req, res) => {
         const databases = node.listDatabases().sort();
@@ -121,6 +123,7 @@ export function createPublicObjectInterface() {
               },
               durability,
               memoryGuard,
+              imports: importLimits,
             });
             adminResult = {
               collection: adminUser.collection,
@@ -337,7 +340,7 @@ export function createPublicObjectInterface() {
       router.post("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isMultipartRequest(req)) {
-          return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files });
+          return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
         }
         const body = await readJson(req);
         const isBulk = Array.isArray(body);
@@ -347,6 +350,7 @@ export function createPublicObjectInterface() {
         let items;
         try {
           items = normalizeFileObjects(files, req.params.database, req.params.collection, withObjectIds(rawItems));
+          assertImportWriteAccepts({ req, imports: importLimits, durability, objects: items });
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -445,6 +449,7 @@ export function createPublicObjectInterface() {
             durability,
             memoryGuard,
             files,
+            imports: importLimits,
           });
           json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
         } catch (err) {
@@ -470,6 +475,7 @@ export function createPublicObjectInterface() {
             durability,
             memoryGuard,
             files,
+            imports: importLimits,
           });
           json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
         } catch (err) {
@@ -495,7 +501,7 @@ export function createPublicObjectInterface() {
       router.put("/api/:database/:collection/object/:id", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isMultipartRequest(req)) {
-          return multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files });
+          return multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
         }
         const body = await readJson(req);
         const error = validatePlainObjects([body || {}]);
@@ -529,6 +535,7 @@ export function createPublicObjectInterface() {
             { partial: false },
           );
           const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
+          assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
           assertUpsertAllowed(req, node, req.params.database, req.params.collection, [preparedObject], { partial: false });
           assertMemoryGuardAcceptsWrites(memoryGuard);
           const before = node.get(req.params.database, req.params.collection, req.params.id);
@@ -593,6 +600,7 @@ export function createPublicObjectInterface() {
             { partial: true },
           );
           const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
+          assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
           assertUpdateAllowed(req, node, req.params.database, req.params.collection, [preparedObject]);
           assertMemoryGuardAcceptsWrites(memoryGuard);
           const before = node.get(req.params.database, req.params.collection, req.params.id);
@@ -645,7 +653,7 @@ export function createPublicObjectInterface() {
   };
 }
 
-async function multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files }) {
+async function multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
   if (!files) return json(res, 404, { error: "file storage is not configured" });
   try {
     assertMemoryGuardAcceptsWrites(memoryGuard);
@@ -689,6 +697,7 @@ async function multipartCreateObject({ req, res, node, auth, routing, durability
     }
     const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
     const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
+    assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
     assertCreateAllowed(req, [prepared], req.params.database);
     await files.put(req.params.database, req.params.collection, item._id, objectWithFile._file, file);
     const [row] = node.insertMany(req.params.database, req.params.collection, [prepared]);
@@ -707,7 +716,7 @@ async function multipartCreateObject({ req, res, node, auth, routing, durability
   }
 }
 
-async function multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files }) {
+async function multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
   if (!files) return json(res, 404, { error: "file storage is not configured" });
   try {
     assertMemoryGuardAcceptsWrites(memoryGuard);
@@ -748,6 +757,7 @@ async function multipartReplaceObject({ req, res, node, auth, routing, durabilit
 
     const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
     const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
+    assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
     assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
     const before = node.get(req.params.database, req.params.collection, req.params.id);
     await files.put(req.params.database, req.params.collection, req.params.id, objectWithFile._file, file);
@@ -873,7 +883,9 @@ async function routedWriteMany({
   durability,
   memoryGuard,
   files,
+  imports,
 }) {
+  assertImportWriteAccepts({ req, imports, durability, objects });
   const rows = [];
   const removedFileObjects = [];
   let total = 0;
@@ -945,7 +957,9 @@ async function routedPatchMany({
   durability,
   memoryGuard,
   files,
+  imports,
 }) {
+  assertImportWriteAccepts({ req, imports, durability, objects: patches });
   const rows = [];
   const skipped = [];
   const removedFileObjects = [];
@@ -1452,10 +1466,92 @@ function remoteError(remote, fallback) {
   return err;
 }
 
-function httpError(status, message) {
+function httpError(status, message, body, headers) {
   const err = new Error(message);
   err.status = status;
+  if (body) err.body = body;
+  if (headers) err.headers = headers;
   return err;
+}
+
+function normalizeImportLimits(config = {}) {
+  return {
+    maxBulkObjects: positiveInt(config.maxBulkObjects, DEFAULT_IMPORT_CONFIG.maxBulkObjects),
+    maxBulkBytes: positiveInt(config.maxBulkBytes, DEFAULT_IMPORT_CONFIG.maxBulkBytes),
+    maxObjectBytes: positiveInt(config.maxObjectBytes, DEFAULT_IMPORT_CONFIG.maxObjectBytes),
+    maxPendingPersistenceBytes: positiveInt(config.maxPendingPersistenceBytes, DEFAULT_IMPORT_CONFIG.maxPendingPersistenceBytes),
+    retryAfterMs: positiveInt(config.retryAfterMs, DEFAULT_IMPORT_CONFIG.retryAfterMs),
+  };
+}
+
+function assertImportWriteAccepts({ req, imports, durability, objects = [], ignoreBodyBytes = false }) {
+  if (objects.length > imports.maxBulkObjects) {
+    throw httpError(413, "bulk write contains too many objects", {
+      error: "bulk write contains too many objects",
+      count: objects.length,
+      maxBulkObjects: imports.maxBulkObjects,
+    });
+  }
+
+  const bodyBytes = ignoreBodyBytes ? 0 : jsonRequestBytes(req);
+  if (bodyBytes > imports.maxBulkBytes) {
+    throw httpError(413, "bulk write is too large", {
+      error: "bulk write is too large",
+      bytes: bodyBytes,
+      maxBulkBytes: imports.maxBulkBytes,
+    });
+  }
+
+  assertObjectByteLimit(objects, imports.maxObjectBytes);
+  const pendingBytes = pendingPersistenceBytes(durability);
+  if (pendingBytes > imports.maxPendingPersistenceBytes) {
+    const retryAfterSeconds = Math.max(1, Math.ceil(imports.retryAfterMs / 1000));
+    throw httpError(503, "persistence backlog is full", {
+      error: "persistence backlog is full",
+      pendingBytes,
+      maxPendingPersistenceBytes: imports.maxPendingPersistenceBytes,
+    }, {
+      "retry-after": String(retryAfterSeconds),
+      "x-spread-db-pressure": "persistence",
+    });
+  }
+}
+
+function assertObjectByteLimit(objects, maxObjectBytes) {
+  if (!maxObjectBytes) return;
+  for (let i = 0; i < objects.length; i++) {
+    const bytes = jsonByteLength(objects[i], `write object ${i}`);
+    if (bytes <= maxObjectBytes) continue;
+    const err = httpError(413, "object is too large", {
+      error: "object is too large",
+      index: i,
+      bytes,
+      maxObjectBytes,
+    });
+    err.index = i;
+    throw err;
+  }
+}
+
+function jsonRequestBytes(req) {
+  const type = String(req.headers?.["content-type"] || "");
+  return type.includes("application/json") ? Number(req._bodyBytes) || 0 : 0;
+}
+
+function pendingPersistenceBytes(durability) {
+  const stats = durability?.getStats?.() || {};
+  return (Number(stats.pendingBytes) || 0) + (Number(stats.localWal?.pendingBytes) || 0);
+}
+
+function jsonByteLength(value, label) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value));
+  } catch (err) {
+    if (err instanceof RangeError) {
+      throw httpError(413, "object is too large", { error: "object is too large", label });
+    }
+    throw err;
+  }
 }
 
 function proxyJson(res, remote) {
@@ -1590,6 +1686,11 @@ function firstNumberParam(...values) {
     if (parsed !== undefined) return parsed;
   }
   return undefined;
+}
+
+function positiveInt(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }
 
 function pageOffset(page, pageSize) {

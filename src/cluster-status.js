@@ -1,4 +1,5 @@
 import { freemem, totalmem } from "node:os";
+import { getHeapStatistics } from "node:v8";
 import { DEFAULT_SHARD, peerKey } from "./shard-map.js";
 import { CLUSTER_SECRET_HEADER } from "./interfaces/cluster.js";
 
@@ -53,6 +54,7 @@ export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard
     shards: shardSummaries(node, shardMap, nodes),
     peers: peerSummaries(node, shardMap, nodes),
     rss: rssSummary(nodes, shardMap),
+    heap: heapSummary(nodes, shardMap),
     nodes,
   };
 }
@@ -136,6 +138,18 @@ function rssSummary(nodes, shardMap) {
   };
 }
 
+function heapSummary(nodes, shardMap) {
+  const perNode = nodes.map(nodeHeapEntry);
+  const physical = heapTotals(perNode);
+  const logical = logicalMemoryTotals(nodes, perNode, shardMap, heapTotals);
+  return {
+    cluster: logical,
+    logical,
+    physical,
+    nodes: perNode,
+  };
+}
+
 function nodeMemoryEntry(status) {
   const rss = status.memory?.rss ?? null;
   const totalMemory = status.memory?.systemTotal ?? null;
@@ -153,6 +167,33 @@ function nodeMemoryEntry(status) {
     freeMemory,
     freeMemoryMb: freeMemory === null ? null : mib(freeMemory),
     rssPercent: percent(rss, totalMemory),
+    error: status.reachable === false ? status.error : undefined,
+  };
+}
+
+function nodeHeapEntry(status) {
+  const heapUsed = status.memory?.heapUsed ?? null;
+  const heapTotal = status.memory?.heapTotal ?? null;
+  const heapLimit = status.memory?.heapLimit ?? heapTotal;
+  return {
+    key: nodeStatusKey(status),
+    nodeId: status.node?.id || null,
+    url: status.node?.url || status.sourcePeer?.url || null,
+    local: status.local === true,
+    reachable: status.reachable !== false,
+    used: heapUsed,
+    usedMb: heapUsed === null ? null : mib(heapUsed),
+    total: heapLimit,
+    totalMb: heapLimit === null ? null : mib(heapLimit),
+    committed: heapTotal,
+    committedMb: heapTotal === null ? null : mib(heapTotal),
+    heapUsed,
+    heapUsedMb: heapUsed === null ? null : mib(heapUsed),
+    heapTotal,
+    heapTotalMb: heapTotal === null ? null : mib(heapTotal),
+    heapLimit,
+    heapLimitMb: heapLimit === null ? null : mib(heapLimit),
+    percent: percent(heapUsed, heapLimit),
     error: status.reachable === false ? status.error : undefined,
   };
 }
@@ -177,7 +218,33 @@ function memoryTotals(entries, extra = {}) {
   };
 }
 
-function logicalMemoryTotals(nodes, perNode, shardMap) {
+function heapTotals(entries, extra = {}) {
+  const used = sumField(entries, "used");
+  const total = sumField(entries, "total");
+  const committed = sumField(entries, "committed");
+  const online = entries.filter((entry) => entry.reachable).length;
+  return {
+    used,
+    usedMb: mib(used),
+    total,
+    totalMb: mib(total),
+    committed,
+    committedMb: mib(committed),
+    heapUsed: used,
+    heapUsedMb: mib(used),
+    heapLimit: total,
+    heapLimitMb: mib(total),
+    heapTotal: committed,
+    heapTotalMb: mib(committed),
+    percent: percent(used, total),
+    nodeCount: entries.length,
+    onlineNodeCount: online,
+    offlineNodeCount: entries.length - online,
+    ...extra,
+  };
+}
+
+function logicalMemoryTotals(nodes, perNode, shardMap, totals = memoryTotals) {
   const byKey = new Map(perNode.map((entry) => [entry.key, entry]));
   const selected = new Map();
   const selectedReplicas = [];
@@ -208,7 +275,7 @@ function logicalMemoryTotals(nodes, perNode, shardMap) {
   }
 
   if (!sawConfiguredPeer) {
-    return memoryTotals(perNode, {
+    return totals(perNode, {
       shardCount: shards.length,
       coveredShardCount: perNode.some((entry) => entry.reachable) ? shards.length : 0,
       missingShardCount: 0,
@@ -218,7 +285,7 @@ function logicalMemoryTotals(nodes, perNode, shardMap) {
     });
   }
 
-  return memoryTotals([...selected.values()], {
+  return totals([...selected.values()], {
     shardCount: shards.length,
     coveredShardCount: selectedReplicas.length,
     missingShardCount: missingShards.length,
@@ -306,6 +373,7 @@ function describePeer(peer = {}) {
 
 function memorySnapshot() {
   const usage = process.memoryUsage();
+  const heap = getHeapStatistics();
   const systemTotal = totalmem();
   const systemFree = freemem();
   return {
@@ -320,6 +388,8 @@ function memorySnapshot() {
     heapUsedMb: mib(usage.heapUsed),
     heapTotal: usage.heapTotal,
     heapTotalMb: mib(usage.heapTotal),
+    heapLimit: heap.heap_size_limit,
+    heapLimitMb: mib(heap.heap_size_limit),
     external: usage.external,
     externalMb: mib(usage.external),
     arrayBuffers: usage.arrayBuffers,

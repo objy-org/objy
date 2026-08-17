@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CRDTNode, localPeer } from "../src/crdt.js";
+import { MemoryObjectStorage } from "../src/object-storage.js";
+import { PersistenceManager } from "../src/persistence.js";
 
 function shardMapFor(shardNames, peerByShard = {}) {
   return {
@@ -34,6 +36,8 @@ test("large sharded cluster recovers failed replicas and converges", async () =>
   const mutationCount = 1200;
   const shardNames = Array.from({ length: shardCount }, (_, i) => `events-${i}`);
   const writer = new CRDTNode({ id: "writer", retainOps: 0, syncBatchSize: 256 });
+  const storage = new MemoryObjectStorage();
+  const writerPersistence = new PersistenceManager({ node: writer, storage, segmentBytes: 64 * 1024 });
   const replicas = new Map();
 
   writer.replaceShardMap(shardMapFor(shardNames));
@@ -43,6 +47,8 @@ test("large sharded cluster recovers failed replicas and converges", async () =>
       shard,
       Array.from({ length: replicasPerShard }, (_, i) => {
         const node = new CRDTNode({ id: `${shard}-replica-${i}`, syncBatchSize: 128 });
+        const persistence = new PersistenceManager({ node, storage });
+        node.setLogTruncatedHandler(({ scope }) => persistence.restoreScope(scope));
         node.replaceShardMap(shardMapFor(shardNames, { [shard]: [localPeer(writer)] }));
         return node;
       }),
@@ -61,6 +67,7 @@ test("large sharded cluster recovers failed replicas and converges", async () =>
       payload: { bucket: i % 103, region: `r${i % 7}` },
     });
   }
+  await writerPersistence.checkpoint();
 
   for (const shardReplicas of replicas.values()) {
     await Promise.all(shardReplicas.map((node) => node.syncAll()));
@@ -83,6 +90,7 @@ test("large sharded cluster recovers failed replicas and converges", async () =>
       });
     }
   }
+  await writerPersistence.checkpoint();
 
   for (const [shard, shardReplicas] of replicas) {
     const online = shardReplicas.filter((node) => node !== failed.get(shard));
@@ -116,7 +124,7 @@ test("multi-writer shard replicas converge after partition and heal", async () =
   const ids = Array.from({ length: 1500 }, (_, i) => `event-${i}`);
   const nodes = Array.from(
     { length: 5 },
-    (_, i) => new CRDTNode({ id: `node-${i}`, retainOps: 64, syncBatchSize: 200 }),
+    (_, i) => new CRDTNode({ id: `node-${i}`, retainOps: 2000, syncBatchSize: 200 }),
   );
 
   for (const node of nodes) {

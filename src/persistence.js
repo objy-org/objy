@@ -5,6 +5,8 @@ import { createObjectStorage } from "./object-storage.js";
 
 const DEFAULT_PREFIX = "spread-db";
 const DEFAULT_SEGMENT_BYTES = 16 * 1024 * 1024;
+const DEFAULT_JOURNAL_BYTES = 4 * 1024 * 1024;
+const RESTORE_APPLY_BATCH_SIZE = 10_000;
 let snapshotSequence = 0;
 
 export class PersistenceManager {
@@ -14,6 +16,7 @@ export class PersistenceManager {
     prefix = DEFAULT_PREFIX,
     flushMs = 5000,
     opBatchSize = 1000,
+    journalMaxBytes = DEFAULT_JOURNAL_BYTES,
     snapshotMs = 60_000,
     segmentBytes = DEFAULT_SEGMENT_BYTES,
     compactJournals = true,
@@ -34,6 +37,7 @@ export class PersistenceManager {
     this.prefix = normalizePrefix(prefix);
     this.flushMs = Math.max(0, Number(flushMs) || 0);
     this.opBatchSize = Math.max(1, Number(opBatchSize) || 1000);
+    this.journalMaxBytes = Math.max(1024, Number(journalMaxBytes) || DEFAULT_JOURNAL_BYTES);
     this.snapshotMs = Math.max(0, Number(snapshotMs) || 0);
     this.segmentBytes = Math.max(1024, Number(segmentBytes) || DEFAULT_SEGMENT_BYTES);
     this.compactJournals = compactJournals !== false;
@@ -50,12 +54,14 @@ export class PersistenceManager {
       throw new Error("persistence.ack localWal requires persistence.localWal.mode on");
     }
     this.pending = new Map();
+    this.pendingBytes = 0;
     this.dirtyScopes = new Map();
     this.pendingDatabases = new Map();
     this.pendingDatabaseDrops = new Set();
     this.pendingMeta = new Map();
     this.pendingCollectionDrops = new Set();
     this.localWalPending = [];
+    this.localWalPendingBytes = 0;
     this.flushTimer = null;
     this.localWalTimer = null;
     this.snapshotTimer = null;
@@ -71,98 +77,50 @@ export class PersistenceManager {
     const root = this._rootPrefix();
     const keys = await this.storage.list(root);
     const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix));
-    const stats = {
-      scopes: 0,
-      databases: 0,
-      metadata: 0,
-      snapshots: 0,
-      snapshotObjects: 0,
-      journals: 0,
-      journalOps: 0,
-      localWalRecords: 0,
-      localWalOps: 0,
-      localWalDatabases: 0,
-      localWalDatabaseDrops: 0,
-      localWalMetadata: 0,
-      localWalCollectionDrops: 0,
-      localWalSkippedPartialRecords: 0,
-      skippedJournals: 0,
-      skippedJournalOps: 0,
-    };
+    const stats = restoreStats();
     let maxLocalSeq = this.node.seq;
 
-    stats.databases = await this._restoreDatabaseMetadata(keys);
-    stats.metadata = await this._restoreMetadata(keys);
-
-    const restoredByScope = new Map();
     this.node.db.beginBulkLoad?.();
     try {
-      for (const scope of scopes) {
-        stats.scopes++;
-        const restored = await this._restoreSnapshot(scope);
-        restoredByScope.set(scopeKey(scope), restored);
-        if (restored) {
-          stats.snapshots++;
-          stats.snapshotObjects += restored.objects;
-          if (restored.node === this.node.id) maxLocalSeq = Math.max(maxLocalSeq, restored.seq);
-        }
+      stats.databases = await this._restoreDatabaseMetadata(keys);
+      stats.metadata = await this._restoreMetadata(keys);
+      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq);
+
+      if (this.localWal && !this.restoreSnapshotId) {
+        const local = await this._restoreLocalWal();
+        stats.localWalRecords = local.records;
+        stats.localWalOps = local.ops;
+        stats.localWalDatabases = local.databases;
+        stats.localWalDatabaseDrops = local.databaseDrops;
+        stats.localWalMetadata = local.metadata;
+        stats.localWalCollectionDrops = local.collectionDrops;
+        stats.localWalSkippedPartialRecords = local.skippedPartialRecords;
+        maxLocalSeq = Math.max(maxLocalSeq, local.maxLocalSeq);
       }
     } finally {
       this.node.db.endBulkLoad?.();
     }
 
-    for (const scope of scopes) {
-      if (this.restoreSnapshotId) continue;
-      const snapshotCursors = restoredByScope.get(scopeKey(scope))?.cursors || {};
+    this.node.seq = Math.max(this.node.seq, maxLocalSeq);
+    if (this.node.log.length === 0) this.node.trimmed = Math.max(this.node.trimmed, this.node.seq);
+    return stats;
+  }
 
-      const journalKeys = keys.filter((key) => key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`));
-      for (const key of journalKeys.sort()) {
-        const journalInfo = parseJournalKey(key, this.prefix);
-        const sourceFromKey = journalInfo?.node;
-        const coveredFromKey = Number(sourceFromKey ? snapshotCursors[sourceFromKey] : 0) || 0;
-        if (journalInfo?.lastSeq && coveredFromKey >= journalInfo.lastSeq) {
-          stats.skippedJournals++;
-          stats.skippedJournalOps += journalInfo.count || 0;
-          continue;
-        }
+  async restoreScope(scope) {
+    const root = this._rootPrefix();
+    const keys = await this.storage.list(root);
+    const scopes = this._filterCatchUpScopes(uniqueScopes(keys, this.prefix), scope);
+    const stats = restoreStats();
+    let maxLocalSeq = this.node.seq;
 
-        const raw = await this.storage.get(key);
-        if (!raw) continue;
-        const segment = JSON.parse(raw);
-        const sourceNode = segment.node || "persistence";
-        const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
-        const segmentOps = Array.isArray(segment.ops) ? segment.ops : [];
-        const ops = this._filterRestoreOps(scope, segmentOps.filter((op) => {
-          const seq = Number(op?.seq);
-          return !Number.isFinite(seq) || seq > coveredSeq;
-        }));
-        if (!ops.length && segmentOps.length) {
-          stats.skippedJournals++;
-          stats.skippedJournalOps += segmentOps.length;
-          continue;
-        }
-        this.node.applyRemote(sourceNode, ops, `persistence:${key}`);
-        rememberRestoredCursor(this.node, sourceNode, scope, ops);
-        for (const op of ops) {
-          if (op.from === this.node.id && Number.isFinite(op.seq)) {
-            maxLocalSeq = Math.max(maxLocalSeq, op.seq);
-          }
-        }
-        stats.journals++;
-        stats.journalOps += ops.length;
-      }
-    }
-
-    if (this.localWal && !this.restoreSnapshotId) {
-      const local = await this._restoreLocalWal();
-      stats.localWalRecords = local.records;
-      stats.localWalOps = local.ops;
-      stats.localWalDatabases = local.databases;
-      stats.localWalDatabaseDrops = local.databaseDrops;
-      stats.localWalMetadata = local.metadata;
-      stats.localWalCollectionDrops = local.collectionDrops;
-      stats.localWalSkippedPartialRecords = local.skippedPartialRecords;
-      maxLocalSeq = Math.max(maxLocalSeq, local.maxLocalSeq);
+    this.node.db.beginBulkLoad?.();
+    try {
+      stats.databases = await this._restoreDatabaseMetadata(keys);
+      stats.metadata = await this._restoreMetadata(keys);
+      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq);
+      if (!scope) this._rememberUnscopedCursors(scopes);
+    } finally {
+      this.node.db.endBulkLoad?.();
     }
 
     this.node.seq = Math.max(this.node.seq, maxLocalSeq);
@@ -248,6 +206,7 @@ export class PersistenceManager {
     return {
       pendingScopes: this.pending.size,
       pendingOps: [...this.pending.values()].reduce((sum, ops) => sum + ops.length, 0),
+      pendingBytes: this.pendingBytes,
       dirtyScopes: this.dirtyScopes.size,
       dirtyOps: [...this.dirtyScopes.values()].reduce((sum, dirty) => sum + dirty.ops, 0),
       pendingDatabases: this.pendingDatabases.size,
@@ -259,6 +218,7 @@ export class PersistenceManager {
         path: this.localWal.filePath,
         fsync: this.localWal.fsync,
         pendingRecords: this.localWalPending.length,
+        pendingBytes: this.localWalPendingBytes,
         flushActive: this.localWalFlushing !== null,
       } : null,
       lastError: this.lastError?.message || null,
@@ -312,6 +272,7 @@ export class PersistenceManager {
     for (const key of [...this.pending.keys()]) {
       if (parseScopeKey(key).database === change.database) this.pending.delete(key);
     }
+    this.pendingBytes = pendingOpsJsonBytes(this.pending);
     this._removePendingLocalWalForDatabase(change.database);
     this._queueLocalWal({
       type: "dropDatabase",
@@ -342,6 +303,7 @@ export class PersistenceManager {
         this.pending.delete(pendingKey);
       }
     }
+    this.pendingBytes = pendingOpsJsonBytes(this.pending);
     this._queueLocalWal({
       type: "dropCollection",
       database: change.database,
@@ -356,13 +318,18 @@ export class PersistenceManager {
       if (queued) cloned.push(queued);
     }
     if (!cloned.length) return;
-    this._queueLocalWal({
-      type: "ops",
-      ...commonScope(cloned),
-      ...seqRange(cloned),
-      count: cloned.length,
-      ops: cloned,
-    });
+    if (!this.localWal) return;
+    const maxBytes = this.localWal?.maxRecordBytes || this.journalMaxBytes;
+    const maxOps = this.localWal?.maxOpsPerRecord || this.opBatchSize;
+    for (const chunk of chunkOpsForRecord(cloned, { maxBytes, maxOps, label: "local WAL ops record" })) {
+      this._queueLocalWal({
+        type: "ops",
+        ...commonScope(chunk),
+        ...seqRange(chunk),
+        count: chunk.length,
+        ops: chunk,
+      });
+    }
   }
 
   _queueOp(op) {
@@ -373,6 +340,7 @@ export class PersistenceManager {
     const pending = this.pending.get(key) || [];
     pending.push(cloned);
     this.pending.set(key, pending);
+    this.pendingBytes += jsonBytes(cloned, "pending journal op");
     this._markDirty(key, cloned);
     if (pending.length >= this.opBatchSize) {
       this.flush().catch((err) => (this.lastError = err));
@@ -382,12 +350,14 @@ export class PersistenceManager {
 
   _queueLocalWal(record) {
     if (!this.localWal) return;
-    this.localWalPending.push({
+    const entry = {
       version: 1,
       node: this.node.id,
       createdAt: new Date().toISOString(),
       ...record,
-    });
+    };
+    this.localWalPending.push(entry);
+    this.localWalPendingBytes += jsonBytes(entry, "pending local WAL record") + 1;
   }
 
   _removePendingLocalWalForCollection(database, collection) {
@@ -405,6 +375,7 @@ export class PersistenceManager {
       if (record.database !== database || record.collection !== collection) return true;
       return record.type !== "meta" && record.type !== "dropCollection";
     });
+    this.localWalPendingBytes = pendingWalJsonBytes(this.localWalPending);
   }
 
   _removePendingLocalWalForDatabase(database) {
@@ -421,6 +392,7 @@ export class PersistenceManager {
       }
       return record.database !== database;
     });
+    this.localWalPendingBytes = pendingWalJsonBytes(this.localWalPending);
   }
 
   _markDirty(key, op) {
@@ -444,6 +416,7 @@ export class PersistenceManager {
     const metadata = this.pendingMeta;
     const collectionDrops = this.pendingCollectionDrops;
     this.pending = new Map();
+    this.pendingBytes = 0;
     this.pendingDatabases = new Map();
     this.pendingDatabaseDrops = new Set();
     this.pendingMeta = new Map();
@@ -503,6 +476,7 @@ export class PersistenceManager {
     if (!this.localWal || !this.localWalPending.length) return emptyLocalFlushStats();
     const records = this.localWalPending;
     this.localWalPending = [];
+    this.localWalPendingBytes = 0;
 
     try {
       const written = await this.localWal.append(records);
@@ -517,6 +491,7 @@ export class PersistenceManager {
       };
     } catch (err) {
       this.localWalPending = [...records, ...this.localWalPending];
+      this.localWalPendingBytes = pendingWalJsonBytes(this.localWalPending);
       this.lastError = err;
       throw err;
     }
@@ -533,6 +508,7 @@ export class PersistenceManager {
       const current = this.pending.get(key) || [];
       this.pending.set(key, [...ops, ...current]);
     }
+    this.pendingBytes = pendingOpsJsonBytes(this.pending);
   }
 
   _requeueDatabases(databases) {
@@ -580,23 +556,21 @@ export class PersistenceManager {
   }
 
   async _writeJournalBatch(scope, ops) {
+    for (const chunk of chunkOpsForRecord(ops, {
+      maxBytes: this.journalMaxBytes,
+      maxOps: this.opBatchSize,
+      label: `${scopeKey(scope)} journal`,
+    })) {
+      await this._writeJournalSegment(scope, chunk);
+    }
+  }
+
+  async _writeJournalSegment(scope, ops) {
     const seqs = ops.map((op) => Number(op.seq)).filter(Number.isFinite);
     const firstSeq = seqs.length ? Math.min(...seqs) : 0;
     const lastSeq = seqs.length ? Math.max(...seqs) : 0;
-    const segment = {
-      version: 1,
-      node: this.node.id,
-      createdAt: new Date().toISOString(),
-      database: scope.database,
-      collection: scope.collection,
-      shard: scope.shard,
-      firstSeq,
-      lastSeq,
-      count: ops.length,
-      ops,
-    };
-    const key = `${scopePrefix(this.prefix, scope)}/journal/${safe(this.node.id)}/${Date.now()}-${pad(firstSeq)}-${pad(lastSeq)}-${randomUUID()}.json`;
-    await this.storage.put(key, JSON.stringify(segment), "application/json");
+    const key = `${scopePrefix(this.prefix, scope)}/journal/${safe(this.node.id)}/${Date.now()}-${pad(firstSeq)}-${pad(lastSeq)}-${randomUUID()}.jsonl`;
+    await this.storage.put(key, jsonlBody(ops, `${scopeKey(scope)} journal`), "application/x-ndjson");
   }
 
   async _checkpointOnce(options = {}) {
@@ -679,11 +653,33 @@ export class PersistenceManager {
     return scopes.filter((scope) => targets.some((target) => matchesRestoreTarget(scope, target)));
   }
 
+  _filterCatchUpScopes(scopes, scope) {
+    if (!scope) return this._filterRestoreScopes(scopes);
+    return scopes.filter((candidate) => matchesRestoreTarget(candidate, scope));
+  }
+
   _filterRestoreObjects(scope, objects) {
     if (this.restoreMode !== "reshard") return objects;
     const targets = this.restoreScopes || this.node.ownedShardTargets();
     if (!targets.length || targets.some(isGlobalTarget)) return objects;
-    return objects.filter((object) => this._objectMatchesRestoreTargets(scope.database, scope.collection, object.id, targets));
+    const out = [];
+    for (const object of objects || []) {
+      const row = this._filterRestoreObject(scope, object, targets);
+      if (row) out.push(row);
+    }
+    return out;
+  }
+
+  _filterRestoreObject(scope, object, targets = null) {
+    if (!object) return null;
+    if (this.restoreMode !== "reshard") return object;
+    const restoreTargets = targets || this.restoreScopes || this.node.ownedShardTargets();
+    if (!restoreTargets.length || restoreTargets.some(isGlobalTarget)) return object;
+    if (!this._objectMatchesRestoreTargets(scope.database, scope.collection, object.id, restoreTargets)) return null;
+    return {
+      ...object,
+      shard: this.node.shardForObject(scope.database, scope.collection, object.id),
+    };
   }
 
   _filterRestoreOps(scope, ops) {
@@ -712,10 +708,10 @@ export class PersistenceManager {
     const segments = [];
     let objectCount = 0;
 
-    for (const chunk of chunkJsonIterable(this.node.snapshotScopeObjects(scope), this.segmentBytes, `${scopeKey(scope)} snapshot`)) {
-      const key = `${base}/segment-${String(segments.length).padStart(6, "0")}.json`;
-      await this.storage.put(key, chunk.body, "application/json");
-      segments.push({ key, count: chunk.count, bytes: chunk.bytes });
+    for (const chunk of chunkJsonlIterable(this.node.snapshotScopeObjects(scope), this.segmentBytes, `${scopeKey(scope)} snapshot`)) {
+      const key = `${base}/segment-${String(segments.length).padStart(6, "0")}.jsonl`;
+      await this.storage.put(key, chunk.body, "application/x-ndjson");
+      segments.push({ key, count: chunk.count, bytes: chunk.bytes, format: "jsonl" });
       objectCount += chunk.count;
     }
 
@@ -731,6 +727,7 @@ export class PersistenceManager {
       databaseMeta: clone(this.node.getDatabaseMeta(scope.database) || {}),
       collectionMeta: clone(this.node.getCollectionMeta(scope.database, scope.collection) || {}),
       cursors: this._snapshotCursors(scope),
+      format: "jsonl",
       objectCount,
       segments,
     };
@@ -776,17 +773,7 @@ export class PersistenceManager {
     if (this.restoreSnapshotId) this._restoreManifestMetadata(scope, manifest);
 
     for (const segment of manifest.segments || []) {
-      const body = await this.storage.get(segment.key);
-      if (body === null) throw new Error(`snapshot segment missing: ${segment.key}`);
-      const rows = this._filterRestoreObjects(scope, JSON.parse(body));
-      const sourceNode = manifest.node || "persistence";
-      const cursorKey = this.node._cursorKey ? this.node._cursorKey(sourceNode, scope) : `persistence:${scopeKey(scope)}:snapshot`;
-      this.node.applySnapshot(sourceNode, {
-        node: sourceNode,
-        lastSeq: manifest.seq || 0,
-        collections: [{ db: scope.database, coll: scope.collection, objects: rows }],
-      }, cursorKey);
-      objects += rows.length;
+      objects += await this._restoreSnapshotSegment(scope, manifest, segment);
     }
 
     return {
@@ -795,6 +782,124 @@ export class PersistenceManager {
       cursors: normalizeSnapshotCursors(manifest),
       objects,
     };
+  }
+
+  async _restoreSnapshotSegment(scope, manifest, segment = {}) {
+    const sourceNode = manifest.node || "persistence";
+    const cursorKey = this.node._cursorKey ? this.node._cursorKey(sourceNode, scope) : `persistence:${scopeKey(scope)}:snapshot`;
+    const lastSeq = Number(manifest.seq) || 0;
+    let objects = 0;
+
+    const applyRows = (rows) => {
+      if (!rows.length) return;
+      objects += this.node.applySnapshotObjects(sourceNode, {
+        database: scope.database,
+        collection: scope.collection,
+        scope,
+        lastSeq,
+        objects: rows,
+      }, cursorKey);
+    };
+
+    if (isJsonlSegment(segment)) {
+      let batch = [];
+      for await (const object of jsonlObjectsFromStorage(this.storage, segment.key, `${scopeKey(scope)} snapshot`)) {
+        const row = this._filterRestoreObject(scope, object);
+        if (!row) continue;
+        batch.push(row);
+        if (batch.length < RESTORE_APPLY_BATCH_SIZE) continue;
+        applyRows(batch);
+        batch = [];
+      }
+      applyRows(batch);
+      return objects;
+    }
+
+    let batch = [];
+    for await (const object of jsonArrayObjectsFromStorage(this.storage, segment.key, `${scopeKey(scope)} legacy snapshot`)) {
+      const row = this._filterRestoreObject(scope, object);
+      if (!row) continue;
+      batch.push(row);
+      if (batch.length < RESTORE_APPLY_BATCH_SIZE) continue;
+      applyRows(batch);
+      batch = [];
+    }
+    applyRows(batch);
+    return objects;
+  }
+
+  async _restoreJournalSegment(scope, key, snapshotCursors = {}) {
+    if (key.endsWith(".jsonl")) return this._restoreJsonlJournalSegment(scope, key, snapshotCursors);
+    return this._restoreLegacyJsonJournalSegment(scope, key, snapshotCursors);
+  }
+
+  async _restoreJsonlJournalSegment(scope, key, snapshotCursors = {}) {
+    const journalInfo = parseJournalKey(key, this.prefix);
+    const sourceNode = journalInfo?.node || "persistence";
+    const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
+    const stats = emptyJournalRestoreStats(this.node.seq);
+    let batch = [];
+    let segmentOps = 0;
+
+    const flush = () => {
+      if (!batch.length) return;
+      const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
+      stats.ops += applied;
+      stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
+      batch = [];
+    };
+
+    for await (const op of jsonlObjectsFromStorage(this.storage, key, `${scopeKey(scope)} journal`)) {
+      segmentOps++;
+      const seq = Number(op?.seq);
+      if (Number.isFinite(seq) && seq <= coveredSeq) continue;
+      batch.push(op);
+      if (batch.length >= this.opBatchSize) flush();
+    }
+    flush();
+
+    if (stats.ops > 0) stats.journals = 1;
+    else if (segmentOps > 0) {
+      stats.skippedJournals = 1;
+      stats.skippedOps = segmentOps;
+    }
+    return stats;
+  }
+
+  async _restoreLegacyJsonJournalSegment(scope, key, snapshotCursors = {}) {
+    const raw = await this.storage.get(key);
+    if (!raw) return emptyJournalRestoreStats(this.node.seq);
+    const segment = JSON.parse(raw);
+    const sourceNode = segment.node || parseJournalKey(key, this.prefix)?.node || "persistence";
+    const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
+    const segmentOps = Array.isArray(segment.ops) ? segment.ops : [];
+    const stats = emptyJournalRestoreStats(this.node.seq);
+
+    for (const rawBatch of chunkArray(segmentOps, this.opBatchSize)) {
+      const batch = rawBatch.filter((op) => {
+        const seq = Number(op?.seq);
+        return !Number.isFinite(seq) || seq > coveredSeq;
+      });
+      if (!batch.length) continue;
+      const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
+      stats.ops += applied;
+      stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
+    }
+
+    if (stats.ops > 0) stats.journals = 1;
+    else if (segmentOps.length) {
+      stats.skippedJournals = 1;
+      stats.skippedOps = segmentOps.length;
+    }
+    return stats;
+  }
+
+  _applyRestoredJournalOps(sourceNode, scope, key, ops) {
+    const filtered = this._filterRestoreOps(scope, ops);
+    if (!filtered.length) return 0;
+    this.node.applyRemote(sourceNode, filtered, `persistence:${key}`);
+    rememberRestoredCursor(this.node, sourceNode, scope, filtered);
+    return filtered.length;
   }
 
   async _restoreMetadata(keys) {
@@ -920,6 +1025,79 @@ export class PersistenceManager {
     }
     return cursors;
   }
+
+  async _restoreScopeSet(keys, scopes, stats, maxLocalSeq) {
+    const restoredByScope = new Map();
+    let nextMaxLocalSeq = maxLocalSeq;
+
+    for (const scope of scopes) {
+      stats.scopes++;
+      const restored = await this._restoreSnapshot(scope);
+      restoredByScope.set(scopeKey(scope), restored);
+      if (restored) {
+        stats.snapshots++;
+        stats.snapshotObjects += restored.objects;
+        this._rememberSnapshotCursors(scope, restored.cursors);
+        if (restored.node === this.node.id) nextMaxLocalSeq = Math.max(nextMaxLocalSeq, restored.seq);
+      }
+    }
+
+    for (const scope of scopes) {
+      if (this.restoreSnapshotId) continue;
+      const snapshotCursors = restoredByScope.get(scopeKey(scope))?.cursors || {};
+      const journalKeys = keys.filter((key) => key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`));
+      for (const key of journalKeys.sort()) {
+        const journalInfo = parseJournalKey(key, this.prefix);
+        const sourceFromKey = journalInfo?.node;
+        const coveredFromKey = Number(sourceFromKey ? snapshotCursors[sourceFromKey] : 0) || 0;
+        if (journalInfo?.lastSeq && coveredFromKey >= journalInfo.lastSeq) {
+          stats.skippedJournals++;
+          stats.skippedJournalOps += journalInfo.count || 0;
+          continue;
+        }
+
+        const restored = await this._restoreJournalSegment(scope, key, snapshotCursors);
+        stats.journals += restored.journals;
+        stats.journalOps += restored.ops;
+        stats.skippedJournals += restored.skippedJournals;
+        stats.skippedJournalOps += restored.skippedOps;
+        nextMaxLocalSeq = Math.max(nextMaxLocalSeq, restored.maxLocalSeq);
+      }
+    }
+
+    return nextMaxLocalSeq;
+  }
+
+  _rememberSnapshotCursors(scope, cursors = {}) {
+    if (!this.node._cursorKey) return;
+    for (const [sourceNode, seq] of Object.entries(cursors || {})) {
+      if (!sourceNode || sourceNode === "persistence") continue;
+      const cursorKey = this.node._cursorKey(sourceNode, scope);
+      this.node.lastSeen.set(cursorKey, Math.max(this.node.lastSeen.get(cursorKey) || 0, Number(seq) || 0));
+    }
+  }
+
+  _rememberUnscopedCursors(scopes) {
+    if (!this.node._cursorKey || !scopes?.length) return;
+    const bySource = new Map();
+    for (const [key, seen] of this.node.lastSeen || []) {
+      if (typeof key !== "string") continue;
+      for (const scope of scopes) {
+        const suffix = `|${scope.database}/${scope.collection}/${scope.shard}`;
+        if (!key.endsWith(suffix)) continue;
+        const sourceNode = key.slice(0, -suffix.length);
+        if (!sourceNode) continue;
+        const entry = bySource.get(sourceNode) || { count: 0, min: Infinity };
+        entry.count++;
+        entry.min = Math.min(entry.min, Number(seen) || 0);
+        bySource.set(sourceNode, entry);
+      }
+    }
+    for (const [sourceNode, entry] of bySource) {
+      if (entry.count < scopes.length || !Number.isFinite(entry.min) || entry.min <= 0) continue;
+      this.node.lastSeen.set(this.node._cursorKey(sourceNode), Math.max(this.node.lastSeen.get(sourceNode) || 0, entry.min));
+    }
+  }
 }
 
 export function createPersistence(node, config = {}) {
@@ -937,6 +1115,7 @@ export function createPersistence(node, config = {}) {
     prefix: config.prefix || "spread-db",
     flushMs: config.flushMs ?? 5000,
     opBatchSize: config.opBatchSize ?? 1000,
+    journalMaxBytes: config.journalMaxBytes ?? DEFAULT_JOURNAL_BYTES,
     snapshotMs: config.snapshotMs ?? 60_000,
     segmentBytes: config.segmentBytes ?? DEFAULT_SEGMENT_BYTES,
     compactJournals: config.compactJournals !== false,
@@ -952,12 +1131,12 @@ export function createPersistence(node, config = {}) {
   });
 }
 
-function* chunkJsonIterable(rows, maxBytes, label) {
+function* chunkJsonlIterable(rows, maxBytes, label) {
   let current = [];
-  let bytes = 2;
+  let bytes = 0;
 
   function makeChunk() {
-    return { body: `[${current.join(",")}]`, count: current.length, bytes };
+    return { body: current.length ? `${current.join("\n")}\n` : "", count: current.length, bytes };
   }
 
   let i = 0;
@@ -965,21 +1144,218 @@ function* chunkJsonIterable(rows, maxBytes, label) {
     const row = stringifyJson(value, `${label} row ${i}`);
     i++;
     const rowBytes = Buffer.byteLength(row);
-    const nextBytes = bytes + (current.length ? 1 : 0) + rowBytes;
+    const nextBytes = bytes + rowBytes + 1;
     if (current.length && nextBytes > maxBytes) {
       yield makeChunk();
       current = [];
-      bytes = 2;
+      bytes = 0;
     }
     current.push(row);
-    bytes += (current.length > 1 ? 1 : 0) + rowBytes;
+    bytes += rowBytes + 1;
   }
 
   if (current.length) {
     yield makeChunk();
     return;
   }
-  yield { body: "[]", count: 0, bytes: 2 };
+  yield { body: "", count: 0, bytes: 0 };
+}
+
+function jsonlBody(values, label) {
+  if (!values?.length) return "";
+  return `${values.map((value, i) => stringifyJson(value, `${label} row ${i}`)).join("\n")}\n`;
+}
+
+async function* jsonlObjectsFromStorage(storage, key, label) {
+  if (typeof storage.getStream === "function") {
+    const stream = await storage.getStream(key);
+    if (stream === null) throw new Error(`segment missing: ${key}`);
+    yield* parseJsonlStream(stream, label);
+    return;
+  }
+
+  const body = await storage.get(key);
+  if (body === null) throw new Error(`segment missing: ${key}`);
+  yield* parseJsonlText(body, label);
+}
+
+async function* jsonArrayObjectsFromStorage(storage, key, label) {
+  if (typeof storage.getStream === "function") {
+    const stream = await storage.getStream(key);
+    if (stream === null) throw new Error(`snapshot segment missing: ${key}`);
+    yield* parseJsonArrayStream(stream, label);
+    return;
+  }
+
+  const body = await storage.get(key);
+  if (body === null) throw new Error(`snapshot segment missing: ${key}`);
+  yield* parseJsonArrayText(body, label);
+}
+
+async function* parseJsonlStream(stream, label) {
+  let buffer = "";
+  let line = 0;
+  for await (const chunk of stream) {
+    buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+    for (const raw of lines) {
+      line++;
+      const trimmed = raw.trim();
+      if (trimmed) yield parseJsonLine(trimmed, label, line);
+    }
+  }
+  const trimmed = buffer.trim();
+  if (trimmed) yield parseJsonLine(trimmed, label, line + 1);
+}
+
+function* parseJsonlText(body, label) {
+  const lines = String(body || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed) yield parseJsonLine(trimmed, label, i + 1);
+  }
+}
+
+async function* parseJsonArrayStream(stream, label) {
+  let parser = createJsonArrayParser(label);
+  for await (const chunk of stream) {
+    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    yield* parser.push(text);
+  }
+  yield* parser.finish();
+}
+
+function* parseJsonArrayText(body, label) {
+  const parser = createJsonArrayParser(label);
+  yield* parser.push(String(body || ""));
+  yield* parser.finish();
+}
+
+function createJsonArrayParser(label) {
+  let started = false;
+  let finished = false;
+  let itemStarted = false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let item = "";
+  let index = 0;
+
+  function* push(text) {
+    for (const ch of text) {
+      if (finished) {
+        if (!/\s/.test(ch)) throw new Error(`invalid JSON array in ${label}: trailing content`);
+        continue;
+      }
+
+      if (!started) {
+        if (/\s/.test(ch)) continue;
+        if (ch !== "[") throw new Error(`invalid JSON array in ${label}: expected [`);
+        started = true;
+        continue;
+      }
+
+      if (!itemStarted) {
+        if (/\s/.test(ch) || ch === ",") continue;
+        if (ch === "]") {
+          finished = true;
+          continue;
+        }
+        itemStarted = true;
+        item = "";
+        depth = 0;
+        inString = false;
+        escaped = false;
+      }
+
+      item += ch;
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === "\"") inString = false;
+        continue;
+      }
+
+      if (ch === "\"") inString = true;
+      else if (ch === "{" || ch === "[") depth++;
+      else if (ch === "}" || ch === "]") depth--;
+
+      if (itemStarted && depth === 0 && !inString) {
+        yield parseJsonArrayItem(item, label, index++);
+        itemStarted = false;
+        item = "";
+      }
+    }
+  }
+
+  function* finish() {
+    if (!started) return;
+    if (itemStarted) throw new Error(`invalid JSON array in ${label}: unfinished item ${index}`);
+    if (!finished) throw new Error(`invalid JSON array in ${label}: missing closing ]`);
+  }
+
+  return { push, finish };
+}
+
+function parseJsonArrayItem(item, label, index) {
+  try {
+    return JSON.parse(item);
+  } catch (err) {
+    throw new Error(`invalid JSON array item in ${label} at index ${index}: ${err.message}`);
+  }
+}
+
+function parseJsonLine(line, label, number) {
+  try {
+    return JSON.parse(line);
+  } catch (err) {
+    throw new Error(`invalid JSONL in ${label} at line ${number}: ${err.message}`);
+  }
+}
+
+function isJsonlSegment(segment = {}) {
+  return segment.format === "jsonl" || String(segment.key || "").endsWith(".jsonl");
+}
+
+function* chunkArray(values, size) {
+  const chunkSize = Math.max(1, Number(size) || 1);
+  for (let i = 0; i < (values || []).length; i += chunkSize) yield values.slice(i, i + chunkSize);
+}
+
+function emptyJournalRestoreStats(maxLocalSeq = 0) {
+  return { journals: 0, ops: 0, skippedJournals: 0, skippedOps: 0, maxLocalSeq };
+}
+
+function restoreStats() {
+  return {
+    scopes: 0,
+    databases: 0,
+    metadata: 0,
+    snapshots: 0,
+    snapshotObjects: 0,
+    journals: 0,
+    journalOps: 0,
+    localWalRecords: 0,
+    localWalOps: 0,
+    localWalDatabases: 0,
+    localWalDatabaseDrops: 0,
+    localWalMetadata: 0,
+    localWalCollectionDrops: 0,
+    localWalSkippedPartialRecords: 0,
+    skippedJournals: 0,
+    skippedJournalOps: 0,
+  };
+}
+
+function maxLocalSeqForOps(ops, nodeId) {
+  let max = 0;
+  for (const op of ops || []) {
+    if (op?.from !== nodeId) continue;
+    const seq = Number(op.seq);
+    if (Number.isFinite(seq) && seq > max) max = seq;
+  }
+  return max;
 }
 
 function stringifyJson(value, label) {
@@ -991,6 +1367,42 @@ function stringifyJson(value, label) {
     }
     throw err;
   }
+}
+
+function jsonBytes(value, label) {
+  return Buffer.byteLength(stringifyJson(value, label));
+}
+
+function pendingOpsJsonBytes(pending) {
+  let total = 0;
+  for (const ops of pending.values()) total += jsonBytes(ops, "pending journal ops");
+  return total;
+}
+
+function pendingWalJsonBytes(records) {
+  let total = 0;
+  for (const record of records || []) total += jsonBytes(record, "pending local WAL record") + 1;
+  return total;
+}
+
+function* chunkOpsForRecord(ops, { maxBytes, maxOps, label }) {
+  let current = [];
+  let bytes = 2;
+
+  for (let i = 0; i < ops.length; i++) {
+    const op = stringifyJson(ops[i], `${label} op ${i}`);
+    const opBytes = Buffer.byteLength(op);
+    const nextBytes = bytes + (current.length ? 1 : 0) + opBytes;
+    if (current.length && (current.length >= maxOps || nextBytes > maxBytes)) {
+      yield current;
+      current = [];
+      bytes = 2;
+    }
+    current.push(ops[i]);
+    bytes += (current.length > 1 ? 1 : 0) + opBytes;
+  }
+
+  if (current.length) yield current;
 }
 
 function uniqueScopes(keys, prefix) {
@@ -1051,6 +1463,8 @@ function createLocalWalStore(config, nodeId) {
     dir: config?.dir || ".spread-db/wal",
     fsync: config?.fsync !== false,
     flushMs: config?.flushMs ?? 0,
+    maxRecordBytes: config?.maxRecordBytes,
+    maxOpsPerRecord: config?.maxOpsPerRecord,
   });
 }
 
@@ -1141,7 +1555,7 @@ function parseJournalKey(key, prefix) {
   const parts = key.slice(expected.length).split("/");
   if (parts[6] !== "journal" || !parts[7] || !parts[8]) return null;
   const file = parts[8];
-  const match = file.match(/^(\d+)-(\d+)-(\d+)-.+\.json$/);
+  const match = file.match(/^(\d+)-(\d+)-(\d+)-.+\.jsonl?$/);
   const createdAtMs = match ? Number(match[1]) : 0;
   const firstSeq = match ? Number(match[2]) : 0;
   const lastSeq = match ? Number(match[3]) : 0;

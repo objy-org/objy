@@ -4,27 +4,33 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 export class LocalWalStore {
-  constructor({ dir = ".spread-db/wal", nodeId, fsync = true, flushMs = 0 } = {}) {
+  constructor({ dir = ".spread-db/wal", nodeId, fsync = true, flushMs = 0, maxRecordBytes = 4 * 1024 * 1024, maxOpsPerRecord = 1000 } = {}) {
     if (!nodeId) throw new Error("local WAL node id is required");
     this.dir = resolve(dir);
     this.nodeId = String(nodeId);
     this.fsync = fsync !== false;
     this.flushMs = Math.max(0, Number(flushMs) || 0);
+    this.maxRecordBytes = Math.max(1024, Number(maxRecordBytes) || 4 * 1024 * 1024);
+    this.maxOpsPerRecord = Math.max(1, Number(maxOpsPerRecord) || 1000);
     this.filePath = `${this.dir}/${safePathPart(this.nodeId)}/wal.jsonl`;
   }
 
   async append(records = []) {
     if (!records.length) return { records: 0, bytes: 0 };
     await mkdir(dirname(this.filePath), { recursive: true });
-    const body = records.map((record) => JSON.stringify(record)).join("\n") + "\n";
     const handle = await open(this.filePath, "a");
+    let bytes = 0;
     try {
-      await handle.writeFile(body, "utf8");
+      for (const record of records) {
+        const line = `${JSON.stringify(record)}\n`;
+        bytes += Buffer.byteLength(line);
+        await handle.write(line, undefined, "utf8");
+      }
       if (this.fsync) await handle.sync();
     } finally {
       await handle.close();
     }
-    return { records: records.length, bytes: Buffer.byteLength(body) };
+    return { records: records.length, bytes };
   }
 
   async readRecords() {

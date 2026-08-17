@@ -156,6 +156,16 @@ test("object row store does not recurse into large containers", () => {
   assert.equal(stats.entries, 0);
 });
 
+test("object row store trusts restored nested containers without copying them", () => {
+  const store = new ObjectRowStore();
+  const nested = { score: 1, tags: ["a", "b"] };
+
+  store.rebuild("a", [["nested", nested]], { trusted: true });
+
+  assert.equal(store.readForQuery("a").nested, nested);
+  assert.notEqual(store.read("a").nested, nested);
+});
+
 test("object row store does not expose mutable internal objects", () => {
   const store = new ObjectRowStore();
   store.rebuild("a", [["nested", { score: 1 }]]);

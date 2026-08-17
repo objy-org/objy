@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CRDTNode, localPeer } from "../src/crdt.js";
+import { MemoryObjectStorage } from "../src/object-storage.js";
+import { PersistenceManager } from "../src/persistence.js";
 import { startServer } from "../src/server.js";
 
 const TEST_AUTH = { jwtSecret: "test-jwt-secret" };
@@ -260,13 +262,14 @@ test("large object-sharded dataset replicates only to owning shard nodes", async
   }
 });
 
-test("new shard replica recovers only its shard by scoped snapshot", async () => {
+test("new shard replica recovers only its shard by durable scoped catch-up", async () => {
   const shardCount = 4;
   const initialReplicas = Array.from(
     { length: shardCount },
     (_, i) => new CRDTNode({ id: `initial-${i}` }),
   );
   const writer = new CRDTNode({ id: "writer", retainOps: 0, syncBatchSize: 128 });
+  const storage = new MemoryObjectStorage();
   const shards = Object.fromEntries(initialReplicas.map((_, i) => [`events-${i}`, { peers: [] }]));
 
   writer.replaceShardMap({ shards });
@@ -285,8 +288,11 @@ test("new shard replica recovers only its shard by scoped snapshot", async () =>
 
   await Promise.all(initialReplicas.map((replica) => replica.syncAll()));
   assert.ok(writer.trimmed > 0, "writer pruned after initial shard replicas acked");
+  await new PersistenceManager({ node: writer, storage, segmentBytes: 2048 }).checkpoint();
 
   const fresh = new CRDTNode({ id: "fresh" });
+  const freshPersistence = new PersistenceManager({ node: fresh, storage });
+  fresh.setLogTruncatedHandler(({ scope }) => freshPersistence.restoreScope(scope));
   fresh.replaceShardMap(shardMapFor(Object.keys(shards), { "events-0": [localPeer(writer)] }));
 
   await fresh.syncAll();

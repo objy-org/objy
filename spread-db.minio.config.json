@@ -8,6 +8,9 @@
   "server": {
     "port": 8080
   },
+  "memoryGuard": {
+    "enabled": true
+  },
   "storage": {
     "engine": "object",
     "object": {

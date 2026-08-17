@@ -20,6 +20,7 @@ export async function startServer({
   shardMapStore,
   auth,
   persistence,
+  durability,
   files,
   memoryGuard,
   clusterSecret,
@@ -27,6 +28,8 @@ export async function startServer({
   replicationTimeoutMs,
   replication,
   replicationHints,
+  maxJsonBytes,
+  imports,
   interfaces = [],
   useDefaultInterfaces = true,
 } = {}) {
@@ -36,21 +39,26 @@ export async function startServer({
   const guard = createMemoryGuard(memoryGuard);
   const scheduler = replication || createReplicationScheduler({ node: n, ...normalizeReplicationHintOptions(replicationHints) });
   const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler };
+  if (persistence?.restoreScope) {
+    n.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
+  }
 
   if (shardMap) n.replaceShardMap(shardMapFromHttp(shardMap, n.id, { secret, timeoutMs: replicationTimeoutMs }));
   for (const peer of peers) n.addPeer(httpPeer(peer, n.id, { secret, timeoutMs: replicationTimeoutMs }));
 
-  const router = new HttpRouter();
+  const router = new HttpRouter({ maxBodyBytes: maxJsonBytes });
   const context = createInterfaceContext({
     node: n,
     shardMapStore,
     auth: authService,
     persistence,
+    durability,
     files,
     memoryGuard: guard,
     clusterSecret: secret,
     forwardTimeoutMs,
     replicationScheduler: scheduler,
+    imports,
   });
   const activeInterfaces = [
     ...(useDefaultInterfaces ? defaultInterfaces() : []),
@@ -63,7 +71,7 @@ export async function startServer({
       if (await router.handle(req, res)) return;
       json(res, 404, { error: "not found" });
     } catch (err) {
-      if (!res.writableEnded) json(res, err.status || 500, { error: err.message });
+      if (!res.writableEnded) json(res, err.status || 500, err.body || { error: err.message }, err.headers || {});
     }
   });
 
@@ -71,6 +79,7 @@ export async function startServer({
   state.server = server;
   state.port = server.address().port;
   state.router = router;
+  n.startIndexWarmup?.();
   n.startVectorIndexWarmup().catch((err) => {
     console.error(`vector index warmup failed: ${err.message}`);
   });
@@ -97,15 +106,18 @@ export function createInterfaceContext({
   clusterSecret,
   forwardTimeoutMs,
   replicationScheduler,
+  imports,
 }) {
   const durableWrite = durability || {
     afterWrite: () => persistence?.afterWrite?.() || Promise.resolve({ records: 0, ops: 0 }),
+    getStats: () => persistence?.getStats?.() || null,
   };
   return {
     node,
     shardMapStore,
     auth,
     files,
+    imports,
     clusterSecret,
     memoryGuard,
     routing: new ShardRequestRouter({ node, forwardTimeoutMs }),

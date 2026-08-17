@@ -7,6 +7,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { Readable } from "node:stream";
 
 export class MemoryObjectStorage {
   constructor() {
@@ -29,6 +30,11 @@ export class MemoryObjectStorage {
 
   async get(key) {
     return this.objects.get(key)?.body ?? null;
+  }
+
+  async getStream(key) {
+    const body = this.objects.get(key)?.body;
+    return body === undefined ? null : Readable.from([body]);
   }
 
   async getBlob(key) {
@@ -130,6 +136,21 @@ export class S3ObjectStorage {
         Key: key,
       }));
       return bodyToString(got.Body);
+    } catch (err) {
+      const code = err.$metadata?.httpStatusCode;
+      if (code === 404 || err.name === "NoSuchKey" || err.name === "NotFound") return null;
+      throw err;
+    }
+  }
+
+  async getStream(key) {
+    await this.ensureBucket();
+    try {
+      const got = await this.client.send(new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }));
+      return got.Body || null;
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
       if (code === 404 || err.name === "NoSuchKey" || err.name === "NotFound") return null;
