@@ -1,5 +1,6 @@
 import { DEFAULT_SHARD } from "./shard-map.js";
 import { aggregateObjects, aggregatePartialObjects, isObjectDbAggregateSpec, mergeAggregatePartials } from "./aggregate.js";
+import { accessTokenFromRequest } from "./auth.js";
 import { compareSortValues, getPathValue } from "./query.js";
 import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEADER } from "./query-planner.js";
 
@@ -403,6 +404,7 @@ export class ShardRequestRouter {
     method = "GET",
     body,
     retryStatuses = [502, 503, 504],
+    allowUnavailable = false,
     timeoutMs,
   } = {}) {
     const peers = this.node.shardMap.allPeers().filter((peer) => peer.url && !this.node._isSelfPeer(peer));
@@ -416,11 +418,24 @@ export class ShardRequestRouter {
       }).catch((err) => ({
         status: err.status || 503,
         body: err.body || { error: err.message },
+        peer,
+        unavailable: true,
       }))
     )));
-    const failed = responses.find((response) => retryStatuses.includes(response.status) || !ok(response.status));
+    const failed = responses.find((response) => (
+      (retryStatuses.includes(response.status) || !ok(response.status)) &&
+      !(allowUnavailable && response.unavailable)
+    ));
     if (failed) return failed;
-    return { status: 200, body: { ok: true, peers: responses.length } };
+    const unavailable = responses.filter((response) => response.unavailable).length;
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        peers: responses.length - unavailable,
+        ...(allowUnavailable && unavailable ? { unavailablePeers: unavailable } : {}),
+      },
+    };
   }
 
   async forwardJson(req, peer, shard, path, { method = "GET", body, query, forwardedOnly = false, timeoutMs } = {}) {
@@ -596,7 +611,8 @@ function forwardedHeaders(req, shard, hasBody) {
     [FORWARDED_HEADER]: "1",
     [TARGET_SHARD_HEADER]: shard,
   };
-  if (req.headers.authorization) headers.authorization = req.headers.authorization;
+  const token = accessTokenFromRequest(req);
+  if (token) headers.authorization = `Bearer ${token}`;
   if (req.headers.prefer) headers.prefer = req.headers.prefer;
   if (hasBody) headers["content-type"] = "application/json";
   return headers;
@@ -606,7 +622,8 @@ function forwardedControlHeaders(req, hasBody) {
   const headers = {
     [FORWARDED_HEADER]: "1",
   };
-  if (req.headers.authorization) headers.authorization = req.headers.authorization;
+  const token = accessTokenFromRequest(req);
+  if (token) headers.authorization = `Bearer ${token}`;
   if (req.headers.prefer) headers.prefer = req.headers.prefer;
   if (hasBody) headers["content-type"] = "application/json";
   return headers;

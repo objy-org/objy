@@ -108,7 +108,8 @@ Response:
   "user": { "_id": "admin", "username": "admin", "role": "admin" },
   "accessToken": "...",
   "refreshToken": "...",
-  "expiresIn": 900
+  "expiresIn": 3600,
+  "expires_in": 3600
 }
 ```
 
@@ -132,7 +133,8 @@ Response:
   "user": { "_id": "admin", "username": "admin", "role": "admin" },
   "accessToken": "...",
   "refreshToken": "...",
-  "expiresIn": 900
+  "expiresIn": 3600,
+  "expires_in": 3600
 }
 ```
 
@@ -714,6 +716,112 @@ Response:
 ```
 
 The delete body may also be a plain array of ids.
+
+### Streamed Bulk Writes
+
+Large imports can use NDJSON so the server does not need to hold one giant JSON array in memory. Each line is one JSON value. Internally, spread-db buffers lines into bounded chunks and then uses the same bulk storage, routing, replication, durability, permission, and index paths as normal bulk writes.
+
+Streamed writes require minimal responses:
+
+```http
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+```
+
+If a streamed request fails after earlier chunks were written, those earlier chunks stay committed. Use stable `_id` values when clients retry large streams. Omitted `_id` values are allowed on insert, but generated ids are not returned by minimal streamed responses.
+
+#### Stream Insert
+
+Request:
+
+```http
+POST {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1","status":"active","score":42}
+{"_id":"object-2","status":"archived","score":10}
+{"_id":"object-3","status":"generated","score":3}
+```
+
+Response:
+
+```json
+{
+  "inserted": 3
+}
+```
+
+#### Stream Replace
+
+Request:
+
+```http
+PUT {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1","status":"active","score":50}
+{"_id":"object-2","status":"archived","score":12}
+```
+
+Response:
+
+```json
+{
+  "replaced": 2
+}
+```
+
+#### Stream Patch
+
+Request:
+
+```http
+PATCH {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1","$set":{"score":51},"$unset":["legacyFlag"]}
+{"_id":"object-2","$set":{"score":13}}
+{"_id":"missing","$set":{"score":99}}
+```
+
+Response:
+
+```json
+{
+  "updated": 2,
+  "skipped": 1
+}
+```
+
+#### Stream Delete
+
+Request:
+
+```http
+DELETE {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1"}
+{"_id":"object-2"}
+{"_id":"missing"}
+```
+
+Response:
+
+```json
+{
+  "deleted": 2,
+  "skipped": 1
+}
+```
 
 ## Query
 

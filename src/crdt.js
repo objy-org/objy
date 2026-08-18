@@ -155,6 +155,15 @@ export class CRDTNode {
     };
   }
 
+  replaceManyCount(db, coll, objects) {
+    const items = normalizeObjectsWithIds(objects);
+    this._writeMany(db, coll, items.map((object) => ({
+      id: object._id,
+      value: this.db.preserveVector(db, coll, object._id, withoutObjectId(object)),
+    })));
+    return items.length;
+  }
+
   updateMany(db, coll, objects) {
     const items = normalizeObjectsWithIds(objects).map((object) => {
       const current = this.get(db, coll, object._id) || { _id: object._id };

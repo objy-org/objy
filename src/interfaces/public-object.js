@@ -1,7 +1,7 @@
 import { GLOBAL_DATABASE, USERS_COLLECTION } from "../auth.js";
 import { aggregateRows } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
-import { json, readJson } from "../http-router.js";
+import { isNdjsonRequest, json, readJson, readNdjson } from "../http-router.js";
 import {
   buildMultipartObjectFile,
   isMultipartRequest,
@@ -41,6 +41,7 @@ import { isValidVector } from "../vector.js";
 const DEFAULT_PUBLIC_QUERY_LIMIT = 250;
 const MAX_PUBLIC_QUERY_LIMIT = 250;
 const READ_ONLY_DATABASES = new Set([GLOBAL_DATABASE]);
+const NDJSON_MINIMAL_REQUIRED = "NDJSON write streams require Prefer: return=minimal";
 
 export function createPublicObjectInterface() {
   return {
@@ -90,18 +91,21 @@ export function createPublicObjectInterface() {
           }
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
-            const remote = await routing.forwardToAllPeers(req, "/api/databases", { method: "POST", body: databaseCreateFanoutBody(name, body) });
-            if (!ok(remote.status)) throw remoteError(remote, "database metadata fan-out failed");
+            await forwardSchemaChange(routing, req, "/api/databases", {
+              method: "POST",
+              body: databaseCreateFanoutBody(name, body),
+            }, "database metadata fan-out failed");
             if (adminUser) {
-              const collectionRemote = await routing.forwardToAllPeers(
+              await forwardSchemaChange(
+                routing,
                 req,
                 `/api/${encodeURIComponent(name)}/collections`,
                 {
                   method: "POST",
                   body: { name: adminUser.collection, meta: adminCollectionMeta },
                 },
+                "admin users collection metadata fan-out failed",
               );
-              if (!ok(collectionRemote.status)) throw remoteError(collectionRemote, "admin users collection metadata fan-out failed");
             }
           }
           if (adminUser) {
@@ -152,14 +156,15 @@ export function createPublicObjectInterface() {
               : json(res, 404, { error: "database not found" });
           }
           await afterLocalWrite(durability);
-          await files?.deleteDatabaseFiles?.(req.params.database);
+          await deleteDatabaseFilesBestEffort(files, req.params.database);
           if (!routing.isForwarded(req)) {
-            const remote = await routing.forwardToAllPeers(
+            await forwardSchemaChange(
+              routing,
               req,
               `/api/databases/${encodeURIComponent(req.params.database)}`,
               { method: "DELETE" },
+              "database delete fan-out failed",
             );
-            if (!ok(remote.status)) throw remoteError(remote, "database delete fan-out failed");
           }
           json(res, 204);
         } catch (err) {
@@ -189,12 +194,13 @@ export function createPublicObjectInterface() {
           const meta = node.createCollection(req.params.database, name, collectionMetaFromBody(body));
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
-            const remote = await routing.forwardToAllPeers(
+            await forwardSchemaChange(
+              routing,
               req,
               `/api/${encodeURIComponent(req.params.database)}/collections`,
               { method: "POST", body },
+              "collection metadata fan-out failed",
             );
-            if (!ok(remote.status)) throw remoteError(remote, "collection metadata fan-out failed");
           }
           json(res, created ? 201 : 200, { name, created, meta });
         } catch (err) {
@@ -214,14 +220,15 @@ export function createPublicObjectInterface() {
               : json(res, 404, { error: "collection not found" });
           }
           await afterLocalWrite(durability);
-          await files?.deleteCollectionFiles?.(req.params.database, req.params.collection);
+          await deleteCollectionFilesBestEffort(files, req.params.database, req.params.collection);
           if (!routing.isForwarded(req)) {
-            const remote = await routing.forwardToAllPeers(
+            await forwardSchemaChange(
+              routing,
               req,
               `/api/${encodeURIComponent(req.params.database)}/collections/${encodeURIComponent(req.params.collection)}`,
               { method: "DELETE" },
+              "collection delete fan-out failed",
             );
-            if (!ok(remote.status)) throw remoteError(remote, "collection delete fan-out failed");
           }
           json(res, 204);
         } catch (err) {
@@ -249,12 +256,13 @@ export function createPublicObjectInterface() {
           const meta = node.setCollectionMeta(req.params.database, req.params.collection, body);
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
-            const remote = await routing.forwardToAllPeers(
+            await forwardSchemaChange(
+              routing,
               req,
               `/api/${encodeURIComponent(req.params.database)}/${encodeURIComponent(req.params.collection)}/meta`,
               { method: "PUT", body },
+              "collection metadata fan-out failed",
             );
-            if (!ok(remote.status)) throw remoteError(remote, "collection metadata fan-out failed");
           }
           json(res, 200, meta);
         } catch (err) {
@@ -342,92 +350,41 @@ export function createPublicObjectInterface() {
         if (isMultipartRequest(req)) {
           return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
         }
+        if (isNdjsonRequest(req)) {
+          return streamCreateObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+        }
         const body = await readJson(req);
         const isBulk = Array.isArray(body);
         const rawItems = isBulk ? body : [body || {}];
-        const error = validatePlainObjects(rawItems);
-        if (error) return json(res, 400, error);
-        let items;
         try {
-          items = normalizeFileObjects(files, req.params.database, req.params.collection, withObjectIds(rawItems));
-          assertImportWriteAccepts({ req, imports: importLimits, durability, objects: items });
-        } catch (err) {
-          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
-        }
-        const minimalBulkReturn = isBulk && prefersMinimalReturn(req);
-        let groups;
-        const preparedByGroup = new Map();
-        try {
-          groups = routing.groupByShard(req, req.params.database, req.params.collection, items, (item) => item._id);
-          for (const group of groups) {
-            if (!group.local) continue;
-            const prepared = auth.prepareWriteObjects(req.params.database, req.params.collection, group.items, { partial: false });
-            assertCreateAllowed(req, prepared, req.params.database);
-            preparedByGroup.set(group, prepared);
-          }
-          if (preparedByGroup.size && rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
-        } catch (err) {
-          return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
-        }
-
-        const rows = [];
-        let inserted = 0;
-        let wroteLocally = false;
-        try {
-          for (const group of groups) {
-            if (group.local) {
-              const prepared = preparedByGroup.get(group);
-              if (minimalBulkReturn) {
-                inserted += node.insertManyCount(req.params.database, req.params.collection, prepared);
-              } else {
-                const localRows = node.insertMany(req.params.database, req.params.collection, prepared);
-                rows.push(...localRows);
-                inserted += localRows.length;
-              }
-              wroteLocally = true;
-              continue;
-            }
-
-            const remote = await routing.forwardToShard(
-                req,
-                group.shard,
-                objectPath(req.params.database, req.params.collection),
-                {
-                  method: "POST",
-                  body: isBulk ? group.items : group.items[0],
-                  query: refDepthQuery(0),
-                },
-            );
-            if (!ok(remote.status)) throw remoteError(remote, `POST failed on shard ${group.shard}`);
-            const remoteRows = remoteInsertedItems(remote.body);
-            rows.push(...remoteRows);
-            inserted += remoteInsertedCount(remote.body, remoteRows.length);
-          }
-          if (wroteLocally) await afterLocalWrite(durability);
-        } catch (err) {
-          if (wroteLocally) await afterLocalWrite(durability).catch((flushErr) => {
-            err = flushErr;
+          const items = prepareCreateObjects(files, req.params.database, req.params.collection, rawItems);
+          const minimalBulkReturn = isBulk && prefersMinimalReturn(req);
+          const result = await routedCreateMany({
+            req,
+            routing,
+            auth,
+            node,
+            database: req.params.database,
+            collection: req.params.collection,
+            objects: items,
+            durability,
+            memoryGuard,
+            imports: importLimits,
+            minimalReturn: minimalBulkReturn,
           });
+          if (minimalBulkReturn) return json(res, 201, { inserted: result.inserted });
+          const safeRows = auth.redactObjects(req.params.database, req.params.collection, result.items);
+          json(res, 201, isBulk ? { inserted: safeRows.length, items: safeRows } : safeRows[0]);
+        } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
-
-        if (minimalBulkReturn) {
-          return json(res, 201, { inserted });
-        }
-        const expandedRows = await expandObjectsForRead({
-          req,
-          node,
-          routing,
-          database: req.params.database,
-          objects: orderLikeInput(items, rows).map(stripReferenceObjects),
-          refDepth: refDepthParam(req),
-        });
-        const safeRows = auth.redactObjects(req.params.database, req.params.collection, expandedRows);
-        json(res, 201, isBulk ? { inserted: safeRows.length, items: safeRows } : safeRows[0]);
       }));
 
       router.put("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
+        if (isNdjsonRequest(req)) {
+          return streamReplaceObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+        }
         const body = await readJson(req);
         if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
@@ -450,8 +407,12 @@ export function createPublicObjectInterface() {
             memoryGuard,
             files,
             imports: importLimits,
+            localWriteCount: (prepared) => node.replaceManyCount(req.params.database, req.params.collection, prepared),
+            minimalReturn: prefersMinimalReturn(req),
           });
-          json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
+          json(res, 200, result.items
+            ? auth.redactResult(req.params.database, req.params.collection, result)
+            : result);
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -459,6 +420,9 @@ export function createPublicObjectInterface() {
 
       router.patch("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
+        if (isNdjsonRequest(req)) {
+          return streamPatchObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+        }
         const body = await readJson(req);
         if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
@@ -476,8 +440,11 @@ export function createPublicObjectInterface() {
             memoryGuard,
             files,
             imports: importLimits,
+            minimalReturn: prefersMinimalReturn(req),
           });
-          json(res, 200, auth.redactResult(req.params.database, req.params.collection, result));
+          json(res, 200, result.items
+            ? auth.redactResult(req.params.database, req.params.collection, result)
+            : result);
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -485,6 +452,20 @@ export function createPublicObjectInterface() {
 
       router.delete("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
+        if (isNdjsonRequest(req)) {
+          return streamRemoveObjects({
+            req,
+            res,
+            node,
+            routing,
+            durability,
+            memoryGuard,
+            files,
+            imports: importLimits,
+            database: req.params.database,
+            collection: req.params.collection,
+          });
+        }
         let ids;
         try {
           ids = parseBulkIds(await readJson(req, null));
@@ -492,7 +473,9 @@ export function createPublicObjectInterface() {
           return json(res, 400, errorBody(err));
         }
         try {
-          json(res, 200, await routedRemoveMany(req, routing, node, durability, memoryGuard, req.params.database, req.params.collection, ids, files));
+          json(res, 200, await routedRemoveMany(req, routing, node, durability, memoryGuard, req.params.database, req.params.collection, ids, files, {
+            minimalReturn: prefersMinimalReturn(req),
+          }));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -868,6 +851,243 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
   }
 }
 
+async function streamCreateObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+  if (rejectNdjsonWithoutMinimal(req, res)) return;
+  const result = { inserted: 0 };
+  try {
+    await consumeNdjsonChunks({
+      req,
+      imports,
+      prepare: (objects) => prepareCreateObjects(
+        files,
+        req.params.database,
+        req.params.collection,
+        objects,
+        { mutateIds: true },
+      ),
+      write: async (objects) => {
+        const written = await routedCreateMany({
+          req,
+          routing,
+          auth,
+          node,
+          database: req.params.database,
+          collection: req.params.collection,
+          objects,
+          durability,
+          memoryGuard,
+          imports,
+          minimalReturn: true,
+          ignoreBodyBytes: true,
+          validatedObjectBytes: true,
+        });
+        result.inserted += written.inserted;
+      },
+    });
+    json(res, 201, result);
+  } catch (err) {
+    json(res, err.status || 400, streamErrorBody(err, result), err.headers || {});
+  }
+}
+
+async function streamReplaceObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+  if (rejectNdjsonWithoutMinimal(req, res)) return;
+  const result = { replaced: 0 };
+  try {
+    await consumeNdjsonChunks({
+      req,
+      imports,
+      prepare: (objects) => {
+        const error = validatePlainObjects(objects, { requireId: true });
+        if (error) throw validationError(error);
+        return normalizeFileObjects(files, req.params.database, req.params.collection, objects);
+      },
+      write: async (objects) => {
+        const written = await routedWriteMany({
+          req,
+          routing,
+          auth,
+          node,
+          database: req.params.database,
+          collection: req.params.collection,
+          objects,
+          method: "PUT",
+          resultKey: "replaced",
+          partial: false,
+          localWrite: (prepared) => node.replaceMany(req.params.database, req.params.collection, prepared),
+          localWriteCount: (prepared) => node.replaceManyCount(req.params.database, req.params.collection, prepared),
+          durability,
+          memoryGuard,
+          files,
+          imports,
+          minimalReturn: true,
+          ignoreBodyBytes: true,
+          validatedObjectBytes: true,
+        });
+        result.replaced += written.replaced;
+      },
+    });
+    json(res, 200, result);
+  } catch (err) {
+    json(res, err.status || 400, streamErrorBody(err, result), err.headers || {});
+  }
+}
+
+async function streamPatchObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+  if (rejectNdjsonWithoutMinimal(req, res)) return;
+  const result = { updated: 0, skipped: 0 };
+  try {
+    await consumeNdjsonChunks({
+      req,
+      imports,
+      prepare: (objects) => {
+        const error = validatePlainObjects(objects, { requireId: true });
+        if (error) throw validationError(error);
+        return objects;
+      },
+      write: async (patches) => {
+        const written = await routedPatchMany({
+          req,
+          routing,
+          auth,
+          node,
+          database: req.params.database,
+          collection: req.params.collection,
+          patches,
+          durability,
+          memoryGuard,
+          files,
+          imports,
+          minimalReturn: true,
+          ignoreBodyBytes: true,
+          validatedObjectBytes: true,
+        });
+        result.updated += written.updated;
+        result.skipped += written.skipped;
+      },
+    });
+    json(res, 200, result);
+  } catch (err) {
+    json(res, err.status || 400, streamErrorBody(err, result), err.headers || {});
+  }
+}
+
+async function streamRemoveObjects({ req, res, node, routing, durability, memoryGuard, files, imports, database, collection }) {
+  if (rejectNdjsonWithoutMinimal(req, res)) return;
+  const result = { deleted: 0, skipped: 0 };
+  try {
+    await consumeNdjsonChunks({
+      req,
+      imports,
+      prepare: parseNdjsonIds,
+      write: async (ids) => {
+        assertImportWriteAccepts({
+          req,
+          imports,
+          durability,
+          objects: ids.map((id) => ({ _id: id })),
+          ignoreBodyBytes: true,
+          validatedObjectBytes: true,
+        });
+        const removed = await routedRemoveMany(
+          req,
+          routing,
+          node,
+          durability,
+          memoryGuard,
+          database,
+          collection,
+          ids,
+          files,
+          { minimalReturn: true },
+        );
+        result.deleted += removed.deleted;
+        result.skipped += removed.skipped;
+      },
+    });
+    json(res, 200, result);
+  } catch (err) {
+    json(res, err.status || 400, streamErrorBody(err, result), err.headers || {});
+  }
+}
+
+async function routedCreateMany({
+  req,
+  routing,
+  auth,
+  node,
+  database,
+  collection,
+  objects,
+  durability,
+  memoryGuard,
+  imports,
+  minimalReturn = false,
+  ignoreBodyBytes = false,
+  validatedObjectBytes = false,
+}) {
+  assertImportWriteAccepts({ req, imports, durability, objects, ignoreBodyBytes, validatedObjectBytes });
+  const rows = [];
+  let inserted = 0;
+  let wroteLocally = false;
+  const groups = routing.groupByShard(req, database, collection, objects, (item) => item._id);
+  const preparedByGroup = new Map();
+
+  for (const group of groups) {
+    if (!group.local) continue;
+    const prepared = auth.prepareWriteObjects(database, collection, group.items, { partial: false });
+    assertCreateAllowed(req, prepared, database);
+    preparedByGroup.set(group, prepared);
+  }
+  if (preparedByGroup.size) assertMemoryGuardAcceptsWrites(memoryGuard);
+
+  try {
+    for (const group of groups) {
+      if (group.local) {
+        const prepared = preparedByGroup.get(group);
+        if (minimalReturn) {
+          inserted += node.insertManyCount(database, collection, prepared);
+        } else {
+          const localRows = node.insertMany(database, collection, prepared);
+          rows.push(...localRows);
+          inserted += localRows.length;
+        }
+        wroteLocally = true;
+        continue;
+      }
+
+      const remote = await routing.forwardToShard(req, group.shard, objectPath(database, collection), {
+        method: "POST",
+        body: group.items,
+        query: refDepthQuery(0),
+      });
+      if (!ok(remote.status)) throw remoteError(remote, `POST failed on shard ${group.shard}`);
+      const remoteRows = remoteInsertedItems(remote.body);
+      if (!minimalReturn) rows.push(...remoteRows);
+      inserted += remoteInsertedCount(remote.body, remoteRows.length);
+    }
+    if (wroteLocally) await afterLocalWrite(durability);
+  } catch (err) {
+    if (wroteLocally) await afterLocalWrite(durability).catch((flushErr) => {
+      err = flushErr;
+    });
+    throw err;
+  }
+
+  if (minimalReturn) return { inserted };
+  return {
+    inserted,
+    items: await expandObjectsForRead({
+      req,
+      node,
+      routing,
+      database,
+      objects: orderLikeInput(objects, rows).map(stripReferenceObjects),
+      refDepth: refDepthParam(req),
+    }),
+  };
+}
+
 async function routedWriteMany({
   req,
   routing,
@@ -880,12 +1100,16 @@ async function routedWriteMany({
   resultKey,
   partial,
   localWrite,
+  localWriteCount,
   durability,
   memoryGuard,
   files,
   imports,
+  minimalReturn = false,
+  ignoreBodyBytes = false,
+  validatedObjectBytes = false,
 }) {
-  assertImportWriteAccepts({ req, imports, durability, objects });
+  assertImportWriteAccepts({ req, imports, durability, objects, ignoreBodyBytes, validatedObjectBytes });
   const rows = [];
   const removedFileObjects = [];
   let total = 0;
@@ -905,10 +1129,14 @@ async function routedWriteMany({
       if (group.local) {
         const prepared = preparedByGroup.get(group);
         const before = files ? existingObjectMap(node, database, collection, prepared.map((object) => object._id)) : null;
-        const localResult = localWrite(prepared);
-        total += Number(localResult[resultKey]) || 0;
-        rows.push(...(localResult.items || []));
-        removedFileObjects.push(...removedFiles(before, localResult.items));
+        if (minimalReturn && !files && localWriteCount) {
+          total += Number(localWriteCount(prepared)) || 0;
+        } else {
+          const localResult = localWrite(prepared);
+          total += Number(localResult[resultKey]) || 0;
+          if (!minimalReturn) rows.push(...(localResult.items || []));
+          removedFileObjects.push(...removedFiles(before, localResult.items));
+        }
         wroteLocally = true;
         continue;
       }
@@ -920,7 +1148,7 @@ async function routedWriteMany({
       });
       if (!ok(remote.status)) throw remoteError(remote, `${method} failed on shard ${group.shard}`);
       total += Number(remote.body?.[resultKey]) || 0;
-      rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
+      if (!minimalReturn) rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
     }
     if (wroteLocally) {
       await afterLocalWrite(durability);
@@ -933,6 +1161,7 @@ async function routedWriteMany({
     throw err;
   }
 
+  if (minimalReturn) return { [resultKey]: total };
   return {
     [resultKey]: total,
     items: await expandObjectsForRead({
@@ -958,10 +1187,14 @@ async function routedPatchMany({
   memoryGuard,
   files,
   imports,
+  minimalReturn = false,
+  ignoreBodyBytes = false,
+  validatedObjectBytes = false,
 }) {
-  assertImportWriteAccepts({ req, imports, durability, objects: patches });
+  assertImportWriteAccepts({ req, imports, durability, objects: patches, ignoreBodyBytes, validatedObjectBytes });
   const rows = [];
   const skipped = [];
+  let skippedCount = 0;
   const removedFileObjects = [];
   let updated = 0;
   let wroteLocally = false;
@@ -975,7 +1208,8 @@ async function routedPatchMany({
       const { _id, ...patch } = item;
       const patched = compilePatchedObject({ node, database, collection, id: _id, patch, files });
       if (!patched) {
-        skipped.push(String(_id));
+        if (minimalReturn) skippedCount += 1;
+        else skipped.push(String(_id));
         continue;
       }
       compiled.push(patched);
@@ -998,10 +1232,14 @@ async function routedPatchMany({
         const prepared = preparedByGroup.get(group) || [];
         if (!prepared.length) continue;
         const before = files ? existingObjectMap(node, database, collection, prepared.map((object) => object._id)) : null;
-        const localResult = node.replaceMany(database, collection, prepared);
-        updated += Number(localResult.replaced) || 0;
-        rows.push(...(localResult.items || []));
-        removedFileObjects.push(...removedFiles(before, localResult.items));
+        if (minimalReturn && !files) {
+          updated += node.replaceManyCount(database, collection, prepared);
+        } else {
+          const localResult = node.replaceMany(database, collection, prepared);
+          updated += Number(localResult.replaced) || 0;
+          if (!minimalReturn) rows.push(...(localResult.items || []));
+          removedFileObjects.push(...removedFiles(before, localResult.items));
+        }
         wroteLocally = true;
         continue;
       }
@@ -1013,8 +1251,12 @@ async function routedPatchMany({
       });
       if (!ok(remote.status)) throw remoteError(remote, `PATCH failed on shard ${group.shard}`);
       updated += Number(remote.body?.updated) || 0;
-      rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
-      skipped.push(...(Array.isArray(remote.body?.skipped) ? remote.body.skipped.map(String) : []));
+      if (!minimalReturn) {
+        rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
+        skipped.push(...(Array.isArray(remote.body?.skipped) ? remote.body.skipped.map(String) : []));
+      } else {
+        skippedCount += responseSkippedCount(remote.body);
+      }
     }
     if (wroteLocally) {
       await afterLocalWrite(durability);
@@ -1027,6 +1269,7 @@ async function routedPatchMany({
     throw err;
   }
 
+  if (minimalReturn) return { updated, skipped: skippedCount };
   return {
     updated,
     skipped,
@@ -1059,11 +1302,12 @@ function collectionVectorField(node, database, collection) {
   }
 }
 
-async function routedRemoveMany(req, routing, node, durability, memoryGuard, database, collection, ids, files = null) {
+async function routedRemoveMany(req, routing, node, durability, memoryGuard, database, collection, ids, files = null, {
+  minimalReturn = false,
+} = {}) {
   const result = {
     deleted: 0,
-    ids: [],
-    skipped: [],
+    ...(minimalReturn ? { skipped: 0 } : { ids: [], skipped: [] }),
   };
   let wroteLocally = false;
   const existingByGroup = new Map();
@@ -1082,8 +1326,11 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
       if (group.local) {
         const local = node.removeMany(database, collection, group.items);
         result.deleted += local.deleted;
-        result.ids.push(...local.ids);
-        result.skipped.push(...local.skipped);
+        if (minimalReturn) result.skipped += local.skipped.length;
+        else {
+          result.ids.push(...local.ids);
+          result.skipped.push(...local.skipped);
+        }
         const existing = existingByGroup.get(group) || new Map();
         removedFileObjects.push(...local.ids.map((id) => existing.get(String(id))).filter(Boolean));
         wroteLocally = wroteLocally || local.deleted > 0;
@@ -1096,8 +1343,12 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
       });
       if (!ok(remote.status)) throw remoteError(remote, `DELETE failed on shard ${group.shard}`);
       result.deleted += Number(remote.body?.deleted) || 0;
-      result.ids.push(...(Array.isArray(remote.body?.ids) ? remote.body.ids : []));
-      result.skipped.push(...(Array.isArray(remote.body?.skipped) ? remote.body.skipped : []));
+      if (minimalReturn) {
+        result.skipped += responseSkippedCount(remote.body);
+      } else {
+        result.ids.push(...(Array.isArray(remote.body?.ids) ? remote.body.ids : []));
+        result.skipped.push(...(Array.isArray(remote.body?.skipped) ? remote.body.skipped : []));
+      }
     }
     if (wroteLocally) {
       await afterLocalWrite(durability);
@@ -1398,15 +1649,118 @@ async function afterLocalWrite(durability) {
   }
 }
 
-function withObjectIds(items) {
-  return items.map((item) => ({
-    ...item,
-    _id: item._id !== undefined && item._id !== null ? String(item._id) : createObjectId(),
-  }));
+async function forwardSchemaChange(routing, req, path, options, message) {
+  const remote = await routing.forwardToAllPeers(req, path, {
+    ...options,
+    allowUnavailable: true,
+  });
+  if (!ok(remote.status)) throw remoteError(remote, message);
+  return remote;
+}
+
+async function consumeNdjsonChunks({ req, imports, prepare, write }) {
+  let entries = [];
+  let bytes = 0;
+  const maxObjects = Math.max(1, Number(imports.maxBulkObjects) || DEFAULT_IMPORT_CONFIG.maxBulkObjects);
+  const maxBytes = Math.max(1, Number(imports.maxBulkBytes) || DEFAULT_IMPORT_CONFIG.maxBulkBytes);
+
+  for await (const entry of readNdjson(req, { maxObjectBytes: imports.maxObjectBytes })) {
+    if (entry.bytes > maxBytes) {
+      throw httpError(413, "bulk write is too large", {
+        error: "bulk write is too large",
+        line: entry.line,
+        bytes: entry.bytes,
+        maxBulkBytes: maxBytes,
+      });
+    }
+    if (entries.length && bytes + entry.bytes > maxBytes) {
+      await flushNdjsonChunk(entries, prepare, write);
+      entries = [];
+      bytes = 0;
+    }
+    entries.push(entry);
+    bytes += entry.bytes;
+    if (entries.length >= maxObjects || bytes >= maxBytes) {
+      await flushNdjsonChunk(entries, prepare, write);
+      entries = [];
+      bytes = 0;
+    }
+  }
+
+  if (entries.length) await flushNdjsonChunk(entries, prepare, write);
+}
+
+async function flushNdjsonChunk(entries, prepare, write) {
+  const lines = entries.map((entry) => entry.line);
+  try {
+    const values = entries.map((entry) => entry.value);
+    await write(prepare(values));
+  } catch (err) {
+    throw annotateStreamLine(err, lines);
+  }
+}
+
+function annotateStreamLine(err, lines) {
+  if (err.line === undefined && err.index !== undefined && lines[err.index] !== undefined) {
+    err.line = lines[err.index];
+  }
+  if (err.line !== undefined) {
+    err.body = { ...(err.body || errorBody(err)), line: err.line };
+  }
+  return err;
+}
+
+function prepareCreateObjects(files, database, collection, rawItems, { mutateIds = false } = {}) {
+  const error = validatePlainObjects(rawItems);
+  if (error) throw validationError(error);
+  return normalizeFileObjects(files, database, collection, withObjectIds(rawItems, { mutate: mutateIds }));
+}
+
+function validationError(error) {
+  const err = httpError(400, error.error, error);
+  err.index = error.index;
+  return err;
+}
+
+function parseNdjsonIds(items) {
+  return items.map((item, index) => {
+    if (typeof item === "string" && item.length > 0) return item;
+    if (item && typeof item === "object" && !Array.isArray(item) && item._id !== undefined && item._id !== null) {
+      const id = String(item._id);
+      if (id.length > 0) return id;
+    }
+    const err = new TypeError(`id at index ${index} must be a non-empty string or object with _id`);
+    err.index = index;
+    throw err;
+  });
+}
+
+function rejectNdjsonWithoutMinimal(req, res) {
+  if (prefersMinimalReturn(req)) return false;
+  json(res, 400, { error: NDJSON_MINIMAL_REQUIRED });
+  return true;
+}
+
+function streamErrorBody(err, progress = {}) {
+  return {
+    ...(err.body || errorBody(err)),
+    ...progress,
+  };
+}
+
+function withObjectIds(items, { mutate = false } = {}) {
+  return items.map((item) => {
+    const id = item._id !== undefined && item._id !== null ? String(item._id) : createObjectId();
+    if (mutate) {
+      item._id = id;
+      return item;
+    }
+    return { ...item, _id: id };
+  });
 }
 
 function normalizeFileObjects(files, database, collection, objects = []) {
-  return objects.map((object) => normalizeFileObject(files, database, collection, object));
+  return files ? objects.map((object) => normalizeFileObject(files, database, collection, object)) : objects;
 }
 
 function normalizeFileObject(files, database, collection, object) {
@@ -1429,6 +1783,24 @@ async function deleteRemovedFiles(files, database, collection, beforeObjects = [
   await deleteObjectFiles(files, database, collection, removedFiles(beforeMap, afterObjects));
 }
 
+async function deleteCollectionFilesBestEffort(files, database, collection) {
+  if (!files) return;
+  try {
+    await files.deleteCollectionFiles(database, collection);
+  } catch {
+    // File cleanup is best-effort; the collection delete is already durable.
+  }
+}
+
+async function deleteDatabaseFilesBestEffort(files, database) {
+  if (!files) return;
+  try {
+    await files.deleteDatabaseFiles(database);
+  } catch {
+    // File cleanup is best-effort; the database delete is already durable.
+  }
+}
+
 async function deleteObjectFiles(files, database, collection, objects = []) {
   if (!files) return;
   for (const object of objects || []) {
@@ -1449,6 +1821,13 @@ function remoteInsertedItems(body) {
 function remoteInsertedCount(body, fallback) {
   if (Number.isFinite(body?.inserted)) return body.inserted;
   return fallback;
+}
+
+function responseSkippedCount(body) {
+  if (Number.isFinite(body?.skipped)) return body.skipped;
+  if (Number.isFinite(body?.skippedCount)) return body.skippedCount;
+  if (Array.isArray(body?.skipped)) return body.skipped.length;
+  return 0;
 }
 
 function orderLikeInput(input, rows) {
@@ -1484,7 +1863,7 @@ function normalizeImportLimits(config = {}) {
   };
 }
 
-function assertImportWriteAccepts({ req, imports, durability, objects = [], ignoreBodyBytes = false }) {
+function assertImportWriteAccepts({ req, imports, durability, objects = [], ignoreBodyBytes = false, validatedObjectBytes = false }) {
   if (objects.length > imports.maxBulkObjects) {
     throw httpError(413, "bulk write contains too many objects", {
       error: "bulk write contains too many objects",
@@ -1502,7 +1881,7 @@ function assertImportWriteAccepts({ req, imports, durability, objects = [], igno
     });
   }
 
-  assertObjectByteLimit(objects, imports.maxObjectBytes);
+  if (!validatedObjectBytes) assertObjectByteLimit(objects, imports.maxObjectBytes);
   const pendingBytes = pendingPersistenceBytes(durability);
   if (pendingBytes > imports.maxPendingPersistenceBytes) {
     const retryAfterSeconds = Math.max(1, Math.ceil(imports.retryAfterMs / 1000));

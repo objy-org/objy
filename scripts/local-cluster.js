@@ -5,6 +5,10 @@ import { spawn } from "node:child_process";
 
 const command = process.argv[2] || "status";
 const config = arg("--config") || "spread-db.minio.config.json";
+const maxOldSpaceSizeMb = positiveInt(
+  arg("--max-old-space-size") || arg("--heap") || runtimeConfigValue(config, "maxOldSpaceSizeMb"),
+  0,
+);
 const ports = (arg("--ports") || "8080,8081,8082,8083")
   .split(",")
   .map((value) => Number(value.trim()))
@@ -24,7 +28,7 @@ else if (command === "restart") {
   await start();
 } else if (command === "status") await status();
 else {
-  console.error("usage: node scripts/local-cluster.js start|stop|restart|status [--config file] [--ports 8080,8081]");
+  console.error("usage: node scripts/local-cluster.js start|stop|restart|status [--config file] [--ports 8080,8081] [--heap 15360]");
   process.exit(1);
 }
 
@@ -37,20 +41,22 @@ async function start() {
       continue;
     }
     const out = openSync(resolve(logDir, `${node.id}.log`), "a");
-    const child = spawn(process.execPath, [
+    const nodeArgs = [
+      ...(maxOldSpaceSizeMb ? [`--max-old-space-size=${maxOldSpaceSizeMb}`] : []),
       "src/index.js",
       "--config", config,
       "--node", node.id,
       "--url", node.url,
       "--port", String(node.port),
-    ], {
+    ];
+    const child = spawn(process.execPath, nodeArgs, {
       cwd: process.cwd(),
       detached: true,
       stdio: ["ignore", out, out],
     });
     child.unref();
     writeFileSync(pidFile(node), String(child.pid));
-    console.log(`started ${node.id} pid=${child.pid} log=${resolve(logDir, `${node.id}.log`)}`);
+    console.log(`started ${node.id} pid=${child.pid}${maxOldSpaceSizeMb ? ` heap=${maxOldSpaceSizeMb}MB` : ""} log=${resolve(logDir, `${node.id}.log`)}`);
   }
 }
 
@@ -82,6 +88,16 @@ function arg(name) {
   if (index >= 0) return process.argv[index + 1];
   const match = process.argv.find((value) => value.startsWith(`${name}=`));
   return match ? match.slice(name.length + 1) : null;
+}
+
+function runtimeConfigValue(path, key) {
+  if (!path || !existsSync(path)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return parsed.runtime?.[key] ?? parsed.node?.[key];
+  } catch {
+    return undefined;
+  }
 }
 
 function pidFile(node) {
@@ -124,4 +140,9 @@ async function waitUntil(check, timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return check();
+}
+
+function positiveInt(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }

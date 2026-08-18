@@ -3,6 +3,9 @@
     "retainOps": 256,
     "syncBatchSize": 4096
   },
+  "runtime": {
+    "maxOldSpaceSizeMb": 15360
+  },
   "cluster": {
     "syncMs": 2500,
     "forwardTimeoutMs": 60000,
@@ -21,7 +24,7 @@
   },
   "auth": {
     "jwtSecret": "local-dev-jwt-secret-change-me",
-    "accessTokenTtlSeconds": 900,
+    "accessTokenTtlSeconds": 3600,
     "refreshTokenTtlSeconds": 1209600,
     "users": [
       {

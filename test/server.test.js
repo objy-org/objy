@@ -86,6 +86,24 @@ async function multipartObjectRequest(base, token, method, path, object, content
   };
 }
 
+async function ndjsonRequest(base, token, method, path, lines, headers = {}) {
+  const response = await fetch(base + path, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-ndjson",
+      prefer: "return=minimal",
+      ...headers,
+    },
+    body: lines.map((line) => typeof line === "string" ? line : JSON.stringify(line)).join("\n") + "\n",
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: await response.json().catch(() => null),
+  };
+}
+
 function clusterHeaders() {
   return { "x-spread-db-cluster-secret": TEST_CLUSTER_SECRET };
 }
@@ -293,6 +311,43 @@ test("all-peer fan-out runs in parallel", async () => {
   assert.equal(maxActive, 2);
 });
 
+test("all-peer fan-out can tolerate unreachable peers only when requested", async () => {
+  const router = new ShardRequestRouter({
+    node: {
+      shardMap: { allPeers: () => [{ url: "http://peer-a" }, { url: "http://peer-b" }] },
+      _isSelfPeer: () => false,
+    },
+  });
+
+  router.forwardJson = async (_req, peer) => {
+    if (peer.url === "http://peer-a") return { status: 200, body: { ok: true }, headers: {} };
+    throw new Error("fetch failed");
+  };
+
+  const strict = await router.forwardToAllPeers({ headers: {} }, "/api/databases", { method: "POST" });
+  assert.equal(strict.status, 503);
+  assert.match(strict.body.error, /fetch failed/);
+
+  const tolerant = await router.forwardToAllPeers({ headers: {} }, "/api/databases", {
+    method: "POST",
+    allowUnavailable: true,
+  });
+  assert.equal(tolerant.status, 200);
+  assert.deepEqual(tolerant.body, { ok: true, peers: 1, unavailablePeers: 1 });
+
+  router.forwardJson = async (_req, peer) => {
+    if (peer.url === "http://peer-a") return { status: 200, body: { ok: true }, headers: {} };
+    return { status: 400, body: { error: "bad metadata" }, headers: {} };
+  };
+
+  const realError = await router.forwardToAllPeers({ headers: {} }, "/api/databases", {
+    method: "POST",
+    allowUnavailable: true,
+  });
+  assert.equal(realError.status, 400);
+  assert.deepEqual(realError.body, { error: "bad metadata" });
+});
+
 test("auth issues and renews global user JWTs", async () => {
   const s = await startTestServer({ port: 0 });
   try {
@@ -313,11 +368,27 @@ test("auth issues and renews global user JWTs", async () => {
     assert.equal(session.status, 200);
     assert.equal(typeof session.body.accessToken, "string");
     assert.equal(typeof session.body.refreshToken, "string");
+    assert.equal(session.body.access_token, session.body.accessToken);
+    assert.equal(session.body.refresh_token, session.body.refreshToken);
+    assert.equal(session.body.token_type, "Bearer");
+    assert.equal(session.body.expires_in, session.body.expiresIn);
+    assert.equal(session.body.token.accessToken, session.body.accessToken);
+    assert.equal(session.body.token.refreshToken, session.body.refreshToken);
+    const claims = JSON.parse(Buffer.from(session.body.accessToken.split(".")[1], "base64url").toString("utf8"));
+    assert.equal(claims.id, claims.sub);
+    assert.equal(claims.tokenId, claims.sessionId);
+    assert.equal(claims.userFamily, claims.role);
     assert.equal(session.body.user.username, "admin");
     assert.equal(session.body.user.password, undefined);
 
     const authed = api(base, session.body.accessToken);
     assert.deepEqual((await authed.get("/api/databases")).body.databases, ["_global"]);
+    const legacyHeader = await fetch(`${base}/api/databases`, {
+      headers: { authorization: `Baerer ${session.body.accessToken}` },
+    });
+    assert.equal(legacyHeader.status, 200);
+    const queryToken = await fetch(`${base}/api/databases?token=${encodeURIComponent(session.body.accessToken)}`);
+    assert.equal(queryToken.status, 200);
     const config = await authed.get("/api/config");
     assert.equal(config.status, 200);
     assert.deepEqual(config.body.shards.map((shard) => shard.name), ["default"]);
@@ -342,6 +413,12 @@ test("auth issues and renews global user JWTs", async () => {
     assert.equal(renewed.status, 200);
     assert.equal(typeof renewed.body.accessToken, "string");
     assert.equal(typeof renewed.body.refreshToken, "string");
+    assert.equal(renewed.body.access_token, renewed.body.accessToken);
+    assert.equal(renewed.body.refresh_token, renewed.body.refreshToken);
+    assert.equal(renewed.body.token_type, "Bearer");
+    assert.equal(renewed.body.expires_in, renewed.body.expiresIn);
+    assert.equal(renewed.body.token.accessToken, renewed.body.accessToken);
+    assert.equal(renewed.body.token.refreshToken, renewed.body.refreshToken);
     assert.equal(renewed.body.user.password, undefined);
   } finally {
     s.server.close();
@@ -629,6 +706,9 @@ test("auth routes database users to the owning shard", async () => {
     assert.equal(session.status, 200, JSON.stringify(session.body));
     assert.equal(session.body.user._id, remoteUserId);
     assert.equal(session.body.user.password, undefined);
+
+    const remoteByQueryToken = await fetch(`${urlA}/api/${db}/${coll}/object/${remoteUserId}?token=${encodeURIComponent(root.accessToken)}`);
+    assert.equal(remoteByQueryToken.status, 200, await remoteByQueryToken.text());
 
     const renewed = await api(urlA, null).post(`/api/${db}/${coll}/renew`, {
       refreshToken: session.body.refreshToken,
@@ -1220,6 +1300,82 @@ test("public object interface supports bulk CRUD", async () => {
   }
 });
 
+test("public object interface supports streamed NDJSON bulk CRUD", async () => {
+  const s = await startTestServer({
+    port: 0,
+    imports: {
+      maxBulkObjects: 2,
+      maxBulkBytes: 1024 * 1024,
+      maxObjectBytes: 1024 * 1024,
+    },
+  });
+  try {
+    const baseUrl = `http://localhost:${s.port}`;
+    const session = await login(baseUrl);
+    const base = "/api/app/streamed/object";
+
+    const missingPreference = await fetch(`${baseUrl}${base}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        "content-type": "application/x-ndjson",
+      },
+      body: JSON.stringify({ _id: "blocked" }) + "\n",
+    });
+    assert.equal(missingPreference.status, 400);
+    assert.match((await missingPreference.json()).error, /Prefer: return=minimal/);
+    assert.equal(s.node.get("app", "streamed", "blocked"), undefined);
+
+    const created = await ndjsonRequest(baseUrl, session.accessToken, "POST", base, [
+      { _id: "e1", type: "signup", count: 1, flags: { old: true } },
+      { _id: "e2", type: "purchase", count: 2, flags: { old: true } },
+      { type: "generated", count: 3 },
+    ]);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.deepEqual(created.body, { inserted: 3 });
+    assert.equal(s.node.count("app", "streamed"), 3);
+
+    const replaced = await ndjsonRequest(baseUrl, session.accessToken, "PUT", base, [
+      { _id: "e1", done: true },
+      { _id: "e2", done: false },
+    ]);
+    assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
+    assert.deepEqual(replaced.body, { replaced: 2 });
+    assert.deepEqual(s.node.get("app", "streamed", "e1"), { _id: "e1", done: true });
+
+    const patched = await ndjsonRequest(baseUrl, session.accessToken, "PATCH", base, [
+      { _id: "e1", $set: { count: 10 } },
+      { _id: "e2", $set: { extra: true } },
+      { _id: "missing", $set: { count: 99 } },
+    ]);
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
+    assert.deepEqual(patched.body, { updated: 2, skipped: 1 });
+    assert.equal(s.node.get("app", "streamed", "e1").count, 10);
+    assert.equal(s.node.get("app", "streamed", "e2").extra, true);
+
+    const removed = await ndjsonRequest(baseUrl, session.accessToken, "DELETE", base, [
+      { _id: "e1" },
+      { _id: "e2" },
+      { _id: "missing" },
+    ]);
+    assert.equal(removed.status, 200, JSON.stringify(removed.body));
+    assert.deepEqual(removed.body, { deleted: 2, skipped: 1 });
+    assert.equal(s.node.get("app", "streamed", "e1"), undefined);
+    assert.equal(s.node.get("app", "streamed", "e2"), undefined);
+
+    const invalid = await ndjsonRequest(baseUrl, session.accessToken, "POST", base, [
+      { _id: "partial", value: 1 },
+      "{bad json",
+    ]);
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.body.line, 2);
+    assert.equal(invalid.body.inserted, 0);
+    assert.equal(s.node.get("app", "streamed", "partial"), undefined);
+  } finally {
+    s.server.close();
+  }
+});
+
 test("public minimal bulk insert skips object readback", async () => {
   const node = new CRDTNode({ id: "minimal-bulk" });
   const s = await startTestServer({ port: 0, node });
@@ -1597,6 +1753,63 @@ test("bulk CRUD splits batches by shard and read routes fan out", async () => {
   }
 });
 
+test("streamed NDJSON bulk CRUD splits chunks by shard", async () => {
+  const { a, b, urlA } = await startRoutedTwoShardCluster({
+    a: {
+      imports: {
+        maxBulkObjects: 2,
+        maxBulkBytes: 1024 * 1024,
+        maxObjectBytes: 1024 * 1024,
+      },
+    },
+    b: {
+      imports: {
+        maxBulkObjects: 2,
+        maxBulkBytes: 1024 * 1024,
+        maxObjectBytes: 1024 * 1024,
+      },
+    },
+  });
+  try {
+    const session = await login(urlA);
+    const db = "app";
+    const coll = "streamed_routed";
+    const base = `/api/${db}/${coll}/object`;
+    const idA = idForShard(a.node, db, coll, "shard-a", "local");
+    const idB = idForShard(a.node, db, coll, "shard-b", "remote");
+
+    const created = await ndjsonRequest(urlA, session.accessToken, "POST", base, [
+      { _id: idA, side: "a", value: 1 },
+      { _id: idB, side: "b", value: 2 },
+    ]);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.deepEqual(created.body, { inserted: 2 });
+    assert.equal(a.node.get(db, coll, idA).value, 1);
+    assert.equal(b.node.get(db, coll, idB).value, 2);
+
+    const patched = await ndjsonRequest(urlA, session.accessToken, "PATCH", base, [
+      { _id: idA, $set: { value: 3 } },
+      { _id: idB, $set: { value: 4 } },
+    ]);
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
+    assert.deepEqual(patched.body, { updated: 2, skipped: 0 });
+    assert.equal(a.node.get(db, coll, idA).value, 3);
+    assert.equal(b.node.get(db, coll, idB).value, 4);
+
+    const removed = await ndjsonRequest(urlA, session.accessToken, "DELETE", base, [
+      { _id: idA },
+      { _id: idB },
+    ]);
+    assert.equal(removed.status, 200, JSON.stringify(removed.body));
+    assert.deepEqual(removed.body, { deleted: 2, skipped: 0 });
+    assert.equal(a.node.get(db, coll, idA), undefined);
+    assert.equal(b.node.get(db, coll, idB), undefined);
+  } finally {
+    a.server.close();
+    b.server.close();
+  }
+});
+
 test("public sharded list does not count shards for array responses", async () => {
   const { a, b, urlA } = await startRoutedTwoShardCluster();
   try {
@@ -1701,6 +1914,88 @@ test("collection metadata fan-out builds indexes on shard peers", async () => {
   } finally {
     a.server.close();
     b.server.close();
+  }
+});
+
+test("schema writes tolerate unreachable fan-out peers after local commit", async () => {
+  const port = await freePort();
+  const url = `http://localhost:${port}`;
+  const offlineUrl = `http://127.0.0.1:${await freePort()}`;
+  const shardMap = {
+    shards: {
+      "shard-a": { peers: [{ url }, { url: offlineUrl }] },
+    },
+  };
+  const s = await startTestServer({
+    port,
+    node: new CRDTNode({ id: "schema-fanout", url }),
+    shardMap,
+  });
+  try {
+    const session = await login(url);
+    const c = api(url, session.accessToken);
+
+    const createdDb = await c.post("/api/databases", { name: "offline_schema" });
+    assert.equal(createdDb.status, 201, JSON.stringify(createdDb.body));
+    assert.deepEqual(s.node.getDatabaseMeta("offline_schema"), {});
+
+    const createdCollection = await c.post("/api/offline_schema/collections", {
+      name: "docs",
+      indexes: ["status"],
+    });
+    assert.equal(createdCollection.status, 201, JSON.stringify(createdCollection.body));
+    assert.deepEqual(s.node.getCollectionMeta("offline_schema", "docs"), {
+      indexes: ["status"],
+      columnIndexes: [],
+    });
+
+    const updatedMeta = await c.put("/api/offline_schema/docs/meta", {
+      indexes: ["status", "owner"],
+    });
+    assert.equal(updatedMeta.status, 200, JSON.stringify(updatedMeta.body));
+    assert.deepEqual(s.node.getCollectionMeta("offline_schema", "docs"), {
+      indexes: ["status", "owner"],
+      columnIndexes: [],
+    });
+
+    const deletedCollection = await c.del("/api/offline_schema/collections/docs");
+    assert.equal(deletedCollection.status, 204, JSON.stringify(deletedCollection.body));
+    assert.equal(s.node.getCollectionMeta("offline_schema", "docs"), null);
+
+    const deletedDb = await c.del("/api/databases/offline_schema");
+    assert.equal(deletedDb.status, 204, JSON.stringify(deletedDb.body));
+    assert.equal(s.node.getDatabaseMeta("offline_schema"), null);
+  } finally {
+    s.server.close();
+  }
+});
+
+test("collection and database deletes keep committed state when file cleanup fails", async () => {
+  const files = {
+    deleteCollectionFiles: async () => {
+      throw new Error("fetch failed");
+    },
+    deleteDatabaseFiles: async () => {
+      throw new Error("fetch failed");
+    },
+  };
+  const s = await startTestServer({ port: 0, files });
+  try {
+    const base = `http://localhost:${s.port}`;
+    const session = await login(base);
+    const c = api(base, session.accessToken);
+
+    assert.equal((await c.post("/api/file_cleanup/collections", { name: "docs" })).status, 201);
+    const deletedCollection = await c.del("/api/file_cleanup/collections/docs");
+    assert.equal(deletedCollection.status, 204, JSON.stringify(deletedCollection.body));
+    assert.equal(s.node.getCollectionMeta("file_cleanup", "docs"), null);
+
+    assert.equal((await c.post("/api/databases", { name: "file_cleanup_db" })).status, 201);
+    const deletedDb = await c.del("/api/databases/file_cleanup_db");
+    assert.equal(deletedDb.status, 204, JSON.stringify(deletedDb.body));
+    assert.equal(s.node.getDatabaseMeta("file_cleanup_db"), null);
+  } finally {
+    s.server.close();
   }
 });
 
