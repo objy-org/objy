@@ -17,6 +17,8 @@ import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, Ve
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
 const FIELD_BUILD_BATCH_SIZE = 4096;
+const INDEX_DEFER_MIN_ROWS = 5000;
+const INDEX_DIRTY_BUILD_BATCH_SIZE = 4096;
 const INDEX_WARMUP_MAX_HEAP_RATIO = 0.7;
 const INDEX_WARMUP_RETRY_MS = 30_000;
 const VECTOR_BUILD_BATCH_SIZE = 4096;
@@ -36,6 +38,8 @@ class Collection {
     this.fieldBuilds = new Map();
     this.columnIndexes = new Map();
     this.columnBuilds = new Set();
+    this.indexDirtyRids = new Set();
+    this.indexDirtyBuild = null;
     this.indexBuildPending = false;
     this.shardIds = new Map();
     this.unshardedLiveCount = 0;
@@ -226,6 +230,8 @@ class Collection {
     this.fieldBuilds.clear();
     this.columnIndexes.clear();
     this.columnBuilds.clear();
+    this.indexDirtyRids.clear();
+    this.indexDirtyBuild = null;
     this.indexBuildPending = false;
     this.clearVectorIndexes();
     this.vectors.clear();
@@ -443,11 +449,12 @@ class Collection {
       ...[...this.indexes.entries()].map(([path, index]) => ({
         type: "field",
         path,
-        status: "ready",
+        status: this.indexDirtyRids.size ? "building" : "ready",
         keys: index.lookupKeys,
         entries: index.lookupEntries,
         orderedKeys: index.orderedKeys,
         orderedEntries: index.orderedEntries,
+        dirtyEntries: this.indexDirtyRids.size,
       })),
       ...[...this.fieldBuilds.values()].map((build) => ({
         type: "field",
@@ -459,11 +466,12 @@ class Collection {
       ...[...this.columnIndexes.entries()].map(([path, index]) => ({
         type: "column",
         path,
-        status: index.status,
+        status: index.ready && this.indexDirtyRids.size ? "building" : index.status,
         entries: index.entries,
         scalarEntries: index.scalarEntries,
         nonScalarEntries: index.nonScalarEntries,
-        pendingEntries: index.pendingEntries,
+        pendingEntries: index.pendingEntries + this.indexDirtyRids.size,
+        dirtyEntries: this.indexDirtyRids.size,
         numberSum: index.numberSum,
         numberCount: index.numberCount,
         ...(index.error ? { error: index.error } : {}),
@@ -498,6 +506,8 @@ class Collection {
     this.fieldBuilds.clear();
     this.columnIndexes.clear();
     this.columnBuilds.clear();
+    this.indexDirtyRids.clear();
+    this.indexDirtyBuild = null;
     for (const [path, column] of columnData) {
       const index = new ColumnIndex(path);
       const buildId = index.startBuild();
@@ -539,6 +549,20 @@ class Collection {
       const builds = [...this.columnBuilds];
       if (!builds.length) return;
       await Promise.allSettled(builds);
+    }
+  }
+
+  async awaitDirtyIndexes() {
+    for (;;) {
+      const build = this.indexDirtyBuild;
+      if (!build) {
+        if (this.indexDirtyRids.size) {
+          this._scheduleDirtyIndexCatchup();
+          if (this.indexDirtyBuild) continue;
+        }
+        return;
+      }
+      await Promise.allSettled([build]);
     }
   }
 
@@ -634,15 +658,17 @@ class Collection {
     const fieldIndexes = this.collectionMeta.indexes.map((path) => ({
       path,
       status: this._fieldIndexStatus(path),
-      pendingEntries: this.fieldBuilds.get(path)?.pending?.size || 0,
+      pendingEntries: (this.fieldBuilds.get(path)?.pending?.size || 0) + this.indexDirtyRids.size,
+      dirtyEntries: this.indexDirtyRids.size,
       ...(this.fieldBuilds.get(path)?.error ? { error: this.fieldBuilds.get(path).error } : {}),
     }));
     const columnIndexes = this.collectionMeta.columnIndexes.map((path) => {
       const index = this.columnIndexes.get(path);
       return {
         path,
-        status: index?.status || (this.indexBuildPending ? "pending" : "missing"),
-        pendingEntries: index?.pendingEntries || 0,
+        status: index?.ready && this.indexDirtyRids.size ? "building" : index?.status || (this.indexBuildPending ? "pending" : "missing"),
+        pendingEntries: (index?.pendingEntries || 0) + this.indexDirtyRids.size,
+        dirtyEntries: this.indexDirtyRids.size,
         ...(index?.error ? { error: index.error } : {}),
       };
     });
@@ -650,7 +676,7 @@ class Collection {
     const workers = {
       fieldIndex: {
         type: "same_thread_task",
-        active: [...this.fieldBuilds.values()].filter((build) => build.status === "building").length,
+        active: [...this.fieldBuilds.values()].filter((build) => build.status === "building").length + (this.indexDirtyBuild ? 1 : 0),
         background: true,
       },
       columnIndex: {
@@ -745,14 +771,18 @@ class Collection {
     return {
       idsForCriteria: (criteria) => this._ridsForCriteria(criteria),
       partialIdsForCriteria: (criteria) => this._partialRidsForCriteria(criteria),
-      hasOrderedIndex: (path) => this.indexes.has(String(path)),
-      hasGroupIndex: (path) => this.indexes.has(String(path)),
-      hasGroupForwardIndex: (path) => this.indexes.get(String(path))?.canReadValuesById === true,
+      hasOrderedIndex: (path) => !this._hasDirtyIndexes() && this.indexes.has(String(path)),
+      hasGroupIndex: (path) => !this._hasDirtyIndexes() && this.indexes.has(String(path)),
+      hasGroupForwardIndex: (path) => !this._hasDirtyIndexes() && this.indexes.get(String(path))?.canReadValuesById === true,
       fieldIndex: (path) => this.indexes.get(String(path)) || null,
-      columnIndex: (path) => this.columnIndexes.get(String(path)) || null,
+      columnIndex: (path) => this._hasDirtyIndexes() ? null : this.columnIndexes.get(String(path)) || null,
       idsForAll: (includeId) => this._ridSetForAll(includeId),
       filterIds: (ids, includeId) => this._filterRidSet(ids, includeId),
     };
+  }
+
+  _hasDirtyIndexes() {
+    return this.indexDirtyRids.size > 0;
   }
 
   _ridSetForAll(includeId = null) {
@@ -880,11 +910,26 @@ class Collection {
     if (!index) return null;
 
     const containsValue = indexableContainsValue(expected);
-    if (containsValue !== null) return index.idsForContains(containsValue);
+    if (containsValue !== null) return this._dirtyAwareIndexedRids(path, expected, index.idsForContains(containsValue));
 
     const values = indexableConstraintValues(expected);
     if (values === null) return null;
-    return index.idsForValues(values);
+    return this._dirtyAwareIndexedRids(path, expected, index.idsForValues(values));
+  }
+
+  _dirtyAwareIndexedRids(path, expected, indexed) {
+    if (indexed === null) return null;
+    if (!this.indexDirtyRids.size) return indexed;
+
+    const out = new Set();
+    for (const rid of indexed) {
+      if (!this.indexDirtyRids.has(rid)) out.add(rid);
+    }
+    for (const rid of this.indexDirtyRids) {
+      const object = this.readRidForQuery(rid);
+      if (object && matchesQuery(object, { [path]: expected })) out.add(rid);
+    }
+    return out;
   }
 
   _ridsForObjectIdConstraint(expected) {
@@ -938,9 +983,17 @@ class Collection {
 
   _applyIndexDeltas(deltas = []) {
     if (!deltas?.length) return;
+    if (this._shouldDeferIndexDeltas(deltas)) {
+      for (const delta of deltas) this._markIndexDirty(delta);
+      this._scheduleDirtyIndexCatchup();
+      return;
+    }
+
     for (const { rid, before, after } of deltas) {
       if (!Number.isInteger(rid)) continue;
       this._recordFieldBuildDelta(rid, before, after);
+      this._recordColumnBuildDelta(rid, after);
+      if (this.indexDirtyRids.has(rid)) continue;
 
       for (const index of this.indexes.values()) {
         if (before) index.removeValue(rid, getPathValue(before, index.path));
@@ -948,9 +1001,83 @@ class Collection {
       }
 
       for (const index of this.columnIndexes.values()) {
+        if (index.status === "building") continue;
         if (after) index.updateScalarState(rid, columnScalarState(getPathValue(after, index.path)));
         else index.remove(rid);
       }
+    }
+  }
+
+  _shouldDeferIndexDeltas(deltas = []) {
+    return deltas.length >= INDEX_DEFER_MIN_ROWS && this._hasIndexWork();
+  }
+
+  _hasIndexWork() {
+    return Boolean(
+      this.indexes.size ||
+        this.columnIndexes.size ||
+        this.fieldBuilds.size ||
+        this.columnBuilds.size,
+    );
+  }
+
+  _markIndexDirty({ rid, before, after } = {}) {
+    if (!Number.isInteger(rid)) return;
+    this._recordFieldBuildDelta(rid, before, after);
+    this._recordColumnBuildDelta(rid, after);
+    this.indexDirtyRids.add(rid);
+  }
+
+  _recordColumnBuildDelta(rid, after) {
+    for (const index of this.columnIndexes.values()) {
+      if (index.status !== "building") continue;
+      if (after) index.updateScalarState(rid, columnScalarState(getPathValue(after, index.path)));
+      else index.remove(rid);
+    }
+  }
+
+  _scheduleDirtyIndexCatchup() {
+    if (this.indexDirtyBuild || !this.indexDirtyRids.size) return;
+    const build = this._runDirtyIndexCatchup();
+    this.indexDirtyBuild = build;
+    build.then(
+      () => {
+        if (this.indexDirtyBuild === build) this.indexDirtyBuild = null;
+        if (this.indexDirtyRids.size) this._scheduleDirtyIndexCatchup();
+      },
+      () => {
+        if (this.indexDirtyBuild === build) this.indexDirtyBuild = null;
+      },
+    );
+  }
+
+  async _runDirtyIndexCatchup() {
+    await yieldToEventLoop();
+    while (this.indexDirtyRids.size) {
+      const batch = [];
+      for (const rid of this.indexDirtyRids) {
+        batch.push(rid);
+        if (batch.length >= INDEX_DIRTY_BUILD_BATCH_SIZE) break;
+      }
+
+      for (const rid of batch) {
+        this._refreshReadyIndexesForRid(rid);
+        this.indexDirtyRids.delete(rid);
+      }
+
+      if (this.indexDirtyRids.size) await yieldToEventLoop();
+    }
+  }
+
+  _refreshReadyIndexesForRid(rid) {
+    const object = this.readRidForQuery(rid);
+    for (const index of this.indexes.values()) {
+      index.removeRid(rid);
+      if (object) index.addValue(rid, getPathValue(object, index.path));
+    }
+    for (const index of this.columnIndexes.values()) {
+      if (object) index.updateScalarState(rid, columnScalarState(getPathValue(object, index.path)));
+      else index.remove(rid);
     }
   }
 
@@ -1021,7 +1148,7 @@ class Collection {
   }
 
   _fieldIndexStatus(path) {
-    if (this.indexes.has(path)) return "ready";
+    if (this.indexes.has(path)) return this.indexDirtyRids.size ? "building" : "ready";
     const build = this.fieldBuilds.get(path);
     if (!build) return this.indexBuildPending ? "pending" : "missing";
     return build.status || "building";
@@ -1483,6 +1610,11 @@ class FieldIndex {
     }
     this._removeOrdered(rid, value);
     this._removeContainsState(rid, value);
+  }
+
+  removeRid(rid) {
+    if (!this.forward.has(rid)) return;
+    this.removeValue(rid, this.forward.get(rid));
   }
 
   idsForValues(values) {
@@ -2313,6 +2445,7 @@ export class Store {
     await Promise.all([
       collection.awaitFieldIndexes(),
       collection.awaitColumnIndexes(),
+      collection.awaitDirtyIndexes(),
     ]);
   }
 
