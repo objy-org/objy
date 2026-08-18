@@ -929,3 +929,67 @@ test("column indexes build in the background and absorb live deltas", async () =
     { total: 65370, payloads: 256, n: 256 },
   ]);
 });
+
+test("large indexed bulk writes defer index catch-up without stale query results", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "events", {
+    indexes: ["status", "tags"],
+    columnIndexes: ["score"],
+  });
+
+  const rows = [];
+  for (let i = 0; i < 6000; i++) {
+    rows.push({
+      _id: `e${i}`,
+      status: i % 2 === 0 ? "hot" : "cold",
+      tags: i % 3 === 0 ? ["asset", `t${i % 5}`] : ["other"],
+      score: i,
+    });
+  }
+  assert.equal(n.insertManyCount("db", "events", rows), rows.length);
+
+  const collection = n.db.collection("db", "events");
+  assert.equal(collection.indexDirtyRids.size, rows.length);
+  assert.equal(collection._planRead({ status: "hot" }, {}).path, READ_PATH.INDEX_EXACT);
+  assert.equal(collection._planAggregate({}, {
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.SCAN);
+
+  assert.equal(n.count("db", "events", { status: "hot" }), 3000);
+  assert.equal(n.count("db", "events", { tags: { $contains: "asset" } }), 2000);
+
+  n.update("db", "events", "e0", { status: "cold", score: 100000 });
+  n.remove("db", "events", "e2");
+
+  assert.equal(n.count("db", "events", { status: "hot" }), 2998);
+  assert.equal(n.count("db", "events", { status: "cold" }), 3001);
+  assert.equal(n.find("db", "events", { status: "hot" }).some((row) => row._id === "e0" || row._id === "e2"), false);
+  assert.equal(n.find("db", "events", { status: "cold" }).some((row) => row._id === "e0"), true);
+  assert.deepEqual(n.aggregate("db", "events", {}, {
+    fields: {
+      total: { $sum: "score" },
+      n: { $count: true },
+    },
+  }), [
+    { total: 18096998, n: 5999 },
+  ]);
+
+  await n.awaitIndexes("db", "events");
+
+  assert.equal(collection.indexDirtyRids.size, 0);
+  assert.equal(collection._planAggregate({}, {
+    fields: {
+      total: { $sum: "score" },
+    },
+  }).path, AGGREGATE_PATH.COLUMN_SUMMARY);
+  assert.deepEqual(n.aggregate("db", "events", {}, {
+    fields: {
+      total: { $sum: "score" },
+      n: { $count: true },
+    },
+  }), [
+    { total: 18096998, n: 5999 },
+  ]);
+});
