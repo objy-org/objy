@@ -257,6 +257,11 @@ export class ShapeStore {
     this.loc.delete(id);
   }
 
+  clear() {
+    this.shapes.clear();
+    this.loc.clear();
+  }
+
   read(id) {
     const old = this.loc.get(id);
     if (!old) return undefined;

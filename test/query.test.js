@@ -453,6 +453,8 @@ test("column indexes drive object-db aggregates and stay fresh", async () => {
       { path: "score", status: "ready", entries: 3 },
     ],
   );
+  assert.equal([...n.db.collection("db", "users").columnIndexes.get("score").values.keys()]
+    .every((rid) => Number.isInteger(rid)), true);
 
   assert.deepEqual(n.aggregate("db", "users", {}, {
     groupBy: "status",
@@ -830,6 +832,9 @@ test("shard scoped grouped count aggregates use shard id sets", () => {
   const options = n._shardQueryOptions("db", "assets", ["shard-0"]);
   assert.equal(options.includeIds instanceof Set, true);
   assert.equal(typeof options.includeId, "undefined");
+  assert.equal([...options.includeIds].every((rid) => Number.isInteger(rid)), true);
+  assert.equal([...n.db.collection("db", "assets").indexes.get("applications").idsForValues(["assetmanagement"])]
+    .every((rid) => Number.isInteger(rid)), true);
 
   n.shardForObject = () => {
     throw new Error("shard scoped aggregate hashed object ids");
@@ -857,8 +862,8 @@ test("unfiltered limited reads and column builds stream live ids", async () => {
   n.insertMany("db", "events", rows);
 
   const collection = n.db.collection("db", "events");
-  collection._liveIds = () => {
-    throw new Error("live ids were materialized");
+  collection._ridSetForAll = () => {
+    throw new Error("live rids were materialized");
   };
 
   assert.deepEqual(

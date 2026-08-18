@@ -339,6 +339,33 @@ test("restore makes objects readable before configured indexes finish warming", 
   assert.equal(fresh.indexStats("app", "orders").find((entry) => entry.type === "field" && entry.path === "status").entries, 50);
 });
 
+test("scoped restore starts pending index warmup", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
+  persistence.start();
+  node.setCollectionMeta("app", "orders", {
+    indexes: ["status"],
+  });
+  node.insertMany("app", "orders", Array.from({ length: 10 }, (_, i) => ({
+    _id: `o${i}`,
+    status: i % 2 ? "open" : "paid",
+  })));
+  await persistence.checkpoint();
+  await persistence.stop();
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  await new PersistenceManager({ node: fresh, storage }).restoreScope({
+    database: "app",
+    collection: "orders",
+    shard: "default",
+  });
+
+  await fresh.awaitIndexes("app", "orders");
+  assert.equal(fresh.queryPath("app", "orders", { status: "paid" }), "index-exact");
+  assert.equal(fresh.indexStats("app", "orders").find((entry) => entry.type === "field" && entry.path === "status").entries, 10);
+});
+
 test("collection removal deletes the persisted collection prefix", async () => {
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "n1" });

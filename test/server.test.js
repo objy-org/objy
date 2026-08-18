@@ -399,8 +399,10 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.equal(local.replication.scheduler.hintsEnabled, true);
     assert.equal(Number.isInteger(local.replication.scheduler.inflightPulls), true);
     assert.equal(local.indexes.status, "ready");
-    assert.equal(local.indexes.workers.columnIndex.type, "worker_thread");
+    assert.equal(local.indexes.workers.fieldIndex.type, "same_thread_task");
+    assert.equal(local.indexes.workers.columnIndex.type, "same_thread_task");
     assert.equal(local.indexes.workers.vectorIndex.type, "same_thread_task");
+    assert.equal(Number.isInteger(local.indexes.workers.fieldIndex.active), true);
     assert.equal(Number.isInteger(local.indexes.workers.columnIndex.active), true);
     assert.equal(Number.isInteger(local.indexes.workers.vectorIndex.active), true);
     assert.ok(local.indexes.collections.some((entry) => (
