@@ -38,7 +38,7 @@ class Collection {
     this.fieldBuilds = new Map();
     this.columnIndexes = new Map();
     this.columnBuilds = new Set();
-    this.indexDirtyRids = new Set();
+    this.indexDirtyRids = new RidBitmapQueue();
     this.indexDirtyBuild = null;
     this.indexBuildPending = false;
     this.shardIds = new Map();
@@ -1054,10 +1054,10 @@ class Collection {
   async _runDirtyIndexCatchup() {
     await yieldToEventLoop();
     while (this.indexDirtyRids.size) {
-      const batch = [];
-      for (const rid of this.indexDirtyRids) {
-        batch.push(rid);
-        if (batch.length >= INDEX_DIRTY_BUILD_BATCH_SIZE) break;
+      const batch = this.indexDirtyRids.take(INDEX_DIRTY_BUILD_BATCH_SIZE);
+      if (!batch.length) {
+        this.indexDirtyRids.clear();
+        break;
       }
 
       for (const rid of batch) {
@@ -1555,6 +1555,83 @@ function createPhysicalStore(options = {}) {
   if (engine === "shape") return new ShapeStore();
   if (engine === "object") return new ObjectRowStore(options.object);
   throw new TypeError(`unsupported storage engine: ${engine}`);
+}
+
+class RidBitmapQueue {
+  constructor() {
+    this.bits = new Uint8Array(0);
+    this.queue = [];
+    this.head = 0;
+    this.size = 0;
+  }
+
+  add(rid) {
+    if (!Number.isInteger(rid) || rid < 0) return false;
+    this._ensure(rid);
+    if (this.bits[rid]) return false;
+    this.bits[rid] = 1;
+    this.size++;
+    this.queue.push(rid);
+    return true;
+  }
+
+  delete(rid) {
+    if (!Number.isInteger(rid) || rid < 0 || rid >= this.bits.length || !this.bits[rid]) return false;
+    this.bits[rid] = 0;
+    this.size--;
+    if (this.size === 0) this._compactQueue();
+    return true;
+  }
+
+  has(rid) {
+    return Number.isInteger(rid) && rid >= 0 && rid < this.bits.length && this.bits[rid] === 1;
+  }
+
+  clear() {
+    this.bits.fill(0);
+    this.queue = [];
+    this.head = 0;
+    this.size = 0;
+  }
+
+  take(limit = Infinity) {
+    const max = Math.max(0, Math.floor(Number(limit) || 0));
+    if (max <= 0 || this.size <= 0) return [];
+    const out = [];
+    while (out.length < max && this.head < this.queue.length) {
+      const rid = this.queue[this.head++];
+      if (this.has(rid)) out.push(rid);
+    }
+    this._compactQueue();
+    return out;
+  }
+
+  *[Symbol.iterator]() {
+    for (let i = this.head; i < this.queue.length; i++) {
+      const rid = this.queue[i];
+      if (this.has(rid)) yield rid;
+    }
+  }
+
+  _ensure(rid) {
+    if (rid < this.bits.length) return;
+    let next = this.bits.length || 1024;
+    while (next <= rid) next *= 2;
+    const bits = new Uint8Array(next);
+    bits.set(this.bits);
+    this.bits = bits;
+  }
+
+  _compactQueue() {
+    if (this.size === 0) {
+      this.queue = [];
+      this.head = 0;
+      return;
+    }
+    if (this.head < 4096 || this.head * 2 < this.queue.length) return;
+    this.queue = this.queue.slice(this.head);
+    this.head = 0;
+  }
 }
 
 class FieldIndex {
