@@ -141,6 +141,54 @@ test("bulk operations are the internal write default", () => {
   assert.equal(changes[0].ops.length, 1);
 });
 
+test("bulk writes update index state in one batch", async () => {
+  const n = makeNode("a");
+  n.createCollection("db", "c", {
+    indexes: ["status"],
+    columnIndexes: ["score"],
+  });
+  const collection = n.db.collection("db", "c");
+  await n.awaitColumnIndexes("db", "c");
+  assert.equal(collection.indexReadiness().workers.fieldIndex.type, "same_thread_task");
+  assert.equal(collection.indexReadiness().workers.columnIndex.type, "same_thread_task");
+
+  const batches = [];
+  const originalApplyBatch = collection._applyIndexDeltas.bind(collection);
+  collection._applyIndexDeltas = (deltas) => {
+    batches.push(deltas.length);
+    return originalApplyBatch(deltas);
+  };
+
+  try {
+    n.insertMany("db", "c", [
+      { _id: "a", status: "hot", score: 1 },
+      { _id: "b", status: "cold", score: 2 },
+      { _id: "c", status: "hot", score: 3 },
+    ]);
+    assert.deepEqual(batches, [3]);
+    assert.deepEqual(n.find("db", "c", { status: "hot" }).map((row) => row._id), ["a", "c"]);
+    assert.deepEqual(n.aggregate("db", "c", {}, { fields: { total: { $sum: "score" } } }), [{ total: 6 }]);
+
+    batches.length = 0;
+    n.updateMany("db", "c", [
+      { _id: "a", status: "warm", score: 4 },
+      { _id: "c", status: "warm", score: 5 },
+    ]);
+    assert.deepEqual(batches, [2]);
+    assert.deepEqual(n.find("db", "c", { status: "hot" }), []);
+    assert.deepEqual(n.find("db", "c", { status: "warm" }).map((row) => row._id), ["a", "c"]);
+    assert.deepEqual(n.aggregate("db", "c", {}, { fields: { total: { $sum: "score" } } }), [{ total: 11 }]);
+
+    batches.length = 0;
+    n.removeMany("db", "c", ["a", "b"]);
+    assert.deepEqual(batches, [2]);
+    assert.deepEqual(n.find("db", "c", { status: "warm" }).map((row) => row._id), ["c"]);
+    assert.deepEqual(n.aggregate("db", "c", {}, { fields: { total: { $sum: "score" } } }), [{ total: 5 }]);
+  } finally {
+    collection._applyIndexDeltas = originalApplyBatch;
+  }
+});
+
 test("bulk insert count path skips object hydration", () => {
   const n = makeNode("a");
   const originalGet = n.get.bind(n);

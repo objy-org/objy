@@ -121,6 +121,7 @@ export class PersistenceManager {
       if (!scope) this._rememberUnscopedCursors(scopes);
     } finally {
       this.node.db.endBulkLoad?.();
+      this.node.startIndexWarmup?.();
     }
 
     this.node.seq = Math.max(this.node.seq, maxLocalSeq);
@@ -332,6 +333,18 @@ export class PersistenceManager {
     }
   }
 
+  _queueLocalWal(record) {
+    if (!this.localWal) return;
+    const entry = {
+      version: 1,
+      node: this.node.id,
+      createdAt: new Date().toISOString(),
+      ...record,
+    };
+    this.localWalPending.push(entry);
+    this.localWalPendingBytes += jsonBytes(entry, "pending local WAL record") + 1;
+  }
+
   _queueOp(op) {
     if (!op?.db || !op.coll || !op.id || !op.shard) return;
     const cloned = clone(op);
@@ -346,18 +359,6 @@ export class PersistenceManager {
       this.flush().catch((err) => (this.lastError = err));
     }
     return cloned;
-  }
-
-  _queueLocalWal(record) {
-    if (!this.localWal) return;
-    const entry = {
-      version: 1,
-      node: this.node.id,
-      createdAt: new Date().toISOString(),
-      ...record,
-    };
-    this.localWalPending.push(entry);
-    this.localWalPendingBytes += jsonBytes(entry, "pending local WAL record") + 1;
   }
 
   _removePendingLocalWalForCollection(database, collection) {

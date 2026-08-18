@@ -39,6 +39,11 @@ export class ObjectRowStore {
     this.rows.delete(id);
   }
 
+  clear() {
+    this.rows.clear();
+    this.valueDirectory.clear();
+  }
+
   read(id) {
     const row = this.rows.get(id);
     return row ? cloneValue(row.value) : undefined;
@@ -192,6 +197,12 @@ class ValueDirectory {
       return true;
     }
     return false;
+  }
+
+  clear() {
+    this.pool.clear();
+    this.pathCandidates.clear();
+    this.candidateCount = 0;
   }
 
   keyFor(value) {
