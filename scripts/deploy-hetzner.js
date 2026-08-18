@@ -120,6 +120,7 @@ optional overrides:
   --public-url http://123.123.123.123:3333
   --node hetzner-1
   --port 3333
+  --max-old-space-size 15360
   --map deploy/shard-map.json
   --release 20260812-120000
   --health-wait-seconds 1200
@@ -161,6 +162,12 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
       installNode: raw.remote?.installNode !== false,
       nodeMajor: positiveInt(raw.remote?.nodeMajor, DEFAULT_NODE_MAJOR),
     },
+    runtime: {
+      maxOldSpaceSizeMb: positiveInt(
+        overrides.maxOldSpaceSize || overrides.maxOldSpaceSizeMb || raw.runtime?.maxOldSpaceSizeMb || raw.node?.maxOldSpaceSizeMb,
+        0,
+      ),
+    },
     node: {
       id: overrides.node || overrides.id || raw.node?.id || DEFAULT_NODE_ID,
       url: publicUrl,
@@ -177,7 +184,7 @@ function normalizeDeployConfig(raw = {}, overrides = {}) {
     files: normalizeFilesConfig(raw.files),
     auth: {
       jwtSecret: required(raw.auth?.jwtSecret, "auth.jwtSecret"),
-      accessTokenTtlSeconds: positiveInt(raw.auth?.accessTokenTtlSeconds, 900),
+      accessTokenTtlSeconds: positiveInt(raw.auth?.accessTokenTtlSeconds, 3600),
       refreshTokenTtlSeconds: positiveInt(raw.auth?.refreshTokenTtlSeconds, 1_209_600),
       users: Array.isArray(raw.auth?.users) ? raw.auth.users : [],
     },
@@ -468,6 +475,11 @@ function closeSshMultiplex() {
 }
 
 function installSystemdUnit() {
+  const nodeOptions = runtimeNodeOptions(config.runtime);
+  const environment = [
+    "NODE_ENV=production",
+    ...(nodeOptions ? [`NODE_OPTIONS=${nodeOptions}`] : []),
+  ];
   const unit = `[Unit]
 Description=spread-db
 After=network-online.target
@@ -480,7 +492,7 @@ ExecStart=/usr/bin/env node ${remoteCurrent}/src/index.js --config ${remoteConfi
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
-Environment=NODE_ENV=production
+${environment.map((entry) => `Environment=${systemdQuote(entry)}`).join("\n")}
 
 [Install]
 WantedBy=multi-user.target
@@ -610,6 +622,14 @@ function sudo() {
 
 function q(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function systemdQuote(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function runtimeNodeOptions(runtime = {}) {
+  return runtime.maxOldSpaceSizeMb ? `--max-old-space-size=${runtime.maxOldSpaceSizeMb}` : "";
 }
 
 function required(value, name) {

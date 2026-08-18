@@ -184,7 +184,7 @@ This sample shows the runtime defaults explicitly. Values like node identity and
   "auth": {
     "enabled": true,
     "jwtSecret": "change-me",
-    "accessTokenTtlSeconds": 900,
+    "accessTokenTtlSeconds": 3600,
     "refreshTokenTtlSeconds": 1209600,
     "clockToleranceSeconds": 0,
     "users": [

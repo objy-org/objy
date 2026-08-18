@@ -1,6 +1,6 @@
 const { hmacSha256, randomUUID } = require('./crypto.cjs')
 
-function signAccessToken(user, secret, { expiresInSeconds = 900, sessionId = null, extraClaims = {} } = {}) {
+function signAccessToken(user, secret, { expiresInSeconds = 3600, sessionId = null, extraClaims = {} } = {}) {
   const data = user && user._data ? user._data : user
   if (!data || typeof data !== 'object') throw new TypeError('JWT user payload must be an object')
 

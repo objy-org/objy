@@ -8,6 +8,9 @@
   "server": {
     "port": 8080
   },
+  "runtime": {
+    "maxOldSpaceSizeMb": 15360
+  },
   "memoryGuard": {
     "enabled": true
   },
@@ -29,7 +32,7 @@
   },
   "auth": {
     "jwtSecret": "local-dev-jwt-secret-change-me",
-    "accessTokenTtlSeconds": 900,
+    "accessTokenTtlSeconds": 3600,
     "refreshTokenTtlSeconds": 1209600,
     "users": [
       {

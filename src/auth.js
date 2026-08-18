@@ -8,7 +8,7 @@ const { hashPassword, randomUUID, verifyPassword } = require("./lib/crypto.cjs")
 export const GLOBAL_DATABASE = "_global";
 export const USERS_COLLECTION = "users";
 
-const DEFAULT_ACCESS_TTL_SECONDS = 15 * 60;
+const DEFAULT_ACCESS_TTL_SECONDS = 60 * 60;
 const DEFAULT_REFRESH_TTL_SECONDS = 14 * 24 * 60 * 60;
 const DEFAULT_BOOTSTRAP_USERS = Object.freeze([
   { _id: "admin", username: "admin", password: "123", role: "admin", admin: true },
@@ -156,7 +156,12 @@ export class AuthService {
       user: this.redactUser(user),
       accessToken: pair.accessToken,
       refreshToken: pair.refreshToken,
+      access_token: pair.accessToken,
+      refresh_token: pair.refreshToken,
+      token_type: "Bearer",
+      token: pair,
       expiresIn: this.config.accessTokenTtlSeconds,
+      expires_in: this.config.accessTokenTtlSeconds,
     };
   }
 
@@ -171,17 +176,28 @@ export class AuthService {
   issueToken(database, collection, user, type, ttlSeconds, sessionId) {
     const now = Math.floor(Date.now() / 1000);
     const permissions = normalizePermissions(user.permissions);
+    const role = user.role || "user";
+    const admin = user.admin === true || role === "admin";
     return JWT.sign({
       typ: type,
       sub: user._id,
+      id: user._id,
       username: user.username,
-      role: user.role || "user",
-      admin: user.admin === true || user.role === "admin",
+      role,
+      userFamily: role,
+      admin,
+      spooAdmin: admin,
       permissions,
+      authorisations: user.authorisations || {},
+      applications: Array.isArray(user.applications) ? user.applications : [],
       database,
+      tenant: database,
+      client: database,
       collection,
+      family: collection,
       globalUser: this.isGlobalUsersCollection(database, collection),
       sessionId,
+      tokenId: sessionId,
       tokenVersion: user.tokenVersion || 0,
       iat: now,
       exp: now + ttlSeconds,
@@ -189,12 +205,11 @@ export class AuthService {
   }
 
   authenticateRequest(req) {
-    const header = req.headers.authorization || "";
-    if (!header.startsWith("Bearer ")) {
+    const token = accessTokenFromRequest(req);
+    if (!token) {
       return { ok: false, status: 401, error: "missing or malformed Authorization header" };
     }
 
-    const token = header.slice("Bearer ".length).trim();
     try {
       const claims = JWT.verifyAccessToken(token, this.config.jwtSecret, {
         clockToleranceSeconds: this.config.clockToleranceSeconds,
@@ -374,6 +389,16 @@ class DisabledAuthService {
 
 export function isPasswordHash(value) {
   return typeof value === "string" && value.startsWith("pbkdf2$sha256$");
+}
+
+export function accessTokenFromRequest(req) {
+  const header = req?.headers?.authorization;
+  if (typeof header === "string") {
+    const match = header.match(/^(Bearer|Baerer)\s+(.+)$/i);
+    if (match) return match[2].trim() || null;
+  }
+  const queryToken = req?.query?.get?.("token");
+  return typeof queryToken === "string" && queryToken.trim() ? queryToken.trim() : null;
 }
 
 function isPlainObject(value) {
