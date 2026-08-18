@@ -340,8 +340,8 @@ export class CRDTNode {
     return this.db.indexReadiness();
   }
 
-  awaitColumnIndexes(db, coll) {
-    return this.db.awaitColumnIndexes(db, coll);
+  awaitColumns(db, coll) {
+    return this.db.awaitColumns(db, coll);
   }
 
   awaitFieldIndexes(db, coll) {

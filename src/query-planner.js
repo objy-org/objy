@@ -224,7 +224,7 @@ function aggregateScanPlan(normalized, reason) {
 function readyColumns(paths, adapter) {
   const columns = new Map();
   for (const path of unique(paths)) {
-    const column = adapter.columnIndex(path);
+    const column = adapter.column(path);
     if (!column || !column.ready) return { ready: false, missing: path, columns };
     columns.set(path, column);
   }

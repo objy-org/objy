@@ -25,7 +25,7 @@ Each collection also has a small `meta` JavaScript object. It is kept in memory 
 ```json
 {
   "indexes": ["status", "tenantId"],
-  "columnIndexes": ["score"]
+  "columns": ["score"]
 }
 ```
 
@@ -63,9 +63,9 @@ Passwords are hashed on write and redacted from responses.
 
 `indexes` are in-memory field indexes. They are best for equality-style filtering, `$in`, narrowing candidate ids, and indexed sorting. They are also used by the query planner before falling back to scans.
 
-**Column Indexes**
+**Columns**
 
-`columnIndexes` keep field values in index structures built for fast aggregate paths. They help `$sum`, `$avg`, `$count`, and grouped aggregates avoid reading full objects when the query can be planned from indexed ids and column values. Column index builds run in the background.
+`columns` move selected field values into RID-addressed column storage. Numeric, boolean, and repeated string values are kept compactly, while dynamic object reads still hydrate as ordinary full objects. They help `$sum`, `$avg`, `$min`, `$max`, `$count`, and grouped aggregates avoid reading full objects when the planner can combine indexed ids with column values. Column builds run in the background.
 
 **Vector Index**
 
@@ -255,7 +255,7 @@ Content-Type: application/json
 {
   "name": "{collection}",
   "indexes": ["status", "tenantId"],
-  "columnIndexes": ["score"]
+  "columns": ["score"]
 }
 ```
 
@@ -267,7 +267,7 @@ Response:
   "created": true,
   "meta": {
     "indexes": ["status", "tenantId"],
-    "columnIndexes": ["score"]
+    "columns": ["score"]
   }
 }
 ```
@@ -288,7 +288,7 @@ Response:
 ```json
 {
   "indexes": ["status", "tenantId"],
-  "columnIndexes": ["score"]
+  "columns": ["score"]
 }
 ```
 
@@ -303,7 +303,7 @@ Content-Type: application/json
 
 {
   "indexes": ["status", "tenantId"],
-  "columnIndexes": ["score"]
+  "columns": ["score"]
 }
 ```
 
@@ -312,11 +312,11 @@ Response:
 ```json
 {
   "indexes": ["status", "tenantId"],
-  "columnIndexes": ["score"]
+  "columns": ["score"]
 }
 ```
 
-Changing `indexes` or `columnIndexes` rebuilds indexes in the background.
+Changing `indexes` or `columns` rebuilds derived structures in the background.
 
 ### Delete Collection
 
@@ -1148,7 +1148,7 @@ Response:
       "indexes": {
         "status": "ready",
         "workers": {
-          "columnIndex": { "type": "worker_thread", "active": 0 },
+          "columns": { "type": "same_thread_task", "active": 0 },
           "vectorIndex": { "type": "same_thread_task", "active": 0 }
         }
       }

@@ -439,10 +439,10 @@ test("column indexes drive object-db aggregates and stay fresh", async () => {
   const n = new CRDTNode({ id: "a" });
   n.createCollection("db", "users", {
     indexes: ["status"],
-    columnIndexes: ["status", "score"],
+    columns: ["status", "score"],
   });
   seedUsers(n);
-  await n.awaitColumnIndexes("db", "users");
+  await n.awaitColumns("db", "users");
 
   assert.deepEqual(
     n.indexStats("db", "users")
@@ -453,8 +453,9 @@ test("column indexes drive object-db aggregates and stay fresh", async () => {
       { path: "score", status: "ready", entries: 3 },
     ],
   );
-  assert.equal([...n.db.collection("db", "users").columnIndexes.get("score").values.keys()]
-    .every((rid) => Number.isInteger(rid)), true);
+  const scoreColumn = n.db.collection("db", "users").columns.get("score");
+  assert.equal(scoreColumn.hasScalar(n.db.collection("db", "users")._ridForId("ada")), true);
+  assert.equal(scoreColumn.valueFor(n.db.collection("db", "users")._ridForId("grace")), 20);
 
   assert.deepEqual(n.aggregate("db", "users", {}, {
     groupBy: "status",
@@ -502,14 +503,59 @@ test("column indexes drive object-db aggregates and stay fresh", async () => {
   ]);
 });
 
+test("columns store selected paths outside base rows and hydrate snapshots", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "events", {
+    indexes: ["status"],
+    columns: ["score", "nested.value"],
+  });
+  n.insert("db", "events", {
+    _id: "e1",
+    status: "hot",
+    score: 7,
+    nested: { value: 11, keep: true },
+  });
+  await n.awaitColumns("db", "events");
+
+  const collection = n.db.collection("db", "events");
+  assert.deepEqual(collection.store.readForQuery("e1"), {
+    status: "hot",
+    nested: { keep: true },
+  });
+  assert.deepEqual(n.get("db", "events", "e1"), {
+    _id: "e1",
+    status: "hot",
+    score: 7,
+    nested: { keep: true, value: 11 },
+  });
+  assert.deepEqual(n.aggregate("db", "events", {}, {
+    fields: {
+      total: { $sum: "score" },
+      nestedTotal: { $sum: "nested.value" },
+    },
+  }), [{ total: 7, nestedTotal: 11 }]);
+
+  const [snapshot] = [...collection.snapshotObjects()];
+  assert.deepEqual(snapshot.value, {
+    status: "hot",
+    nested: { keep: true, value: 11 },
+    score: 7,
+  });
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  fresh.createCollection("db", "events", { indexes: ["status"], columns: ["score", "nested.value"] });
+  fresh.applySnapshot("a", { collections: [{ db: "db", coll: "events", objects: [snapshot] }] });
+  assert.deepEqual(fresh.get("db", "events", "e1"), n.get("db", "events", "e1"));
+});
+
 test("query planner chooses old index-style read and aggregate paths", async () => {
   const n = new CRDTNode({ id: "a" });
   n.createCollection("db", "users", {
     indexes: ["status"],
-    columnIndexes: ["score", "profile.city"],
+    columns: ["score", "profile.city"],
   });
   seedUsers(n);
-  await n.awaitColumnIndexes("db", "users");
+  await n.awaitColumns("db", "users");
 
   const collection = n.db.collection("db", "users");
   assert.equal(collection._planRead({ status: "active" }, {}).path, READ_PATH.INDEX_EXACT);
@@ -557,7 +603,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   const n = new CRDTNode({ id: "a" });
   n.createCollection("db", "assets", {
     indexes: ["applications", "properties.department.value"],
-    columnIndexes: ["score"],
+    columns: ["score"],
   });
 
   const departments = ["ops", "rd", "sales"];
@@ -581,7 +627,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
     }
   }
   n.insertMany("db", "assets", rows);
-  await n.awaitColumnIndexes("db", "assets");
+  await n.awaitColumns("db", "assets");
 
   const spec = {
     groupBy: "properties.department.value",
@@ -683,7 +729,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
   const n = new CRDTNode({ id: "a" });
   n.createCollection("db", "assets", {
     indexes: ["applications", "properties.department.value"],
-    columnIndexes: ["score", "cost", "label"],
+    columns: ["score", "cost", "label"],
   });
   n.insertMany("db", "assets", [
     {
@@ -719,7 +765,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
       label: "ignored",
     },
   ]);
-  await n.awaitColumnIndexes("db", "assets");
+  await n.awaitColumns("db", "assets");
 
   const spec = {
     groupBy: "properties.department.value",
@@ -874,9 +920,9 @@ test("unfiltered limited reads and column builds stream live ids", async () => {
   n.createIndex("db", "events", "score");
   n.setCollectionMeta("db", "events", {
     indexes: ["score"],
-    columnIndexes: ["score"],
+    columns: ["score"],
   });
-  await n.awaitColumnIndexes("db", "events");
+  await n.awaitColumns("db", "events");
 
   const scoreColumn = n.indexStats("db", "events").find((entry) => entry.type === "column" && entry.path === "score");
   assert.equal(scoreColumn.status, "ready");
@@ -898,7 +944,7 @@ test("column indexes build in the background and absorb live deltas", async () =
   n.createIndex("db", "events", "status");
   n.setCollectionMeta("db", "events", {
     indexes: ["status"],
-    columnIndexes: ["score", "payload"],
+    columns: ["score", "payload"],
   });
 
   n.update("db", "events", "e10", { score: 100, payload: { bucket: "changed" } });
@@ -914,7 +960,7 @@ test("column indexes build in the background and absorb live deltas", async () =
     { total: 65370, payloads: 256, n: 256 },
   ]);
 
-  await n.awaitColumnIndexes("db", "events");
+  await n.awaitColumns("db", "events");
   const columns = n.indexStats("db", "events").filter((entry) => entry.type === "column");
   assert.equal(columns.every((entry) => entry.status === "ready"), true);
   assert.equal(columns.find((entry) => entry.path === "payload").nonScalarEntries, 511);
@@ -934,7 +980,7 @@ test("large indexed bulk writes defer index catch-up without stale query results
   const n = new CRDTNode({ id: "a" });
   n.createCollection("db", "events", {
     indexes: ["status", "tags"],
-    columnIndexes: ["score"],
+    columns: ["score"],
   });
 
   const rows = [];

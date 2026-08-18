@@ -145,12 +145,12 @@ test("bulk writes update index state in one batch", async () => {
   const n = makeNode("a");
   n.createCollection("db", "c", {
     indexes: ["status"],
-    columnIndexes: ["score"],
+    columns: ["score"],
   });
   const collection = n.db.collection("db", "c");
-  await n.awaitColumnIndexes("db", "c");
+  await n.awaitColumns("db", "c");
   assert.equal(collection.indexReadiness().workers.fieldIndex.type, "same_thread_task");
-  assert.equal(collection.indexReadiness().workers.columnIndex.type, "same_thread_task");
+  assert.equal(collection.indexReadiness().workers.columns.type, "same_thread_task");
 
   const batches = [];
   const originalApplyBatch = collection._applyIndexDeltas.bind(collection);
