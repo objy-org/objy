@@ -2141,7 +2141,7 @@ function renderClusterStatus(config) {
   const workerCount = nodes.reduce((sum, nodeStatus) => {
     const workers = nodeStatus.indexes?.workers || {};
     return sum
-      + (Number(workers.columnIndex?.active) || 0)
+      + (Number(workers.columns?.active) || 0)
       + (Number(workers.vectorIndex?.active) || 0);
   }, 0);
 
@@ -2477,8 +2477,8 @@ function indexSummary(item) {
   if (Array.isArray(item.fieldIndexes) && item.fieldIndexes.length) {
     parts.push(`field: ${indexPathList(item.fieldIndexes)}`);
   }
-  if (Array.isArray(item.columnIndexes) && item.columnIndexes.length) {
-    parts.push(`column: ${indexPathList(item.columnIndexes, true)}`);
+  if (Array.isArray(item.columns) && item.columns.length) {
+    parts.push(`column: ${indexPathList(item.columns, true)}`);
   }
   if (hasVectorState(item.vector)) {
     parts.push(`vector: ${statusLabel(item.vector.status)} · ${formatNumber(item.vector.stored)} stored`);
@@ -2489,7 +2489,7 @@ function indexSummary(item) {
 function hasIndexState(item) {
   return Boolean(
     (Array.isArray(item?.fieldIndexes) && item.fieldIndexes.length) ||
-      (Array.isArray(item?.columnIndexes) && item.columnIndexes.length) ||
+      (Array.isArray(item?.columns) && item.columns.length) ||
       hasVectorState(item?.vector),
   );
 }
@@ -2506,7 +2506,7 @@ function hasVectorState(vector) {
 
 function activeWorkerCount(nodeStatus) {
   const workers = nodeStatus.indexes?.workers || {};
-  return (Number(workers.columnIndex?.active) || 0) + (Number(workers.vectorIndex?.active) || 0);
+  return (Number(workers.columns?.active) || 0) + (Number(workers.vectorIndex?.active) || 0);
 }
 
 function activeVectorContextCount(nodeStatus) {

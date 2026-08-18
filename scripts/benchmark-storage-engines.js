@@ -76,7 +76,7 @@ async function runChild(options) {
   const store = new Store(storage);
   store.createCollection("bench", "assets", {
     indexes: ["status", "applications", "properties.department.value"],
-    columnIndexes: ["cost", "properties.cost.value", "status", "properties.department.value"],
+    columns: ["cost", "properties.cost.value", "status", "properties.department.value"],
   });
   const collection = store.collection("bench", "assets");
 

@@ -270,7 +270,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   const rawMeta = await storage.get("spread-db/db/app/collection/orders/meta.json");
   assert.deepEqual(JSON.parse(rawMeta), {
     indexes: ["status"],
-    columnIndexes: [],
+    columns: [],
     owner: "events-team",
   });
   assert.deepEqual(JSON.parse(await storage.get("spread-db/db/empty/meta.json")), {
@@ -278,7 +278,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   });
   assert.deepEqual(JSON.parse(await storage.get("spread-db/db/app/collection/empty_collection/meta.json")), {
     indexes: [],
-    columnIndexes: [],
+    columns: [],
   });
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -289,7 +289,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   assert.deepEqual(fresh.listCollections("app").sort(), ["empty_collection", "orders"]);
   assert.deepEqual(fresh.getCollectionMeta("app", "orders"), {
     indexes: ["status"],
-    columnIndexes: [],
+    columns: [],
     owner: "events-team",
   });
   assert.deepEqual(fresh.get("app", "orders", "o1"), { _id: "o1", status: "paid", amount: 10 });
@@ -309,7 +309,7 @@ test("restore makes objects readable before configured indexes finish warming", 
   persistence.start();
   node.setCollectionMeta("app", "orders", {
     indexes: ["status"],
-    columnIndexes: ["amount"],
+    columns: ["amount"],
   });
   node.insertMany("app", "orders", Array.from({ length: 50 }, (_, i) => ({
     _id: `o${i}`,
@@ -559,7 +559,7 @@ test("restore can target a retained checkpoint id", async () => {
   assert.deepEqual(earlier.get("app", "users", "u1"), { _id: "u1", version: 1 });
   assert.deepEqual(earlier.getCollectionMeta("app", "users"), {
     indexes: ["version"],
-    columnIndexes: [],
+    columns: [],
   });
 });
 

@@ -477,10 +477,10 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.equal(Number.isInteger(local.replication.scheduler.inflightPulls), true);
     assert.equal(local.indexes.status, "ready");
     assert.equal(local.indexes.workers.fieldIndex.type, "same_thread_task");
-    assert.equal(local.indexes.workers.columnIndex.type, "same_thread_task");
+    assert.equal(local.indexes.workers.columns.type, "same_thread_task");
     assert.equal(local.indexes.workers.vectorIndex.type, "same_thread_task");
     assert.equal(Number.isInteger(local.indexes.workers.fieldIndex.active), true);
-    assert.equal(Number.isInteger(local.indexes.workers.columnIndex.active), true);
+    assert.equal(Number.isInteger(local.indexes.workers.columns.active), true);
     assert.equal(Number.isInteger(local.indexes.workers.vectorIndex.active), true);
     assert.ok(local.indexes.collections.some((entry) => (
       entry.database === "_global" &&
@@ -747,8 +747,8 @@ test("database creation can bootstrap a routed admin user", async () => {
     assert.equal(created.body.adminUser.user.admin, true);
     assert.equal(created.body.adminUser.user.password, undefined);
 
-    assert.deepEqual(a.node.getCollectionMeta(db, coll), { indexes: ["username"], columnIndexes: [] });
-    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["username"], columnIndexes: [] });
+    assert.deepEqual(a.node.getCollectionMeta(db, coll), { indexes: ["username"], columns: [] });
+    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["username"], columns: [] });
     assert.equal(a.node.get(db, coll, remoteAdminId), undefined);
     assert.equal(b.node.get(db, coll, remoteAdminId).admin, true);
     assert.match(b.node.get(db, coll, remoteAdminId).password, /^pbkdf2\$sha256\$/);
@@ -1899,14 +1899,14 @@ test("collection metadata fan-out builds indexes on shard peers", async () => {
 
     const created = await c.post(`/api/${db}/collections`, { name: coll, indexes: ["value"] });
     assert.equal(created.status, 201);
-    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["value"], columnIndexes: [] });
+    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["value"], columns: [] });
 
     await c.post(base, { _id: idB, value: 3 });
     assert.equal(b.node.indexStats(db, coll)[0].orderedEntries, 1);
 
     const updated = await c.put(`/api/${db}/${coll}/meta`, { indexes: ["value", "id"] });
     assert.equal(updated.status, 200);
-    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["value", "id"], columnIndexes: [] });
+    assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["value", "id"], columns: [] });
 
     const removed = await c.del(`/api/${db}/collections/${coll}`);
     assert.equal(removed.status, 204);
@@ -1946,7 +1946,7 @@ test("schema writes tolerate unreachable fan-out peers after local commit", asyn
     assert.equal(createdCollection.status, 201, JSON.stringify(createdCollection.body));
     assert.deepEqual(s.node.getCollectionMeta("offline_schema", "docs"), {
       indexes: ["status"],
-      columnIndexes: [],
+      columns: [],
     });
 
     const updatedMeta = await c.put("/api/offline_schema/docs/meta", {
@@ -1955,7 +1955,7 @@ test("schema writes tolerate unreachable fan-out peers after local commit", asyn
     assert.equal(updatedMeta.status, 200, JSON.stringify(updatedMeta.body));
     assert.deepEqual(s.node.getCollectionMeta("offline_schema", "docs"), {
       indexes: ["status", "owner"],
-      columnIndexes: [],
+      columns: [],
     });
 
     const deletedCollection = await c.del("/api/offline_schema/collections/docs");
@@ -2128,7 +2128,7 @@ test("public query responses expose planner path headers", async () => {
     const createdCollection = await c.post(`/api/${db}/collections`, {
       name: coll,
       indexes: ["status"],
-      columnIndexes: ["score"],
+      columns: ["score"],
     });
     assert.equal(createdCollection.status, 201);
     assert.equal((await c.post(base, [
@@ -2206,7 +2206,7 @@ test("sharded object-db aggregate merges shard partials without fetching raw obj
     const createdCollection = await c.post(`/api/${db}/collections`, {
       name: coll,
       indexes: ["status"],
-      columnIndexes: ["status", "score"],
+      columns: ["status", "score"],
     });
     assert.equal(createdCollection.status, 201);
 
@@ -2410,7 +2410,7 @@ test("public interface lists databases, collections, and collection meta", async
     assert.deepEqual(createdCollection.body, {
       name: "orders",
       created: true,
-      meta: { indexes: ["status"], columnIndexes: [], owner: "events-team" },
+      meta: { indexes: ["status"], columns: [], owner: "events-team" },
     });
 
     await c.post("/api/app/users/object", { _id: "u1", name: "Ada" });
@@ -2419,10 +2419,10 @@ test("public interface lists databases, collections, and collection meta", async
     assert.deepEqual((await c.get("/api/app/collections")).body.collections, ["orders", "users"]);
     assert.deepEqual((await c.get("/api/app/orders/meta")).body, {
       indexes: ["status"],
-      columnIndexes: [],
+      columns: [],
       owner: "events-team",
     });
-    assert.deepEqual((await c.get("/api/app/users/meta")).body, { indexes: [], columnIndexes: [] });
+    assert.deepEqual((await c.get("/api/app/users/meta")).body, { indexes: [], columns: [] });
 
     await c.post("/api/app/orders/object", { _id: "o1", status: "paid" });
     const indexStats = s.node.indexStats("app", "orders");
