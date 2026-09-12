@@ -1,6 +1,7 @@
 import { DEFAULT_SHARD } from "./shard-map.js";
 import { aggregateObjects, aggregatePartialObjects, isObjectDbAggregateSpec, mergeAggregatePartials } from "./aggregate.js";
 import { accessTokenFromRequest } from "./auth.js";
+import { NDJSON_CONTENT_TYPE, ndjsonReadable } from "./ndjson.js";
 import { compareSortValues, getPathValue } from "./query.js";
 import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEADER } from "./query-planner.js";
 
@@ -372,6 +373,33 @@ export class ShardRequestRouter {
     return last;
   }
 
+  async forwardToShardNdjson(req, shard, path, {
+    method = "POST",
+    items = [],
+    query,
+    retryStatuses = [409, 502, 503, 504],
+    timeoutMs,
+  } = {}) {
+    const peers = this.node.routingPeersForShard(shard);
+    if (!peers.length) throw httpError(503, `no remote peer available for shard ${shard}`);
+
+    let last = null;
+    for (const peer of peers) {
+      try {
+        const response = await this.forwardNdjson(req, peer, shard, path, { method, items, query, timeoutMs });
+        last = response;
+        if (!retryStatuses.includes(response.status)) return response;
+      } catch (err) {
+        last = {
+          status: err.status || 503,
+          body: { error: err.message },
+          headers: {},
+        };
+      }
+    }
+    return last;
+  }
+
   async forwardToShardRaw(req, shard, path, {
     method = "GET",
     body,
@@ -450,6 +478,39 @@ export class ShardRequestRouter {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      return {
+        status: response.status,
+        body: text ? JSON.parse(text) : null,
+        headers: Object.fromEntries(response.headers),
+      };
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw httpError(504, `forward timeout after ${forwardTimeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async forwardNdjson(req, peer, shard, path, { method = "POST", items = [], query, timeoutMs } = {}) {
+    const suffix = query ? `?${query}` : "";
+    const headers = forwardedHeaders(req, shard, true);
+    headers["content-type"] = NDJSON_CONTENT_TYPE;
+    headers.prefer = preferMinimal(headers.prefer);
+    const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
+    timer.unref?.();
+    try {
+      const response = await fetch(`${peer.url}${path}${suffix}`, {
+        method,
+        headers,
+        body: ndjsonReadable(items),
+        duplex: "half",
         signal: controller.signal,
       });
       const text = await response.text();
@@ -627,6 +688,12 @@ function forwardedControlHeaders(req, hasBody) {
   if (req.headers.prefer) headers.prefer = req.headers.prefer;
   if (hasBody) headers["content-type"] = "application/json";
   return headers;
+}
+
+function preferMinimal(value) {
+  const current = String(value || "");
+  if (/\breturn=minimal\b/i.test(current)) return current;
+  return current ? `${current}, return=minimal` : "return=minimal";
 }
 
 function sortObjects(objects, options = {}) {

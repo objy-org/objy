@@ -1023,6 +1023,77 @@
   .config-meter.warn span { --meter-color: var(--amber); }
   .config-meter.bad span { --meter-color: var(--red); }
 
+  .compression-chart {
+    display: grid;
+    gap: 8px;
+  }
+
+  .compression-chart-row {
+    display: grid;
+    grid-template-columns: 68px minmax(72px, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .compression-track {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .08);
+    overflow: hidden;
+  }
+
+  .compression-track span {
+    display: block;
+    width: var(--bar, 0%);
+    height: 100%;
+    border-radius: inherit;
+    background: var(--amber);
+  }
+
+  .compression-track.compressed span {
+    background: var(--teal);
+  }
+
+  .compression-contexts {
+    display: grid;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .compression-context-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.25fr) minmax(150px, .9fr) minmax(190px, 1.3fr) minmax(160px, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 9px 10px;
+    border-top: 1px solid var(--line-soft);
+    color: var(--muted);
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  .compression-context-row:first-child {
+    border-top: 0;
+  }
+
+  .compression-context-row.header {
+    background: rgba(255, 255, 255, .035);
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .compression-context-row > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .cluster-kv {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1285,8 +1356,9 @@
     .top-stats-wrap, .session { justify-content: stretch; }
     .top-stats { flex-wrap: wrap; overflow: visible; }
     .cluster-hero { grid-template-columns: 1fr; }
-    .index-table { overflow-x: auto; }
+    .index-table, .compression-contexts { overflow-x: auto; }
     .index-row { min-width: 520px; }
+    .compression-context-row { min-width: 720px; }
     .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
     .sidebar { border-right: 0; border-bottom: 1px solid var(--line-soft); }
     .tree { max-height: 260px; }
@@ -2175,6 +2247,8 @@ function renderClusterStatsModal(config) {
   const shards = Array.isArray(config.shards) ? config.shards : [];
   const peers = Array.isArray(config.peers) ? config.peers : [];
   const memory = configMemory(config, nodes);
+  const compression = configCompression(config, nodes);
+  const hasCompression = compression.physical.collectionCount > 0;
   const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
   const readyIndexes = nodes.filter((nodeStatus) => nodeStatus.indexes?.status === "ready").length;
   const workerCount = nodes.reduce((sum, nodeStatus) => sum + activeWorkerCount(nodeStatus), 0);
@@ -2194,10 +2268,12 @@ function renderClusterStatsModal(config) {
         ${clusterMetric("indexes", `${readyIndexes}/${nodes.length}`, "nodes ready", readyIndexes === nodes.length ? "ok" : "warn")}
         ${clusterMetric("workers", workerCount, "active", workerCount ? "warn" : "ok")}
         ${clusterMetric("vectors", vectorContexts, "contexts with data", vectorContexts ? "ok" : "")}
+        ${hasCompression ? clusterMetric("compression", formatPercent(compression.logical.savedPercent), "logical payload saved", "ok") : ""}
       </div>
     </section>
 
     ${renderMemoryDetails(memory)}
+    ${renderCompressionDetails(compression)}
     ${renderShardDetails(shards)}
     ${renderNodeDetails(nodes)}
     ${renderIndexDetails(nodes)}
@@ -2276,6 +2352,98 @@ function selectedReplicaPanel(replicas) {
       </div>
     </div>
   `;
+}
+
+function renderCompressionDetails(compression) {
+  const nodes = compression.nodes.filter((entry) => entry.collectionCount > 0);
+  const contexts = nodes.flatMap((entry) => entry.collections.map((collection) => ({
+    node: entry.nodeId || entry.url || "unknown",
+    ...collection,
+  })));
+  if (!contexts.length) return "";
+
+  return `
+    <section class="cluster-section">
+      <div class="cluster-section-title">
+        <h3>Compression</h3>
+        <span>tiered payload bytes only</span>
+      </div>
+      <div class="cluster-grid">
+        ${compressionPanel("Logical data", compression.logical, "one replica per shard")}
+        ${compressionPanel("Physical data", compression.physical, "all online replicas")}
+        ${nodes.map((entry) => compressionPanel(entry.nodeId || entry.url || "node", entry, `${entry.collectionCount} configured collection${entry.collectionCount === 1 ? "" : "s"}`)).join("")}
+      </div>
+      <div class="compression-contexts">
+        <div class="compression-context-row header">
+          <span>Context</span><span>Coverage</span><span>Payload</span><span>Policy</span>
+        </div>
+        ${contexts.map(compressionContextRow).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function compressionPanel(title, entry, subtitle = "") {
+  const savedPercent = Number(entry.savedPercent) || 0;
+  const tone = entry.uncompressedBytes > 0 && savedPercent <= 0 ? "warn" : "";
+  return `
+    <div class="cluster-panel">
+      <div class="cluster-panel-head">
+        <strong>${escapeHtml(title)}</strong>
+        <span class="state-text ${tone}">${formatPercent(savedPercent)} saved</span>
+      </div>
+      ${compressionChart(entry)}
+      <div class="cluster-kv">
+        ${kv("Original", formatMemory(entry.uncompressedBytes))}
+        ${kv("Compressed", formatMemory(entry.compressedBytes))}
+        ${kv("Objects", formatNumber(entry.compressedObjects))}
+        ${kv("Coverage", formatPercent(entry.coveragePercent))}
+      </div>
+      ${subtitle ? `<div class="cluster-subtle">${escapeHtml(subtitle)}</div>` : ""}
+    </div>
+  `;
+}
+
+function compressionChart(entry) {
+  const original = Number(entry.uncompressedBytes) || 0;
+  const compressed = Number(entry.compressedBytes) || 0;
+  const storedPercent = original > 0 ? Math.max(0, Math.min(100, (compressed / original) * 100)) : 0;
+  const label = `Original ${formatMemory(original)}, compressed ${formatMemory(compressed)}`;
+  return `
+    <div class="compression-chart" role="img" aria-label="${escapeHtml(label)}">
+      <div class="compression-chart-row">
+        <span>Original</span>
+        <div class="compression-track"><span style="--bar:${original > 0 ? 100 : 0}%"></span></div>
+        <strong>${formatMemory(original)}</strong>
+      </div>
+      <div class="compression-chart-row">
+        <span>Compressed</span>
+        <div class="compression-track compressed"><span style="--bar:${storedPercent}%"></span></div>
+        <strong>${formatMemory(compressed)}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function compressionContextRow(item) {
+  const context = `${item.node} · ${item.database || "_"} / ${item.collection || "_"}`;
+  const coverage = `${formatNumber(item.compressedObjects)} / ${formatNumber(item.liveObjects)} · ${formatPercent(item.coveragePercent)}`;
+  const payload = `${formatMemory(item.uncompressedBytes)} to ${formatMemory(item.compressedBytes)} · ${formatPercent(item.savedPercent)} saved`;
+  return `
+    <div class="compression-context-row">
+      <span class="cluster-context" title="${escapeHtml(context)}">${escapeHtml(context)}</span>
+      <span>${escapeHtml(coverage)}</span>
+      <span title="${escapeHtml(payload)}">${escapeHtml(payload)}</span>
+      <span title="${escapeHtml(compressionPolicy(item.policy))}">${escapeHtml(compressionPolicy(item.policy))}</span>
+    </div>
+  `;
+}
+
+function compressionPolicy(policy = {}) {
+  const min = `min ${formatByteSize(policy.minBytes)}`;
+  if (Array.isArray(policy.keep) && policy.keep.length) return `keep ${policy.keep.join(", ")} · ${min}`;
+  if (Array.isArray(policy.offload) && policy.offload.length) return `compress ${policy.offload.join(", ")} · ${min}`;
+  return min;
 }
 
 function renderShardDetails(shards) {
@@ -2600,6 +2768,31 @@ function configMemory(config, nodes) {
   };
 }
 
+function configCompression(config, nodes) {
+  const root = config.compression || {};
+  const compressionNodes = Array.isArray(root.nodes) ? root.nodes : nodes.map((nodeStatus) => ({
+    nodeId: nodeStatus.node?.id || null,
+    url: nodeStatus.node?.url || nodeStatus.sourcePeer?.url || null,
+    reachable: nodeStatus.reachable !== false,
+    ...(nodeStatus.compression || {}),
+  }));
+  const empty = {
+    collectionCount: 0,
+    liveObjects: 0,
+    compressedObjects: 0,
+    coveragePercent: 0,
+    uncompressedBytes: 0,
+    compressedBytes: 0,
+    savedBytes: 0,
+    savedPercent: 0,
+  };
+  return {
+    logical: { ...empty, ...(root.logical || root.cluster || {}) },
+    physical: { ...empty, ...(root.physical || root.cluster || {}) },
+    nodes: compressionNodes,
+  };
+}
+
 function clusterMemory(cluster, memoryNodes, fallback) {
   const { fallbackUsed, fallbackTotal, fallbackCommitted } = fallback;
   return {
@@ -2714,6 +2907,14 @@ function formatMemory(bytes) {
   const mib = value / 1024 / 1024;
   if (mib >= 1024) return `${(mib / 1024).toLocaleString(undefined, { maximumFractionDigits: 2 })} GiB`;
   return `${mib.toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
+}
+
+function formatByteSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KiB`;
+  return formatMemory(value);
 }
 
 function renderTree() {
