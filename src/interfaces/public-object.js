@@ -1056,10 +1056,11 @@ async function routedCreateMany({
         continue;
       }
 
-      const remote = await routing.forwardToShard(req, group.shard, objectPath(database, collection), {
+      const remote = await forwardShardBulkWrite(routing, req, group.shard, objectPath(database, collection), {
         method: "POST",
-        body: group.items,
+        items: group.items,
         query: refDepthQuery(0),
+        minimalReturn,
       });
       if (!ok(remote.status)) throw remoteError(remote, `POST failed on shard ${group.shard}`);
       const remoteRows = remoteInsertedItems(remote.body);
@@ -1141,10 +1142,11 @@ async function routedWriteMany({
         continue;
       }
 
-      const remote = await routing.forwardToShard(req, group.shard, objectPath(database, collection), {
+      const remote = await forwardShardBulkWrite(routing, req, group.shard, objectPath(database, collection), {
         method,
-        body: group.items,
+        items: group.items,
         query: refDepthQuery(0),
+        minimalReturn,
       });
       if (!ok(remote.status)) throw remoteError(remote, `${method} failed on shard ${group.shard}`);
       total += Number(remote.body?.[resultKey]) || 0;
@@ -1244,10 +1246,11 @@ async function routedPatchMany({
         continue;
       }
 
-      const remote = await routing.forwardToShard(req, group.shard, objectPath(database, collection), {
+      const remote = await forwardShardBulkWrite(routing, req, group.shard, objectPath(database, collection), {
         method: "PATCH",
-        body: group.items,
+        items: group.items,
         query: refDepthQuery(0),
+        minimalReturn,
       });
       if (!ok(remote.status)) throw remoteError(remote, `PATCH failed on shard ${group.shard}`);
       updated += Number(remote.body?.updated) || 0;
@@ -1337,9 +1340,11 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
         continue;
       }
 
-      const remote = await routing.forwardToShard(req, group.shard, objectPath(database, collection), {
+      const remote = await forwardShardBulkWrite(routing, req, group.shard, objectPath(database, collection), {
         method: "DELETE",
+        items: group.items,
         body: { ids: group.items },
+        minimalReturn,
       });
       if (!ok(remote.status)) throw remoteError(remote, `DELETE failed on shard ${group.shard}`);
       result.deleted += Number(remote.body?.deleted) || 0;
@@ -1647,6 +1652,19 @@ async function afterLocalWrite(durability) {
     err.status = err.status || 500;
     throw err;
   }
+}
+
+async function forwardShardBulkWrite(routing, req, shard, path, {
+  method,
+  items,
+  body = items,
+  query,
+  minimalReturn = false,
+}) {
+  if (minimalReturn && typeof routing.forwardToShardNdjson === "function") {
+    return routing.forwardToShardNdjson(req, shard, path, { method, items, query });
+  }
+  return routing.forwardToShard(req, shard, path, { method, body, query });
 }
 
 async function forwardSchemaChange(routing, req, path, options, message) {

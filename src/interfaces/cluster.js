@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
+import { once } from "node:events";
 import { json, readJson } from "../http-router.js";
 import { localClusterStatus } from "../cluster-status.js";
+import { acceptsNdjson, isNdjsonContentType, NDJSON_CONTENT_TYPE, parseNdjsonBatches } from "../ndjson.js";
 
 export const CLUSTER_SECRET_HEADER = "x-spread-db-cluster-secret";
 export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
@@ -44,7 +46,7 @@ export function createClusterInterface() {
         json(res, 201, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
       }));
 
-      router.get("/replicate", secure((req, res) => {
+      router.get("/replicate", secure(async (req, res) => {
         const after = Number(req.query.get("after") || 0);
         const limit = Number(req.query.get("limit") || 0);
         const scope = scopeFromParams(req.query);
@@ -55,6 +57,10 @@ export function createClusterInterface() {
             lastSeq: node.seq,
             trimmed: node.trimmed,
           });
+          return;
+        }
+        if (acceptsNdjson(req.headers)) {
+          await writeReplicationNdjson(res, node, after, limit, scope);
           return;
         }
         json(res, 200, {
@@ -85,6 +91,20 @@ export function createClusterInterface() {
       }));
 
       router.post("/replicate", secure(async (req, res) => {
+        if (isNdjsonContentType(req.headers["content-type"])) {
+          const from = String(req.headers["x-spread-db-node"] || req.query.get("node") || "");
+          let applied = 0;
+          let batches = 0;
+          for await (const ops of parseNdjsonBatches(req, {
+            maxBatchObjects: replicationBatchObjects(node.syncBatchSize),
+            label: "replication stream",
+          })) {
+            applied += node.applyRemote(from, ops);
+            batches++;
+          }
+          json(res, 200, { ok: true, lastSeq: node.seq, applied, batches });
+          return;
+        }
         const body = await readJson(req);
         node.applyRemote(String(body.node || ""), Array.isArray(body.ops) ? body.ops : []);
         json(res, 200, { ok: true, lastSeq: node.seq });
@@ -105,7 +125,23 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
       const params = new URLSearchParams({ after: String(after), node: nodeId });
       if (limit) params.set("limit", String(limit));
       addScopeParams(params, scope);
-      const r = await fetchWithTimeout(`${base}/replicate?${params}`, { headers: clusterHeaders(secret) }, timeout);
+      const r = await fetchWithTimeout(`${base}/replicate?${params}`, {
+        headers: {
+          ...clusterHeaders(secret),
+          accept: NDJSON_CONTENT_TYPE,
+        },
+      }, timeout);
+      if (r.status === 200 && isNdjsonResponse(r)) {
+        return {
+          status: r.status,
+          node: r.headers.get("x-spread-db-node") || undefined,
+          lastSeq: numberHeader(r.headers, "x-spread-db-last-seq"),
+          opBatches: parseNdjsonBatches(r.body, {
+            maxBatchObjects: replicationBatchObjects(limit),
+            label: "replication stream",
+          }),
+        };
+      }
       const body = await r.json().catch(() => null);
       return { status: r.status, ...(body || {}) };
     },
@@ -126,6 +162,34 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
       return { status: r.status, ...(responseBody || {}) };
     },
   };
+}
+
+async function writeReplicationNdjson(res, node, after, limit, scope) {
+  res.writeHead(200, {
+    "content-type": NDJSON_CONTENT_TYPE,
+    "x-spread-db-node": node.id,
+    "x-spread-db-last-seq": String(node.seq),
+  });
+  for (const op of node._opsAfterIterable(after, limit, scope)) {
+    if (!res.write(`${JSON.stringify(op)}\n`)) await once(res, "drain");
+  }
+  res.end();
+}
+
+function isNdjsonResponse(response) {
+  return String(response.headers.get("content-type") || "").toLowerCase().includes("application/x-ndjson") ||
+    String(response.headers.get("content-type") || "").toLowerCase().includes("application/ndjson");
+}
+
+function numberHeader(headers, name) {
+  const n = Number(headers.get(name));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function replicationBatchObjects(limit) {
+  const n = Number(limit);
+  if (!Number.isFinite(n) || n <= 0) return 1000;
+  return Math.max(1, Math.min(Math.floor(n), 5000));
 }
 
 export function shardMapFromHttp(map, nodeId, { secret = null, timeoutMs = DEFAULT_REPLICATION_TIMEOUT_MS } = {}) {

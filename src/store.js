@@ -1,8 +1,10 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { getHeapStatistics } from "node:v8";
+import { constants as zlibConstants, deflateSync, inflateSync } from "node:zlib";
 import { ObjectRowStore } from "./object-store.js";
 import { ShapeStore } from "./shape.js";
 import { gt } from "./clock.js";
+import { percentOf, summarizeCompression } from "./compression-stats.js";
 import {
   aggregateLegacyObjects,
   aggregateObjects,
@@ -22,6 +24,8 @@ const INDEX_DIRTY_BUILD_BATCH_SIZE = 4096;
 const INDEX_WARMUP_MAX_HEAP_RATIO = 0.9;
 const INDEX_WARMUP_RETRY_MS = 30_000;
 const VECTOR_BUILD_BATCH_SIZE = 4096;
+const DEFAULT_TIERING_MIN_BYTES = 4096;
+const TIERING_DEFLATE_OPTIONS = Object.freeze({ level: zlibConstants.Z_BEST_SPEED });
 
 class Collection {
   constructor(name, options = {}) {
@@ -43,6 +47,8 @@ class Collection {
     this.indexBuildPending = false;
     this.shardIds = new Map();
     this.unshardedLiveCount = 0;
+    this.compressedCold = [];
+    this.compressionTotals = emptyCompressionTotals();
     this.collectionMeta = normalizeCollectionMeta();
     this.liveCount = 0;
   }
@@ -116,6 +122,7 @@ class Collection {
       m.deleted = row.deleted;
       m.shard = normalizeShard(row.shard) || m.shard || null;
       this.store.removeObject(id);
+      this._clearCompressedCold(m.rid);
       this._removeVector(id);
       this._refreshColumns(m.rid, undefined);
       return true;
@@ -129,9 +136,7 @@ class Collection {
     m.ts = row.ts;
     m.deleted = null;
     m.shard = normalizeShard(row.shard) || m.shard || null;
-    this.store.rebuild(id, Object.entries(baseValue).filter(([key]) => key !== "_id"), {
-      trusted: options.trustedValues === true,
-    });
+    this._writeBaseValue(id, m.rid, baseValue, { trusted: options.trustedValues === true });
     this._applyVectorUpdate(id, prepared.vector);
     this._refreshColumns(m.rid, prepared.value);
     return true;
@@ -154,9 +159,7 @@ class Collection {
     m.ts = ts;
     m.deleted = null;
     m.shard = nextShard;
-    this.store.rebuild(key, Object.entries(baseValue).filter(([field]) => field !== "_id"), {
-      trusted: options.trustedValues === true,
-    });
+    this._writeBaseValue(key, rid, baseValue, { trusted: options.trustedValues === true });
     this._applyVectorUpdate(key, prepared.vector);
     const after = queryObjectFromStoredValue(key, prepared.value);
     this._recordIndexDelta({ rid, before, after }, indexDeltas);
@@ -182,6 +185,82 @@ class Collection {
     return base;
   }
 
+  _writeBaseValue(id, rid, value = {}, options = {}) {
+    const baseValue = this._tierBaseValue(rid, value);
+    this.store.rebuild(id, Object.entries(baseValue).filter(([field]) => field !== "_id"), {
+      trusted: options.trusted === true,
+    });
+  }
+
+  _tierBaseValue(rid, value = {}) {
+    const tiering = this.collectionMeta.tiering;
+    if (!tiering || tiering.mode !== "compressedMemory") {
+      this._clearCompressedCold(rid);
+      return value || {};
+    }
+
+    const split = splitTieredValue(value || {}, tiering, this._forcedHotTieringPaths());
+    if (!split.cold) {
+      this._clearCompressedCold(rid);
+      return value || {};
+    }
+
+    const json = JSON.stringify(split.cold);
+    const rawBytes = Buffer.byteLength(json);
+    if (rawBytes < tiering.minBytes) {
+      this._clearCompressedCold(rid);
+      return value || {};
+    }
+
+    const compressed = deflateSync(Buffer.from(json), TIERING_DEFLATE_OPTIONS);
+    const compact = new Uint8Array(compressed.byteLength);
+    compact.set(compressed);
+    this._setCompressedCold(rid, {
+      bytes: rawBytes,
+      compressed: compact,
+    });
+    return split.hot;
+  }
+
+  _forcedHotTieringPaths() {
+    return unique([
+      ...this.collectionMeta.indexes,
+      ...this.collectionMeta.columns,
+    ]);
+  }
+
+  _clearCompressedCold(rid) {
+    this._setCompressedCold(rid, undefined);
+  }
+
+  _setCompressedCold(rid, entry) {
+    if (!Number.isInteger(rid)) return;
+    const previous = this.compressedCold[rid];
+    if (!previous && !entry) return;
+    if (previous) {
+      this.compressionTotals.objects--;
+      this.compressionTotals.uncompressedBytes -= previous.bytes;
+      this.compressionTotals.compressedBytes -= previous.compressed.byteLength;
+    }
+    this.compressedCold[rid] = entry;
+    if (entry) {
+      this.compressionTotals.objects++;
+      this.compressionTotals.uncompressedBytes += entry.bytes;
+      this.compressionTotals.compressedBytes += entry.compressed.byteLength;
+    }
+  }
+
+  _hydrateCompressedCold(value = {}, rid) {
+    const entry = this.compressedCold[rid];
+    if (!entry) return value || {};
+    const cold = JSON.parse(inflateSync(entry.compressed).toString("utf8"));
+    return mergePlainObjects(cold, value || {});
+  }
+
+  _hydrateStoredValue(value = {}, rid, id) {
+    return this._hydrateColumns(this._hydrateCompressedCold(value, rid), rid, id);
+  }
+
   _hydrateColumns(value = {}, rid, id) {
     let out = { ...(value || {}), _id: id };
     for (const [path, column] of this.columns) {
@@ -196,9 +275,7 @@ class Collection {
     if (id === undefined) return;
     const { _id, ...value } = object || {};
     const baseValue = this._baseValueForStorage(value, paths);
-    this.store.rebuild(id, Object.entries(baseValue).filter(([field]) => field !== "_id"), {
-      trusted: true,
-    });
+    this._writeBaseValue(id, rid, baseValue, { trusted: true });
   }
 
   deleteObject(id, ts, shard = null) {
@@ -228,6 +305,7 @@ class Collection {
     m.deleted = ts;
     if (shard) m.shard = normalizeShard(shard);
     this.store.removeObject(key);
+    this._clearCompressedCold(rid);
     this._removeVector(key);
     this._recordIndexDelta({ rid, before, after: undefined }, indexDeltas);
     if (wasLive) {
@@ -242,7 +320,7 @@ class Collection {
     const m = this.meta.get(key);
     if (!m || m.deleted) return undefined;
     const vals = this.store.read(key) || {};
-    return this._hydrateColumns(vals, m.rid, key);
+    return this._hydrateStoredValue(vals, m.rid, key);
   }
 
   readForQuery(id) {
@@ -252,7 +330,7 @@ class Collection {
     const vals = typeof this.store.readForQuery === "function"
       ? this.store.readForQuery(key) || {}
       : this.store.read(key) || {};
-    return this._hydrateColumns(vals, m.rid, key);
+    return this._hydrateStoredValue(vals, m.rid, key);
   }
 
   readRid(rid) {
@@ -277,6 +355,8 @@ class Collection {
     this.vectors.clear();
     this.meta.clear();
     this.idByRid = [];
+    this.compressedCold = [];
+    this.compressionTotals = emptyCompressionTotals();
     this.shardIds.clear();
     this.unshardedLiveCount = 0;
     this.liveCount = 0;
@@ -475,12 +555,14 @@ class Collection {
   }
 
   setMeta(meta = {}, options = {}) {
+    const previousTiering = stableKey(this.collectionMeta.tiering || null);
     this.collectionMeta = normalizeCollectionMeta(meta);
     if (options.deferIndexes) this._deferMetaIndexes();
     else {
       this._applyMetaIndexes();
       this._applyMetaColumns();
     }
+    if (previousTiering !== stableKey(this.collectionMeta.tiering || null)) this._retierBaseValues();
     return this.getMeta();
   }
 
@@ -604,7 +686,40 @@ class Collection {
         live: this.liveCount,
         allocated: this.idByRid.length,
       },
+      tiering: this.compressionStats(),
     }));
+  }
+
+  compressionStats() {
+    const tiering = this.collectionMeta.tiering;
+    const { objects, uncompressedBytes, compressedBytes } = this.compressionTotals;
+    const savedBytes = uncompressedBytes - compressedBytes;
+    return {
+      mode: tiering?.mode || "off",
+      objects,
+      liveObjects: this.liveCount,
+      compressedObjects: objects,
+      coveragePercent: percentOf(objects, this.liveCount),
+      rawBytes: uncompressedBytes,
+      uncompressedBytes,
+      compressedBytes,
+      savedBytes,
+      savedPercent: percentOf(savedBytes, uncompressedBytes),
+      ...(tiering ? {
+        policy: {
+          ...(tiering.keep?.length ? { keep: [...tiering.keep] } : {}),
+          ...(tiering.offload?.length ? { offload: [...tiering.offload] } : {}),
+          minBytes: tiering.minBytes,
+        },
+      } : {}),
+    };
+  }
+
+  _retierBaseValues() {
+    for (const rid of this._liveRidIterator()) {
+      const object = this.readRidForQuery(rid);
+      if (object) this._rewriteBaseValueForColumns(rid, object);
+    }
   }
 
   *snapshotObjects({ includeId } = {}) {
@@ -2432,10 +2547,36 @@ function normalizeCollectionMeta(meta = {}) {
   }
   const next = clone(meta);
   delete next.columnIndexes;
-  return {
+  delete next.tiering;
+  const indexes = normalizeIndexList(meta.indexes, "indexes");
+  const columns = normalizeIndexList(meta.columns, "columns");
+  const tiering = normalizeTieringMeta(meta.tiering);
+  const out = {
     ...next,
-    indexes: normalizeIndexList(meta.indexes, "indexes"),
-    columns: normalizeIndexList(meta.columns, "columns"),
+    indexes,
+    columns,
+  };
+  if (tiering) out.tiering = tiering;
+  return out;
+}
+
+function normalizeTieringMeta(tiering) {
+  if (tiering === undefined || tiering === null || tiering === false) return null;
+  if (!tiering || typeof tiering !== "object" || Array.isArray(tiering)) {
+    throw new TypeError("collection meta tiering must be a plain object");
+  }
+  const mode = tiering.mode === undefined ? "compressedMemory" : String(tiering.mode);
+  if (mode === "off") return null;
+  if (mode !== "compressedMemory") throw new TypeError("collection meta tiering.mode must be compressedMemory or off");
+  const keep = normalizeIndexList(tiering.keep, "tiering.keep");
+  const offload = normalizeIndexList(tiering.offload, "tiering.offload");
+  if (keep.length && offload.length) throw new TypeError("collection meta tiering must use keep or offload, not both");
+  const minBytes = Math.max(0, Math.floor(Number(tiering.minBytes ?? DEFAULT_TIERING_MIN_BYTES) || 0));
+  return {
+    mode: "compressedMemory",
+    ...(keep.length ? { keep } : {}),
+    ...(offload.length ? { offload } : {}),
+    minBytes,
   };
 }
 
@@ -2451,6 +2592,53 @@ function normalizeIndexList(indexes = [], label = "indexes") {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function splitTieredValue(value = {}, tiering = {}, forcedHotPaths = []) {
+  if (!isPlainObject(value)) return { hot: value || {}, cold: null };
+  const forced = unique(forcedHotPaths);
+  if (Array.isArray(tiering.keep) && tiering.keep.length) {
+    const hotPaths = unique([...tiering.keep, ...forced]);
+    const hot = pickPaths(value, hotPaths);
+    const cold = unsetPaths(value, hotPaths);
+    return isRemovableEmptyObject(cold) ? { hot: value, cold: null } : { hot, cold };
+  }
+
+  if (!Array.isArray(tiering.offload) || !tiering.offload.length) return { hot: value, cold: null };
+  let hot = unsetPaths(value, tiering.offload);
+  let cold = pickPaths(value, tiering.offload);
+  for (const path of forced) {
+    const current = getPathValue(value, path);
+    if (current === undefined) continue;
+    hot = setPath(hot, path, clone(current));
+    cold = unsetPath(cold, path);
+  }
+  return isRemovableEmptyObject(cold) ? { hot: value, cold: null } : { hot, cold };
+}
+
+function pickPaths(value = {}, paths = []) {
+  let out = {};
+  for (const path of paths) {
+    const current = getPathValue(value, path);
+    if (current !== undefined) out = setPath(out, path, clone(current));
+  }
+  return out;
+}
+
+function unsetPaths(value = {}, paths = []) {
+  let out = clone(value || {});
+  for (const path of paths) out = unsetPath(out, path);
+  return out;
+}
+
+function mergePlainObjects(base = {}, overlay = {}) {
+  const out = isPlainObject(base) ? { ...base } : {};
+  for (const [key, value] of Object.entries(overlay || {})) {
+    out[key] = isPlainObject(value) && isPlainObject(out[key])
+      ? mergePlainObjects(out[key], value)
+      : value;
+  }
+  return out;
 }
 
 function clone(value) {
@@ -2877,6 +3065,18 @@ export class Store {
     return out;
   }
 
+  compressionStats() {
+    const collections = [];
+    for (const [dbName, db] of this.dbs) {
+      for (const [collName, collection] of db.collections) {
+        const stats = collection.compressionStats();
+        if (stats.mode === "off" && stats.compressedObjects === 0) continue;
+        collections.push({ database: dbName, collection: collName, ...stats });
+      }
+    }
+    return { ...summarizeCompression(collections), collections };
+  }
+
   indexReadiness() {
     const collections = [];
     const workers = {
@@ -2987,6 +3187,10 @@ export class Store {
     }
     return collections;
   }
+}
+
+function emptyCompressionTotals() {
+  return { objects: 0, uncompressedBytes: 0, compressedBytes: 0 };
 }
 
 function matchesSnapshotName(name, expected) {

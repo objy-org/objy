@@ -108,6 +108,12 @@ function clusterHeaders() {
   return { "x-spread-db-cluster-secret": TEST_CLUSTER_SECRET };
 }
 
+function headerValue(headers, name) {
+  if (!headers) return undefined;
+  if (typeof headers.get === "function") return headers.get(name);
+  return headers[name] || headers[name.toLowerCase()];
+}
+
 async function freePort() {
   const server = createNetServer();
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -389,6 +395,10 @@ test("auth issues and renews global user JWTs", async () => {
     assert.equal(legacyHeader.status, 200);
     const queryToken = await fetch(`${base}/api/databases?token=${encodeURIComponent(session.body.accessToken)}`);
     assert.equal(queryToken.status, 200);
+    s.node.createCollection("compression", "docs", {
+      tiering: { mode: "compressedMemory", offload: ["payload"], minBytes: 1 },
+    });
+    s.node.insert("compression", "docs", { _id: "one", payload: "compress me ".repeat(100) });
     const config = await authed.get("/api/config");
     assert.equal(config.status, 200);
     assert.deepEqual(config.body.shards.map((shard) => shard.name), ["default"]);
@@ -408,6 +418,13 @@ test("auth issues and renews global user JWTs", async () => {
     assert.ok(config.body.rss.nodes[0].totalMemory > config.body.rss.nodes[0].rss);
     assert.ok(config.body.rss.nodes[0].freeMemory >= 0);
     assert.ok(config.body.rss.nodes[0].rssPercent > 0);
+    assert.equal(config.body.compression.cluster.collectionCount, 1);
+    assert.equal(config.body.compression.logical.compressedObjects, 1);
+    assert.equal(config.body.compression.physical.compressedObjects, 1);
+    assert.equal(config.body.compression.nodes[0].collections[0].database, "compression");
+    assert.equal(config.body.compression.nodes[0].collections[0].collection, "docs");
+    assert.deepEqual(config.body.compression.nodes[0].collections[0].policy.offload, ["payload"]);
+    assert.ok(config.body.compression.nodes[0].collections[0].savedPercent > 0);
 
     const renewed = await anonymous.post("/api/_global/users/renew", { refreshToken: session.body.refreshToken });
     assert.equal(renewed.status, 200);
@@ -502,6 +519,15 @@ test("api config reports cluster shards peers and node RSS", async () => {
 test("api config reports logical memory without counting replicas", async () => {
   const { servers, urlA } = await startReplicatedTwoShardCluster();
   try {
+    for (const [index, server] of servers.entries()) {
+      server.node.createCollection("metrics", "docs", {
+        tiering: { mode: "compressedMemory", offload: ["payload"], minBytes: 1 },
+      });
+      server.node.insert("metrics", "docs", {
+        _id: `doc-${index}`,
+        payload: "replicated payload ".repeat(100),
+      });
+    }
     const session = await login(urlA);
     const status = await api(urlA, session.accessToken).get("/api/config");
 
@@ -526,6 +552,11 @@ test("api config reports logical memory without counting replicas", async () => 
       selectedNodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
     );
     assert.ok(status.body.rss.logical.totalMemory < status.body.rss.physical.totalMemory);
+    assert.equal(status.body.compression.nodes.length, 4);
+    assert.equal(status.body.compression.physical.compressedObjects, 4);
+    assert.equal(status.body.compression.logical.compressedObjects, 2);
+    assert.equal(status.body.compression.cluster.compressedObjects, 2);
+    assert.ok(status.body.compression.logical.compressedBytes < status.body.compression.physical.compressedBytes);
   } finally {
     for (const server of servers) server.server.close();
   }
@@ -1770,8 +1801,20 @@ test("streamed NDJSON bulk CRUD splits chunks by shard", async () => {
       },
     },
   });
+  const originalFetch = global.fetch;
+  const forwarded = [];
   try {
     const session = await login(urlA);
+    global.fetch = async (url, init = {}) => {
+      if (String(url).startsWith(`http://localhost:${b.port}/api/`)) {
+        forwarded.push({
+          method: init.method || "GET",
+          contentType: headerValue(init.headers, "content-type"),
+          prefer: headerValue(init.headers, "prefer"),
+        });
+      }
+      return originalFetch(url, init);
+    };
     const db = "app";
     const coll = "streamed_routed";
     const base = `/api/${db}/${coll}/object`;
@@ -1796,6 +1839,15 @@ test("streamed NDJSON bulk CRUD splits chunks by shard", async () => {
     assert.equal(a.node.get(db, coll, idA).value, 3);
     assert.equal(b.node.get(db, coll, idB).value, 4);
 
+    const replaced = await ndjsonRequest(urlA, session.accessToken, "PUT", base, [
+      { _id: idA, side: "a", value: 5 },
+      { _id: idB, side: "b", value: 6 },
+    ]);
+    assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
+    assert.deepEqual(replaced.body, { replaced: 2 });
+    assert.equal(a.node.get(db, coll, idA).value, 5);
+    assert.equal(b.node.get(db, coll, idB).value, 6);
+
     const removed = await ndjsonRequest(urlA, session.accessToken, "DELETE", base, [
       { _id: idA },
       { _id: idB },
@@ -1804,7 +1856,11 @@ test("streamed NDJSON bulk CRUD splits chunks by shard", async () => {
     assert.deepEqual(removed.body, { deleted: 2, skipped: 0 });
     assert.equal(a.node.get(db, coll, idA), undefined);
     assert.equal(b.node.get(db, coll, idB), undefined);
+    assert.deepEqual(forwarded.map((entry) => entry.method), ["POST", "PATCH", "PUT", "DELETE"]);
+    assert.ok(forwarded.every((entry) => entry.contentType === "application/x-ndjson"));
+    assert.ok(forwarded.every((entry) => /\breturn=minimal\b/i.test(entry.prefer)));
   } finally {
+    global.fetch = originalFetch;
     a.server.close();
     b.server.close();
   }
@@ -2578,6 +2634,39 @@ test("replication across two HTTP nodes", async () => {
     const payload = await pull.json();
     assert.equal(payload.node, a.node.id);
     assert.ok(Array.isArray(payload.ops));
+
+    const streamPull = await fetch(`http://localhost:${a.port}/replicate?after=0`, {
+      headers: { ...clusterHeaders(), accept: "application/x-ndjson" },
+    });
+    assert.equal(streamPull.status, 200);
+    assert.match(streamPull.headers.get("content-type"), /application\/x-ndjson/);
+    assert.equal(streamPull.headers.get("x-spread-db-node"), a.node.id);
+    const streamedOps = (await streamPull.text()).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    assert.ok(streamedOps.length >= 1);
+    assert.ok(streamedOps.some((op) => op.kind === "putObj" && op.id === "i1"));
+
+    const pushedOp = {
+      kind: "putObj",
+      db: "app",
+      coll: "items",
+      id: "i2",
+      value: { _id: "i2", qty: 7 },
+      ts: { c: 1000, n: "manual" },
+      seq: 1000,
+      from: "manual",
+    };
+    const pushed = await fetch(`http://localhost:${b.port}/replicate?node=manual`, {
+      method: "POST",
+      headers: {
+        ...clusterHeaders(),
+        "content-type": "application/x-ndjson",
+        "x-spread-db-node": "manual",
+      },
+      body: `${JSON.stringify(pushedOp)}\n`,
+    });
+    assert.equal(pushed.status, 200);
+    assert.equal((await pushed.json()).applied, 1);
+    assert.equal(b.node.get("app", "items", "i2").qty, 7);
   } finally {
     a.server.close();
     b.server.close();

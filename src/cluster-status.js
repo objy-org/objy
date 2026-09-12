@@ -2,6 +2,7 @@ import { freemem, totalmem } from "node:os";
 import { getHeapStatistics } from "node:v8";
 import { DEFAULT_SHARD, peerKey } from "./shard-map.js";
 import { CLUSTER_SECRET_HEADER } from "./interfaces/cluster.js";
+import { summarizeCompression } from "./compression-stats.js";
 
 export const CLUSTER_STATUS_PATH = "/cluster/status";
 
@@ -33,6 +34,7 @@ export function localClusterStatus(node, memoryGuard = null, replicationSchedule
     },
     indexes: node.indexReadiness(),
     vectors: node.vectorStats(),
+    compression: node.compressionStats?.() || emptyCompressionStats(),
     process: {
       pid: process.pid,
       uptimeMs: Math.round(process.uptime() * 1000),
@@ -55,6 +57,7 @@ export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard
     peers: peerSummaries(node, shardMap, nodes),
     rss: rssSummary(nodes, shardMap),
     heap: heapSummary(nodes, shardMap),
+    compression: compressionSummary(nodes, shardMap),
     nodes,
   };
 }
@@ -150,6 +153,18 @@ function heapSummary(nodes, shardMap) {
   };
 }
 
+function compressionSummary(nodes, shardMap) {
+  const perNode = nodes.map(nodeCompressionEntry);
+  const physical = compressionTotals(perNode);
+  const logical = logicalMemoryTotals(nodes, perNode, shardMap, compressionTotals);
+  return {
+    cluster: logical,
+    logical,
+    physical,
+    nodes: perNode,
+  };
+}
+
 function nodeMemoryEntry(status) {
   const rss = status.memory?.rss ?? null;
   const totalMemory = status.memory?.systemTotal ?? null;
@@ -198,6 +213,27 @@ function nodeHeapEntry(status) {
   };
 }
 
+function nodeCompressionEntry(status) {
+  const compression = status.compression || emptyCompressionStats();
+  return {
+    key: nodeStatusKey(status),
+    nodeId: status.node?.id || null,
+    url: status.node?.url || status.sourcePeer?.url || null,
+    local: status.local === true,
+    reachable: status.reachable !== false,
+    collectionCount: Number(compression.collectionCount) || 0,
+    liveObjects: Number(compression.liveObjects) || 0,
+    compressedObjects: Number(compression.compressedObjects) || 0,
+    coveragePercent: Number(compression.coveragePercent) || 0,
+    uncompressedBytes: Number(compression.uncompressedBytes) || 0,
+    compressedBytes: Number(compression.compressedBytes) || 0,
+    savedBytes: Number(compression.savedBytes) || 0,
+    savedPercent: Number(compression.savedPercent) || 0,
+    collections: Array.isArray(compression.collections) ? compression.collections : [],
+    error: status.reachable === false ? status.error : undefined,
+  };
+}
+
 function memoryTotals(entries, extra = {}) {
   const total = sumField(entries, "rss");
   const totalMemory = sumField(entries, "totalMemory");
@@ -237,6 +273,18 @@ function heapTotals(entries, extra = {}) {
     heapTotal: committed,
     heapTotalMb: mib(committed),
     percent: percent(used, total),
+    nodeCount: entries.length,
+    onlineNodeCount: online,
+    offlineNodeCount: entries.length - online,
+    ...extra,
+  };
+}
+
+function compressionTotals(entries, extra = {}) {
+  const summary = summarizeCompression(entries);
+  const online = entries.filter((entry) => entry.reachable).length;
+  return {
+    ...summary,
     nodeCount: entries.length,
     onlineNodeCount: online,
     offlineNodeCount: entries.length - online,
@@ -399,6 +447,13 @@ function memorySnapshot() {
 
 function sumField(entries, field) {
   return entries.reduce((sum, entry) => sum + (Number(entry[field]) || 0), 0);
+}
+
+function emptyCompressionStats() {
+  return {
+    ...summarizeCompression([]),
+    collections: [],
+  };
 }
 
 function percent(value, total) {

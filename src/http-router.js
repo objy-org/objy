@@ -1,4 +1,4 @@
-import { StringDecoder } from "node:string_decoder";
+import { isNdjsonContentType, parseNdjsonStream } from "./ndjson.js";
 
 export const DEFAULT_MAX_BODY_BYTES = 64 * 1024 * 1024;
 
@@ -68,41 +68,22 @@ export async function readJson(req, fallback = {}) {
 }
 
 export function isNdjsonRequest(req) {
-  const type = String(req.headers?.["content-type"] || "").toLowerCase().split(";")[0].trim();
-  return type === "application/x-ndjson" || type === "application/ndjson";
+  return isNdjsonContentType(req.headers?.["content-type"]);
 }
 
 export async function* readNdjson(req, { maxObjectBytes = 0 } = {}) {
-  const decoder = new StringDecoder("utf8");
-  let buffer = "";
-  let line = 0;
   let totalBytes = 0;
-  const maxBytes = Number(maxObjectBytes) || 0;
+  const counting = (async function* () {
+    for await (const chunk of req) {
+      totalBytes += chunk.length;
+      req._bodyBytes = totalBytes;
+      yield chunk;
+    }
+  })();
 
-  for await (const chunk of req) {
-    totalBytes += chunk.length;
+  for await (const entry of parseNdjsonStream(counting, { maxObjectBytes, label: "NDJSON" })) {
     req._bodyBytes = totalBytes;
-    buffer += decoder.write(chunk);
-
-    let newline;
-    while ((newline = buffer.indexOf("\n")) !== -1) {
-      const rawLine = stripTrailingCarriageReturn(buffer.slice(0, newline));
-      buffer = buffer.slice(newline + 1);
-      line += 1;
-      if (!rawLine.trim()) continue;
-      yield parseNdjsonLine(rawLine, line, maxBytes);
-    }
-
-    if (maxBytes && Buffer.byteLength(buffer) > maxBytes) {
-      throw ndjsonError(413, "object is too large", { line: line + 1, bytes: Buffer.byteLength(buffer), maxObjectBytes: maxBytes });
-    }
-  }
-
-  buffer += decoder.end();
-  if (buffer.length > 0) {
-    const rawLine = stripTrailingCarriageReturn(buffer);
-    line += 1;
-    if (rawLine.trim()) yield parseNdjsonLine(rawLine, line, maxBytes);
+    yield entry;
   }
 }
 
@@ -148,29 +129,6 @@ async function readBody(req) {
     });
   });
   return req._bodyText;
-}
-
-function parseNdjsonLine(rawLine, line, maxObjectBytes) {
-  const bytes = Buffer.byteLength(rawLine);
-  if (maxObjectBytes && bytes > maxObjectBytes) {
-    throw ndjsonError(413, "object is too large", { line, bytes, maxObjectBytes });
-  }
-  try {
-    return { line, bytes, value: JSON.parse(rawLine) };
-  } catch {
-    throw ndjsonError(400, `invalid NDJSON at line ${line}`, { line });
-  }
-}
-
-function stripTrailingCarriageReturn(value) {
-  return value.endsWith("\r") ? value.slice(0, -1) : value;
-}
-
-function ndjsonError(status, message, body) {
-  const err = new Error(message);
-  err.status = status;
-  err.body = { error: message, ...body };
-  return err;
 }
 
 function compilePattern(pattern) {

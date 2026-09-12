@@ -548,6 +548,152 @@ test("columns store selected paths outside base rows and hydrate snapshots", asy
   assert.deepEqual(fresh.get("db", "events", "e1"), n.get("db", "events", "e1"));
 });
 
+test("compressed memory tiering keeps hot paths queryable and hydrates full objects", async () => {
+  const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
+  n.createCollection("db", "assets", {
+    indexes: ["status", "applications"],
+    columns: ["score"],
+    tiering: {
+      mode: "compressedMemory",
+      keep: ["name", "status", "applications"],
+      minBytes: 1,
+    },
+  });
+
+  const coldNotes = "asset history ".repeat(512);
+  n.insert("db", "assets", {
+    _id: "a1",
+    name: "Thinkpad",
+    status: "active",
+    applications: ["assetmanagement", "objy-agent"],
+    score: 42,
+    history: {
+      notes: coldNotes,
+      changes: Array.from({ length: 16 }, (_, i) => ({ i, status: i % 2 ? "checked" : "new" })),
+    },
+  });
+  await n.awaitIndexes("db", "assets");
+
+  const collection = n.db.collection("db", "assets");
+  assert.deepEqual(collection.store.readForQuery("a1"), {
+    name: "Thinkpad",
+    status: "active",
+    applications: ["assetmanagement", "objy-agent"],
+  });
+  assert.equal(collection.shapeStats()[0].tiering.objects, 1);
+
+  assert.deepEqual(n.find("db", "assets", {
+    applications: { $contains: "assetmanagement" },
+  }), [{
+    _id: "a1",
+    name: "Thinkpad",
+    status: "active",
+    applications: ["assetmanagement", "objy-agent"],
+    score: 42,
+    history: {
+      notes: coldNotes,
+      changes: Array.from({ length: 16 }, (_, i) => ({ i, status: i % 2 ? "checked" : "new" })),
+    },
+  }]);
+  assert.deepEqual(n.aggregate("db", "assets", {}, {
+    fields: {
+      total: { $sum: "score" },
+      n: { $count: true },
+    },
+  }), [{ total: 42, n: 1 }]);
+
+  const [snapshot] = [...collection.snapshotObjects()];
+  assert.equal(snapshot.value.history.notes, coldNotes);
+  assert.equal(snapshot.value.score, 42);
+
+  const fresh = new CRDTNode({ id: "fresh", storage: { engine: "object" } });
+  fresh.createCollection("db", "assets", collection.getMeta());
+  fresh.applySnapshot("a", { collections: [{ db: "db", coll: "assets", objects: [snapshot] }] });
+  assert.deepEqual(fresh.get("db", "assets", "a1"), n.get("db", "assets", "a1"));
+
+  n.setCollectionMeta("db", "assets", { indexes: ["status"], columns: ["score"], tiering: { mode: "off" } });
+  assert.equal(collection.shapeStats()[0].tiering.objects, 0);
+  assert.equal(collection.store.readForQuery("a1").history.notes, coldNotes);
+});
+
+test("compressed memory tiering preserves forced hot index and column paths", async () => {
+  const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
+  n.createCollection("db", "events", {
+    indexes: ["details.kind"],
+    columns: ["details.score"],
+    tiering: {
+      mode: "compressedMemory",
+      offload: ["details"],
+      minBytes: 1,
+    },
+  });
+
+  n.insert("db", "events", {
+    _id: "e1",
+    details: {
+      kind: "audit",
+      score: 11,
+      payload: "payload ".repeat(1024),
+    },
+  });
+  await n.awaitIndexes("db", "events");
+
+  const collection = n.db.collection("db", "events");
+  assert.deepEqual(collection.store.readForQuery("e1"), {
+    details: { kind: "audit" },
+  });
+  assert.deepEqual(n.find("db", "events", { "details.kind": "audit" }).map((object) => object._id), ["e1"]);
+  assert.deepEqual(n.aggregate("db", "events", {}, {
+    fields: {
+      total: { $sum: "details.score" },
+    },
+  }), [{ total: 11 }]);
+  assert.equal(n.get("db", "events", "e1").details.payload, "payload ".repeat(1024));
+});
+
+test("compressed memory tiering maintains constant-time collection statistics", () => {
+  const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
+  n.createCollection("db", "docs", {
+    tiering: {
+      mode: "compressedMemory",
+      keep: ["status"],
+      minBytes: 100,
+    },
+  });
+  n.insertMany("db", "docs", [
+    { _id: "large", status: "open", payload: "repeated payload ".repeat(100) },
+    { _id: "small", status: "open", payload: "short" },
+  ]);
+
+  const collection = n.db.collection("db", "docs");
+  let stats = collection.compressionStats();
+  assert.equal(stats.liveObjects, 2);
+  assert.equal(stats.compressedObjects, 1);
+  assert.equal(stats.objects, 1);
+  assert.equal(stats.coveragePercent, 50);
+  assert.ok(stats.uncompressedBytes > stats.compressedBytes);
+  assert.equal(stats.rawBytes, stats.uncompressedBytes);
+  assert.equal(stats.savedBytes, stats.uncompressedBytes - stats.compressedBytes);
+  assert.ok(stats.savedPercent > 0);
+
+  n.update("db", "docs", "large", { payload: "short" });
+  stats = collection.compressionStats();
+  assert.equal(stats.compressedObjects, 0);
+  assert.equal(stats.uncompressedBytes, 0);
+  assert.equal(stats.compressedBytes, 0);
+
+  n.update("db", "docs", "small", { payload: "different payload ".repeat(120) });
+  stats = collection.compressionStats();
+  assert.equal(stats.compressedObjects, 1);
+  assert.equal(stats.coveragePercent, 50);
+
+  n.remove("db", "docs", "small");
+  stats = collection.compressionStats();
+  assert.equal(stats.liveObjects, 1);
+  assert.equal(stats.compressedObjects, 0);
+  assert.equal(stats.savedBytes, 0);
+});
+
 test("query planner chooses old index-style read and aggregate paths", async () => {
   const n = new CRDTNode({ id: "a" });
   n.createCollection("db", "users", {

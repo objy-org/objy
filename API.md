@@ -25,7 +25,12 @@ Each collection also has a small `meta` JavaScript object. It is kept in memory 
 ```json
 {
   "indexes": ["status", "tenantId"],
-  "columns": ["score"]
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "tenantId"],
+    "minBytes": 4096
+  }
 }
 ```
 
@@ -66,6 +71,32 @@ Passwords are hashed on write and redacted from responses.
 **Columns**
 
 `columns` move selected field values into RID-addressed column storage. Numeric, boolean, and repeated string values are kept compactly, while dynamic object reads still hydrate as ordinary full objects. They help `$sum`, `$avg`, `$min`, `$max`, `$count`, and grouped aggregates avoid reading full objects when the planner can combine indexed ids with column values. Column builds run in the background.
+
+**Compressed Memory Tiering**
+
+`tiering` can compress cold object fields in memory while keeping snapshots and journals as full logical objects. API reads still return ordinary full objects. Use either `keep` to name the fields that should remain hot, or `offload` to name fields that should be compressed; do not use both in the same meta object.
+
+```json
+{
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "applications"],
+    "minBytes": 4096
+  }
+}
+```
+
+```json
+{
+  "tiering": {
+    "mode": "compressedMemory",
+    "offload": ["history", "rawPayload"],
+    "minBytes": 4096
+  }
+}
+```
+
+Fields listed in `indexes` or `columns` are kept hot automatically, even if a broader parent object is offloaded. This lets indexes and column aggregates stay fast without inflating compressed data. Queries on non-indexed compressed fields still work, but they require scan-time hydration.
 
 **Vector Index**
 
@@ -255,7 +286,12 @@ Content-Type: application/json
 {
   "name": "{collection}",
   "indexes": ["status", "tenantId"],
-  "columns": ["score"]
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "tenantId"],
+    "minBytes": 4096
+  }
 }
 ```
 
@@ -267,7 +303,12 @@ Response:
   "created": true,
   "meta": {
     "indexes": ["status", "tenantId"],
-    "columns": ["score"]
+    "columns": ["score"],
+    "tiering": {
+      "mode": "compressedMemory",
+      "keep": ["name", "status", "tenantId"],
+      "minBytes": 4096
+    }
   }
 }
 ```
@@ -288,7 +329,12 @@ Response:
 ```json
 {
   "indexes": ["status", "tenantId"],
-  "columns": ["score"]
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "tenantId"],
+    "minBytes": 4096
+  }
 }
 ```
 
@@ -303,7 +349,12 @@ Content-Type: application/json
 
 {
   "indexes": ["status", "tenantId"],
-  "columns": ["score"]
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "tenantId"],
+    "minBytes": 4096
+  }
 }
 ```
 
@@ -312,11 +363,16 @@ Response:
 ```json
 {
   "indexes": ["status", "tenantId"],
-  "columns": ["score"]
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "tenantId"],
+    "minBytes": 4096
+  }
 }
 ```
 
-Changing `indexes` or `columns` rebuilds derived structures in the background.
+Changing `indexes`, `columns`, or `tiering` rebuilds derived in-memory structures.
 
 ### Delete Collection
 

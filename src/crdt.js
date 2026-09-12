@@ -340,6 +340,10 @@ export class CRDTNode {
     return this.db.indexReadiness();
   }
 
+  compressionStats() {
+    return this.db.compressionStats();
+  }
+
   awaitColumns(db, coll) {
     return this.db.awaitColumns(db, coll);
   }
@@ -435,14 +439,34 @@ export class CRDTNode {
       if (!remoteId || remoteId === this.id) return total;
 
       this._bindPeer(peer, remoteId, key);
-      const ops = Array.isArray(res.ops) ? res.ops : [];
       const remoteKey = this._cursorKey(remoteId, scope);
-      total += this.applyRemote(remoteId, ops, remoteKey);
-      const seen = ops.length ? ops[ops.length - 1].seq : res.lastSeq || after;
-      this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
-      await this._ack(peer, seen, scope);
+      let seen = after;
+      let received = 0;
 
-      if (!ops.length || seen >= (res.lastSeq || seen)) return total;
+      if (res.opBatches) {
+        for await (const ops of res.opBatches) {
+          if (!Array.isArray(ops) || !ops.length) continue;
+          received += ops.length;
+          total += this.applyRemote(remoteId, ops, remoteKey);
+          seen = ops.length ? ops[ops.length - 1].seq : seen;
+          this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
+          await this._ack(peer, seen, scope);
+        }
+        if (!received) {
+          seen = res.lastSeq || after;
+          this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
+          await this._ack(peer, seen, scope);
+        }
+      } else {
+        const ops = Array.isArray(res.ops) ? res.ops : [];
+        received = ops.length;
+        total += this.applyRemote(remoteId, ops, remoteKey);
+        seen = ops.length ? ops[ops.length - 1].seq : res.lastSeq || after;
+        this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
+        await this._ack(peer, seen, scope);
+      }
+
+      if (!received || seen >= (res.lastSeq || seen)) return total;
     }
   }
 
@@ -797,14 +821,18 @@ export class CRDTNode {
   }
 
   _opsAfter(after, limit, scope) {
-    const out = [];
+    return [...this._opsAfterIterable(after, limit, scope)];
+  }
+
+  *_opsAfterIterable(after, limit, scope) {
+    let count = 0;
     for (const op of this.log) {
       if (op.seq <= after) continue;
       if (scope && !this._opMatchesScope(op, scope)) continue;
-      out.push(op);
-      if (limit && out.length >= limit) break;
+      yield op;
+      count++;
+      if (limit && count >= limit) break;
     }
-    return out;
   }
 
   _opMatchesScope(op, scope) {

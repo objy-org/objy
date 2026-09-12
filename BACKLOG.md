@@ -1,5 +1,7 @@
 # Later
 
+- Internal cluster transport: use streamed NDJSON for every shard-forwarded bulk write, including operations that return hydrated objects. Keep request transport independent from response policy: minimal requests return counts, while hydrated requests may return full JSON objects. Queries, aggregations, and small cluster-control messages can remain JSON unless streaming provides a measurable benefit.
+
 - Reference query planner: optimize predicates like `owner.object.name` by querying the referenced collection first, converting matching referenced IDs into base reference-value filters such as `owner.value: { "$in": [...] }`, and then using the normal field indexes on the owning collection. This should work generally for nested references where each hop can be resolved through indexed reference fields.
 
 - Local warm-tier storage for large object parts:
