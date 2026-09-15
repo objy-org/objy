@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { createAuthService } from "./auth.js";
+import { localClusterStatus } from "./cluster-status.js";
 import { CRDTNode } from "./crdt.js";
 import { HttpRouter, json } from "./http-router.js";
 import { createAuthInterface } from "./interfaces/auth.js";
@@ -11,6 +12,41 @@ import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
 
 export { httpPeer, shardMapFromHttp };
+
+export async function startRestoreStatusServer({
+  port = 0,
+  node,
+  memoryGuard,
+  replication,
+  restoreStatus,
+} = {}) {
+  const n = node || new CRDTNode();
+  const server = createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://localhost");
+    if (url.pathname === "/health") {
+      return json(res, 200, {
+        ok: true,
+        node: n.id,
+        restoring: restoreStatus?.restoring === true,
+        restore: restoreStatus?.snapshot?.() || null,
+      });
+    }
+    if (url.pathname === "/api/config" || url.pathname === "/cluster/status") {
+      return json(res, 200, {
+        ...localClusterStatus(n, memoryGuard, replication, restoreStatus),
+        local: true,
+        reachable: true,
+      });
+    }
+    return json(res, 503, {
+      error: "database is restoring",
+      restore: restoreStatus?.snapshot?.() || null,
+    }, { "retry-after": "5" });
+  });
+
+  await new Promise((resolve) => server.listen(port, resolve));
+  return { server, port: server.address().port };
+}
 
 export async function startServer({
   port = 0,
@@ -27,6 +63,7 @@ export async function startServer({
   forwardTimeoutMs,
   replicationTimeoutMs,
   replication,
+  restoreStatus,
   replicationHints,
   maxJsonBytes,
   imports,
@@ -38,7 +75,7 @@ export async function startServer({
   const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret);
   const guard = createMemoryGuard(memoryGuard);
   const scheduler = replication || createReplicationScheduler({ node: n, ...normalizeReplicationHintOptions(replicationHints) });
-  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler };
+  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus };
   if (persistence?.restoreScope) {
     n.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
   }
@@ -55,6 +92,7 @@ export async function startServer({
     durability,
     files,
     memoryGuard: guard,
+    restoreStatus,
     clusterSecret: secret,
     forwardTimeoutMs,
     replicationScheduler: scheduler,
@@ -103,6 +141,7 @@ export function createInterfaceContext({
   files,
   durability,
   memoryGuard,
+  restoreStatus,
   clusterSecret,
   forwardTimeoutMs,
   replicationScheduler,
@@ -120,6 +159,7 @@ export function createInterfaceContext({
     imports,
     clusterSecret,
     memoryGuard,
+    restoreStatus,
     routing: new ShardRequestRouter({ node, forwardTimeoutMs }),
     replicationScheduler,
     durability: {

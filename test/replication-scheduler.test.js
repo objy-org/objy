@@ -102,3 +102,38 @@ test("unknown hint senders are rejected before pull scheduling", async () => {
     await scheduler.stop();
   }
 });
+
+test("anti-entropy status reports partial failures and clears stale errors after success", async () => {
+  const source = new CRDTNode({ id: "source" });
+  const replica = new CRDTNode({ id: "replica" });
+  source.insert("app", "events", { _id: "e1", value: 1 });
+
+  const flakyPeer = {
+    key: "flaky",
+    pull: async () => {
+      throw new Error("offline");
+    },
+  };
+  replica.replaceShardMap({
+    shards: {
+      default: { peers: [localPeer(source), flakyPeer] },
+    },
+  });
+  const scheduler = createReplicationScheduler({ node: replica });
+
+  try {
+    await scheduler.syncAll("anti-entropy");
+    assert.equal(replica.get("app", "events", "e1").value, 1);
+    assert.equal(scheduler.status().lastSyncFailures.length, 1);
+    assert.match(scheduler.status().lastError, /sync: 1 peer sync\(s\) failed/);
+    assert.equal(scheduler.status().lastSyncAt, null);
+
+    flakyPeer.pull = async () => ({ status: 200, nodeId: "flaky", lastSeq: 0, ops: [] });
+    await scheduler.syncAll("anti-entropy");
+    assert.deepEqual(scheduler.status().lastSyncFailures, []);
+    assert.equal(scheduler.status().lastError, null);
+    assert.ok(scheduler.status().lastSyncAt);
+  } finally {
+    await scheduler.stop();
+  }
+});

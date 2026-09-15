@@ -78,18 +78,10 @@ export class ShardRequestRouter {
 
     const targets = this.queryTargets(database, collection);
     if (targets.length === 1 && targets[0].local && targets[0].shard === null) {
-      return {
-        count: countIfNeeded(options, () => this.node.count(database, collection, criteria)),
-        objects: this.node.find(database, collection, criteria, options),
-        path: publicReadPath(this.node.queryPath(database, collection, criteria, options)),
-      };
+      return this.findLocalShard(database, collection, criteria, options, null);
     }
     if (targets.every((target) => target.local)) {
-      return {
-        count: countIfNeeded(options, () => this.node.count(database, collection, criteria)),
-        objects: this.node.find(database, collection, criteria, options),
-        path: publicReadPath(this.node.queryPath(database, collection, criteria, options)),
-      };
+      return this.findLocalShards(database, collection, criteria, options, targets.map((target) => target.shard).filter(Boolean));
     }
 
     const all = [];
@@ -303,9 +295,6 @@ export class ShardRequestRouter {
     const includeId = shardSet.size
       ? (id) => shardSet.has(this.shardForObject(database, collection, id))
       : null;
-    if (includeId) this.node.assertVectorIndexReadyShards(database, collection, [...shardSet]);
-    else this.node.assertVectorIndexReady(database, collection);
-
     if (criteria && Object.keys(criteria).length > 0) {
       const rows = this.node.find(database, collection, criteria, includeId ? { includeId } : {});
       return this.node.rankVectorRows(database, collection, rows, queryVec, limit);
@@ -635,7 +624,7 @@ function queryForVectorSearch(criteria, vector = {}, options = {}) {
 
 async function remoteAfterLocalWork(remoteResultsPromise, localWork) {
   try {
-    localWork();
+    await localWork();
     return await remoteResultsPromise;
   } catch (err) {
     await remoteResultsPromise.catch(() => {});

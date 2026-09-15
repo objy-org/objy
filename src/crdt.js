@@ -39,6 +39,7 @@ export class CRDTNode {
     this.vectorWarmupScheduled = false;
     this.vectorWarmupPromise = Promise.resolve([]);
     this.logTruncatedHandler = null;
+    this.lastSyncFailures = [];
   }
 
   nextTs() {
@@ -422,7 +423,13 @@ export class CRDTNode {
         const remoteKey = this._cursorKey(remoteId || key, scope);
         const before = this.lastSeen.get(remoteKey) || after;
         const restored = await this._handleLogTruncated({ peer, scope, after, response: res, remoteId });
-        const seen = this.lastSeen.get(remoteKey) || 0;
+        let seen = this.lastSeen.get(remoteKey) || 0;
+        const restoredRows = Number(restored?.applied || restored?.snapshotObjects || restored?.journalOps || 0);
+        const durableFloor = Math.max(0, Number(res.trimmed) || 0);
+        if (restoredRows > 0 && durableFloor > seen) {
+          this.lastSeen.set(remoteKey, durableFloor);
+          seen = durableFloor;
+        }
         if (!restored || seen <= before) {
           const err = new Error("replication log truncated and durable catch-up did not advance");
           err.code = "LOG_TRUNCATED";
@@ -634,16 +641,24 @@ export class CRDTNode {
 
   async syncAll() {
     let total = 0;
+    const failures = [];
     for (const target of this.ownedShardTargets()) {
       const scope = this._scope(target.database, target.collection, target.shard);
       for (const peer of this._syncPeersForTarget(target)) {
         try {
           total += await this.syncPeer(peer, scope);
-        } catch {
+        } catch (err) {
           // peer unreachable; will retry on next sync
+          failures.push({
+            peer: this._peerKey(peer),
+            scope,
+            message: err?.message || String(err),
+            code: err?.code,
+          });
         }
       }
     }
+    this.lastSyncFailures = failures;
     return total;
   }
 

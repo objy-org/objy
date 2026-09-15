@@ -1,9 +1,10 @@
-import { shardMapFromHttp, startServer } from "./server.js";
+import { shardMapFromHttp, startRestoreStatusServer, startServer } from "./server.js";
 import { CRDTNode } from "./crdt.js";
 import { loadConfig } from "./config.js";
 import { createFileService } from "./files.js";
 import { createPersistence } from "./persistence.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
+import { createRestoreStatus } from "./restore-status.js";
 import { createShardMapStore } from "./shard-map-store.js";
 
 const config = loadConfig();
@@ -34,21 +35,33 @@ const replication = createReplicationScheduler({
 });
 const persistence = createPersistence(node, config.persistence);
 const files = createFileService(config.files, config.persistence);
+const restoreStatus = createRestoreStatus();
+const restoreServer = await startRestoreStatusServer({
+  port: config.server.port,
+  node,
+  restoreStatus,
+  replication,
+});
+
 if (persistence) {
   node.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
-  const restored = await persistence.restore();
+  const restored = await persistence.restore({ progress: restoreStatus });
   persistence.start();
   console.log(`persistence restored ${restored.snapshotObjects} snapshot objects and ${restored.journalOps} journal ops`);
+} else {
+  restoreStatus.done({ disabled: true });
 }
+await new Promise((resolve) => restoreServer.server.close(resolve));
 
 const state = await startServer({
-  port: config.server.port,
+  port: restoreServer.port,
   maxJsonBytes: config.server.maxJsonBytes,
   node,
   shardMapStore,
   auth: config.auth,
   persistence,
   files,
+  restoreStatus,
   memoryGuard: config.memoryGuard,
   clusterSecret: config.cluster.secret,
   forwardTimeoutMs: config.cluster.forwardTimeoutMs,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { DEFAULT_SHARD, GLOBAL_COLLECTION, GLOBAL_DATABASE } from "./shard-map.js";
 import { LocalWalStore } from "./local-wal.js";
 import { createObjectStorage } from "./object-storage.js";
@@ -7,6 +8,7 @@ const DEFAULT_PREFIX = "spread-db";
 const DEFAULT_SEGMENT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_JOURNAL_BYTES = 4 * 1024 * 1024;
 const RESTORE_APPLY_BATCH_SIZE = 10_000;
+const RESTORE_PARSE_YIELD_LINES = 1000;
 let snapshotSequence = 0;
 
 export class PersistenceManager {
@@ -73,20 +75,33 @@ export class PersistenceManager {
     this.lastError = null;
   }
 
-  async restore() {
+  async restore(options = {}) {
+    const progress = options.progress || null;
+    progress?.start?.({
+      mode: this.restoreMode,
+      snapshotId: this.restoreSnapshotId || null,
+    });
     const root = this._rootPrefix();
-    const keys = await this.storage.list(root);
-    const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix));
     const stats = restoreStats();
     let maxLocalSeq = this.node.seq;
 
-    this.node.db.beginBulkLoad?.();
     try {
+      progress?.update?.({ phase: "listing" });
+      const keys = await this.storage.list(root);
+      const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix));
+      progress?.update?.({
+        phase: "metadata",
+        scopesTotal: scopes.length,
+        totalKeys: keys.length,
+      });
+
+      this.node.db.beginBulkLoad?.();
       stats.databases = await this._restoreDatabaseMetadata(keys);
       stats.metadata = await this._restoreMetadata(keys);
-      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq);
+      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress);
 
       if (this.localWal && !this.restoreSnapshotId) {
+        progress?.update?.({ phase: "local-wal" });
         const local = await this._restoreLocalWal();
         stats.localWalRecords = local.records;
         stats.localWalOps = local.ops;
@@ -95,8 +110,13 @@ export class PersistenceManager {
         stats.localWalMetadata = local.metadata;
         stats.localWalCollectionDrops = local.collectionDrops;
         stats.localWalSkippedPartialRecords = local.skippedPartialRecords;
+        progress?.add?.("localWalOps", local.ops);
         maxLocalSeq = Math.max(maxLocalSeq, local.maxLocalSeq);
       }
+      progress?.done?.(stats);
+    } catch (err) {
+      progress?.fail?.(err);
+      throw err;
     } finally {
       this.node.db.endBulkLoad?.();
     }
@@ -106,7 +126,8 @@ export class PersistenceManager {
     return stats;
   }
 
-  async restoreScope(scope) {
+  async restoreScope(scope, options = {}) {
+    const progress = options.progress || null;
     const root = this._rootPrefix();
     const keys = await this.storage.list(root);
     const scopes = this._filterCatchUpScopes(uniqueScopes(keys, this.prefix), scope);
@@ -117,8 +138,9 @@ export class PersistenceManager {
     try {
       stats.databases = await this._restoreDatabaseMetadata(keys);
       stats.metadata = await this._restoreMetadata(keys);
-      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq);
+      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress);
       if (!scope) this._rememberUnscopedCursors(scopes);
+      else this._rememberScopeSetCursors(scope, scopes);
     } finally {
       this.node.db.endBulkLoad?.();
       this.node.startIndexWarmup?.();
@@ -577,12 +599,13 @@ export class PersistenceManager {
   async _checkpointOnce(options = {}) {
     await this.flush();
     this.flushPaused = true;
+    const coverage = this._snapshotCoverage();
     const scopes = this._snapshotScopes(options);
     const checkpointId = snapshotId();
     const stats = { id: checkpointId, scopes: 0, objects: 0, segments: 0, retainedSnapshotsDeleted: 0, retainedJournalsDeleted: 0 };
     try {
       for (const scope of scopes) {
-        const written = await this._writeSnapshot(scope, checkpointId);
+        const written = await this._writeSnapshot(scope, checkpointId, coverage);
         this._markCheckpointed(scope);
         stats.scopes++;
         stats.objects += written.objects;
@@ -646,8 +669,8 @@ export class PersistenceManager {
   }
 
   _filterRestoreScopes(scopes) {
-    const targets = this.restoreScopes || this.node.ownedShardTargets();
-    if (!targets.length || targets.some(isGlobalTarget)) return scopes;
+    const targets = this._restoreTargets();
+    if (this._restoreAllTargets(targets)) return scopes;
     if (this.restoreMode === "reshard") {
       return scopes.filter((scope) => targets.some((target) => matchesRestoreCollection(scope, target)));
     }
@@ -661,8 +684,8 @@ export class PersistenceManager {
 
   _filterRestoreObjects(scope, objects) {
     if (this.restoreMode !== "reshard") return objects;
-    const targets = this.restoreScopes || this.node.ownedShardTargets();
-    if (!targets.length || targets.some(isGlobalTarget)) return objects;
+    const targets = this._restoreTargets();
+    if (this._restoreAllTargets(targets)) return objects;
     const out = [];
     for (const object of objects || []) {
       const row = this._filterRestoreObject(scope, object, targets);
@@ -674,8 +697,8 @@ export class PersistenceManager {
   _filterRestoreObject(scope, object, targets = null) {
     if (!object) return null;
     if (this.restoreMode !== "reshard") return object;
-    const restoreTargets = targets || this.restoreScopes || this.node.ownedShardTargets();
-    if (!restoreTargets.length || restoreTargets.some(isGlobalTarget)) return object;
+    const restoreTargets = targets || this._restoreTargets();
+    if (this._restoreAllTargets(restoreTargets)) return object;
     if (!this._objectMatchesRestoreTargets(scope.database, scope.collection, object.id, restoreTargets)) return null;
     return {
       ...object,
@@ -685,8 +708,8 @@ export class PersistenceManager {
 
   _filterRestoreOps(scope, ops) {
     if (this.restoreMode !== "reshard") return ops;
-    const targets = this.restoreScopes || this.node.ownedShardTargets();
-    if (!targets.length || targets.some(isGlobalTarget)) return ops;
+    const targets = this._restoreTargets();
+    if (this._restoreAllTargets(targets)) return ops;
     return ops
       .filter((op) => this._objectMatchesRestoreTargets(op.db || scope.database, op.coll || scope.collection, op.id, targets))
       .map((op) => ({
@@ -704,7 +727,17 @@ export class PersistenceManager {
     return [...new Set(this.node.ownedShardTargets().map((target) => target.shard))];
   }
 
-  async _writeSnapshot(scope, id = snapshotId()) {
+  _restoreTargets() {
+    return this.restoreScopes || this.node.ownedShardTargets();
+  }
+
+  _restoreAllTargets(targets) {
+    if (targets?.length) return false;
+    if (!this.node.url) return true;
+    return this.node.shardMap.syncTargets().length === 0;
+  }
+
+  async _writeSnapshot(scope, id = snapshotId(), coverage = this._snapshotCoverage()) {
     const base = `${scopePrefix(this.prefix, scope)}/snapshots/${id}`;
     const segments = [];
     let objectCount = 0;
@@ -720,30 +753,43 @@ export class PersistenceManager {
       version: 1,
       id,
       node: this.node.id,
-      seq: this.node.seq,
+      seq: coverage.seq,
       createdAt: new Date().toISOString(),
       database: scope.database,
       collection: scope.collection,
       shard: scope.shard,
       databaseMeta: clone(this.node.getDatabaseMeta(scope.database) || {}),
       collectionMeta: clone(this.node.getCollectionMeta(scope.database, scope.collection) || {}),
-      cursors: this._snapshotCursors(scope),
+      cursors: this._snapshotCursors(scope, coverage),
       format: "jsonl",
       objectCount,
       segments,
     };
     await this.storage.put(`${base}/manifest.json`, JSON.stringify(manifest), "application/json");
     await this.storage.put(`${scopePrefix(this.prefix, scope)}/latest.json`, JSON.stringify(manifest), "application/json");
-    const retainedJournalsDeleted = this.compactJournals ? await this._compactJournals(scope) : 0;
+    const retainedJournalsDeleted = this.compactJournals ? await this._compactJournals(scope, manifest.cursors) : 0;
     const retainedSnapshotsDeleted = await this._applySnapshotRetention(scope, id);
     return { objects: objectCount, segments: segments.length, retainedJournalsDeleted, retainedSnapshotsDeleted };
   }
 
-  async _compactJournals(scope) {
+  _snapshotCoverage() {
+    return {
+      seq: this.node.seq,
+      lastSeen: new Map(this.node.lastSeen || []),
+    };
+  }
+
+  async _compactJournals(scope, cursors = {}) {
     const prefix = `${scopePrefix(this.prefix, scope)}/journal/`;
     const keys = await this.storage.list(prefix);
     if (!keys.length) return 0;
-    const removable = filterRetentionKeys(keys, this.journalRetention, (key) => {
+    const covered = keys.filter((key) => {
+      const info = parseJournalKey(key, this.prefix);
+      if (!info?.node || !info.lastSeq) return false;
+      return (Number(cursors[info.node]) || 0) >= info.lastSeq;
+    });
+    if (!covered.length) return 0;
+    const removable = filterRetentionKeys(covered, this.journalRetention, (key) => {
       const info = parseJournalKey(key, this.prefix);
       return info?.createdAtMs || 0;
     });
@@ -763,7 +809,7 @@ export class PersistenceManager {
     return this.storage.delete(removable);
   }
 
-  async _restoreSnapshot(scope) {
+  async _restoreSnapshot(scope, progress = null) {
     const manifestKey = this.restoreSnapshotId
       ? `${scopePrefix(this.prefix, scope)}/snapshots/${this.restoreSnapshotId}/manifest.json`
       : `${scopePrefix(this.prefix, scope)}/latest.json`;
@@ -774,7 +820,7 @@ export class PersistenceManager {
     if (this.restoreSnapshotId) this._restoreManifestMetadata(scope, manifest);
 
     for (const segment of manifest.segments || []) {
-      objects += await this._restoreSnapshotSegment(scope, manifest, segment);
+      objects += await this._restoreSnapshotSegment(scope, manifest, segment, progress);
     }
 
     return {
@@ -785,21 +831,24 @@ export class PersistenceManager {
     };
   }
 
-  async _restoreSnapshotSegment(scope, manifest, segment = {}) {
+  async _restoreSnapshotSegment(scope, manifest, segment = {}, progress = null) {
     const sourceNode = manifest.node || "persistence";
     const cursorKey = this.node._cursorKey ? this.node._cursorKey(sourceNode, scope) : `persistence:${scopeKey(scope)}:snapshot`;
     const lastSeq = Number(manifest.seq) || 0;
     let objects = 0;
 
-    const applyRows = (rows) => {
+    const applyRows = async (rows) => {
       if (!rows.length) return;
-      objects += this.node.applySnapshotObjects(sourceNode, {
+      const applied = this.node.applySnapshotObjects(sourceNode, {
         database: scope.database,
         collection: scope.collection,
         scope,
         lastSeq,
         objects: rows,
       }, cursorKey);
+      objects += applied;
+      progress?.add?.("snapshotObjects", applied);
+      await yieldToEventLoop();
     };
 
     if (isJsonlSegment(segment)) {
@@ -809,10 +858,10 @@ export class PersistenceManager {
         if (!row) continue;
         batch.push(row);
         if (batch.length < RESTORE_APPLY_BATCH_SIZE) continue;
-        applyRows(batch);
+        await applyRows(batch);
         batch = [];
       }
-      applyRows(batch);
+      await applyRows(batch);
       return objects;
     }
 
@@ -822,19 +871,19 @@ export class PersistenceManager {
       if (!row) continue;
       batch.push(row);
       if (batch.length < RESTORE_APPLY_BATCH_SIZE) continue;
-      applyRows(batch);
+      await applyRows(batch);
       batch = [];
     }
-    applyRows(batch);
+    await applyRows(batch);
     return objects;
   }
 
-  async _restoreJournalSegment(scope, key, snapshotCursors = {}) {
-    if (key.endsWith(".jsonl")) return this._restoreJsonlJournalSegment(scope, key, snapshotCursors);
-    return this._restoreLegacyJsonJournalSegment(scope, key, snapshotCursors);
+  async _restoreJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
+    if (key.endsWith(".jsonl")) return this._restoreJsonlJournalSegment(scope, key, snapshotCursors, progress);
+    return this._restoreLegacyJsonJournalSegment(scope, key, snapshotCursors, progress);
   }
 
-  async _restoreJsonlJournalSegment(scope, key, snapshotCursors = {}) {
+  async _restoreJsonlJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
     const journalInfo = parseJournalKey(key, this.prefix);
     const sourceNode = journalInfo?.node || "persistence";
     const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
@@ -842,12 +891,14 @@ export class PersistenceManager {
     let batch = [];
     let segmentOps = 0;
 
-    const flush = () => {
+    const flush = async () => {
       if (!batch.length) return;
       const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
       stats.ops += applied;
+      progress?.add?.("journalOps", applied);
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
       batch = [];
+      await yieldToEventLoop();
     };
 
     for await (const op of jsonlObjectsFromStorage(this.storage, key, `${scopeKey(scope)} journal`)) {
@@ -855,9 +906,9 @@ export class PersistenceManager {
       const seq = Number(op?.seq);
       if (Number.isFinite(seq) && seq <= coveredSeq) continue;
       batch.push(op);
-      if (batch.length >= this.opBatchSize) flush();
+      if (batch.length >= this.opBatchSize) await flush();
     }
-    flush();
+    await flush();
 
     if (stats.ops > 0) stats.journals = 1;
     else if (segmentOps > 0) {
@@ -867,7 +918,7 @@ export class PersistenceManager {
     return stats;
   }
 
-  async _restoreLegacyJsonJournalSegment(scope, key, snapshotCursors = {}) {
+  async _restoreLegacyJsonJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
     const raw = await this.storage.get(key);
     if (!raw) return emptyJournalRestoreStats(this.node.seq);
     const segment = JSON.parse(raw);
@@ -884,7 +935,9 @@ export class PersistenceManager {
       if (!batch.length) continue;
       const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
       stats.ops += applied;
+      progress?.add?.("journalOps", applied);
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
+      await yieldToEventLoop();
     }
 
     if (stats.ops > 0) stats.journals = 1;
@@ -945,6 +998,7 @@ export class PersistenceManager {
     let line = 0;
     for (const record of records) {
       line++;
+      if (line % RESTORE_PARSE_YIELD_LINES === 0) await yieldToEventLoop();
       if (!record || record.version !== 1) continue;
       if (record.type === "ops") {
         const ops = this._filterLocalWalOps(Array.isArray(record.ops) ? record.ops : []);
@@ -988,8 +1042,8 @@ export class PersistenceManager {
   }
 
   _filterLocalWalOps(ops) {
-    const targets = this.restoreScopes || this.node.ownedShardTargets();
-    if (!targets.length || targets.some(isGlobalTarget)) return ops;
+    const targets = this._restoreTargets();
+    if (this._restoreAllTargets(targets)) return ops;
     if (this.restoreMode === "reshard") {
       return ops
         .filter((op) => this._objectMatchesRestoreTargets(op.db, op.coll, op.id, targets))
@@ -1014,11 +1068,11 @@ export class PersistenceManager {
     }
   }
 
-  _snapshotCursors(scope) {
-    const cursors = { [this.node.id]: this.node.seq };
+  _snapshotCursors(scope, coverage = this._snapshotCoverage()) {
+    const cursors = { [this.node.id]: Number(coverage.seq) || 0 };
     const suffix = this.node._cursorKey ? `|${scope.database}/${scope.collection}/${scope.shard}` : null;
     if (!suffix) return cursors;
-    for (const [key, seen] of this.node.lastSeen || []) {
+    for (const [key, seen] of coverage.lastSeen || []) {
       if (typeof key !== "string" || !key.endsWith(suffix)) continue;
       const sourceNode = key.slice(0, -suffix.length);
       if (!sourceNode) continue;
@@ -1027,13 +1081,15 @@ export class PersistenceManager {
     return cursors;
   }
 
-  async _restoreScopeSet(keys, scopes, stats, maxLocalSeq) {
+  async _restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress = null) {
     const restoredByScope = new Map();
     let nextMaxLocalSeq = maxLocalSeq;
 
+    let scopeIndex = 0;
     for (const scope of scopes) {
+      progress?.scope?.(scope, scopeIndex, scopes.length);
       stats.scopes++;
-      const restored = await this._restoreSnapshot(scope);
+      const restored = await this._restoreSnapshot(scope, progress);
       restoredByScope.set(scopeKey(scope), restored);
       if (restored) {
         stats.snapshots++;
@@ -1041,10 +1097,15 @@ export class PersistenceManager {
         this._rememberSnapshotCursors(scope, restored.cursors);
         if (restored.node === this.node.id) nextMaxLocalSeq = Math.max(nextMaxLocalSeq, restored.seq);
       }
+      scopeIndex++;
+      progress?.scope?.(scope, scopeIndex, scopes.length);
+      await yieldToEventLoop();
     }
 
+    scopeIndex = 0;
     for (const scope of scopes) {
       if (this.restoreSnapshotId) continue;
+      progress?.scope?.(scope, scopeIndex, scopes.length);
       const snapshotCursors = restoredByScope.get(scopeKey(scope))?.cursors || {};
       const journalKeys = keys.filter((key) => key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`));
       for (const key of journalKeys.sort()) {
@@ -1054,16 +1115,23 @@ export class PersistenceManager {
         if (journalInfo?.lastSeq && coveredFromKey >= journalInfo.lastSeq) {
           stats.skippedJournals++;
           stats.skippedJournalOps += journalInfo.count || 0;
+          progress?.add?.("skippedJournals", 1);
+          progress?.add?.("skippedJournalOps", journalInfo.count || 0);
           continue;
         }
 
-        const restored = await this._restoreJournalSegment(scope, key, snapshotCursors);
+        const restored = await this._restoreJournalSegment(scope, key, snapshotCursors, progress);
         stats.journals += restored.journals;
         stats.journalOps += restored.ops;
         stats.skippedJournals += restored.skippedJournals;
         stats.skippedJournalOps += restored.skippedOps;
+        progress?.add?.("skippedJournals", restored.skippedJournals);
+        progress?.add?.("skippedJournalOps", restored.skippedOps);
         nextMaxLocalSeq = Math.max(nextMaxLocalSeq, restored.maxLocalSeq);
       }
+      scopeIndex++;
+      progress?.scope?.(scope, scopeIndex, scopes.length);
+      await yieldToEventLoop();
     }
 
     return nextMaxLocalSeq;
@@ -1097,6 +1165,33 @@ export class PersistenceManager {
     for (const [sourceNode, entry] of bySource) {
       if (entry.count < scopes.length || !Number.isFinite(entry.min) || entry.min <= 0) continue;
       this.node.lastSeen.set(this.node._cursorKey(sourceNode), Math.max(this.node.lastSeen.get(sourceNode) || 0, entry.min));
+    }
+  }
+
+  _rememberScopeSetCursors(target, scopes) {
+    if (!this.node._cursorKey || !target || !scopes?.length) return;
+    const matchingScopes = scopes.filter((scope) => matchesRestoreTarget(scope, target));
+    if (!matchingScopes.length) return;
+    const bySource = new Map();
+
+    for (const [key, seen] of this.node.lastSeen || []) {
+      if (typeof key !== "string") continue;
+      for (const scope of matchingScopes) {
+        const suffix = `|${scope.database}/${scope.collection}/${scope.shard}`;
+        if (!key.endsWith(suffix)) continue;
+        const sourceNode = key.slice(0, -suffix.length);
+        if (!sourceNode) continue;
+        const entry = bySource.get(sourceNode) || { count: 0, min: Infinity };
+        entry.count++;
+        entry.min = Math.min(entry.min, Number(seen) || 0);
+        bySource.set(sourceNode, entry);
+      }
+    }
+
+    for (const [sourceNode, entry] of bySource) {
+      if (entry.count < matchingScopes.length || !Number.isFinite(entry.min) || entry.min <= 0) continue;
+      const cursorKey = this.node._cursorKey(sourceNode, target);
+      this.node.lastSeen.set(cursorKey, Math.max(this.node.lastSeen.get(cursorKey) || 0, entry.min));
     }
   }
 }
@@ -1196,6 +1291,7 @@ async function* jsonArrayObjectsFromStorage(storage, key, label) {
 async function* parseJsonlStream(stream, label) {
   let buffer = "";
   let line = 0;
+  let yielded = 0;
   for await (const chunk of stream) {
     buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     const lines = buffer.split(/\r?\n/);
@@ -1203,7 +1299,11 @@ async function* parseJsonlStream(stream, label) {
     for (const raw of lines) {
       line++;
       const trimmed = raw.trim();
-      if (trimmed) yield parseJsonLine(trimmed, label, line);
+      if (trimmed) {
+        yield parseJsonLine(trimmed, label, line);
+        yielded++;
+        if (yielded % RESTORE_PARSE_YIELD_LINES === 0) await yieldToEventLoop();
+      }
     }
   }
   const trimmed = buffer.trim();
@@ -1515,10 +1615,6 @@ function opScope(op, node) {
   };
 }
 
-function isGlobalTarget(target) {
-  return target.database === GLOBAL_DATABASE && target.collection === GLOBAL_COLLECTION && target.shard === DEFAULT_SHARD;
-}
-
 function matchesRestoreTarget(scope, target) {
   return (
     (target.database === GLOBAL_DATABASE || target.database === scope.database) &&
@@ -1726,6 +1822,7 @@ function normalizeSnapshotRole(value) {
   if (value === "all" || value === "none" || value === "primary") return value;
   throw new Error("persistence.snapshotRole must be one of: primary, all, none");
 }
+
 
 function normalizeUrl(url) {
   return url ? String(url).replace(/\/+$/, "") : null;

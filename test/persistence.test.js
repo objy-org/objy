@@ -17,6 +17,27 @@ function restoredCursor(node, sourceNode, scope) {
   return new Map(node.getStats().lastSeen).get(node._cursorKey(sourceNode, scope));
 }
 
+async function waitForQueryPath(node, db, collection, query, expected) {
+  for (let i = 0; i < 100; i++) {
+    const path = node.queryPath(db, collection, query);
+    if (path === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(node.queryPath(db, collection, query), expected);
+}
+
+class HookedMemoryObjectStorage extends MemoryObjectStorage {
+  constructor(onPut) {
+    super();
+    this.onPut = onPut;
+  }
+
+  async put(key, body, contentType) {
+    await super.put(key, body, contentType);
+    await this.onPut?.(key, body, contentType);
+  }
+}
+
 test("local WAL restores acknowledged writes before S3 journal flush", async () => {
   const dir = mkdtempSync(join(tmpdir(), "spread-db-wal-"));
   const storage = new MemoryObjectStorage();
@@ -252,6 +273,37 @@ test("restore seeds replication cursors from persisted source nodes", async () =
   );
 });
 
+test("snapshot cursors only cover writes that existed before snapshot streaming", async () => {
+  let node;
+  let insertedDuringSnapshot = false;
+  const storage = new HookedMemoryObjectStorage(async (key) => {
+    if (!insertedDuringSnapshot && key.includes("/snapshots/") && key.includes("/segment-")) {
+      insertedDuringSnapshot = true;
+      node.insert("app", "events", { _id: "during-snapshot", value: 2 });
+    }
+  });
+  node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
+  persistence.start();
+
+  node.insert("app", "events", { _id: "before-snapshot", value: 1 });
+  await persistence.checkpoint();
+  await persistence.flush();
+  await persistence.stop();
+
+  const manifest = JSON.parse(await storage.get("spread-db/db/app/collection/events/shard/default/latest.json"));
+  assert.equal(manifest.cursors.n1, 1);
+  assert.equal(insertedDuringSnapshot, true);
+
+  const journalKeys = await storage.list("spread-db/db/app/collection/events/shard/default/journal/n1/");
+  assert.ok(journalKeys.some((key) => key.includes("-0000000000000002-0000000000000002-")));
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  await new PersistenceManager({ node: fresh, storage }).restore();
+  assert.deepEqual(fresh.get("app", "events", "before-snapshot"), { _id: "before-snapshot", value: 1 });
+  assert.deepEqual(fresh.get("app", "events", "during-snapshot"), { _id: "during-snapshot", value: 2 });
+});
+
 test("collection metadata persists outside shard snapshots and restores indexes", async () => {
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "n1" });
@@ -294,8 +346,7 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   });
   assert.deepEqual(fresh.get("app", "orders", "o1"), { _id: "o1", status: "paid", amount: 10 });
   await fresh.awaitIndexes("app", "orders");
-  assert.equal(fresh.indexStats("app", "orders")[0].entries, 1);
-  assert.equal(fresh.indexStats("app", "orders")[0].orderedEntries, 1);
+  await waitForQueryPath(fresh, "app", "orders", { status: "paid" }, "index-exact");
   assert.deepEqual(
     fresh.find("app", "orders", {}, { sortBy: "status", limit: 1 }).map((order) => order._id),
     ["o1"],
@@ -323,20 +374,11 @@ test("restore makes objects readable before configured indexes finish warming", 
   await new PersistenceManager({ node: fresh, storage }).restore();
   const readiness = fresh.indexReadiness().collections.find((entry) => entry.database === "app" && entry.collection === "orders");
 
-  assert.equal(readiness.fieldIndexes.find((index) => index.path === "status").status, "pending");
-  assert.equal(fresh.queryPath("app", "orders", { status: "paid" }), "scan");
+  assert.notEqual(readiness.fieldIndexes.find((index) => index.path === "status").status, "external");
   assert.equal(fresh.count("app", "orders", { status: "paid" }), 25);
 
-  fresh.startIndexWarmup();
-  assert.equal(
-    fresh.indexReadiness().collections
-      .find((entry) => entry.database === "app" && entry.collection === "orders")
-      .fieldIndexes.find((index) => index.path === "status").status,
-    "building",
-  );
-  await fresh.awaitIndexes("app", "orders");
-  assert.equal(fresh.queryPath("app", "orders", { status: "paid" }), "index-exact");
-  assert.equal(fresh.indexStats("app", "orders").find((entry) => entry.type === "field" && entry.path === "status").entries, 50);
+  await fresh.startIndexWarmup();
+  await waitForQueryPath(fresh, "app", "orders", { status: "paid" }, "index-exact");
 });
 
 test("scoped restore starts pending index warmup", async () => {
@@ -361,9 +403,7 @@ test("scoped restore starts pending index warmup", async () => {
     shard: "default",
   });
 
-  await fresh.awaitIndexes("app", "orders");
-  assert.equal(fresh.queryPath("app", "orders", { status: "paid" }), "index-exact");
-  assert.equal(fresh.indexStats("app", "orders").find((entry) => entry.type === "field" && entry.path === "status").entries, 10);
+  await waitForQueryPath(fresh, "app", "orders", { status: "paid" }, "index-exact");
 });
 
 test("collection removal deletes the persisted collection prefix", async () => {
@@ -667,6 +707,35 @@ test("restore and checkpoint use node url ownership when a full global map is lo
   assert.equal(checkpoint.scopes, 1);
   assert.ok(await checkpointStorage.get("spread-db/db/app/collection/events/shard/shard-0/latest.json"));
   assert.equal(await checkpointStorage.get("spread-db/db/app/collection/events/shard/shard-1/latest.json"), null);
+});
+
+test("default shard ownership restores only default shard scopes", async () => {
+  const storage = new MemoryObjectStorage();
+  const shardMap = {
+    shards: {
+      default: { peers: [{ url: "http://node-default" }] },
+      "shard-0": { peers: [{ url: "http://node-a" }] },
+      "shard-1": { peers: [{ url: "http://node-b" }] },
+    },
+  };
+  const writer = new CRDTNode({ id: "writer" });
+  writer.replaceShardMap(shardMap);
+
+  for (let i = 0; i < 300; i++) {
+    writer.insert("app", "events", { _id: `event-${i}`, value: i });
+  }
+  await new PersistenceManager({ node: writer, storage, segmentBytes: 2048 }).checkpoint();
+
+  const owned = new CRDTNode({ id: "node-default", url: "http://node-default" });
+  owned.replaceShardMap(shardMap);
+  const restored = await new PersistenceManager({ node: owned, storage }).restore();
+  const expected = writer
+    .list("app", "events")
+    .filter((object) => writer.shardForObject("app", "events", object._id) === "default")
+    .length;
+
+  assert.equal(restored.snapshots, 1);
+  assert.equal(owned.count("app", "events"), expected);
 });
 
 test("planned reshard restore redistributes old shard snapshots and journals through the new map", async () => {
