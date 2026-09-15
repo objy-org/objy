@@ -39,7 +39,9 @@ export class ReplicationScheduler {
       lastHintSentAt: null,
       lastHintReceivedAt: null,
       lastSyncAt: null,
+      lastPartialSyncAt: null,
       lastError: null,
+      lastSyncFailures: [],
     };
     this.unsubscribe = this.node.onChange((change) => this._recordLocalChange(change));
   }
@@ -122,8 +124,16 @@ export class ReplicationScheduler {
     this.syncingAll = true;
     try {
       const applied = await this.node.syncAll();
-      this.stats.lastSyncAt = new Date().toISOString();
       if (reason === "anti-entropy") this.stats.antiEntropySyncs++;
+      const failures = Array.isArray(this.node.lastSyncFailures) ? this.node.lastSyncFailures : [];
+      this.stats.lastSyncFailures = failures;
+      if (failures.length) {
+        this.stats.lastPartialSyncAt = new Date().toISOString();
+        this._rememberError(new Error(`${failures.length} peer sync(s) failed`), "sync");
+      } else {
+        this.stats.lastSyncAt = new Date().toISOString();
+        this._rememberSuccess();
+      }
       return applied;
     } catch (err) {
       this._rememberError(err);
@@ -185,6 +195,7 @@ export class ReplicationScheduler {
       this.stats.hintsSent++;
       this.stats.hintScopesSent += scopes.length;
       this.stats.lastHintSentAt = new Date().toISOString();
+      this._rememberSuccess(`hint ${key}`);
     } catch (err) {
       this._rememberError(err, `hint ${key}`);
     }
@@ -214,6 +225,7 @@ export class ReplicationScheduler {
       await this.node.syncPeer(peer, scope);
       this.stats.pullSyncs++;
       this.stats.lastSyncAt = new Date().toISOString();
+      this._rememberSuccess(`pull ${key}`);
     } catch (err) {
       this._rememberError(err, `pull ${key}`);
     } finally {
@@ -225,6 +237,11 @@ export class ReplicationScheduler {
   _rememberError(err, prefix = "") {
     const message = err?.message || String(err);
     this.stats.lastError = prefix ? `${prefix}: ${message}` : message;
+  }
+
+  _rememberSuccess(prefix = "") {
+    if (!this.stats.lastError) return;
+    if (!prefix || this.stats.lastError.startsWith(`${prefix}:`)) this.stats.lastError = null;
   }
 }
 

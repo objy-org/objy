@@ -6,7 +6,7 @@ import { summarizeCompression } from "./compression-stats.js";
 
 export const CLUSTER_STATUS_PATH = "/cluster/status";
 
-export function localClusterStatus(node, memoryGuard = null, replicationScheduler = null) {
+export function localClusterStatus(node, memoryGuard = null, replicationScheduler = null, restoreStatus = null) {
   const memory = memorySnapshot();
   const shardMap = node.shardMapSnapshot();
   const peers = peerSummaries(node, shardMap);
@@ -35,6 +35,7 @@ export function localClusterStatus(node, memoryGuard = null, replicationSchedule
     indexes: node.indexReadiness(),
     vectors: node.vectorStats(),
     compression: node.compressionStats?.() || emptyCompressionStats(),
+    restore: restoreSnapshot(restoreStatus),
     process: {
       pid: process.pid,
       uptimeMs: Math.round(process.uptime() * 1000),
@@ -42,8 +43,8 @@ export function localClusterStatus(node, memoryGuard = null, replicationSchedule
   };
 }
 
-export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard = null, replicationScheduler = null } = {}) {
-  const local = { ...localClusterStatus(node, memoryGuard, replicationScheduler), local: true, reachable: true };
+export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard = null, replicationScheduler = null, restoreStatus = null } = {}) {
+  const local = { ...localClusterStatus(node, memoryGuard, replicationScheduler, restoreStatus), local: true, reachable: true };
   const remotes = await Promise.all(remoteStatusPeers(node).map((peer) => fetchPeerStatus(peer, timeoutMs)));
   const nodes = uniqueNodes([local, ...remotes]);
   const shardMap = node.shardMapSnapshot();
@@ -60,6 +61,11 @@ export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard
     compression: compressionSummary(nodes, shardMap),
     nodes,
   };
+}
+
+function restoreSnapshot(restoreStatus) {
+  if (!restoreStatus) return null;
+  return typeof restoreStatus.snapshot === "function" ? restoreStatus.snapshot() : restoreStatus;
 }
 
 async function fetchPeerStatus(peer, timeoutMs) {

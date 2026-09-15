@@ -46,7 +46,7 @@ const NDJSON_MINIMAL_REQUIRED = "NDJSON write streams require Prefer: return=min
 export function createPublicObjectInterface() {
   return {
     name: "public-object",
-    register(router, { node, auth, routing, durability, memoryGuard, replicationScheduler, files, imports }) {
+    register(router, { node, auth, routing, durability, memoryGuard, restoreStatus, replicationScheduler, files, imports }) {
       const secure = secureRoute(auth);
       const importLimits = normalizeImportLimits(imports);
 
@@ -60,7 +60,7 @@ export function createPublicObjectInterface() {
 
       router.get("/api/config", secure(async (req, res) => {
         if (rejectUnlessGlobalAdmin(req, res, auth)) return;
-        json(res, 200, await collectClusterStatus(node, { memoryGuard, replicationScheduler }));
+        json(res, 200, await collectClusterStatus(node, { memoryGuard, replicationScheduler, restoreStatus }));
       }));
 
       router.post("/api/databases", secure(async (req, res) => {
@@ -825,6 +825,7 @@ async function executeCollectionQuery(req, res, { node, auth, routing, query }) 
         node,
         routing,
         database,
+        collection,
         objects: rows,
         refDepth: options.refDepth,
       });
@@ -1083,6 +1084,7 @@ async function routedCreateMany({
       node,
       routing,
       database,
+      collection,
       objects: orderLikeInput(objects, rows).map(stripReferenceObjects),
       refDepth: refDepthParam(req),
     }),
@@ -1171,6 +1173,7 @@ async function routedWriteMany({
       node,
       routing,
       database,
+      collection,
       objects: orderLikeInput(objects, rows).map(stripReferenceObjects),
       refDepth: refDepthParam(req),
     }),
@@ -1281,6 +1284,7 @@ async function routedPatchMany({
       node,
       routing,
       database,
+      collection,
       objects: orderLikeInput(patches, rows).map(stripReferenceObjects),
       refDepth: refDepthParam(req),
     }),
@@ -1377,6 +1381,7 @@ async function findPublicObjects({ req, node, routing, database, collection, cri
       node,
       routing,
       database,
+      collection,
       objects: result.pairs.map(({ raw }) => raw),
       refDepth: options.refDepth,
     });
@@ -1392,6 +1397,7 @@ async function findPublicObjects({ req, node, routing, database, collection, cri
     node,
     routing,
     database,
+    collection,
     objects: result.objects,
     refDepth: options.refDepth,
   });
@@ -1445,10 +1451,26 @@ async function expandObjectForRead({ req, node, routing, database, object, refDe
   });
 }
 
-async function expandObjectsForRead({ req, node, routing, database, objects, refDepth }) {
+async function expandObjectsForRead({ req, node, routing, database, collection, objects, refDepth }) {
   const out = [];
   for (const object of objects || []) {
-    out.push(await expandObjectForRead({ req, node, routing, database, object, refDepth }));
+    let row = object;
+    if (collection && object?._id !== undefined) {
+      const shard = routing.shardForObject(database, collection, object._id);
+      if (routing.ownsShard(shard)) {
+        row = mergeResponseOnlyFields(node.get(database, collection, object._id, { refDepth: 0 }) || object, object);
+      }
+    }
+    out.push(await expandObjectForRead({ req, node, routing, database, object: row, refDepth }));
+  }
+  return out;
+}
+
+function mergeResponseOnlyFields(base = {}, source = {}) {
+  const out = { ...(base || {}) };
+  for (const [key, value] of Object.entries(source || {})) {
+    if (key === "_id" || key === "_vec") continue;
+    if (key.startsWith("_") && out[key] === undefined) out[key] = value;
   }
   return out;
 }

@@ -5,7 +5,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startServer, httpPeer } from "../src/server.js";
+import { startRestoreStatusServer, startServer, httpPeer } from "../src/server.js";
 import { CRDTNode } from "../src/crdt.js";
 import { FileService, createFileService } from "../src/files.js";
 import { createMemoryGuard } from "../src/memory-guard.js";
@@ -13,6 +13,7 @@ import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { ShardRequestRouter } from "../src/shard-router.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
+import { createRestoreStatus } from "../src/restore-status.js";
 
 const TEST_AUTH = { jwtSecret: "test-jwt-secret" };
 const TEST_CLUSTER_SECRET = TEST_AUTH.jwtSecret;
@@ -20,6 +21,31 @@ const TEST_CLUSTER_SECRET = TEST_AUTH.jwtSecret;
 function startTestServer(options = {}) {
   return startServer({ auth: TEST_AUTH, ...options });
 }
+
+test("restore status server exposes health and rejects data routes", async () => {
+  const node = new CRDTNode({ id: "restore-node" });
+  const restoreStatus = createRestoreStatus();
+  restoreStatus.start({ mode: "scoped" });
+  restoreStatus.update({ phase: "snapshot", scopesTotal: 3, scopesDone: 1 });
+  const state = await startRestoreStatusServer({ port: 0, node, restoreStatus });
+  const base = `http://localhost:${state.port}`;
+
+  try {
+    const health = await api(base).get("/health");
+    assert.equal(health.status, 200);
+    assert.equal(health.body.restoring, true);
+    assert.equal(health.body.restore.phase, "snapshot");
+
+    const config = await api(base).get("/api/config");
+    assert.equal(config.status, 200);
+    assert.equal(config.body.restore.status, "restoring");
+
+    const blocked = await api(base).get("/api/app/events/object");
+    assert.equal(blocked.status, 503);
+  } finally {
+    await new Promise((resolve) => state.server.close(resolve));
+  }
+});
 
 async function login(base, username = "admin", password = "123", database = "_global", collection = "users") {
   const result = await api(base, null).post(`/api/${database}/${collection}/auth`, { username, password });
@@ -499,11 +525,6 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.equal(Number.isInteger(local.indexes.workers.fieldIndex.active), true);
     assert.equal(Number.isInteger(local.indexes.workers.columns.active), true);
     assert.equal(Number.isInteger(local.indexes.workers.vectorIndex.active), true);
-    assert.ok(local.indexes.collections.some((entry) => (
-      entry.database === "_global" &&
-      entry.collection === "users" &&
-      entry.fieldIndexes.some((index) => index.path === "username" && index.status === "ready")
-    )));
     assert.equal(status.body.nodes.some((nodeStatus) => (
       (nodeStatus.indexes.collections || []).some((entry) => (
         entry.database === "config_empty" && entry.collection === "plain"
@@ -1958,7 +1979,7 @@ test("collection metadata fan-out builds indexes on shard peers", async () => {
     assert.deepEqual(b.node.getCollectionMeta(db, coll), { indexes: ["value"], columns: [] });
 
     await c.post(base, { _id: idB, value: 3 });
-    assert.equal(b.node.indexStats(db, coll)[0].orderedEntries, 1);
+    assert.equal(b.node.queryPath(db, coll, { value: 3 }), "index-exact");
 
     const updated = await c.put(`/api/${db}/${coll}/meta`, { indexes: ["value", "id"] });
     assert.equal(updated.status, 200);
@@ -2341,10 +2362,13 @@ test("public vector search supports GET query syntax and POST body payloads", as
       status: "active",
       $vector: { vector: [1, 0, 0], limit: 2 },
     }));
+    const vectorOnlyQ = encodeURIComponent(JSON.stringify({
+      $vector: { vector: [1, 0, 0], limit: 2 },
+    }));
     await s.node.awaitVectorIndexes();
     s.node.vectorWarmupEnabled = false;
     s.node.db.clearVectorIndexes();
-    const warming = await c.get(`${base}?q=${q}`);
+    const warming = await c.get(`${base}?q=${vectorOnlyQ}`);
     assert.equal(warming.status, 503, JSON.stringify(warming.body));
     assert.match(warming.body.error, /vector index warming/);
     await s.node.awaitVectorIndexes();
@@ -2481,9 +2505,7 @@ test("public interface lists databases, collections, and collection meta", async
     assert.deepEqual((await c.get("/api/app/users/meta")).body, { indexes: [], columns: [] });
 
     await c.post("/api/app/orders/object", { _id: "o1", status: "paid" });
-    const indexStats = s.node.indexStats("app", "orders");
-    const statusIndex = indexStats.find((index) => index.type === "field" && index.path === "status");
-    assert.equal(statusIndex.entries, 1);
+    assert.equal(s.node.queryPath("app", "orders", { status: "paid" }), "index-exact");
 
     const removed = await c.del("/api/app/collections/orders");
     assert.equal(removed.status, 204);

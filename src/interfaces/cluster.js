@@ -10,11 +10,11 @@ export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
 export function createClusterInterface() {
   return {
     name: "cluster",
-    register(router, { node, shardMapStore, memoryGuard, clusterSecret, replicationScheduler }) {
+    register(router, { node, shardMapStore, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
       const secure = secureClusterRoute(clusterSecret);
 
       router.get("/health", (req, res) => {
-        json(res, 200, { ok: true, node: node.id });
+        json(res, 200, { ok: true, node: node.id, restore: restoreStatus?.snapshot?.() || null });
       });
 
       router.get("/cluster/shards", secure((req, res) => {
@@ -22,7 +22,7 @@ export function createClusterInterface() {
       }));
 
       router.get("/cluster/status", secure((req, res) => {
-        json(res, 200, localClusterStatus(node, memoryGuard, replicationScheduler));
+        json(res, 200, localClusterStatus(node, memoryGuard, replicationScheduler, restoreStatus));
       }));
 
       router.put("/cluster/shards", secure(async (req, res) => {

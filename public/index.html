@@ -606,6 +606,114 @@
     min-height: 42px;
   }
 
+  .query-mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 3px;
+    background: rgba(255, 255, 255, .025);
+    width: max-content;
+  }
+
+  .query-mode button {
+    min-height: 30px;
+    padding: 6px 10px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .query-mode button.active {
+    color: var(--text);
+    background: rgba(62, 215, 181, .12);
+    border-color: rgba(62, 215, 181, .25);
+  }
+
+  .query-builder {
+    display: none;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .025);
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .query-builder.open {
+    display: grid;
+  }
+
+  .builder-section {
+    display: grid;
+    gap: 8px;
+  }
+
+  .builder-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .builder-title {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+
+  .builder-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .builder-grid {
+    display: grid;
+    gap: 6px;
+  }
+
+  .builder-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.3fr) 120px minmax(120px, 1fr) 34px;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .builder-row.metric {
+    grid-template-columns: minmax(110px, .9fr) 112px minmax(140px, 1.2fr) 34px;
+  }
+
+  .builder-row input,
+  .builder-row select,
+  .builder-controls input,
+  .builder-controls select {
+    height: 34px;
+    padding: 7px 9px;
+  }
+
+  .builder-row .icon-only {
+    width: 34px;
+    height: 34px;
+  }
+
+  .builder-empty {
+    color: var(--muted);
+    font-size: 12px;
+    border: 1px dashed var(--line-soft);
+    border-radius: 8px;
+    padding: 9px;
+  }
+
+  .builder-error {
+    color: #ffd1cf;
+    font-size: 12px;
+    min-height: 16px;
+  }
+
   .workspace {
     min-height: 0;
     display: grid;
@@ -1365,12 +1473,15 @@
     .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 34vh) minmax(0, 1fr); }
     .object-list { border-right: 0; border-bottom: 1px solid var(--line-soft); }
     .query-row { grid-template-columns: 1fr 84px; }
+    .builder-row, .builder-row.metric { grid-template-columns: 1fr 110px 1fr 34px; }
     .query-row button { min-width: 0; }
   }
 
   @media (max-width: 560px) {
     .login-grid, .query-row { grid-template-columns: 1fr; }
     .query-row { align-items: stretch; }
+    .builder-row, .builder-row.metric { grid-template-columns: 1fr; }
+    .builder-row .icon-only { width: 100%; }
     .form-grid { grid-template-columns: 1fr; }
     .tree-head, .content-head, .detail-head { align-items: flex-start; flex-direction: column; }
     .tree-head.actions-only { align-items: flex-end; }
@@ -1503,6 +1614,48 @@
             <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
             Load
           </button>
+        </div>
+        <div class="query-mode" role="tablist" aria-label="Query editor mode">
+          <button id="query-json-mode-btn" class="active" type="button">JSON</button>
+          <button id="query-builder-mode-btn" type="button">Builder</button>
+        </div>
+        <div class="query-builder" id="query-builder" aria-label="Graphical query builder">
+          <div class="builder-section">
+            <div class="builder-section-head">
+              <div class="builder-title">Filter</div>
+              <div class="builder-controls">
+                <label>
+                  Match
+                  <select id="builder-match">
+                    <option value="and">all</option>
+                    <option value="or">any</option>
+                  </select>
+                </label>
+                <button id="builder-add-filter" class="secondary" type="button">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  Condition
+                </button>
+              </div>
+            </div>
+            <div class="builder-grid" id="builder-filters"></div>
+          </div>
+          <div class="builder-section">
+            <div class="builder-section-head">
+              <div class="builder-title">Aggregate</div>
+              <div class="builder-controls">
+                <label>
+                  Group by
+                  <input id="builder-group-by" placeholder="properties.department.value" autocomplete="off" />
+                </label>
+                <button id="builder-add-metric" class="secondary" type="button">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  Metric
+                </button>
+              </div>
+            </div>
+            <div class="builder-grid" id="builder-metrics"></div>
+          </div>
+          <div class="builder-error" id="builder-error"></div>
         </div>
       </section>
 
@@ -1770,7 +1923,37 @@ const state = {
   collapsedDbs: new Set(),
   treeFilter: "",
   deleteTarget: null,
+  queryMode: "json",
+  queryBuilder: {
+    match: "and",
+    filters: [],
+    aggregate: {
+      groupBy: "",
+      metrics: [],
+    },
+  },
 };
+
+const BUILDER_OPERATORS = [
+  ["eq", "="],
+  ["ne", "!="],
+  ["contains", "contains"],
+  ["in", "in"],
+  ["gt", ">"],
+  ["gte", ">="],
+  ["lt", "<"],
+  ["lte", "<="],
+  ["startsWith", "starts with"],
+  ["exists", "exists"],
+];
+
+const BUILDER_METRICS = [
+  ["$count", "count"],
+  ["$sum", "sum"],
+  ["$avg", "avg"],
+  ["$min", "min"],
+  ["$max", "max"],
+];
 
 function defaultServer() {
   const origin = window.location.origin;
@@ -3046,19 +3229,328 @@ function setMeta(text) {
   $("collection-meta").textContent = text;
 }
 
-function parseQuery() {
+function newBuilderFilter() {
+  return { field: "", op: "eq", value: "" };
+}
+
+function newBuilderMetric() {
+  return { alias: "_count", fn: "$count", field: "" };
+}
+
+function setQueryMode(mode) {
+  const next = mode === "builder" ? "builder" : "json";
+  if (next === "builder") importQueryIntoBuilder();
+  state.queryMode = next;
+  renderQueryMode();
+}
+
+function renderQueryMode() {
+  const builder = state.queryMode === "builder";
+  $("query-json-mode-btn").classList.toggle("active", !builder);
+  $("query-builder-mode-btn").classList.toggle("active", builder);
+  $("query-builder").classList.toggle("open", builder);
+  $("query").readOnly = builder;
+  if (builder) {
+    renderQueryBuilder();
+    syncBuilderToQuery();
+  }
+}
+
+function renderQueryBuilder() {
+  $("builder-match").value = state.queryBuilder.match;
+  $("builder-group-by").value = state.queryBuilder.aggregate.groupBy || "";
+  renderBuilderFilters();
+  renderBuilderMetrics();
+}
+
+function renderBuilderFilters() {
+  const root = $("builder-filters");
+  if (!state.queryBuilder.filters.length) {
+    root.innerHTML = `<div class="builder-empty">No filters. Add a condition or use aggregation only.</div>`;
+    return;
+  }
+  root.innerHTML = state.queryBuilder.filters.map((filter, index) => `
+    <div class="builder-row" data-filter-index="${index}">
+      <input data-builder-field="field" placeholder="field.path" autocomplete="off" value="${escapeAttr(filter.field)}" />
+      <select data-builder-field="op">${BUILDER_OPERATORS.map(([value, label]) => `
+        <option value="${value}"${filter.op === value ? " selected" : ""}>${label}</option>
+      `).join("")}</select>
+      <input data-builder-field="value" placeholder="${filter.op === "exists" ? "true" : "value"}" autocomplete="off" value="${escapeAttr(filter.value)}" />
+      <button class="ghost icon-only" type="button" data-remove-filter="${index}" title="Remove condition" aria-label="Remove condition">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+  `).join("");
+}
+
+function renderBuilderMetrics() {
+  const root = $("builder-metrics");
+  if (!state.queryBuilder.aggregate.metrics.length) {
+    root.innerHTML = `<div class="builder-empty">No aggregate metrics. Add one to create a $aggregate query.</div>`;
+    return;
+  }
+  root.innerHTML = state.queryBuilder.aggregate.metrics.map((metric, index) => `
+    <div class="builder-row metric" data-metric-index="${index}">
+      <input data-metric-field="alias" placeholder="alias" autocomplete="off" value="${escapeAttr(metric.alias)}" />
+      <select data-metric-field="fn">${BUILDER_METRICS.map(([value, label]) => `
+        <option value="${value}"${metric.fn === value ? " selected" : ""}>${label}</option>
+      `).join("")}</select>
+      <input data-metric-field="field" placeholder="${metric.fn === "$count" ? "unused" : "field.path"}" autocomplete="off" value="${escapeAttr(metric.field)}" ${metric.fn === "$count" ? "disabled" : ""} />
+      <button class="ghost icon-only" type="button" data-remove-metric="${index}" title="Remove metric" aria-label="Remove metric">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+  `).join("");
+}
+
+function updateBuilderFilter(event) {
+  const input = event.target.closest("[data-builder-field]");
+  const row = event.target.closest("[data-filter-index]");
+  if (!input || !row) return;
+  const filter = state.queryBuilder.filters[Number(row.dataset.filterIndex)];
+  if (!filter) return;
+  const key = input.dataset.builderField;
+  filter[key] = input.value;
+  if (key === "op") renderBuilderFilters();
+  syncBuilderToQuery();
+}
+
+function updateBuilderMetric(event) {
+  const input = event.target.closest("[data-metric-field]");
+  const row = event.target.closest("[data-metric-index]");
+  if (!input || !row) return;
+  const metric = state.queryBuilder.aggregate.metrics[Number(row.dataset.metricIndex)];
+  if (!metric) return;
+  const key = input.dataset.metricField;
+  metric[key] = input.value;
+  if (key === "fn" && metric.fn === "$count") metric.field = "";
+  if (key === "fn") renderBuilderMetrics();
+  syncBuilderToQuery();
+}
+
+function syncBuilderToQuery() {
+  const built = buildQueryFromBuilder();
+  if (!built.ok) {
+    $("builder-error").textContent = built.error;
+    return false;
+  }
+  $("builder-error").textContent = "";
+  $("query").value = JSON.stringify(built.query, null, 2);
+  return true;
+}
+
+function buildQueryFromBuilder() {
+  const filterQueries = [];
+  for (const filter of state.queryBuilder.filters) {
+    const field = String(filter.field || "").trim();
+    if (!field) continue;
+    try {
+      filterQueries.push({ [field]: builderFilterValue(filter) });
+    } catch (err) {
+      return { ok: false, error: `${field}: ${err.message}` };
+    }
+  }
+
+  const query = {};
+  if (filterQueries.length === 1 || state.queryBuilder.match === "and") {
+    for (const part of filterQueries) mergeBuilderFilter(query, part);
+  } else if (filterQueries.length > 1) {
+    query.$or = filterQueries;
+  }
+
+  const aggregate = buildAggregateFromBuilder();
+  if (!aggregate.ok) return aggregate;
+  if (aggregate.value) query.$aggregate = aggregate.value;
+
+  return { ok: true, query };
+}
+
+function builderFilterValue(filter) {
+  const value = parseBuilderValue(filter.value, filter.op);
+  if (filter.op === "eq") return value;
+  if (filter.op === "ne") return { $ne: value };
+  if (filter.op === "contains") return { $contains: value };
+  if (filter.op === "in") return { $in: Array.isArray(value) ? value : commaList(filter.value) };
+  if (filter.op === "gt") return { $gt: value };
+  if (filter.op === "gte") return { $gte: value };
+  if (filter.op === "lt") return { $lt: value };
+  if (filter.op === "lte") return { $lte: value };
+  if (filter.op === "startsWith") return { $startsWith: value };
+  if (filter.op === "exists") return { $exists: value };
+  return value;
+}
+
+function parseBuilderValue(raw, op) {
+  const value = String(raw ?? "").trim();
+  if (op === "exists") return value === "" ? true : value !== "false";
+  if (op === "in" && !value.startsWith("[")) return commaList(value);
+  if (value === "") return "";
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function commaList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => parseBuilderValue(item.trim(), "eq"))
+    .filter((item) => item !== "");
+}
+
+function mergeBuilderFilter(target, part) {
+  const [[field, value]] = Object.entries(part);
+  if (!isPlainObject(target[field]) || !isPlainObject(value)) {
+    target[field] = value;
+    return;
+  }
+  target[field] = { ...target[field], ...value };
+}
+
+function buildAggregateFromBuilder() {
+  const metrics = state.queryBuilder.aggregate.metrics.filter((metric) => String(metric.alias || "").trim());
+  const groupBy = String(state.queryBuilder.aggregate.groupBy || "").trim();
+  if (!metrics.length && !groupBy) return { ok: true, value: null };
+  if (!metrics.length) return { ok: false, error: "Aggregate needs at least one metric" };
+
+  const fields = {};
+  for (const metric of metrics) {
+    const alias = String(metric.alias || "").trim();
+    const fn = metric.fn || "$count";
+    const field = String(metric.field || "").trim();
+    if (fn !== "$count" && !field) return { ok: false, error: `${alias}: metric field is required` };
+    fields[alias] = fn === "$count" ? { $count: true } : { [fn]: field };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(groupBy ? { groupBy } : {}),
+      fields,
+    },
+  };
+}
+
+function importQueryIntoBuilder() {
+  const parsed = parseQueryValue();
+  if (!parsed.ok) {
+    $("builder-error").textContent = parsed.error;
+    return;
+  }
+  const imported = queryToBuilder(parsed.value);
+  state.queryBuilder = imported.builder;
+  $("builder-error").textContent = imported.custom
+    ? "Some JSON could not be represented visually. The builder shows the parts it understands."
+    : "";
+}
+
+function queryToBuilder(query) {
+  const source = isPlainObject(query) ? query : {};
+  const filters = [];
+  let match = "and";
+
+  if (Array.isArray(source.$or)) {
+    match = "or";
+    for (const entry of source.$or) collectBuilderFilters(entry, filters);
+  } else {
+    collectBuilderFilters(source, filters);
+  }
+
+  const aggregate = aggregateToBuilder(source.$aggregate);
+  const knownKeys = new Set(["$aggregate", "$or"]);
+  for (const filter of filters) knownKeys.add(filter.field);
+  const custom = Object.keys(source).some((key) => !knownKeys.has(key) && key.startsWith("$"));
+
+  return {
+    custom,
+    builder: {
+      match,
+      filters,
+      aggregate,
+    },
+  };
+}
+
+function collectBuilderFilters(query, filters) {
+  if (!isPlainObject(query)) return;
+  for (const [field, value] of Object.entries(query)) {
+    if (field.startsWith("$")) continue;
+    filters.push(valueToBuilderFilter(field, value));
+  }
+}
+
+function valueToBuilderFilter(field, value) {
+  if (!isPlainObject(value)) return { field, op: "eq", value: builderValueText(value) };
+  const entries = Object.entries(value);
+  if (entries.length !== 1) return { field, op: "eq", value: builderValueText(value) };
+  const [[op, raw]] = entries;
+  const reverse = {
+    $ne: "ne",
+    $contains: "contains",
+    $in: "in",
+    $gt: "gt",
+    $gte: "gte",
+    $lt: "lt",
+    $lte: "lte",
+    $startsWith: "startsWith",
+    $exists: "exists",
+  };
+  return { field, op: reverse[op] || "eq", value: builderValueText(raw) };
+}
+
+function aggregateToBuilder(spec) {
+  if (!isPlainObject(spec)) return { groupBy: "", metrics: [] };
+  const metrics = [];
+  const fields = isPlainObject(spec.fields) ? spec.fields : {};
+  for (const [alias, config] of Object.entries(fields)) {
+    if (!isPlainObject(config)) continue;
+    const entry = Object.entries(config)[0];
+    if (!entry) continue;
+    const [fn, value] = entry;
+    metrics.push({
+      alias,
+      fn,
+      field: fn === "$count" ? "" : String(value || ""),
+    });
+  }
+  return {
+    groupBy: typeof spec.groupBy === "string" ? spec.groupBy : "",
+    metrics,
+  };
+}
+
+function builderValueText(value) {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "";
+  return JSON.stringify(value);
+}
+
+function parseQueryValue() {
   const raw = $("query").value.trim();
-  if (!raw) return { ok: true, params: new URLSearchParams() };
+  if (!raw) return { ok: true, value: {} };
   try {
     const value = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return { ok: false, error: "Query must be a JSON object" };
     }
-    const params = new URLSearchParams({ q: JSON.stringify(value) });
-    return { ok: true, params };
+    return { ok: true, value };
   } catch (err) {
     return { ok: false, error: err.message };
   }
+}
+
+function escapeAttr(value) {
+  return escapeHtml(String(value ?? "")).replace(/"/g, "&quot;");
+}
+
+function parseQuery() {
+  if (state.queryMode === "builder" && !syncBuilderToQuery()) return { ok: false, error: $("builder-error").textContent };
+  const parsed = parseQueryValue();
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const params = new URLSearchParams();
+  if (Object.keys(parsed.value).length) params.set("q", JSON.stringify(parsed.value));
+  return { ok: true, params };
 }
 
 async function loadObjects({ selectId = null } = {}) {
@@ -3219,6 +3711,7 @@ function highlightJson(value) {
 }
 
 function formatQuery() {
+  if (state.queryMode === "builder" && !syncBuilderToQuery()) return;
   const raw = $("query").value.trim();
   if (!raw) {
     $("query").value = "{}";
@@ -3591,6 +4084,44 @@ $("add-coll-btn").addEventListener("click", openCollectionModal);
 $("edit-meta-btn").addEventListener("click", openMetaModal);
 $("load-objects-btn").addEventListener("click", reloadObjectsFromFirstPage);
 $("format-query-btn").addEventListener("click", formatQuery);
+$("query-json-mode-btn").addEventListener("click", () => setQueryMode("json"));
+$("query-builder-mode-btn").addEventListener("click", () => setQueryMode("builder"));
+$("builder-match").addEventListener("change", (event) => {
+  state.queryBuilder.match = event.target.value === "or" ? "or" : "and";
+  syncBuilderToQuery();
+});
+$("builder-group-by").addEventListener("input", (event) => {
+  state.queryBuilder.aggregate.groupBy = event.target.value;
+  syncBuilderToQuery();
+});
+$("builder-add-filter").addEventListener("click", () => {
+  state.queryBuilder.filters.push(newBuilderFilter());
+  renderBuilderFilters();
+  syncBuilderToQuery();
+});
+$("builder-add-metric").addEventListener("click", () => {
+  state.queryBuilder.aggregate.metrics.push(newBuilderMetric());
+  renderBuilderMetrics();
+  syncBuilderToQuery();
+});
+$("builder-filters").addEventListener("input", updateBuilderFilter);
+$("builder-filters").addEventListener("change", updateBuilderFilter);
+$("builder-filters").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-filter]");
+  if (!button) return;
+  state.queryBuilder.filters.splice(Number(button.dataset.removeFilter), 1);
+  renderBuilderFilters();
+  syncBuilderToQuery();
+});
+$("builder-metrics").addEventListener("input", updateBuilderMetric);
+$("builder-metrics").addEventListener("change", updateBuilderMetric);
+$("builder-metrics").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-metric]");
+  if (!button) return;
+  state.queryBuilder.aggregate.metrics.splice(Number(button.dataset.removeMetric), 1);
+  renderBuilderMetrics();
+  syncBuilderToQuery();
+});
 $("limit").addEventListener("change", reloadObjectsFromFirstPage);
 $("tree-filter").addEventListener("input", (event) => {
   state.treeFilter = event.target.value;
@@ -3626,6 +4157,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 loadSession();
+renderQueryMode();
 checkHealth();
 if (state.accessToken) {
   loadTree();
