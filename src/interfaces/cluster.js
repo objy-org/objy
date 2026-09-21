@@ -22,7 +22,9 @@ export function createClusterInterface() {
       }));
 
       router.get("/cluster/status", secure((req, res) => {
-        json(res, 200, localClusterStatus(node, memoryGuard, replicationScheduler, restoreStatus));
+        json(res, 200, localClusterStatus(node, memoryGuard, replicationScheduler, restoreStatus, {
+          details: req.query.get("details") === "1",
+        }));
       }));
 
       router.put("/cluster/shards", secure(async (req, res) => {

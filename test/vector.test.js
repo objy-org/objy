@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CRDTNode, localPeer } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { HNSWIndex } from "../src/hnsw.js";
 
 test("vectors are stored outside returned objects and searched through warmed HNSW", async () => {
   const node = new CRDTNode({ id: "vector-node" });
@@ -60,6 +61,24 @@ test("vector writes validate, preserve on ordinary replace, and remove explicitl
   node.update("app", "docs", "doc", { _vec: null });
   assert.equal(node.getVector("app", "docs", "doc"), null);
   assert.deepEqual(node.vectorSearch("app", "docs", [0, 1], 1), []);
+});
+
+test("HNSW removal physically releases graph nodes", () => {
+  const vectors = new Map([
+    ["a", [1, 0]],
+    ["b", [0, 1]],
+  ]);
+  const index = new HNSWIndex({ getVec: (id) => vectors.get(id) });
+  index.insert("a", vectors.get("a"));
+  index.insert("b", vectors.get("b"));
+  assert.equal(index.nodes.size, 2);
+
+  vectors.delete("a");
+  index.remove("a");
+  assert.equal(index.nodes.size, 1);
+  for (const node of index.nodes.values()) {
+    assert.equal(node.neighbors.every((neighbors) => !neighbors.includes("a")), true);
+  }
 });
 
 test("replication carries vectors in object ops and rebuilds local vector indexes", async () => {

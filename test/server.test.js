@@ -439,18 +439,17 @@ test("auth issues and renews global user JWTs", async () => {
     assert.equal(config.body.rss.cluster.nodeCount, 1);
     assert.equal(config.body.rss.cluster.totalMemory, config.body.rss.logical.totalMemory);
     assert.equal(config.body.rss.cluster.totalMemory, config.body.rss.physical.totalMemory);
-    assert.equal(config.body.rss.nodes[0].nodeId, s.node.id);
-    assert.ok(config.body.rss.nodes[0].rss > 0);
-    assert.ok(config.body.rss.nodes[0].totalMemory > config.body.rss.nodes[0].rss);
-    assert.ok(config.body.rss.nodes[0].freeMemory >= 0);
-    assert.ok(config.body.rss.nodes[0].rssPercent > 0);
-    assert.equal(config.body.compression.cluster.collectionCount, 1);
-    assert.equal(config.body.compression.logical.compressedObjects, 1);
-    assert.equal(config.body.compression.physical.compressedObjects, 1);
-    assert.equal(config.body.compression.nodes[0].collections[0].database, "compression");
-    assert.equal(config.body.compression.nodes[0].collections[0].collection, "docs");
-    assert.deepEqual(config.body.compression.nodes[0].collections[0].policy.offload, ["payload"]);
-    assert.ok(config.body.compression.nodes[0].collections[0].savedPercent > 0);
+    assert.equal(config.body.rss.nodes, undefined);
+    assert.equal(config.body.compression.collectionCount, 1);
+    assert.equal(config.body.compression.compressedObjects, 1);
+    assert.equal(config.body.compression.nodes, undefined);
+    assert.equal(config.body.compression.collections, undefined);
+    assert.ok(config.body.compression.savedPercent > 0);
+
+    const details = await authed.get("/api/config?details=1");
+    assert.equal(details.body.compression.nodes[0].collections[0].database, "compression");
+    assert.equal(details.body.compression.nodes[0].collections[0].collection, "docs");
+    assert.deepEqual(details.body.compression.nodes[0].collections[0].policy.offload, ["payload"]);
 
     const renewed = await anonymous.post("/api/_global/users/renew", { refreshToken: session.body.refreshToken });
     assert.equal(renewed.status, 200);
@@ -468,7 +467,7 @@ test("auth issues and renews global user JWTs", async () => {
   }
 });
 
-test("api config reports cluster shards peers and node RSS", async () => {
+test("api config keeps normal status compact and loads diagnostics on demand", async () => {
   const { a, b, urlA } = await startRoutedTwoShardCluster();
   try {
     const anonymous = api(urlA, null);
@@ -484,7 +483,8 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.equal(status.body.ok, true);
     assert.equal(status.body.node.id, "route-a");
     assert.deepEqual(status.body.shards.map((shard) => shard.name), ["shard-a", "shard-b"]);
-    assert.equal(status.body.peers.length, 2);
+    assert.equal(status.body.peers, undefined);
+    assert.equal(status.body.shardMap, undefined);
 
     const local = status.body.nodes.find((nodeStatus) => nodeStatus.node.id === "route-a");
     const remote = status.body.nodes.find((nodeStatus) => nodeStatus.node.id === "route-b");
@@ -497,40 +497,40 @@ test("api config reports cluster shards peers and node RSS", async () => {
     assert.equal(status.body.rss.cluster.nodeCount, 2);
     assert.equal(status.body.rss.cluster.onlineNodeCount, 2);
     assert.equal(status.body.rss.cluster.offlineNodeCount, 0);
-    assert.equal(status.body.rss.nodes.length, 2);
-    assert.ok(status.body.rss.nodes.some((entry) => entry.nodeId === "route-a" && entry.rss > 0));
-    assert.ok(status.body.rss.nodes.some((entry) => entry.nodeId === "route-b" && entry.rss > 0));
+    assert.equal(status.body.rss.nodes, undefined);
     assert.equal(
       status.body.rss.cluster.rss,
-      status.body.rss.nodes.reduce((sum, entry) => sum + entry.rss, 0),
+      status.body.nodes.reduce((sum, entry) => sum + entry.memory.rss, 0),
     );
     assert.equal(
       status.body.rss.cluster.totalMemory,
-      status.body.rss.nodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
+      status.body.nodes.reduce((sum, entry) => sum + entry.memory.systemTotal, 0),
     );
     assert.equal(status.body.rss.cluster.totalMemory, status.body.rss.logical.totalMemory);
-    assert.equal(status.body.rss.physical.totalMemory, status.body.rss.nodes.reduce((sum, entry) => sum + entry.totalMemory, 0));
+    assert.equal(status.body.rss.physical.totalMemory, status.body.nodes.reduce((sum, entry) => sum + entry.memory.systemTotal, 0));
     assert.ok(status.body.rss.cluster.rssPercent > 0);
-    assert.ok(status.body.peers.every((peer) => peer.totalMemory > peer.rss));
     assert.deepEqual(local.ownedShards, ["shard-a"]);
     assert.deepEqual(remote.ownedShards, ["shard-b"]);
-    assert.equal(local.replication.scheduler.mode, "hinted-pull");
-    assert.equal(local.replication.scheduler.enabled, true);
-    assert.equal(local.replication.scheduler.hintsEnabled, true);
-    assert.equal(Number.isInteger(local.replication.scheduler.inflightPulls), true);
-    assert.equal(local.indexes.status, "ready");
-    assert.equal(local.indexes.workers.fieldIndex.type, "same_thread_task");
-    assert.equal(local.indexes.workers.columns.type, "same_thread_task");
-    assert.equal(local.indexes.workers.vectorIndex.type, "same_thread_task");
-    assert.equal(Number.isInteger(local.indexes.workers.fieldIndex.active), true);
-    assert.equal(Number.isInteger(local.indexes.workers.columns.active), true);
-    assert.equal(Number.isInteger(local.indexes.workers.vectorIndex.active), true);
-    assert.equal(status.body.nodes.some((nodeStatus) => (
+    assert.equal(typeof local.replication.healthy, "boolean");
+    assert.equal(Number.isInteger(local.replication.inflightPulls), true);
+    assert.equal(local.indexes, undefined);
+    assert.deepEqual(Object.keys(status.body.indexes).sort(), ["activeWorkers", "building", "error", "ready"]);
+    assert.deepEqual(Object.keys(status.body.vectors).sort(), ["activeIndexes", "errors", "storedVectors", "warmingIndexes"]);
+    assert.equal(status.body.shards.find((shard) => shard.name === "shard-b").peers[0].online, true);
+    assert.equal(status.body.shards[0].peers[0].rss, undefined);
+
+    const cached = await authed.get("/api/config");
+    assert.equal(cached.body.generatedAt, status.body.generatedAt);
+
+    const details = await authed.get("/api/config?details=1");
+    const detailedLocal = details.body.nodes.find((nodeStatus) => nodeStatus.node.id === "route-a");
+    assert.equal(detailedLocal.replication.scheduler.mode, "hinted-pull");
+    assert.equal(detailedLocal.indexes.workers.fieldIndex.type, "same_thread_task");
+    assert.equal(details.body.nodes.some((nodeStatus) => (
       (nodeStatus.indexes.collections || []).some((entry) => (
         entry.database === "config_empty" && entry.collection === "plain"
       ))
     )), false);
-    assert.equal(status.body.shards.find((shard) => shard.name === "shard-b").peers[0].online, true);
   } finally {
     a.server.close();
     b.server.close();
@@ -553,7 +553,8 @@ test("api config reports logical memory without counting replicas", async () => 
     const status = await api(urlA, session.accessToken).get("/api/config");
 
     assert.equal(status.status, 200, JSON.stringify(status.body));
-    assert.equal(status.body.rss.nodes.length, 4);
+    assert.equal(status.body.nodes.length, 4);
+    assert.equal(status.body.rss.nodes, undefined);
     assert.equal(status.body.rss.physical.nodeCount, 4);
     assert.equal(status.body.rss.logical.shardCount, 2);
     assert.equal(status.body.rss.logical.coveredShardCount, 2);
@@ -562,22 +563,26 @@ test("api config reports logical memory without counting replicas", async () => 
     assert.equal(status.body.rss.cluster.totalMemory, status.body.rss.logical.totalMemory);
     assert.equal(
       status.body.rss.physical.totalMemory,
-      status.body.rss.nodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
+      status.body.nodes.reduce((sum, entry) => sum + entry.memory.systemTotal, 0),
     );
+    assert.equal(status.body.rss.logical.selectedReplicas, undefined);
+    assert.equal(status.body.compression.compressedObjects, 2);
+    assert.equal(status.body.compression.nodes, undefined);
 
-    const selectedNodeIds = new Set(status.body.rss.logical.selectedReplicas.map((replica) => replica.nodeId));
-    const selectedNodes = status.body.rss.nodes.filter((entry) => selectedNodeIds.has(entry.nodeId));
+    const details = await api(urlA, session.accessToken).get("/api/config?details=1");
+    const selectedNodeIds = new Set(details.body.rss.logical.selectedReplicas.map((replica) => replica.nodeId));
+    const selectedNodes = details.body.nodes.filter((entry) => selectedNodeIds.has(entry.node.id));
     assert.deepEqual([...selectedNodeIds].sort(), ["replica-0", "replica-2"]);
     assert.equal(
-      status.body.rss.logical.totalMemory,
-      selectedNodes.reduce((sum, entry) => sum + entry.totalMemory, 0),
+      details.body.rss.logical.totalMemory,
+      selectedNodes.reduce((sum, entry) => sum + entry.memory.systemTotal, 0),
     );
-    assert.ok(status.body.rss.logical.totalMemory < status.body.rss.physical.totalMemory);
-    assert.equal(status.body.compression.nodes.length, 4);
-    assert.equal(status.body.compression.physical.compressedObjects, 4);
-    assert.equal(status.body.compression.logical.compressedObjects, 2);
-    assert.equal(status.body.compression.cluster.compressedObjects, 2);
-    assert.ok(status.body.compression.logical.compressedBytes < status.body.compression.physical.compressedBytes);
+    assert.ok(details.body.rss.logical.totalMemory < details.body.rss.physical.totalMemory);
+    assert.equal(details.body.compression.nodes.length, 4);
+    assert.equal(details.body.compression.physical.compressedObjects, 4);
+    assert.equal(details.body.compression.logical.compressedObjects, 2);
+    assert.equal(details.body.compression.cluster.compressedObjects, 2);
+    assert.ok(details.body.compression.logical.compressedBytes < details.body.compression.physical.compressedBytes);
   } finally {
     for (const server of servers) server.server.close();
   }
@@ -609,6 +614,11 @@ test("memory guard rejects local writes but still allows remote shard forwarding
     assert.equal(local.status, 507, JSON.stringify(local.body));
     assert.equal(local.body.error, "peer memory limit exceeded");
     assert.equal(local.headers.get("retry-after"), "5");
+    assert.equal(a.node.get(db, coll, localId), undefined);
+
+    a.node.insert(db, coll, { _id: localId, value: "cleanup" });
+    const deleted = await c.del(`/api/${db}/${coll}/object/${localId}`);
+    assert.equal(deleted.status, 204, JSON.stringify(deleted.body));
     assert.equal(a.node.get(db, coll, localId), undefined);
 
     const status = await c.get("/api/config");
@@ -1994,7 +2004,7 @@ test("collection metadata fan-out builds indexes on shard peers", async () => {
   }
 });
 
-test("schema writes tolerate unreachable fan-out peers after local commit", async () => {
+test("schema writes tolerate unavailable peers except for destructive collection drops", async () => {
   const port = await freePort();
   const url = `http://localhost:${port}`;
   const offlineUrl = `http://127.0.0.1:${await freePort()}`;
@@ -2036,11 +2046,11 @@ test("schema writes tolerate unreachable fan-out peers after local commit", asyn
     });
 
     const deletedCollection = await c.del("/api/offline_schema/collections/docs");
-    assert.equal(deletedCollection.status, 204, JSON.stringify(deletedCollection.body));
+    assert.equal(deletedCollection.status, 503, JSON.stringify(deletedCollection.body));
     assert.equal(s.node.getCollectionMeta("offline_schema", "docs"), null);
 
     const deletedDb = await c.del("/api/databases/offline_schema");
-    assert.equal(deletedDb.status, 204, JSON.stringify(deletedDb.body));
+    assert.equal(deletedDb.status, 503, JSON.stringify(deletedDb.body));
     assert.equal(s.node.getDatabaseMeta("offline_schema"), null);
   } finally {
     s.server.close();

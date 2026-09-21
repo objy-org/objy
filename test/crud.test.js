@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CRDTNode } from "../src/crdt.js";
+import { DerivedStateScheduler } from "../src/derived-state-scheduler.js";
 
 function makeNode(id) {
   return new CRDTNode({ id });
@@ -187,6 +188,51 @@ test("bulk writes update index state in one batch", async () => {
   } finally {
     collection._applyIndexDeltas = originalApplyBatch;
   }
+});
+
+test("collection deletion disposes queued derived state and blocks stale object ops", async () => {
+  const scheduler = new DerivedStateScheduler({ maxConcurrent: 1 });
+  let release;
+  let markStarted;
+  const started = new Promise((resolve) => (markStarted = resolve));
+  const blocker = scheduler.schedule("blocker", () => new Promise((resolve) => {
+    release = resolve;
+    markStarted();
+  }));
+  await started;
+  const n = new CRDTNode({ id: "a", storage: { derivedStateScheduler: scheduler } });
+
+  n.createCollection("db", "c", { indexes: ["status"], columns: ["score"] });
+  n.insertMany("db", "c", Array.from({ length: 6_000 }, (_, index) => ({
+    _id: `id-${index}`,
+    status: index % 2 ? "open" : "closed",
+    score: index,
+  })));
+  const collection = n.db.getCollection("db", "c");
+  assert.ok(scheduler.stats().queued > 0);
+
+  n.removeCollection("db", "c");
+  assert.equal(scheduler.stats().queued, 0);
+  assert.equal(collection.meta.size, 0);
+  assert.equal(collection.columns.size, 0);
+  assert.equal(collection.indexes.size, 0);
+  assert.equal(n.get("db", "c", "id-1"), undefined);
+  assert.deepEqual(n.listCollections("db"), []);
+
+  const applied = n.applyRemote("old-peer", [{
+    kind: "putObj",
+    db: "db",
+    coll: "c",
+    id: "late",
+    value: { status: "open" },
+    ts: { c: 1, n: "old-peer" },
+    seq: 1,
+  }]);
+  assert.equal(applied, 0);
+  assert.deepEqual(n.listCollections("db"), []);
+
+  release();
+  await blocker;
 });
 
 test("bulk insert count path skips object hydration", () => {

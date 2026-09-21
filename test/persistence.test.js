@@ -415,17 +415,82 @@ test("collection removal deletes the persisted collection prefix", async () => {
   node.createCollection("app", "orders", { indexes: ["status"] });
   node.insert("app", "orders", { _id: "o1", status: "paid" });
   await persistence.checkpoint();
+  const staleObjects = new Map();
+  for (const key of await storage.list("spread-db/db/app/collection/orders/")) {
+    staleObjects.set(key, await storage.get(key));
+  }
   assert.ok(await storage.get("spread-db/db/app/collection/orders/meta.json"));
   assert.ok((await storage.list("spread-db/db/app/collection/orders/")).length > 0);
 
   node.removeCollection("app", "orders");
   await persistence.flush();
   assert.deepEqual(await storage.list("spread-db/db/app/collection/orders/"), []);
+  assert.ok(await storage.get("spread-db/db/app/collection-tombstones/orders.json"));
+
+  // A stale checkpoint finishing after the drop must not resurrect the collection.
+  for (const [key, body] of staleObjects) await storage.put(key, body);
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  const restored = await new PersistenceManager({ node: fresh, storage }).restore();
+  assert.equal(restored.collectionTombstones, 1);
+  assert.deepEqual(fresh.listCollections("app"), []);
+  assert.equal(fresh.get("app", "orders", "o1"), undefined);
+  assert.deepEqual(fresh.listCollections("app"), []);
+});
+
+test("explicit collection recreation clears its durable tombstone", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
+  persistence.start();
+
+  node.createCollection("app", "orders", { indexes: ["status"] });
+  await persistence.flush();
+  node.removeCollection("app", "orders");
+  await persistence.flush();
+  assert.ok(await storage.get("spread-db/db/app/collection-tombstones/orders.json"));
+
+  node.createCollection("app", "orders", { indexes: ["state"] });
+  node.insert("app", "orders", { _id: "new", state: "open" });
+  await persistence.checkpoint();
+  assert.equal(await storage.get("spread-db/db/app/collection-tombstones/orders.json"), null);
 
   const fresh = new CRDTNode({ id: "fresh" });
   await new PersistenceManager({ node: fresh, storage }).restore();
-  assert.deepEqual(fresh.listCollections("app"), []);
-  assert.equal(fresh.get("app", "orders", "o1"), undefined);
+  assert.deepEqual(fresh.get("app", "orders", "new"), { _id: "new", state: "open" });
+});
+
+test("database removal is durable against stale collection data", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "n1" });
+  const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
+  persistence.start();
+
+  node.createDatabase("app", { label: "old" });
+  node.createCollection("app", "orders", { indexes: ["status"] });
+  node.insert("app", "orders", { _id: "old", status: "open" });
+  await persistence.checkpoint();
+  const staleObjects = new Map();
+  for (const key of await storage.list("spread-db/db/app/")) staleObjects.set(key, await storage.get(key));
+
+  node.removeDatabase("app");
+  await persistence.flush();
+  assert.deepEqual(await storage.list("spread-db/db/app/"), []);
+  assert.ok(await storage.get("spread-db/database-tombstones/app.json"));
+  for (const [key, body] of staleObjects) await storage.put(key, body);
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  const freshPersistence = new PersistenceManager({ node: fresh, storage, flushMs: 0, snapshotMs: 0 });
+  const restored = await freshPersistence.restore();
+  assert.equal(restored.databaseTombstones, 1);
+  assert.deepEqual(fresh.listDatabases(), []);
+  assert.equal(fresh.get("app", "orders", "old"), undefined);
+
+  freshPersistence.start();
+  fresh.createDatabase("app", { label: "new" });
+  await freshPersistence.flush();
+  assert.deepEqual(fresh.getDatabaseMeta("app"), { label: "new" });
+  assert.equal(await storage.get("spread-db/database-tombstones/app.json"), null);
 });
 
 test("checkpoints are partitioned per object shard", async () => {

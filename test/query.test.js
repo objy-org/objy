@@ -548,6 +548,28 @@ test("columns store selected paths outside base rows and hydrate snapshots", asy
   assert.deepEqual(fresh.get("db", "events", "e1"), n.get("db", "events", "e1"));
 });
 
+test("columns release typed buffers and string dictionaries when emptied", async () => {
+  const n = new CRDTNode({ id: "column-delete" });
+  n.createCollection("db", "events", { columns: ["score", "label"] });
+  await n.awaitColumns("db", "events");
+  n.insertMany("db", "events", [
+    { _id: "a", score: 1, label: "alpha" },
+    { _id: "b", score: 2, label: "beta" },
+  ]);
+
+  const collection = n.db.getCollection("db", "events");
+  const score = collection.columns.get("score");
+  const label = collection.columns.get("label");
+  assert.ok(score.numberValues.length > 0);
+  assert.equal(label.stringIds.size, 2);
+
+  n.removeMany("db", "events", ["a", "b"]);
+  assert.equal(score.numberValues.length, 0);
+  assert.equal(label.stringCodes.length, 0);
+  assert.equal(label.stringIds.size, 0);
+  assert.equal(label.strings.length, 0);
+});
+
 test("compressed memory tiering keeps hot paths queryable and hydrates full objects", async () => {
   const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
   n.createCollection("db", "assets", {

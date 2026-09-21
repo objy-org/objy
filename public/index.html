@@ -1913,6 +1913,7 @@ const state = {
   active: null,
   collectionMeta: null,
   cluster: null,
+  clusterDetails: null,
   apiDocs: null,
   apiDocsSource: "",
   objects: [],
@@ -2018,6 +2019,7 @@ function clearSession(render = true) {
   state.active = null;
   state.collectionMeta = null;
   state.cluster = null;
+  state.clusterDetails = null;
   state.objects = [];
   state.objectPage = 1;
   state.objectHasMore = false;
@@ -2356,6 +2358,7 @@ async function loadTree() {
 async function loadClusterStatus() {
   if (!state.accessToken) {
     state.cluster = null;
+    state.clusterDetails = null;
     renderClusterStatus(null);
     renderActionState();
     return;
@@ -2367,12 +2370,14 @@ async function loadClusterStatus() {
   const result = await apiFetch("GET", "/api/config");
   if (!result.ok) {
     state.cluster = null;
+    state.clusterDetails = null;
     root.title = "";
     root.innerHTML = `<span class="top-config-message bad">${escapeHtml(result.body?.error || "Could not load cluster status")}</span>`;
     return;
   }
 
   state.cluster = result.body || null;
+  state.clusterDetails = null;
   renderClusterStatus(state.cluster);
 }
 
@@ -2391,16 +2396,10 @@ function renderClusterStatus(config) {
 
   const nodes = Array.isArray(config.nodes) ? config.nodes : [];
   const shards = Array.isArray(config.shards) ? config.shards : [];
-  const peers = Array.isArray(config.peers) ? config.peers : [];
   const memory = configMemory(config, nodes);
-  const workerCount = nodes.reduce((sum, nodeStatus) => {
-    const workers = nodeStatus.indexes?.workers || {};
-    return sum
-      + (Number(workers.columns?.active) || 0)
-      + (Number(workers.vectorIndex?.active) || 0);
-  }, 0);
+  const workerCount = Number(config.indexes?.activeWorkers) || 0;
 
-  root.title = clusterTitle({ nodes, shards, peers });
+  root.title = clusterTitle({ nodes, shards });
   const stats = [
     topStat("shards", shards.length, shards.length ? "ok" : "warn", shardTitle(shards)),
     memoryStat("heap logical", memory.cluster, memoryClusterTitle(memory)),
@@ -2417,25 +2416,26 @@ async function openClusterStatsModal() {
   const root = $("cluster-modal-body");
   root.innerHTML = `<div class="empty">Loading cluster status...</div>`;
   openModal("cluster-modal");
-  if (!state.cluster) await loadClusterStatus();
-  if (!state.cluster) {
-    root.innerHTML = `<div class="error">Could not load cluster status.</div>`;
+  const result = await apiFetch("GET", "/api/config?details=1");
+  if (!result.ok) {
+    root.innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load cluster status.")}</div>`;
     return;
   }
-  renderClusterStatsModal(state.cluster);
+  state.clusterDetails = result.body || null;
+  renderClusterStatsModal(state.clusterDetails);
 }
 
 function renderClusterStatsModal(config) {
   const nodes = Array.isArray(config.nodes) ? config.nodes : [];
   const shards = Array.isArray(config.shards) ? config.shards : [];
-  const peers = Array.isArray(config.peers) ? config.peers : [];
   const memory = configMemory(config, nodes);
   const compression = configCompression(config, nodes);
   const hasCompression = compression.physical.collectionCount > 0;
   const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
-  const readyIndexes = nodes.filter((nodeStatus) => nodeStatus.indexes?.status === "ready").length;
-  const workerCount = nodes.reduce((sum, nodeStatus) => sum + activeWorkerCount(nodeStatus), 0);
-  const vectorContexts = nodes.reduce((sum, nodeStatus) => sum + activeVectorContextCount(nodeStatus), 0);
+  const indexes = config.indexes || {};
+  const indexCount = (Number(indexes.ready) || 0) + (Number(indexes.building) || 0) + (Number(indexes.error) || 0);
+  const workerCount = Number(indexes.activeWorkers) || 0;
+  const vectors = config.vectors || {};
 
   $("cluster-modal-body").innerHTML = `
     <section class="cluster-hero">
@@ -2447,10 +2447,9 @@ function renderClusterStatsModal(config) {
       <div class="cluster-metrics">
         ${clusterMetric("nodes", `${online}/${nodes.length}`, "online", nodesTone(online, nodes.length))}
         ${clusterMetric("shards", shards.length, `${coveredShardText(memory.cluster)}`, shards.length ? "ok" : "warn")}
-        ${clusterMetric("peers", peers.length, "configured", peers.length ? "ok" : "warn")}
-        ${clusterMetric("indexes", `${readyIndexes}/${nodes.length}`, "nodes ready", readyIndexes === nodes.length ? "ok" : "warn")}
+        ${clusterMetric("indexes", `${Number(indexes.ready) || 0}/${indexCount}`, "collections ready", Number(indexes.building) || Number(indexes.error) ? "warn" : "ok")}
         ${clusterMetric("workers", workerCount, "active", workerCount ? "warn" : "ok")}
-        ${clusterMetric("vectors", vectorContexts, "contexts with data", vectorContexts ? "ok" : "")}
+        ${clusterMetric("vectors", formatNumber(vectors.storedVectors), `${formatNumber(vectors.activeIndexes)} active indexes`, Number(vectors.errors) ? "warn" : "ok")}
         ${hasCompression ? clusterMetric("compression", formatPercent(compression.logical.savedPercent), "logical payload saved", "ok") : ""}
       </div>
     </section>
@@ -2855,16 +2854,6 @@ function hasVectorState(vector) {
   );
 }
 
-function activeWorkerCount(nodeStatus) {
-  const workers = nodeStatus.indexes?.workers || {};
-  return (Number(workers.columns?.active) || 0) + (Number(workers.vectorIndex?.active) || 0);
-}
-
-function activeVectorContextCount(nodeStatus) {
-  const vectors = Array.isArray(nodeStatus.vectors) ? nodeStatus.vectors : [];
-  return vectors.filter((item) => Number(item.stored) > 0 || Number(item.indexes) > 0 || item.status !== "ready").length;
-}
-
 function nodesTone(online, total) {
   if (!total) return "warn";
   if (online === total) return "ok";
@@ -2953,6 +2942,7 @@ function configMemory(config, nodes) {
 
 function configCompression(config, nodes) {
   const root = config.compression || {};
+  const detailed = root.logical || root.physical || Array.isArray(root.nodes);
   const compressionNodes = Array.isArray(root.nodes) ? root.nodes : nodes.map((nodeStatus) => ({
     nodeId: nodeStatus.node?.id || null,
     url: nodeStatus.node?.url || nodeStatus.sourcePeer?.url || null,
@@ -2970,8 +2960,8 @@ function configCompression(config, nodes) {
     savedPercent: 0,
   };
   return {
-    logical: { ...empty, ...(root.logical || root.cluster || {}) },
-    physical: { ...empty, ...(root.physical || root.cluster || {}) },
+    logical: { ...empty, ...(detailed ? root.logical || root.cluster || {} : root) },
+    physical: { ...empty, ...(detailed ? root.physical || root.cluster || {} : root) },
     nodes: compressionNodes,
   };
 }
@@ -3054,11 +3044,10 @@ function formatPercent(value) {
   return `${number.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
 }
 
-function clusterTitle({ nodes, shards, peers }) {
+function clusterTitle({ nodes, shards }) {
   return [
     nodeMemoryTitle(nodes),
     shardTitle(shards),
-    `${peers.length} configured peers`,
   ].filter(Boolean).join("\n");
 }
 
@@ -3991,7 +3980,9 @@ async function deleteSelectedContext() {
     renderDetail(null);
   }
   state.deleteTarget = null;
-  await loadTree();
+  state.cluster = null;
+  state.clusterDetails = null;
+  await Promise.all([loadTree(), loadClusterStatus()]);
 }
 
 function parseJsonField(id, label, { allowArray = false } = {}) {

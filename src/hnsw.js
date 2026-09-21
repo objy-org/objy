@@ -85,11 +85,10 @@ export class HNSWIndex {
     this.nodes = new Map();
     this.entryPoint = null;
     this.maxLayer = -1;
-    this.deleted = new Set();
   }
 
   get size() {
-    return this.nodes.size - this.deleted.size;
+    return this.nodes.size;
   }
 
   insert(id, vec) {
@@ -152,8 +151,7 @@ export class HNSWIndex {
   remove(id) {
     const key = String(id);
     if (!this.nodes.has(key)) return;
-    this.deleted.add(key);
-    if (this.entryPoint === key) this._resetEntryPoint();
+    this._unlinkExisting(key);
   }
 
   search(queryVec, k, ef = Math.max(k, 20)) {
@@ -172,7 +170,6 @@ export class HNSWIndex {
 
   clear() {
     this.nodes.clear();
-    this.deleted.clear();
     this.entryPoint = null;
     this.maxLayer = -1;
   }
@@ -196,7 +193,6 @@ export class HNSWIndex {
       for (const neighborId of node.neighbors[layer] || []) {
         if (visited.has(neighborId)) continue;
         visited.add(neighborId);
-        if (this.deleted.has(neighborId)) continue;
         const neighborVec = this.getVec(neighborId);
         if (!neighborVec) continue;
         const dist = angularDistance(queryVec, neighborVec);
@@ -249,7 +245,6 @@ export class HNSWIndex {
       }
     }
     this.nodes.delete(id);
-    this.deleted.delete(id);
     if (this.entryPoint === id) this._resetEntryPoint();
   }
 
@@ -257,7 +252,6 @@ export class HNSWIndex {
     let bestId = null;
     let bestLayer = -1;
     for (const [id, node] of this.nodes) {
-      if (this.deleted.has(id)) continue;
       const layer = node.neighbors.length - 1;
       if (layer > bestLayer) {
         bestId = id;
