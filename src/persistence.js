@@ -88,7 +88,11 @@ export class PersistenceManager {
     try {
       progress?.update?.({ phase: "listing" });
       const keys = await this.storage.list(root);
-      const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix));
+      const deletedDatabases = databaseTombstones(keys, this.prefix);
+      const tombstones = collectionTombstones(keys, this.prefix);
+      const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix))
+        .filter((scope) => !deletedDatabases.has(scope.database))
+        .filter((scope) => !tombstones.has(collectionKey(scope.database, scope.collection)));
       progress?.update?.({
         phase: "metadata",
         scopesTotal: scopes.length,
@@ -96,6 +100,8 @@ export class PersistenceManager {
       });
 
       this.node.db.beginBulkLoad?.();
+      stats.databaseTombstones = this._restoreDatabaseTombstones(deletedDatabases);
+      stats.collectionTombstones = this._restoreCollectionTombstones(tombstones);
       stats.databases = await this._restoreDatabaseMetadata(keys);
       stats.metadata = await this._restoreMetadata(keys);
       maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress);
@@ -130,12 +136,18 @@ export class PersistenceManager {
     const progress = options.progress || null;
     const root = this._rootPrefix();
     const keys = await this.storage.list(root);
-    const scopes = this._filterCatchUpScopes(uniqueScopes(keys, this.prefix), scope);
+    const deletedDatabases = databaseTombstones(keys, this.prefix);
+    const tombstones = collectionTombstones(keys, this.prefix);
+    const scopes = this._filterCatchUpScopes(uniqueScopes(keys, this.prefix), scope)
+      .filter((candidate) => !deletedDatabases.has(candidate.database))
+      .filter((candidate) => !tombstones.has(collectionKey(candidate.database, candidate.collection)));
     const stats = restoreStats();
     let maxLocalSeq = this.node.seq;
 
     this.node.db.beginBulkLoad?.();
     try {
+      stats.databaseTombstones = this._restoreDatabaseTombstones(deletedDatabases);
+      stats.collectionTombstones = this._restoreCollectionTombstones(tombstones);
       stats.databases = await this._restoreDatabaseMetadata(keys);
       stats.metadata = await this._restoreMetadata(keys);
       maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress);
@@ -555,6 +567,7 @@ export class PersistenceManager {
   }
 
   async _writeDatabaseMeta(database, meta) {
+    await this.storage.delete([databaseTombstoneKey(this.prefix, database)]);
     await this.storage.put(
       `${databasePrefix(this.prefix, database)}/meta.json`,
       JSON.stringify(meta),
@@ -563,6 +576,7 @@ export class PersistenceManager {
   }
 
   async _writeCollectionMeta({ database, collection }, meta) {
+    await this.storage.delete([collectionTombstoneKey(this.prefix, database, collection)]);
     await this.storage.put(
       `${collectionPrefix(this.prefix, database, collection)}/meta.json`,
       JSON.stringify(meta),
@@ -572,10 +586,20 @@ export class PersistenceManager {
 
   async _deleteCollection({ database, collection }) {
     await this.storage.deletePrefix(`${collectionPrefix(this.prefix, database, collection)}/`);
+    await this.storage.put(
+      collectionTombstoneKey(this.prefix, database, collection),
+      JSON.stringify({ database, collection, deletedAt: new Date().toISOString() }),
+      "application/json",
+    );
   }
 
   async _deleteDatabase(database) {
     await this.storage.deletePrefix(`${databasePrefix(this.prefix, database)}/`);
+    await this.storage.put(
+      databaseTombstoneKey(this.prefix, database),
+      JSON.stringify({ database, deletedAt: new Date().toISOString() }),
+      "application/json",
+    );
   }
 
   async _writeJournalBatch(scope, ops) {
@@ -961,6 +985,8 @@ export class PersistenceManager {
     for (const key of keys) {
       const target = parseMetaFromKey(key, this.prefix);
       if (!target) continue;
+      if (this.node.db.isDatabaseDeleted(target.database)) continue;
+      if (this.node.db.isCollectionDeleted(target.database, target.collection)) continue;
       const raw = await this.storage.get(key);
       if (!raw) continue;
       this.node.db.setCollectionMeta(target.database, target.collection, JSON.parse(raw));
@@ -969,11 +995,25 @@ export class PersistenceManager {
     return count;
   }
 
+  _restoreCollectionTombstones(tombstones) {
+    for (const key of tombstones) {
+      const target = parseCollectionKey(key);
+      this.node.db.deleteCollection(target.database, target.collection);
+    }
+    return tombstones.size;
+  }
+
+  _restoreDatabaseTombstones(tombstones) {
+    for (const database of tombstones) this.node.db.deleteDatabase(database);
+    return tombstones.size;
+  }
+
   async _restoreDatabaseMetadata(keys) {
     let count = 0;
     for (const key of keys) {
       const target = parseDatabaseMetaFromKey(key, this.prefix);
       if (!target) continue;
+      if (this.node.db.isDatabaseDeleted(target.database)) continue;
       const raw = await this.storage.get(key);
       if (!raw) continue;
       this.node.db.setDatabaseMeta(target.database, JSON.parse(raw));
@@ -1433,6 +1473,8 @@ function restoreStats() {
     scopes: 0,
     databases: 0,
     metadata: 0,
+    databaseTombstones: 0,
+    collectionTombstones: 0,
     snapshots: 0,
     snapshotObjects: 0,
     journals: 0,
@@ -1513,6 +1555,24 @@ function uniqueScopes(keys, prefix) {
     if (scope) scopes.set(scopeKey(scope), scope);
   }
   return [...scopes.values()].sort((a, b) => scopeKey(a).localeCompare(scopeKey(b)));
+}
+
+function collectionTombstones(keys, prefix) {
+  const deleted = new Set();
+  for (const key of keys) {
+    const target = parseCollectionTombstoneFromKey(key, prefix);
+    if (target) deleted.add(collectionKey(target.database, target.collection));
+  }
+  return deleted;
+}
+
+function databaseTombstones(keys, prefix) {
+  const deleted = new Set();
+  for (const key of keys) {
+    const database = parseDatabaseTombstoneFromKey(key, prefix);
+    if (database) deleted.add(database);
+  }
+  return deleted;
 }
 
 function rememberRestoredCursor(node, sourceNode, scope, ops) {
@@ -1680,6 +1740,19 @@ function parseMetaFromKey(key, prefix) {
   };
 }
 
+function parseCollectionTombstoneFromKey(key, prefix) {
+  const root = normalizePrefix(prefix);
+  const expected = root ? `${root}/` : "";
+  if (!key.startsWith(expected)) return null;
+  const parts = key.slice(expected.length).split("/");
+  if (parts[0] !== "db" || parts[2] !== "collection-tombstones" || !parts[3]?.endsWith(".json")) return null;
+  if (!parts[1]) return null;
+  return {
+    database: decodeURIComponent(parts[1]),
+    collection: decodeURIComponent(parts[3].slice(0, -5)),
+  };
+}
+
 function parseDatabaseMetaFromKey(key, prefix) {
   const root = normalizePrefix(prefix);
   const expected = root ? `${root}/` : "";
@@ -1690,6 +1763,15 @@ function parseDatabaseMetaFromKey(key, prefix) {
   return {
     database: decodeURIComponent(parts[1]),
   };
+}
+
+function parseDatabaseTombstoneFromKey(key, prefix) {
+  const root = normalizePrefix(prefix);
+  const expected = root ? `${root}/` : "";
+  if (!key.startsWith(expected)) return null;
+  const parts = key.slice(expected.length).split("/");
+  if (parts[0] !== "database-tombstones" || !parts[1]?.endsWith(".json")) return null;
+  return decodeURIComponent(parts[1].slice(0, -5));
 }
 
 function snapshotEntries(keys, prefix) {
@@ -1773,8 +1855,16 @@ function collectionPrefix(prefix, database, collection) {
   return `${normalizePrefix(prefix)}/db/${safe(database)}/collection/${safe(collection)}`.replace(/^\/+/, "");
 }
 
+function collectionTombstoneKey(prefix, database, collection) {
+  return `${databasePrefix(prefix, database)}/collection-tombstones/${safe(collection)}.json`;
+}
+
 function databasePrefix(prefix, database) {
   return `${normalizePrefix(prefix)}/db/${safe(database)}`.replace(/^\/+/, "");
+}
+
+function databaseTombstoneKey(prefix, database) {
+  return `${normalizePrefix(prefix)}/database-tombstones/${safe(database)}.json`.replace(/^\/+/, "");
 }
 
 function snapshotId() {

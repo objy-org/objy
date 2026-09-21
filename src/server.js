@@ -33,7 +33,9 @@ export async function startRestoreStatusServer({
     }
     if (url.pathname === "/api/config" || url.pathname === "/cluster/status") {
       return json(res, 200, {
-        ...localClusterStatus(n, memoryGuard, replication, restoreStatus),
+        ...localClusterStatus(n, memoryGuard, replication, restoreStatus, {
+          details: url.searchParams.get("details") === "1",
+        }),
         local: true,
         reachable: true,
       });

@@ -263,6 +263,22 @@ test("retention prunes ops once acked", async () => {
   assert.equal(a.prune(), 0, "pruning is idempotent");
 });
 
+test("collection deletion releases its replication payloads without breaking pruning", () => {
+  const node = new CRDTNode({ id: "source", retainOps: 0 });
+  node.insert("db", "removed", { _id: "a", payload: "x".repeat(1_000) });
+  node.insert("db", "kept", { _id: "b", value: 1 });
+  node.insert("db", "removed", { _id: "c", payload: "y".repeat(1_000) });
+  node.insert("db", "kept", { _id: "d", value: 2 });
+
+  node.removeCollection("db", "removed");
+  assert.deepEqual(node.log.map((op) => `${op.coll}:${op.id}`), ["kept:b", "kept:d"]);
+  assert.equal(node.needsSnapshot(0, { database: "*", collection: "*", shard: "default" }), true);
+
+  node.receiveAck("replica", node.seq);
+  assert.equal(node.trimmed, node.seq);
+  assert.deepEqual(node.log, []);
+});
+
 test("scoped replication snapshots only when that scope was trimmed", () => {
   const source = new CRDTNode({ id: "source", retainOps: 0 });
   source.replaceShardMap(shardMapFor(["shard-0", "shard-1"]));

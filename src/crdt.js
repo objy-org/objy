@@ -103,6 +103,7 @@ export class CRDTNode {
   }
 
   _writeMany(db, coll, items) {
+    this.db.assertCollectionWritable(db, coll);
     return this._commitLocalOps((items || []).map(({ id, value }) => ({
       kind: Object.keys(value || {}).length ? "putObj" : "touch",
       db,
@@ -185,7 +186,7 @@ export class CRDTNode {
     const ops = [];
     const normalized = normalizeIds(ids);
     for (const id of normalized) {
-      if (!this.db.collection(db, coll).has(id)) {
+      if (!this.db.getCollection(db, coll)?.has(id)) {
         skipped.push(id);
         continue;
       }
@@ -200,7 +201,7 @@ export class CRDTNode {
   }
 
   get(db, coll, id, options = {}) {
-    const object = this.db.collection(db, coll).read(id);
+    const object = this.db.getCollection(db, coll)?.read(id);
     if (!object) return object;
     const depth = normalizeRefDepth(options.refDepth, 0);
     return depth > 0 ? this.expandReferences(db, object, depth) : object;
@@ -213,12 +214,12 @@ export class CRDTNode {
   }
 
   list(db, coll) {
-    return this.db.collection(db, coll).list();
+    return this.db.getCollection(db, coll)?.list() || [];
   }
 
   find(db, coll, query = {}, options = {}) {
     if (this._needsReferenceRead(query, options)) return this._findWithReferences(db, coll, query, options);
-    return this.db.collection(db, coll).find(query, options);
+    return this.db.getCollection(db, coll)?.find(query, options) || [];
   }
 
   findShards(db, coll, query = {}, options = {}, shards = []) {
@@ -237,7 +238,7 @@ export class CRDTNode {
 
   count(db, coll, query = {}, options = {}) {
     if (referenceDepthForQuery(query) > 0) return this._countWithReferences(db, coll, query, options);
-    return this.db.collection(db, coll).count(query, options);
+    return this.db.getCollection(db, coll)?.count(query, options) || 0;
   }
 
   countShards(db, coll, query = {}, shards = []) {
@@ -248,7 +249,7 @@ export class CRDTNode {
     if (referenceDepthForQuery(query) > 0 || referenceDepthForAggregateSpec(spec) > 0) {
       return this._aggregateWithReferences(db, coll, query, spec);
     }
-    return this.db.collection(db, coll).aggregate(query, spec, options);
+    return this.db.getCollection(db, coll)?.aggregate(query, spec, options) || [];
   }
 
   aggregateShards(db, coll, query = {}, spec = {}, shards = []) {
@@ -298,8 +299,12 @@ export class CRDTNode {
   }
 
   removeDatabase(db) {
+    const alreadyDeleted = this.db.isDatabaseDeleted(db);
     const removed = this.db.deleteDatabase(db);
-    if (removed) this._notifyChange({ kind: "dropDatabase", database: db });
+    if (removed || !alreadyDeleted) {
+      this._discardDatabaseOps(db);
+      this._notifyChange({ kind: "dropDatabase", database: db });
+    }
     return removed;
   }
 
@@ -316,8 +321,12 @@ export class CRDTNode {
   }
 
   removeCollection(db, coll) {
+    const alreadyDeleted = this.db.isCollectionDeleted(db, coll);
     const removed = this.db.deleteCollection(db, coll);
-    if (removed) this._notifyChange({ kind: "dropCollection", database: db, collection: coll });
+    if (removed || !alreadyDeleted) {
+      this._discardCollectionOps(db, coll);
+      this._notifyChange({ kind: "dropCollection", database: db, collection: coll });
+    }
     return removed;
   }
 
@@ -330,19 +339,27 @@ export class CRDTNode {
   }
 
   stats(db, coll) {
-    return this.db.collection(db, coll).shapeStats();
+    return this.db.getCollection(db, coll)?.shapeStats() || [];
   }
 
   indexStats(db, coll) {
-    return this.db.collection(db, coll).indexStats();
+    return this.db.getCollection(db, coll)?.indexStats() || [];
   }
 
   indexReadiness() {
     return this.db.indexReadiness();
   }
 
+  indexSummary() {
+    return this.db.indexSummary();
+  }
+
   compressionStats() {
     return this.db.compressionStats();
+  }
+
+  compressionSummary() {
+    return this.db.compressionSummary();
   }
 
   awaitColumns(db, coll) {
@@ -393,6 +410,10 @@ export class CRDTNode {
 
   vectorStats() {
     return this.db.vectorStats();
+  }
+
+  vectorSummary() {
+    return this.db.vectorSummary();
   }
 
   startVectorIndexWarmup() {
@@ -613,11 +634,35 @@ export class CRDTNode {
     const cut = Math.min(safe, this.seq);
     const removed = cut - this.trimmed;
     if (removed > 0) {
-      const removedOps = this.log.splice(0, removed);
+      const removedOps = [];
+      this.log = this.log.filter((op) => {
+        if (op.seq > cut) return true;
+        removedOps.push(op);
+        return false;
+      });
       for (const op of removedOps) this._rememberScopeTrim(op);
       this.trimmed = cut;
     }
     return removed;
+  }
+
+  _discardCollectionOps(db, coll) {
+    return this._discardOps((op) => op.db === db && op.coll === coll);
+  }
+
+  _discardDatabaseOps(db) {
+    return this._discardOps((op) => op.db === db);
+  }
+
+  _discardOps(matches) {
+    const removed = [];
+    this.log = this.log.filter((op) => {
+      if (!matches(op)) return true;
+      removed.push(op);
+      return false;
+    });
+    for (const op of removed) this._rememberScopeTrim(op);
+    return removed.length;
   }
 
   _rememberScopeTrim(op) {
@@ -772,15 +817,17 @@ export class CRDTNode {
   _findWithReferences(db, coll, query = {}, options = {}) {
     const criteria = query || {};
     const { matchDepth, responseDepth } = referenceReadPlan(criteria, options);
+    const collection = this.db.getCollection(db, coll);
+    if (!collection) return [];
     if (matchDepth <= 0) {
-      return this.db.collection(db, coll)
+      return collection
         .find(criteria, withoutReferenceOptions(options))
         .map((object) => this.expandReferences(db, object, responseDepth));
     }
     const fetchOptions = {
       ...(typeof options.includeId === "function" ? { includeId: options.includeId } : {}),
     };
-    const candidates = this.db.collection(db, coll).find(
+    const candidates = collection.find(
       matchDepth > 0 ? baseCriteriaForReferenceQuery(criteria) : criteria,
       fetchOptions,
     );
@@ -798,7 +845,9 @@ export class CRDTNode {
     const criteria = query || {};
     const depth = referenceDepthForQuery(criteria);
     let n = 0;
-    const candidates = this.db.collection(db, coll).find(baseCriteriaForReferenceQuery(criteria), {
+    const collection = this.db.getCollection(db, coll);
+    if (!collection) return 0;
+    const candidates = collection.find(baseCriteriaForReferenceQuery(criteria), {
       ...(typeof options.includeId === "function" ? { includeId: options.includeId } : {}),
     });
     for (const object of candidates) {

@@ -4,6 +4,8 @@
 
 - Reference query planner: optimize predicates like `owner.object.name` by querying the referenced collection first, converting matching referenced IDs into base reference-value filters such as `owner.value: { "$in": [...] }`, and then using the normal field indexes on the owning collection. This should work generally for nested references where each hop can be resolved through indexed reference fields.
 
+- Durable tombstone garbage collection: eventually remove database and collection tombstones once no retained snapshot or journal predates the deletion, every active peer has acknowledged it, and a stale peer cannot replay the deleted generation. Prefer generation/epoch IDs or an equivalent durable cluster watermark so cleanup remains safe across restarts and delete/recreate cycles.
+
 - Local warm-tier storage for large object parts:
   - Treat tiering as an internal storage optimization only. Public reads must return normal hydrated objects with no `_warm`, `_cold`, or storage hints.
   - Keep hot data in memory and move configured warm payloads to local disk, not S3. S3 remains the durable snapshot/journal/restore layer.

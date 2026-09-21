@@ -1183,7 +1183,7 @@ Vector search cannot currently be combined with reference object paths.
 
 ## Public Cluster Status
 
-`/api/config` is the public status endpoint for the UI and operators. It requires a global user token.
+`/api/config` is the compact public status endpoint for the UI and operators. It requires a global user token. Cluster collection is cached for one second so concurrent status requests reuse the same peer fan-out.
 
 Request:
 
@@ -1196,17 +1196,35 @@ Response:
 
 ```json
 {
+  "indexes": {
+    "ready": 18,
+    "building": 2,
+    "error": 0,
+    "activeWorkers": 1
+  },
+  "vectors": {
+    "storedVectors": 4200,
+    "activeIndexes": 2,
+    "warmingIndexes": 0,
+    "errors": 0
+  },
+  "compression": {
+    "compressedObjects": 120000,
+    "uncompressedBytes": 2899102924,
+    "compressedBytes": 577136230,
+    "savedPercent": 80.1
+  },
   "nodes": [
     {
       "node": { "id": "node-8080", "url": "{URL}" },
       "ownedShards": ["shard-0", "shard-3"],
-      "memory": { "rss": 2190999552 },
-      "indexes": {
-        "status": "ready",
-        "workers": {
-          "columns": { "type": "same_thread_task", "active": 0 },
-          "vectorIndex": { "type": "same_thread_task", "active": 0 }
-        }
+      "memory": { "rss": 2190999552, "heapUsed": 1701040128 },
+      "replication": {
+        "healthy": true,
+        "lastSuccessfulSyncAt": "2026-09-18T08:41:22.000Z",
+        "pendingHints": 0,
+        "inflightPulls": 0,
+        "error": null
       }
     }
   ],
@@ -1221,7 +1239,18 @@ Response:
 }
 ```
 
-The full response includes peers, shards, per-node RSS memory, replication state, index readiness, and vector readiness.
+The normal response contains one shard topology, lightweight node health, per-node heap/RSS and memory-guard state, and aggregate index, vector, and logical compression information. It omits duplicated peer topology and collection-level diagnostics.
+
+`replication.healthy` means the node has no known replication failure or queued/in-flight catch-up work. It is an operational health signal, not a full data-checksum comparison between replicas.
+
+Detailed request:
+
+```http
+GET {URL}/api/config?details=1
+Authorization: Bearer <accessToken>
+```
+
+The detailed response adds per-collection index, vector, and compression state plus full replication diagnostics. The admin UI requests it only when the cluster-status modal is opened. Restore progress is included only while a peer is restoring.
 
 ## Response Notes
 

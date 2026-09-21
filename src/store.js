@@ -1,10 +1,10 @@
-import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { getHeapStatistics } from "node:v8";
 import { constants as zlibConstants, deflateSync, inflateSync } from "node:zlib";
 import { ObjectRowStore } from "./object-store.js";
 import { ShapeStore } from "./shape.js";
 import { gt } from "./clock.js";
 import { percentOf, summarizeCompression } from "./compression-stats.js";
+import { DerivedStateScheduler } from "./derived-state-scheduler.js";
 import {
   aggregateLegacyObjects,
   aggregateObjects,
@@ -30,6 +30,7 @@ const TIERING_DEFLATE_OPTIONS = Object.freeze({ level: zlibConstants.Z_BEST_SPEE
 class Collection {
   constructor(name, options = {}) {
     this.name = name;
+    this.disposed = false;
     this.vectorConfig = normalizeVectorConfig(options.vector);
     this.vectorField = this.vectorConfig.enabled ? this.vectorConfig.field : null;
     this.store = createPhysicalStore(options);
@@ -45,6 +46,8 @@ class Collection {
     this.indexDirtyRids = new RidBitmapQueue();
     this.indexDirtyBuild = null;
     this.indexBuildPending = false;
+    this.derivedStateScheduler = options.derivedStateScheduler || new DerivedStateScheduler(options.derivedState);
+    this.derivedStateOwner = {};
     this.shardIds = new Map();
     this.unshardedLiveCount = 0;
     this.compressedCold = [];
@@ -344,6 +347,8 @@ class Collection {
   }
 
   dispose() {
+    this.disposed = true;
+    this.derivedStateScheduler.cancel(this.derivedStateOwner);
     this.indexes.clear();
     this.fieldBuilds.clear();
     this.columns.clear();
@@ -800,6 +805,29 @@ class Collection {
     };
   }
 
+  indexSummary() {
+    const hasVector = this.vectors.size > 0 || this.vectorIndexes.size > 0 || this.vectorBuilds.size > 0;
+    let activeFieldBuilds = this.indexDirtyBuild ? 1 : 0;
+    for (const build of this.fieldBuilds.values()) {
+      if (build.status === "building") activeFieldBuilds++;
+    }
+    const statuses = [
+      ...this.collectionMeta.indexes.map((path) => this._fieldIndexStatus(path)),
+      ...this.collectionMeta.columns.map((path) => {
+        const column = this.columns.get(path);
+        return column?.ready && this.indexDirtyRids.size
+          ? "building"
+          : column?.status || (this.indexBuildPending ? "pending" : "missing");
+      }),
+      ...(hasVector ? [this._vectorIndexStatus()] : []),
+    ];
+    return {
+      configured: statuses.length > 0,
+      status: overallIndexStatus(statuses),
+      activeWorkers: activeFieldBuilds + this.columnBuilds.size + this.vectorBuilds.size,
+    };
+  }
+
   indexReadiness() {
     const fieldIndexes = this.collectionMeta.indexes.map((path) => ({
       path,
@@ -1188,7 +1216,11 @@ class Collection {
 
   _scheduleDirtyIndexCatchup() {
     if (this.indexDirtyBuild || !this.indexDirtyRids.size) return;
-    const build = this._runDirtyIndexCatchup();
+    const build = this.derivedStateScheduler.schedule(
+      `dirty-index:${this.name}`,
+      (job) => this._runDirtyIndexCatchup(job),
+      { owner: this.derivedStateOwner },
+    );
     this.indexDirtyBuild = build;
     build.then(
       () => {
@@ -1201,9 +1233,10 @@ class Collection {
     );
   }
 
-  async _runDirtyIndexCatchup() {
-    await yieldToEventLoop();
+  async _runDirtyIndexCatchup(job) {
+    if (this.disposed) return;
     while (this.indexDirtyRids.size) {
+      if (this.disposed) return;
       const batch = this.indexDirtyRids.take(INDEX_DIRTY_BUILD_BATCH_SIZE);
       if (!batch.length) {
         this.indexDirtyRids.clear();
@@ -1215,7 +1248,7 @@ class Collection {
         this.indexDirtyRids.delete(rid);
       }
 
-      if (this.indexDirtyRids.size) await yieldToEventLoop();
+      if (this.indexDirtyRids.size) await job.checkpoint(INDEX_DIRTY_BUILD_BATCH_SIZE);
     }
   }
 
@@ -1322,18 +1355,23 @@ class Collection {
     }
     if (!targets.length) return null;
 
-    const promise = this._runFieldIndexBuild(targets);
+    const promise = this.derivedStateScheduler.schedule(
+      `field-index:${this.name}:${targets.map((target) => target.path).join(",")}`,
+      (job) => this._runFieldIndexBuild(targets, job),
+      { owner: this.derivedStateOwner },
+    );
     for (const target of targets) target.promise = promise;
     promise.catch(() => {});
     return promise;
   }
 
-  async _runFieldIndexBuild(targets) {
-    await yieldToEventLoop();
+  async _runFieldIndexBuild(targets, job) {
+    if (this.disposed) return;
     const built = new Map(targets.map((target) => [target.path, new FieldIndex(target.path)]));
     try {
       let scanned = 0;
       for (const rid of this._liveRidIterator()) {
+        if (this.disposed) return;
         const object = this.readRidForQuery(rid);
         if (object) {
           for (const target of targets) {
@@ -1343,7 +1381,7 @@ class Collection {
           }
         }
         scanned++;
-        if (scanned % FIELD_BUILD_BATCH_SIZE === 0) await yieldToEventLoop();
+        if (scanned % FIELD_BUILD_BATCH_SIZE === 0) await job.checkpoint(scanned);
       }
 
       for (const target of targets) {
@@ -1428,7 +1466,11 @@ class Collection {
     }
     if (!targets.length) return null;
 
-    const build = this._runColumnBuild(targets);
+    const build = this.derivedStateScheduler.schedule(
+      `column:${this.name}:${targets.map((target) => target.path).join(",")}`,
+      (job) => this._runColumnBuild(targets, job),
+      { owner: this.derivedStateOwner },
+    );
     this.columnBuilds.add(build);
     build.then(
       () => this.columnBuilds.delete(build),
@@ -1437,12 +1479,14 @@ class Collection {
     return build;
   }
 
-  async _runColumnBuild(targets) {
+  async _runColumnBuild(targets, job) {
+    if (this.disposed) return;
     const paths = targets.map((target) => target.path);
     const built = new Map(paths.map((path) => [path, new TypedRidColumn(path)]));
     try {
       let scanned = 0;
       for (const rid of this._liveRidIterator()) {
+        if (this.disposed) return;
         const object = this.readRidForQuery(rid);
         if (object) {
           for (const path of paths) {
@@ -1452,7 +1496,7 @@ class Collection {
           }
         }
         scanned++;
-        if (scanned % COLUMN_BUILD_BATCH_SIZE === 0) await yieldToEventLoop();
+        if (scanned % COLUMN_BUILD_BATCH_SIZE === 0) await job.checkpoint(scanned);
       }
 
       const installedPaths = [];
@@ -1461,7 +1505,7 @@ class Collection {
         const column = built.get(path);
         if (target && column && target.install(column, buildId)) installedPaths.push(path);
       }
-      await this._stripBaseValuesForColumns(installedPaths);
+      await this._stripBaseValuesForColumns(installedPaths, job);
     } catch (error) {
       for (const { path, buildId } of targets) {
         const column = this.columns.get(path);
@@ -1470,14 +1514,15 @@ class Collection {
     }
   }
 
-  async _stripBaseValuesForColumns(paths = []) {
+  async _stripBaseValuesForColumns(paths = [], job = null) {
     if (!paths.length) return;
     let scanned = 0;
     for (const rid of this._liveRidIterator()) {
+      if (this.disposed) return;
       const object = this.readRidForQuery(rid);
       if (object) this._rewriteBaseValueForColumns(rid, object, paths);
       scanned++;
-      if (scanned % COLUMN_BUILD_BATCH_SIZE === 0) await yieldToEventLoop();
+      if (scanned % COLUMN_BUILD_BATCH_SIZE === 0 && job) await job.checkpoint(scanned);
     }
   }
 
@@ -1666,7 +1711,11 @@ class Collection {
       promise: null,
     };
     this.vectorIndexes.set(indexKey, entry);
-    const build = this._runVectorIndexBuild(indexKey, entry);
+    const build = this.derivedStateScheduler.schedule(
+      `vector-index:${this.name}:${indexKey}`,
+      (job) => this._runVectorIndexBuild(indexKey, entry, job),
+      { owner: this.derivedStateOwner },
+    );
     entry.promise = build;
     this.vectorBuilds.add(build);
     build.then(
@@ -1676,16 +1725,17 @@ class Collection {
     return build;
   }
 
-  async _runVectorIndexBuild(indexKey, entry) {
-    await yieldToEventLoop();
+  async _runVectorIndexBuild(indexKey, entry, job) {
+    if (this.disposed) return;
     try {
       for (const [id, vector] of this.vectors) {
+        if (this.disposed) return;
         entry.scanned++;
         if (!entry.includeId || entry.includeId(id)) {
           entry.index.insert(id, vector);
           entry.inserted++;
         }
-        if (entry.scanned % VECTOR_BUILD_BATCH_SIZE === 0) await yieldToEventLoop();
+        if (entry.scanned % VECTOR_BUILD_BATCH_SIZE === 0) await job.checkpoint(entry.scanned);
       }
       if (this.vectorIndexes.get(indexKey) === entry) {
         entry.status = "ready";
@@ -1704,11 +1754,13 @@ class Collection {
   _vectorIndexStatus() {
     if (!this.vectorField) return "disabled";
     if (this.vectors.size === 0) return "ready";
-    const entries = [...this.vectorIndexes.values()];
-    if (!entries.length) return "pending";
-    if (entries.some((entry) => entry.status === "failed")) return "failed";
-    if (entries.some((entry) => entry.status === "building")) return "building";
-    return "ready";
+    if (!this.vectorIndexes.size) return "pending";
+    let building = false;
+    for (const entry of this.vectorIndexes.values()) {
+      if (entry.status === "failed") return "failed";
+      if (entry.status === "building") building = true;
+    }
+    return building ? "building" : "ready";
   }
 }
 
@@ -1976,6 +2028,8 @@ class TypedRidColumn {
     this.nulls = new Uint8Array(0);
     this.strings = [];
     this.stringIds = new Map();
+    this.stringRefs = [];
+    this.freeStringCodes = [];
     this.overflow = new Map();
     this.pending = null;
     this.status = "ready";
@@ -1992,7 +2046,7 @@ class TypedRidColumn {
   }
 
   get entries() {
-    return this.scalarCount + this.overflow.size;
+    return this.scalarCount + this.nullCount + this.overflow.size;
   }
 
   get scalarEntries() {
@@ -2024,6 +2078,8 @@ class TypedRidColumn {
     this.nulls = source.nulls;
     this.strings = source.strings;
     this.stringIds = source.stringIds;
+    this.stringRefs = source.stringRefs;
+    this.freeStringCodes = source.freeStringCodes;
     this.overflow = source.overflow;
     this.numberSum = source.numberSum;
     this.numberCount = source.numberCount;
@@ -2085,7 +2141,10 @@ class TypedRidColumn {
   _applyState(rid, state) {
     if (!Number.isInteger(rid) || rid < 0) return;
     this._clearRid(rid);
-    if (state.kind === "absent") return;
+    if (state.kind === "absent") {
+      this._resetIfEmpty();
+      return;
+    }
     this._ensure(rid);
     if (state.kind === "null") {
       this.nulls[rid] = 1;
@@ -2134,6 +2193,16 @@ class TypedRidColumn {
       this.scalarCount--;
     }
     if (rid < this.stringCodes.length && this.stringCodes[rid]) {
+      const code = this.stringCodes[rid];
+      const index = code - 1;
+      const refs = (this.stringRefs[index] || 1) - 1;
+      this.stringRefs[index] = refs;
+      if (refs === 0) {
+        const value = this.strings[index];
+        if (this.stringIds.get(value) === code) this.stringIds.delete(value);
+        this.strings[index] = undefined;
+        this.freeStringCodes.push(code);
+      }
       this.stringCodes[rid] = 0;
       this.scalarCount--;
     }
@@ -2146,11 +2215,33 @@ class TypedRidColumn {
 
   _stringCode(value) {
     let code = this.stringIds.get(value);
-    if (code) return code;
-    code = this.strings.length + 1;
-    this.strings.push(value);
+    if (code) {
+      this.stringRefs[code - 1]++;
+      return code;
+    }
+    code = this.freeStringCodes.pop() || this.strings.length + 1;
+    this.strings[code - 1] = value;
+    this.stringRefs[code - 1] = 1;
     this.stringIds.set(value, code);
     return code;
+  }
+
+  _resetIfEmpty() {
+    if (this.scalarCount || this.nullCount || this.overflow.size) return;
+    this.numberValues = new Float64Array(0);
+    this.numberPresent = new Uint8Array(0);
+    this.booleanValues = new Uint8Array(0);
+    this.booleanPresent = new Uint8Array(0);
+    this.stringCodes = new Uint32Array(0);
+    this.nulls = new Uint8Array(0);
+    this.strings = [];
+    this.stringIds.clear();
+    this.stringRefs = [];
+    this.freeStringCodes = [];
+    this.numberSum = 0;
+    this.numberCount = 0;
+    this.scalarCount = 0;
+    this.nullCount = 0;
   }
 
   _ensure(rid) {
@@ -2806,7 +2897,11 @@ class Database {
 export class Store {
   constructor(options = {}) {
     this.options = options;
+    this.derivedStateScheduler = options.derivedStateScheduler || new DerivedStateScheduler(options.derivedState);
+    this.collectionOptions = { ...options, derivedStateScheduler: this.derivedStateScheduler };
     this.dbs = new Map();
+    this.databaseTombstones = new Set();
+    this.collectionTombstones = new Set();
     this.bulkLoadDepth = 0;
     this.bulkLoadDirty = new Set();
     this.indexWarmupPending = new Set();
@@ -2816,17 +2911,43 @@ export class Store {
   db(name) {
     let d = this.dbs.get(name);
     if (!d) {
-      d = new Database(name, this.options);
+      d = new Database(name, this.collectionOptions);
       this.dbs.set(name, d);
     }
     return d;
   }
 
   collection(dbName, collName) {
+    this.assertCollectionWritable(dbName, collName);
     return this.db(dbName).collection(collName);
   }
 
+  getCollection(dbName, collName) {
+    return this.dbs.get(dbName)?.collections.get(collName) || null;
+  }
+
+  isCollectionDeleted(dbName, collName) {
+    return this.collectionTombstones.has(storeCollectionKey(dbName, collName));
+  }
+
+  isDatabaseDeleted(dbName) {
+    return this.databaseTombstones.has(String(dbName));
+  }
+
+  assertCollectionWritable(dbName, collName) {
+    if (this.isDatabaseDeleted(dbName)) {
+      const error = new Error("database was deleted; create it explicitly before writing");
+      error.status = 409;
+      throw error;
+    }
+    if (!this.isCollectionDeleted(dbName, collName)) return;
+    const error = new Error("collection was deleted; create it explicitly before writing");
+    error.status = 409;
+    throw error;
+  }
+
   createDatabase(dbName, meta = {}) {
+    this.databaseTombstones.delete(String(dbName));
     return this.db(dbName).setMeta(meta);
   }
 
@@ -2836,6 +2957,7 @@ export class Store {
   }
 
   setDatabaseMeta(dbName, meta = {}) {
+    this.databaseTombstones.delete(String(dbName));
     return this.db(dbName).setMeta(meta);
   }
 
@@ -2844,6 +2966,7 @@ export class Store {
   }
 
   deleteDatabase(dbName) {
+    this.databaseTombstones.add(String(dbName));
     const db = this.dbs.get(dbName);
     if (!db) return false;
     for (const collection of db.collections.values()) this._disposeCollection(collection);
@@ -2851,6 +2974,7 @@ export class Store {
   }
 
   createCollection(dbName, collName, meta = {}) {
+    this.collectionTombstones.delete(storeCollectionKey(dbName, collName));
     const collection = this.collection(dbName, collName);
     const next = collection.setMeta(meta, { deferIndexes: this.bulkLoadDepth > 0 });
     if (this.bulkLoadDepth > 0) this.bulkLoadDirty.add(collection);
@@ -2858,6 +2982,7 @@ export class Store {
   }
 
   deleteCollection(dbName, collName) {
+    this.collectionTombstones.add(storeCollectionKey(dbName, collName));
     const db = this.dbs.get(dbName);
     if (!db) return false;
     const collection = db.collections.get(collName);
@@ -2885,6 +3010,7 @@ export class Store {
   }
 
   setCollectionMeta(dbName, collName, meta) {
+    this.collectionTombstones.delete(storeCollectionKey(dbName, collName));
     const collection = this.collection(dbName, collName);
     const next = collection.setMeta(meta, { deferIndexes: this.bulkLoadDepth > 0 });
     if (this.bulkLoadDepth > 0) this.bulkLoadDirty.add(collection);
@@ -2943,6 +3069,7 @@ export class Store {
     };
 
     for (const op of ops || []) {
+      if (this.isDatabaseDeleted(op.db) || this.isCollectionDeleted(op.db, op.coll)) continue;
       const kind = op.kind === "delObj" ? "delObj" : "putObj";
       const key = `${op.db}\0${op.coll}\0${kind}`;
       if (runKey && runKey !== key) flush();
@@ -3000,6 +3127,7 @@ export class Store {
   }
 
   applySnapshotObjects(dbName, collName, rows, options = {}) {
+    if (this.isCollectionDeleted(dbName, collName)) return 0;
     const collection = this.collection(dbName, collName);
     const applied = collection.applySnapshotObjects(rows, {
       ...options,
@@ -3010,15 +3138,15 @@ export class Store {
   }
 
   readObjects(dbName, collName, ids) {
-    return this.collection(dbName, collName).readObjects(ids);
+    return this.getCollection(dbName, collName)?.readObjects(ids) || [];
   }
 
   queryPath(dbName, collName, criteria = {}, options = {}) {
-    return this.collection(dbName, collName).readPath(criteria, options);
+    return this.getCollection(dbName, collName)?.readPath(criteria, options) || READ_PATH.SCAN;
   }
 
   aggregatePath(dbName, collName, criteria = {}, spec = {}, options = {}) {
-    return this.collection(dbName, collName).aggregatePath(criteria, spec, options);
+    return this.getCollection(dbName, collName)?.aggregatePath(criteria, spec, options) || AGGREGATE_PATH.SCAN;
   }
 
   validateWriteValue(dbName, collName, value = {}) {
@@ -3030,12 +3158,12 @@ export class Store {
   }
 
   getVector(dbName, collName, id) {
-    return this.collection(dbName, collName).getVector(id);
+    return this.getCollection(dbName, collName)?.getVector(id) || null;
   }
 
   vectorSearch(dbName, collName, queryVec, limit = 20, options = {}) {
     try {
-      return this.collection(dbName, collName).vectorSearch(queryVec, limit, options);
+      return this.getCollection(dbName, collName)?.vectorSearch(queryVec, limit, options) || [];
     } catch (err) {
       throw annotateVectorIndexError(err, dbName, collName);
     }
@@ -3065,6 +3193,26 @@ export class Store {
     return out;
   }
 
+  vectorSummary() {
+    const summary = {
+      storedVectors: 0,
+      activeIndexes: 0,
+      warmingIndexes: 0,
+      errors: 0,
+    };
+    for (const db of this.dbs.values()) {
+      for (const collection of db.collections.values()) {
+        summary.storedVectors += collection.vectors.size;
+        summary.activeIndexes += collection.vectorIndexes.size;
+        for (const index of collection.vectorIndexes.values()) {
+          if (index.status === "error" || index.status === "failed") summary.errors++;
+          else if (index.status !== "ready") summary.warmingIndexes++;
+        }
+      }
+    }
+    return summary;
+  }
+
   compressionStats() {
     const collections = [];
     for (const [dbName, db] of this.dbs) {
@@ -3075,6 +3223,47 @@ export class Store {
       }
     }
     return { ...summarizeCompression(collections), collections };
+  }
+
+  compressionSummary() {
+    const summary = {
+      collectionCount: 0,
+      liveObjects: 0,
+      compressedObjects: 0,
+      uncompressedBytes: 0,
+      compressedBytes: 0,
+    };
+    for (const db of this.dbs.values()) {
+      for (const collection of db.collections.values()) {
+        const { objects, uncompressedBytes, compressedBytes } = collection.compressionTotals;
+        if (!collection.collectionMeta.tiering && objects === 0) continue;
+        summary.collectionCount++;
+        summary.liveObjects += collection.liveCount;
+        summary.compressedObjects += objects;
+        summary.uncompressedBytes += uncompressedBytes;
+        summary.compressedBytes += compressedBytes;
+      }
+    }
+    const savedBytes = summary.uncompressedBytes - summary.compressedBytes;
+    return {
+      ...summary,
+      coveragePercent: percentOf(summary.compressedObjects, summary.liveObjects),
+      savedBytes,
+      savedPercent: percentOf(savedBytes, summary.uncompressedBytes),
+    };
+  }
+
+  indexSummary() {
+    const summary = { ready: 0, building: 0, error: 0, activeWorkers: 0 };
+    for (const db of this.dbs.values()) {
+      for (const collection of db.collections.values()) {
+        const readiness = collection.indexSummary();
+        summary.activeWorkers += readiness.activeWorkers;
+        if (!readiness.configured) continue;
+        summary[readiness.status === "ready" ? "ready" : readiness.status === "building" ? "building" : "error"]++;
+      }
+    }
+    return summary;
   }
 
   indexReadiness() {
@@ -3191,6 +3380,10 @@ export class Store {
 
 function emptyCompressionTotals() {
   return { objects: 0, uncompressedBytes: 0, compressedBytes: 0 };
+}
+
+function storeCollectionKey(database, collection) {
+  return `${String(database)}\0${String(collection)}`;
 }
 
 function matchesSnapshotName(name, expected) {

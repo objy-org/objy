@@ -5,12 +5,17 @@ import { CLUSTER_SECRET_HEADER } from "./interfaces/cluster.js";
 import { summarizeCompression } from "./compression-stats.js";
 
 export const CLUSTER_STATUS_PATH = "/cluster/status";
+export const DEFAULT_CLUSTER_STATUS_CACHE_MS = 1_000;
 
-export function localClusterStatus(node, memoryGuard = null, replicationScheduler = null, restoreStatus = null) {
+const clusterStatusCache = new WeakMap();
+
+export function localClusterStatus(node, memoryGuard = null, replicationScheduler = null, restoreStatus = null, { details = false } = {}) {
   const memory = memorySnapshot();
   const shardMap = node.shardMapSnapshot();
-  const peers = peerSummaries(node, shardMap);
-  const shards = shardSummaries(node, shardMap);
+  const ownedShards = shardEntries(shardMap).filter(([shard]) => node.ownsShard(shard)).map(([shard]) => shard);
+  const indexSummary = node.indexSummary();
+  const vectorSummary = node.vectorSummary();
+  const restore = restoreSnapshot(restoreStatus);
 
   return {
     ok: true,
@@ -21,21 +26,23 @@ export function localClusterStatus(node, memoryGuard = null, replicationSchedule
     },
     memory,
     memoryGuard: memoryGuard?.status?.() || null,
-    ownedShards: shards.filter((shard) => shard.owned).map((shard) => shard.name),
-    shards,
-    peers,
-    replication: {
+    ownedShards,
+    replication: details ? {
+      ...compactReplicationStatus(replicationScheduler),
       seq: node.seq,
       logLength: node.log.length,
       trimmed: node.trimmed,
       retainOps: node.retainOps,
       syncBatchSize: node.syncBatchSize,
       scheduler: replicationScheduler?.status?.() || null,
-    },
-    indexes: node.indexReadiness(),
-    vectors: node.vectorStats(),
-    compression: node.compressionStats?.() || emptyCompressionStats(),
-    restore: restoreSnapshot(restoreStatus),
+    } : compactReplicationStatus(replicationScheduler),
+    indexes: details ? { ...node.indexReadiness(), ...indexSummary } : indexSummary,
+    vectors: details ? { ...vectorSummary, collections: node.vectorStats() } : vectorSummary,
+    compression: details
+      ? node.compressionStats?.() || emptyCompressionStats()
+      : node.compressionSummary?.() || emptyCompressionSummary(),
+    restoring: restore?.status === "restoring",
+    ...(restore?.status === "restoring" ? { restore } : {}),
     process: {
       pid: process.pid,
       uptimeMs: Math.round(process.uptime() * 1000),
@@ -43,23 +50,61 @@ export function localClusterStatus(node, memoryGuard = null, replicationSchedule
   };
 }
 
-export async function collectClusterStatus(node, { timeoutMs = 1500, memoryGuard = null, replicationScheduler = null, restoreStatus = null } = {}) {
-  const local = { ...localClusterStatus(node, memoryGuard, replicationScheduler, restoreStatus), local: true, reachable: true };
-  const remotes = await Promise.all(remoteStatusPeers(node).map((peer) => fetchPeerStatus(peer, timeoutMs)));
+export async function collectClusterStatus(node, options = {}) {
+  const cacheMs = Math.max(0, Number(options.cacheMs ?? DEFAULT_CLUSTER_STATUS_CACHE_MS) || 0);
+  if (!cacheMs) return buildClusterStatus(node, options);
+  const key = options.details ? "details" : "compact";
+  let cache = clusterStatusCache.get(node);
+  if (!cache) {
+    cache = new Map();
+    clusterStatusCache.set(node, cache);
+  }
+  const cached = cache.get(key);
+  if (cached?.value && cached.expiresAt > Date.now()) return cached.value;
+  if (cached?.promise) return cached.promise;
+
+  const entry = {};
+  entry.promise = buildClusterStatus(node, options).then((value) => {
+    entry.value = value;
+    entry.expiresAt = Date.now() + cacheMs;
+    entry.promise = null;
+    return value;
+  }, (err) => {
+    cache.delete(key);
+    throw err;
+  });
+  cache.set(key, entry);
+  return entry.promise;
+}
+
+async function buildClusterStatus(node, {
+  timeoutMs = 1500,
+  memoryGuard = null,
+  replicationScheduler = null,
+  restoreStatus = null,
+  details = false,
+} = {}) {
+  const local = {
+    ...localClusterStatus(node, memoryGuard, replicationScheduler, restoreStatus, { details }),
+    local: true,
+    reachable: true,
+  };
+  const remotes = await Promise.all(remoteStatusPeers(node).map((peer) => fetchPeerStatus(peer, timeoutMs, details)));
   const nodes = uniqueNodes([local, ...remotes]);
   const shardMap = node.shardMapSnapshot();
+  const compression = compressionSummary(nodes, shardMap, { details });
 
   return {
     ok: true,
     generatedAt: new Date().toISOString(),
     node: local.node,
-    shardMap,
     shards: shardSummaries(node, shardMap, nodes),
-    peers: peerSummaries(node, shardMap, nodes),
-    rss: rssSummary(nodes, shardMap),
-    heap: heapSummary(nodes, shardMap),
-    compression: compressionSummary(nodes, shardMap),
-    nodes,
+    rss: rssSummary(nodes, shardMap, { details }),
+    heap: heapSummary(nodes, shardMap, { details }),
+    compression: details ? compression : compression.logical,
+    indexes: aggregateIndexSummary(nodes),
+    vectors: aggregateVectorSummary(nodes),
+    nodes: nodes.map((status) => nodeStatusResponse(status, details)),
   };
 }
 
@@ -68,11 +113,77 @@ function restoreSnapshot(restoreStatus) {
   return typeof restoreStatus.snapshot === "function" ? restoreStatus.snapshot() : restoreStatus;
 }
 
-async function fetchPeerStatus(peer, timeoutMs) {
+function compactReplicationStatus(replicationScheduler) {
+  const status = replicationScheduler?.status?.() || {};
+  const error = status.lastError || null;
+  const pendingHints = Number(status.pendingHintScopes) || 0;
+  const inflightPulls = (Number(status.queuedPulls) || 0) + (Number(status.inflightPulls) || 0);
+  return {
+    healthy:
+      !error
+      && (!Array.isArray(status.lastSyncFailures) || status.lastSyncFailures.length === 0)
+      && pendingHints === 0
+      && inflightPulls === 0
+      && status.syncingAll !== true,
+    lastSuccessfulSyncAt: status.lastSyncAt || null,
+    pendingHints,
+    inflightPulls,
+    error,
+  };
+}
+
+function aggregateIndexSummary(nodes) {
+  const summary = { ready: 0, building: 0, error: 0, activeWorkers: 0 };
+  for (const status of nodes) {
+    const indexes = status.indexes || {};
+    summary.ready += Number(indexes.ready) || 0;
+    summary.building += Number(indexes.building) || 0;
+    summary.error += Number(indexes.error) || 0;
+    summary.activeWorkers += Number(indexes.activeWorkers) || 0;
+  }
+  return summary;
+}
+
+function aggregateVectorSummary(nodes) {
+  const summary = { storedVectors: 0, activeIndexes: 0, warmingIndexes: 0, errors: 0 };
+  for (const status of nodes) {
+    const vectors = status.vectors || {};
+    summary.storedVectors += Number(vectors.storedVectors) || 0;
+    summary.activeIndexes += Number(vectors.activeIndexes) || 0;
+    summary.warmingIndexes += Number(vectors.warmingIndexes) || 0;
+    summary.errors += Number(vectors.errors) || 0;
+  }
+  return summary;
+}
+
+function nodeStatusResponse(status, details) {
+  if (details) {
+    const { compression, ...response } = status;
+    return response;
+  }
+  return {
+    ok: status.ok !== false,
+    generatedAt: status.generatedAt,
+    local: status.local === true,
+    reachable: status.reachable !== false,
+    ...(status.status ? { status: status.status } : {}),
+    ...(status.error ? { error: status.error } : {}),
+    node: status.node,
+    memory: status.memory || null,
+    memoryGuard: status.memoryGuard || null,
+    ownedShards: status.ownedShards || [],
+    replication: status.replication || null,
+    restoring: status.restoring === true,
+    ...(status.restore ? { restore: status.restore } : {}),
+    process: status.process || null,
+  };
+}
+
+async function fetchPeerStatus(peer, timeoutMs, details = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${peer.url}${CLUSTER_STATUS_PATH}`, {
+    const response = await fetch(`${peer.url}${CLUSTER_STATUS_PATH}${details ? "?details=1" : ""}`, {
       signal: controller.signal,
       headers: peer.secret ? { [CLUSTER_SECRET_HEADER]: peer.secret } : {},
     });
@@ -110,8 +221,7 @@ function unreachablePeer(peer, error, status = 0) {
     memory: null,
     memoryGuard: null,
     ownedShards: [],
-    shards: [],
-    peers: [],
+    restoring: false,
     sourcePeer: describePeer(peer),
     error,
   };
@@ -135,39 +245,37 @@ function uniqueNodes(nodes) {
   });
 }
 
-function rssSummary(nodes, shardMap) {
+function rssSummary(nodes, shardMap, { details = false } = {}) {
   const perNode = nodes.map(nodeMemoryEntry);
   const physical = memoryTotals(perNode);
-  const logical = logicalMemoryTotals(nodes, perNode, shardMap);
+  const logical = logicalMemoryTotals(nodes, perNode, shardMap, memoryTotals, { details });
   return {
     cluster: logical,
     logical,
     physical,
-    nodes: perNode,
   };
 }
 
-function heapSummary(nodes, shardMap) {
+function heapSummary(nodes, shardMap, { details = false } = {}) {
   const perNode = nodes.map(nodeHeapEntry);
   const physical = heapTotals(perNode);
-  const logical = logicalMemoryTotals(nodes, perNode, shardMap, heapTotals);
+  const logical = logicalMemoryTotals(nodes, perNode, shardMap, heapTotals, { details });
   return {
     cluster: logical,
     logical,
     physical,
-    nodes: perNode,
   };
 }
 
-function compressionSummary(nodes, shardMap) {
+function compressionSummary(nodes, shardMap, { details = false } = {}) {
   const perNode = nodes.map(nodeCompressionEntry);
   const physical = compressionTotals(perNode);
-  const logical = logicalMemoryTotals(nodes, perNode, shardMap, compressionTotals);
+  const logical = logicalMemoryTotals(nodes, perNode, shardMap, compressionTotals, { details });
   return {
     cluster: logical,
     logical,
     physical,
-    nodes: perNode,
+    ...(details ? { nodes: perNode } : {}),
   };
 }
 
@@ -298,7 +406,7 @@ function compressionTotals(entries, extra = {}) {
   };
 }
 
-function logicalMemoryTotals(nodes, perNode, shardMap, totals = memoryTotals) {
+function logicalMemoryTotals(nodes, perNode, shardMap, totals = memoryTotals, { details = false } = {}) {
   const byKey = new Map(perNode.map((entry) => [entry.key, entry]));
   const selected = new Map();
   const selectedReplicas = [];
@@ -333,8 +441,7 @@ function logicalMemoryTotals(nodes, perNode, shardMap, totals = memoryTotals) {
       shardCount: shards.length,
       coveredShardCount: perNode.some((entry) => entry.reachable) ? shards.length : 0,
       missingShardCount: 0,
-      missingShards: [],
-      selectedReplicas: [],
+      ...(details ? { missingShards: [], selectedReplicas: [] } : {}),
       mode: "physical-fallback",
     });
   }
@@ -343,8 +450,7 @@ function logicalMemoryTotals(nodes, perNode, shardMap, totals = memoryTotals) {
     shardCount: shards.length,
     coveredShardCount: selectedReplicas.length,
     missingShardCount: missingShards.length,
-    missingShards,
-    selectedReplicas,
+    ...(details ? { missingShards, selectedReplicas } : {}),
     mode: "one-replica-per-shard",
   });
 }
@@ -361,26 +467,6 @@ function shardSummaries(node, shardMap = node.shardMapSnapshot(), nodes = []) {
   });
 }
 
-function peerSummaries(node, shardMap = node.shardMapSnapshot(), nodes = []) {
-  const peers = new Map();
-  for (const [shard, config] of shardEntries(shardMap)) {
-    for (const peer of config.peers || []) {
-      const key = peerKey(peer);
-      const entry = peers.get(key) || {
-        ...enrichedPeer(node, peer, nodes),
-        shards: [],
-      };
-      if (!entry.shards.includes(shard)) entry.shards.push(shard);
-      peers.set(key, entry);
-    }
-  }
-  return [...peers.values()].sort((left, right) => {
-    if (left.self) return -1;
-    if (right.self) return 1;
-    return peerLabel(left).localeCompare(peerLabel(right));
-  });
-}
-
 function shardEntries(shardMap) {
   const entries = Object.entries(shardMap.shards || {});
   if (!entries.length) return [[DEFAULT_SHARD, { peers: [] }]];
@@ -389,21 +475,11 @@ function shardEntries(shardMap) {
 
 function enrichedPeer(node, peer, nodes) {
   const status = nodes.find((candidate) => peerMatchesStatus(peer, candidate));
-  const rss = status?.memory?.rss ?? null;
-  const totalMemory = status?.memory?.systemTotal ?? null;
-  const freeMemory = status?.memory?.systemFree ?? null;
   return {
     ...describePeer(peer),
     self: node._isSelfPeer(peer),
     online: node._isSelfPeer(peer) || status?.reachable === true,
     nodeId: status?.node?.id || peer.nodeId || null,
-    rss,
-    rssMb: rss === null ? null : mib(rss),
-    totalMemory,
-    totalMemoryMb: totalMemory === null ? null : mib(totalMemory),
-    freeMemory,
-    freeMemoryMb: freeMemory === null ? null : mib(freeMemory),
-    rssPercent: percent(rss, totalMemory),
     error: status?.reachable === false ? status.error : undefined,
   };
 }
@@ -457,9 +533,13 @@ function sumField(entries, field) {
 
 function emptyCompressionStats() {
   return {
-    ...summarizeCompression([]),
+    ...emptyCompressionSummary(),
     collections: [],
   };
+}
+
+function emptyCompressionSummary() {
+  return summarizeCompression([]);
 }
 
 function percent(value, total) {
@@ -479,8 +559,4 @@ function nodeLabel(status) {
 
 function nodeStatusKey(status) {
   return status.node?.id || status.node?.url || status.sourcePeer?.url || status.sourcePeer?.key || "";
-}
-
-function peerLabel(peer) {
-  return peer.nodeId || peer.url || peer.key || "";
 }

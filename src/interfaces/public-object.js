@@ -60,7 +60,12 @@ export function createPublicObjectInterface() {
 
       router.get("/api/config", secure(async (req, res) => {
         if (rejectUnlessGlobalAdmin(req, res, auth)) return;
-        json(res, 200, await collectClusterStatus(node, { memoryGuard, replicationScheduler, restoreStatus }));
+        json(res, 200, await collectClusterStatus(node, {
+          memoryGuard,
+          replicationScheduler,
+          restoreStatus,
+          details: req.query.get("details") === "1",
+        }));
       }));
 
       router.post("/api/databases", secure(async (req, res) => {
@@ -149,20 +154,20 @@ export function createPublicObjectInterface() {
         if (rejectUnlessGlobalAdmin(req, res, auth)) return;
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         try {
-          const removed = node.removeDatabase(req.params.database);
-          if (!removed) {
-            return routing.isForwarded(req)
-              ? json(res, 204)
-              : json(res, 404, { error: "database not found" });
+          const existed = node.getDatabaseMeta(req.params.database) !== null;
+          const alreadyDeleted = node.db.isDatabaseDeleted(req.params.database);
+          if (!existed && !alreadyDeleted && !routing.isForwarded(req)) {
+            return json(res, 404, { error: "database not found" });
           }
-          await afterLocalWrite(durability);
-          await deleteDatabaseFilesBestEffort(files, req.params.database);
+          const removed = node.removeDatabase(req.params.database);
+          if (removed || !alreadyDeleted) await afterLocalWrite(durability);
+          if (removed) await deleteDatabaseFilesBestEffort(files, req.params.database);
           if (!routing.isForwarded(req)) {
             await forwardSchemaChange(
               routing,
               req,
               `/api/databases/${encodeURIComponent(req.params.database)}`,
-              { method: "DELETE" },
+              { method: "DELETE", allowUnavailable: false },
               "database delete fan-out failed",
             );
           }
@@ -211,22 +216,21 @@ export function createPublicObjectInterface() {
       router.delete("/api/:database/collections/:collection", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
-        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         try {
-          const removed = node.removeCollection(req.params.database, req.params.collection);
-          if (!removed) {
-            return routing.isForwarded(req)
-              ? json(res, 204)
-              : json(res, 404, { error: "collection not found" });
+          const existed = node.getCollectionMeta(req.params.database, req.params.collection) !== null;
+          const alreadyDeleted = node.db.isCollectionDeleted(req.params.database, req.params.collection);
+          if (!existed && !alreadyDeleted && !routing.isForwarded(req)) {
+            return json(res, 404, { error: "collection not found" });
           }
-          await afterLocalWrite(durability);
-          await deleteCollectionFilesBestEffort(files, req.params.database, req.params.collection);
+          const removed = node.removeCollection(req.params.database, req.params.collection);
+          if (removed || !alreadyDeleted) await afterLocalWrite(durability);
+          if (removed) await deleteCollectionFilesBestEffort(files, req.params.database, req.params.collection);
           if (!routing.isForwarded(req)) {
             await forwardSchemaChange(
               routing,
               req,
               `/api/${encodeURIComponent(req.params.database)}/collections/${encodeURIComponent(req.params.collection)}`,
-              { method: "DELETE" },
+              { method: "DELETE", allowUnavailable: false },
               "collection delete fan-out failed",
             );
           }
@@ -459,7 +463,6 @@ export function createPublicObjectInterface() {
             node,
             routing,
             durability,
-            memoryGuard,
             files,
             imports: importLimits,
             database: req.params.database,
@@ -473,7 +476,7 @@ export function createPublicObjectInterface() {
           return json(res, 400, errorBody(err));
         }
         try {
-          json(res, 200, await routedRemoveMany(req, routing, node, durability, memoryGuard, req.params.database, req.params.collection, ids, files, {
+          json(res, 200, await routedRemoveMany(req, routing, node, durability, req.params.database, req.params.collection, ids, files, {
             minimalReturn: prefersMinimalReturn(req),
           }));
         } catch (err) {
@@ -625,7 +628,6 @@ export function createPublicObjectInterface() {
         const existing = node.get(req.params.database, req.params.collection, req.params.id);
         if (!existing) return json(res, 404, { error: "not found" });
         assertDeleteAllowed(req, [existing], req.params.database);
-        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         const ok = node.remove(req.params.database, req.params.collection, req.params.id);
         if (!ok) return json(res, 404, { error: "not found" });
         await afterLocalWrite(durability);
@@ -973,7 +975,7 @@ async function streamPatchObjects({ req, res, node, auth, routing, durability, m
   }
 }
 
-async function streamRemoveObjects({ req, res, node, routing, durability, memoryGuard, files, imports, database, collection }) {
+async function streamRemoveObjects({ req, res, node, routing, durability, files, imports, database, collection }) {
   if (rejectNdjsonWithoutMinimal(req, res)) return;
   const result = { deleted: 0, skipped: 0 };
   try {
@@ -995,7 +997,6 @@ async function streamRemoveObjects({ req, res, node, routing, durability, memory
           routing,
           node,
           durability,
-          memoryGuard,
           database,
           collection,
           ids,
@@ -1309,7 +1310,7 @@ function collectionVectorField(node, database, collection) {
   }
 }
 
-async function routedRemoveMany(req, routing, node, durability, memoryGuard, database, collection, ids, files = null, {
+async function routedRemoveMany(req, routing, node, durability, database, collection, ids, files = null, {
   minimalReturn = false,
 } = {}) {
   const result = {
@@ -1326,8 +1327,6 @@ async function routedRemoveMany(req, routing, node, durability, memoryGuard, dat
     assertDeleteAllowed(req, existing, database);
     existingByGroup.set(group, new Map(existing.map((object) => [String(object._id), object])));
   }
-  if (groups.some((group) => group.local)) assertMemoryGuardAcceptsWrites(memoryGuard);
-
   try {
     for (const group of groups) {
       if (group.local) {
@@ -1690,9 +1689,10 @@ async function forwardShardBulkWrite(routing, req, shard, path, {
 }
 
 async function forwardSchemaChange(routing, req, path, options, message) {
+  const { allowUnavailable = true, ...forwardOptions } = options;
   const remote = await routing.forwardToAllPeers(req, path, {
-    ...options,
-    allowUnavailable: true,
+    ...forwardOptions,
+    allowUnavailable,
   });
   if (!ok(remote.status)) throw remoteError(remote, message);
   return remote;
