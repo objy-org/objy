@@ -6,6 +6,8 @@ spread-db is built for plain JavaScript-style objects, fast local reads, bulk-fi
 
 Public REST API usage is documented in `API.md`. This guide is for developing, running, and operating the database itself.
 
+The [JavaScript client](client/README.md) is available at `/client.js` for browser imports and `spread-db/client` for Node and bundlers. It includes CRUD, queries, files, bulk imports and automatic token renewal.
+
 ## Why This Exists
 
 spread-db keeps the database model simple:

@@ -56,6 +56,7 @@ await new Promise((resolve) => restoreServer.server.close(resolve));
 const state = await startServer({
   port: restoreServer.port,
   maxJsonBytes: config.server.maxJsonBytes,
+  cors: config.server.cors,
   node,
   shardMapStore,
   auth: config.auth,

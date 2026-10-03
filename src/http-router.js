@@ -52,6 +52,8 @@ export class HttpRouter {
 }
 
 export function json(res, status, body, headers = {}) {
+  // A downstream auth rejection cannot undo work already begun by this node.
+  if (status >= 400 && res.operationStarted && body?.operationStarted === false) body = { ...body, operationStarted: true };
   const payload = body === undefined ? "" : JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
