@@ -2605,9 +2605,15 @@ test("serves the console UI at /", async () => {
     assert.equal(r.status, 200);
     assert.match(r.headers.get("content-type"), /text\/html/);
     const html = await r.text();
-    assert.match(html, /spread-db console/);
+    assert.match(html, /FastObject/);
+    assert.match(html, /fastobject-logo\.png/);
     assert.match(html, /id="object-file"/);
     assert.match(html, /id="download-file-btn"/);
+
+    const logo = await fetch(`http://localhost:${s.port}/fastobject-logo.png`);
+    assert.equal(logo.status, 200);
+    assert.match(logo.headers.get("content-type"), /image\/png/);
+    assert.ok((await logo.arrayBuffer()).byteLength > 0);
 
     const docs = await fetch(`http://localhost:${s.port}/API.md`);
     assert.equal(docs.status, 200);

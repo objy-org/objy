@@ -7,6 +7,8 @@ import { createAuthInterface } from "./interfaces/auth.js";
 import { createClusterInterface, httpPeer, shardMapFromHttp } from "./interfaces/cluster.js";
 import { createPublicObjectInterface } from "./interfaces/public-object.js";
 import { createUiInterface } from "./interfaces/ui.js";
+import { createClientInterface } from "./interfaces/client.js";
+import { createCorsHandler } from "./http-cors.js";
 import { createMemoryGuard } from "./memory-guard.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
@@ -71,7 +73,9 @@ export async function startServer({
   imports,
   interfaces = [],
   useDefaultInterfaces = true,
+  cors = false,
 } = {}) {
+  const handleCors = createCorsHandler(cors);
   const n = node || new CRDTNode();
   const authService = createAuthService(n, auth);
   const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret);
@@ -108,6 +112,7 @@ export async function startServer({
 
   const server = createServer(async (req, res) => {
     try {
+      if (handleCors(req, res)) return;
       if (await router.handle(req, res)) return;
       json(res, 404, { error: "not found" });
     } catch (err) {
@@ -132,6 +137,7 @@ export function defaultInterfaces() {
     createAuthInterface(),
     createPublicObjectInterface(),
     createUiInterface(),
+    createClientInterface(),
   ];
 }
 

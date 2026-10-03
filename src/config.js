@@ -41,6 +41,7 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
     server: {
       port,
       maxJsonBytes: positiveInt(serverConfig.maxJsonBytes, DEFAULT_MAX_JSON_BYTES),
+      cors: serverConfig.cors ?? false,
     },
     imports: normalizeImportConfig(config.imports),
     storage: normalizeStorageConfig(config.storage),

@@ -207,7 +207,7 @@ export class AuthService {
   authenticateRequest(req) {
     const token = accessTokenFromRequest(req);
     if (!token) {
-      return { ok: false, status: 401, error: "missing or malformed Authorization header" };
+      return { ok: false, status: 401, code: "ACCESS_TOKEN_REQUIRED", error: "missing or malformed Authorization header" };
     }
 
     try {
@@ -215,10 +215,10 @@ export class AuthService {
         clockToleranceSeconds: this.config.clockToleranceSeconds,
       });
       if (typeof claims.sub !== "string" || typeof claims.database !== "string" || typeof claims.collection !== "string") {
-        return { ok: false, status: 401, error: "invalid token: user identity claims required" };
+        return { ok: false, status: 401, code: "ACCESS_TOKEN_INVALID", error: "invalid token: user identity claims required" };
       }
       if (req.params?.database && !this.canAccessDatabase(claims, req.params.database)) {
-        return { ok: false, status: 403, error: "token database does not match URL database" };
+        return { ok: false, status: 403, code: "DATABASE_ACCESS_DENIED", error: "token database does not match URL database" };
       }
       req.jwt = claims;
       req.auth = {
@@ -236,7 +236,7 @@ export class AuthService {
       };
       return { ok: true, claims };
     } catch (err) {
-      return { ok: false, status: 401, error: `invalid token: ${err.message}` };
+      return { ok: false, status: 401, code: err.code === 'E_TOKEN_EXPIRED' ? 'ACCESS_TOKEN_EXPIRED' : 'ACCESS_TOKEN_INVALID', error: `invalid token: ${err.message}` };
     }
   }
 

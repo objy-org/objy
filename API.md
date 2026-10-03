@@ -2,6 +2,8 @@
 
 HTTP API for the default public spread-db interface.
 
+The [JavaScript client](client/README.md) exposes these public operations. `GET /client.js` serves its ES module without authentication; `HEAD` and ETag revalidation are supported. The response's `Link` header identifies the current content-addressed module URL.
+
 Examples use `{URL}` as the base URL. In a cluster, public `/api` requests may hit any public node; the node routes object operations to the owning shard when needed.
 
 ## Context
@@ -170,6 +172,8 @@ Response:
 ```
 
 Refresh tokens must be renewed against the same database and collection they were issued from.
+
+Access-token expiration rejected before an operation begins returns HTTP 401 with `code: "ACCESS_TOKEN_EXPIRED"` and `operationStarted: false`. The client may renew and replay that request once. These markers do not authorize replay when `operationStarted` is true or `writeMayHaveSucceeded` is true. Other authentication failures and permission errors are not expiration signals.
 
 ## Databases
 

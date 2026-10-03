@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>spread-db console</title>
+<title>FastObject</title>
 <style>
   :root {
     --bg: #0d0e0f;
@@ -138,16 +138,11 @@
     min-width: 0;
   }
 
-  .brand-mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    display: grid;
-    place-items: center;
-    background:
-      linear-gradient(135deg, rgba(62, 215, 181, .9), rgba(240, 182, 77, .88));
-    color: #10110f;
-    font-weight: 900;
+  .brand-logo {
+    width: 64px;
+    height: 32px;
+    object-fit: contain;
+    flex: 0 0 auto;
   }
 
   .brand h1 {
@@ -1495,9 +1490,9 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">S</div>
+      <img class="brand-logo" src="/fastobject-logo.png" alt="{[]...}">
       <div>
-        <h1>spread-db console</h1>
+        <h1>FastObject</h1>
         <small id="node-label">checking node</small>
       </div>
     </div>
@@ -1896,19 +1891,16 @@
 
 <div class="toast" id="toast"></div>
 
-<script>
-"use strict";
+<script type="module">
+import { createClient } from "./client.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = "spread-db-ui:session";
 
 const state = {
   server: defaultServer(),
-  accessToken: "",
-  refreshToken: "",
   authDb: "_global",
   authColl: "users",
-  user: null,
   tree: {},
   active: null,
   collectionMeta: null,
@@ -1934,6 +1926,9 @@ const state = {
     },
   },
 };
+
+let client = createClient({ url: state.server });
+let sessionEpoch = 0;
 
 const BUILDER_OPERATORS = [
   ["eq", "="],
@@ -1962,59 +1957,47 @@ function defaultServer() {
   return "http://localhost:8080";
 }
 
-function enc(value) {
-  return encodeURIComponent(String(value || ""));
-}
-
-function authPath(kind, db = state.authDb, coll = state.authColl) {
-  return `/api/${enc(db)}/${enc(coll)}/${kind}`;
-}
-
-function collectionPath(db, coll, tail = "") {
-  return `/api/${enc(db)}/${enc(coll)}${tail}`;
-}
-
-function objectPath(db, coll, tail = "") {
-  return `/api/${enc(db)}/${enc(coll)}/object${tail}`;
-}
-
 function normalizeServer(value) {
   return String(value || "").trim().replace(/\/+$/, "") || defaultServer();
 }
 
 function loadSession() {
-  state.server = normalizeServer(localStorage.getItem("spread-db-ui:server") || state.server);
   try {
-    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
-    state.accessToken = saved.accessToken || "";
-    state.refreshToken = saved.refreshToken || "";
-    state.authDb = saved.authDb || "_global";
-    state.authColl = saved.authColl || "users";
-    state.user = saved.user || null;
-    $("auth-db").value = state.authDb;
-    $("auth-coll").value = state.authColl;
+    state.server = normalizeServer(localStorage.getItem("spread-db-ui:server") || state.server);
+    client = createClient({ url: state.server });
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+    if (saved?.accessToken) {
+      const { authDb, authColl, ...session } = saved;
+      client.setSession({
+        ...session,
+        database: session.database || authDb || "_global",
+        collection: session.collection || authColl || "users",
+      });
+      state.authDb = client.getSession().database;
+      state.authColl = client.getSession().collection;
+    }
   } catch {
+    state.server = defaultServer();
+    client = createClient({ url: state.server });
     clearSession(false);
   }
+  $("auth-db").value = state.authDb;
+  $("auth-coll").value = state.authColl;
+  saveSession();
   renderServerLabel();
   renderSession();
 }
 
 function saveSession() {
   localStorage.setItem("spread-db-ui:server", state.server);
-  localStorage.setItem(STORE_KEY, JSON.stringify({
-    accessToken: state.accessToken,
-    refreshToken: state.refreshToken,
-    authDb: state.authDb,
-    authColl: state.authColl,
-    user: state.user,
-  }));
+  const session = client.getSession();
+  if (session) localStorage.setItem(STORE_KEY, JSON.stringify(session));
+  else localStorage.removeItem(STORE_KEY);
 }
 
 function clearSession(render = true) {
-  state.accessToken = "";
-  state.refreshToken = "";
-  state.user = null;
+  sessionEpoch++;
+  client.logout();
   state.tree = {};
   state.active = null;
   state.collectionMeta = null;
@@ -2029,6 +2012,7 @@ function clearSession(render = true) {
   $("tree-filter").value = "";
   localStorage.removeItem(STORE_KEY);
   if (render) {
+    closeAllModals();
     renderSession();
     renderTree();
     renderClusterStatus(null);
@@ -2041,13 +2025,14 @@ function clearSession(render = true) {
 }
 
 function renderSession() {
-  const user = state.user;
-  $("login-panel").hidden = !!state.accessToken;
+  const session = client.getSession();
+  const user = session?.user;
+  $("login-panel").hidden = !!session?.accessToken;
   $("session-pill").textContent = user
     ? `${user.username || user._id || "user"} at ${state.authDb}/${state.authColl}`
     : "not signed in";
-  $("renew-btn").disabled = !state.refreshToken;
-  $("logout-btn").disabled = !state.accessToken;
+  $("renew-btn").disabled = !session?.refreshToken;
+  $("logout-btn").disabled = !session?.accessToken;
   renderActionState();
 }
 
@@ -2070,17 +2055,21 @@ async function editServer() {
   const normalized = normalizeServer(next);
   if (normalized === current) return;
 
+  let nextClient;
+  try { nextClient = createClient({ url: normalized }); }
+  catch (error) { return showToast(error.message, true); }
+  clearSession();
+  client = nextClient;
   state.server = normalized;
   state.apiDocs = null;
   state.apiDocsSource = "";
   saveSession();
   renderServerLabel();
   await checkHealth();
-  if (state.accessToken) await Promise.all([loadTree(), loadClusterStatus()]);
 }
 
 function renderActionState() {
-  const signedIn = !!state.accessToken;
+  const signedIn = !!client.getSession()?.accessToken;
   const hasCollection = signedIn && !!state.active;
   const hasObject = hasCollection && !!state.selected?._id;
   const hasFile = hasObject && !!fileMetadata(state.selected);
@@ -2096,77 +2085,34 @@ function renderActionState() {
   updateObjectPaging(false);
 }
 
-function authHeaders() {
-  return state.accessToken ? { authorization: `Bearer ${state.accessToken}` } : {};
-}
-
-function requestInit(method, body, includeAuth = true) {
-  return {
-    method,
-    headers: {
-      ...(includeAuth ? authHeaders() : {}),
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  };
-}
-
-async function apiFetch(method, path, body, { retry = true, auth = true } = {}) {
-  const url = state.server + path;
-  let res;
+// UI adaptation only: HTTP, authentication and retries belong to the shared client.
+async function run(operation) {
+  const connection = client;
+  const epoch = sessionEpoch;
+  const previousSession = connection.getSession();
+  let result;
   try {
-    res = await fetch(url, requestInit(method, body, auth));
-  } catch (err) {
-    return { ok: false, status: 0, body: { error: err.message } };
+    result = { ok: true, body: await operation(connection) };
+  } catch (error) {
+    result = { ok: false, status: error.status || 0, body: {
+      ...error.body,
+      error: error.message,
+      writeMayHaveSucceeded: error.writeMayHaveSucceeded,
+    } };
   }
-  if (res.status === 401 && retry && state.refreshToken && !/\/(?:auth|renew)$/.test(path)) {
-    const renewed = await renewToken({ silent: true });
-    if (renewed.ok) return apiFetch(method, path, body, { retry: false, auth });
+  if (connection !== client || epoch !== sessionEpoch) return { stale: true };
+  if (previousSession && !connection.getSession()) {
+    clearSession();
+    showToast("Session expired. Sign in again.", true);
+    return { stale: true };
   }
-  return { ok: res.ok, status: res.status, body: await parseResponseBody(res) };
+  saveSession();
+  renderSession();
+  return result;
 }
 
-async function apiFetchForm(method, path, form, { retry = true } = {}) {
-  const url = state.server + path;
-  let res;
-  try {
-    res = await fetch(url, { method, headers: authHeaders(), body: form });
-  } catch (err) {
-    return { ok: false, status: 0, body: { error: err.message } };
-  }
-  if (res.status === 401 && retry && state.refreshToken) {
-    const renewed = await renewToken({ silent: true });
-    if (renewed.ok) return apiFetchForm(method, path, form, { retry: false });
-  }
-  return { ok: res.ok, status: res.status, body: await parseResponseBody(res) };
-}
-
-async function apiFetchBlob(path, { retry = true } = {}) {
-  const url = state.server + path;
-  let res;
-  try {
-    res = await fetch(url, { method: "GET", headers: authHeaders() });
-  } catch (err) {
-    return { ok: false, status: 0, body: { error: err.message } };
-  }
-  if (res.status === 401 && retry && state.refreshToken) {
-    const renewed = await renewToken({ silent: true });
-    if (renewed.ok) return apiFetchBlob(path, { retry: false });
-  }
-  if (!res.ok) return { ok: false, status: res.status, body: await parseResponseBody(res) };
-  return {
-    ok: true,
-    status: res.status,
-    blob: await res.blob(),
-    contentType: res.headers.get("content-type") || "",
-  };
-}
-
-async function parseResponseBody(res) {
-  const text = await res.text();
-  let parsed = null;
-  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-  return parsed;
+function activeCollection(connection) {
+  return connection.database(state.active.db).collection(state.active.collection);
 }
 
 async function openApiDocs() {
@@ -2284,69 +2230,61 @@ function renderInlineMarkdown(text) {
 }
 
 async function checkHealth() {
-  const result = await apiFetch("GET", "/health", undefined, { auth: false });
+  const result = await run(connection => connection.health());
+  if (result.stale) return;
   $("node-label").textContent = result.ok
     ? (result.body?.node ? `node ${result.body.node}` : "node reachable")
     : "node unreachable";
 }
 
 async function login() {
-  state.server = normalizeServer(state.server);
+  clearSession();
   state.authDb = $("auth-db").value.trim() || "_global";
   state.authColl = $("auth-coll").value.trim() || "users";
-  const username = $("username").value.trim();
-  const password = $("password").value;
-
-  const result = await apiFetch("POST", authPath("auth"), { username, password }, { auth: false });
+  const credentials = {
+    database: state.authDb,
+    collection: state.authColl,
+    username: $("username").value.trim(),
+    password: $("password").value,
+  };
+  const result = await run(connection => connection.login(credentials));
+  if (result.stale) return;
   if (!result.ok) return showToast(result.body?.error || "Login failed", true);
-
-  state.accessToken = result.body.accessToken || "";
-  state.refreshToken = result.body.refreshToken || "";
-  state.user = result.body.user || null;
   $("password").value = "";
-  saveSession();
-  renderServerLabel();
-  renderSession();
   showToast("Signed in");
   await Promise.all([loadTree(), loadClusterStatus()]);
 }
 
-async function renewToken({ silent = false } = {}) {
-  const result = await apiFetch("POST", authPath("renew"), { refreshToken: state.refreshToken }, { auth: false, retry: false });
-  if (!result.ok) {
-    if (!silent) showToast(result.body?.error || "Renew failed", true);
-    if (result.status === 401 || result.status === 403) clearSession();
-    return result;
-  }
-  state.accessToken = result.body.accessToken || state.accessToken;
-  state.refreshToken = result.body.refreshToken || state.refreshToken;
-  state.user = result.body.user || state.user;
-  saveSession();
-  renderSession();
-  if (!silent) showToast("Token renewed");
-  return result;
+async function renewSession() {
+  const result = await run(connection => connection.renew());
+  if (result.stale) return;
+  showToast(result.ok ? "Token renewed" : result.body?.error || "Renew failed", !result.ok);
 }
 
 async function loadTree() {
-  if (!state.accessToken) {
+  if (!client.getSession()?.accessToken) {
     $("tree").innerHTML = `<div class="empty">Sign in to load databases.</div>`;
     renderActionState();
     return;
   }
 
   $("tree").innerHTML = `<div class="empty">Loading databases...</div>`;
-  const dbs = await apiFetch("GET", "/api/databases");
+  const dbs = await run(connection => connection.listDatabases());
+  if (dbs.stale) return;
   if (!dbs.ok) {
     $("tree").innerHTML = `<div class="error">${escapeHtml(dbs.body?.error || "Could not load databases")}</div>`;
     return;
   }
 
+  const epoch = sessionEpoch;
   const previousDbs = new Set(Object.keys(state.tree));
   const names = Array.isArray(dbs.body?.databases) ? dbs.body.databases : [];
   const entries = await Promise.all(names.map(async (db) => {
-    const result = await apiFetch("GET", `/api/${enc(db)}/collections`);
+    const result = await run(connection => connection.database(db).listCollections());
+    if (result.stale) return;
     return [db, result.ok && Array.isArray(result.body?.collections) ? result.body.collections : []];
   }));
+  if (epoch !== sessionEpoch || entries.some(entry => !entry)) return;
   state.tree = Object.fromEntries(entries);
   for (const db of names) {
     if (!previousDbs.has(db) && state.active?.db !== db) state.collapsedDbs.add(db);
@@ -2356,7 +2294,7 @@ async function loadTree() {
 }
 
 async function loadClusterStatus() {
-  if (!state.accessToken) {
+  if (!client.getSession()?.accessToken) {
     state.cluster = null;
     state.clusterDetails = null;
     renderClusterStatus(null);
@@ -2367,7 +2305,8 @@ async function loadClusterStatus() {
   const root = $("cluster-status");
   root.title = "";
   root.innerHTML = `<span class="top-config-message">Loading cluster...</span>`;
-  const result = await apiFetch("GET", "/api/config");
+  const result = await run(connection => connection.status());
+  if (result.stale) return;
   if (!result.ok) {
     state.cluster = null;
     state.clusterDetails = null;
@@ -2383,7 +2322,7 @@ async function loadClusterStatus() {
 
 function renderClusterStatus(config) {
   const root = $("cluster-status");
-  if (!state.accessToken) {
+  if (!client.getSession()?.accessToken) {
     root.innerHTML = `<span class="top-config-message">Sign in for cluster stats.</span>`;
     root.title = "";
     return;
@@ -2412,11 +2351,12 @@ function renderClusterStatus(config) {
 }
 
 async function openClusterStatsModal() {
-  if (!state.accessToken) return showToast("Sign in first", true);
+  if (!client.getSession()?.accessToken) return showToast("Sign in first", true);
   const root = $("cluster-modal-body");
   root.innerHTML = `<div class="empty">Loading cluster status...</div>`;
   openModal("cluster-modal");
-  const result = await apiFetch("GET", "/api/config?details=1");
+  const result = await run(connection => connection.status({ details: true }));
+  if (result.stale) return;
   if (!result.ok) {
     root.innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load cluster status.")}</div>`;
     return;
@@ -3093,7 +3033,7 @@ function renderTree() {
   const root = $("tree");
   const dbs = Object.keys(state.tree).sort();
   const filter = state.treeFilter.trim().toLowerCase();
-  if (!state.accessToken) {
+  if (!client.getSession()?.accessToken) {
     root.innerHTML = `<div class="empty">Sign in to load databases.</div>`;
     return;
   }
@@ -3202,7 +3142,8 @@ async function loadCollectionMeta() {
     renderActionState();
     return setMeta("");
   }
-  const result = await apiFetch("GET", collectionPath(state.active.db, state.active.collection, "/meta"));
+  const result = await run(connection => activeCollection(connection).getMeta());
+  if (result.stale) return;
   if (!result.ok) {
     state.collectionMeta = null;
     renderActionState();
@@ -3537,9 +3478,7 @@ function parseQuery() {
   if (state.queryMode === "builder" && !syncBuilderToQuery()) return { ok: false, error: $("builder-error").textContent };
   const parsed = parseQueryValue();
   if (!parsed.ok) return { ok: false, error: parsed.error };
-  const params = new URLSearchParams();
-  if (Object.keys(parsed.value).length) params.set("q", JSON.stringify(parsed.value));
-  return { ok: true, params };
+  return parsed;
 }
 
 async function loadObjects({ selectId = null } = {}) {
@@ -3548,12 +3487,10 @@ async function loadObjects({ selectId = null } = {}) {
   if (!parsed.ok) return showToast(`Invalid query: ${parsed.error}`, true);
   const limit = objectLimit();
   const offset = Math.max(0, state.objectPage - 1) * limit;
-  parsed.params.set("limit", String(limit));
-  parsed.params.set("offset", String(offset));
-  const query = parsed.params.toString();
   $("objects").innerHTML = `<div class="empty">Loading objects...</div>`;
   updateObjectPaging(true);
-  const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, query ? `?${query}` : ""));
+  const result = await run(connection => activeCollection(connection).search(parsed.value, { limit, offset }));
+  if (result.stale) return;
   if (!result.ok) {
     $("objects").innerHTML = `<div class="error">${escapeHtml(result.body?.error || "Could not load objects")}</div>`;
     $("object-count").textContent = "0 shown";
@@ -3658,7 +3595,8 @@ function showObject(object) {
 
 async function reloadObject() {
   if (!state.active || !state.selected?._id) return;
-  const result = await apiFetch("GET", objectPath(state.active.db, state.active.collection, `/${enc(state.selected._id)}`));
+  const result = await run(connection => activeCollection(connection).get(state.selected._id));
+  if (result.stale) return;
   if (!result.ok) return showToast(result.body?.error || "Could not reload object", true);
   showObject(result.body);
 }
@@ -3719,13 +3657,17 @@ async function openSelectedFile() {
   }
   const target = window.open("about:blank", "_blank");
   const id = state.selected._id;
-  const result = await apiFetchBlob(objectPath(state.active.db, state.active.collection, `/${enc(id)}/blob`));
+  const result = await run(async connection => {
+    const response = await activeCollection(connection).download(id);
+    return response.blob();
+  });
+  if (result.stale) { target?.close(); return; }
   if (!result.ok) {
     target?.close();
     return showToast(result.body?.error || "Could not open file", true);
   }
 
-  const url = URL.createObjectURL(result.blob);
+  const url = URL.createObjectURL(result.body);
   if (target) {
     target.opener = null;
     target.location.href = url;
@@ -3743,7 +3685,7 @@ async function openSelectedFile() {
 }
 
 function openDatabaseModal() {
-  if (!state.accessToken) return showToast("Sign in first", true);
+  if (!client.getSession()?.accessToken) return showToast("Sign in first", true);
   $("db-name").value = "";
   setJsonField("db-meta-json", {});
   openModal("db-modal", "db-name");
@@ -3756,7 +3698,8 @@ async function saveDatabase() {
   const parsed = parseJsonField("db-meta-json", "Database meta");
   if (!parsed.ok) return setModalError("db-modal", parsed.error);
 
-  const result = await apiFetch("POST", "/api/databases", { name, meta: parsed.value });
+  const result = await run(connection => connection.createDatabase(name, { meta: parsed.value }));
+  if (result.stale) return;
   if (!result.ok) return setModalError("db-modal", result.body?.error || "Could not save database");
   closeModal("db-modal");
   showToast(result.body?.created ? "Database created" : "Database updated");
@@ -3764,7 +3707,7 @@ async function saveDatabase() {
 }
 
 function openCollectionModal() {
-  if (!state.accessToken) return showToast("Sign in first", true);
+  if (!client.getSession()?.accessToken) return showToast("Sign in first", true);
   $("collection-db").value = state.active?.db || state.authDb || "_global";
   $("collection-name").value = "";
   setJsonField("collection-meta-json", { indexes: [] });
@@ -3780,7 +3723,8 @@ async function saveCollection() {
   const parsed = parseJsonField("collection-meta-json", "Collection meta");
   if (!parsed.ok) return setModalError("collection-modal", parsed.error);
 
-  const result = await apiFetch("POST", `/api/${enc(db)}/collections`, { name, meta: parsed.value });
+  const result = await run(connection => connection.database(db).createCollection(name, parsed.value));
+  if (result.stale) return;
   if (!result.ok) return setModalError("collection-modal", result.body?.error || "Could not save collection");
   closeModal("collection-modal");
   showToast(result.body?.created ? "Collection created" : "Collection updated");
@@ -3802,7 +3746,8 @@ async function saveCollectionMeta() {
   const parsed = parseJsonField("meta-json", "Collection meta");
   if (!parsed.ok) return setModalError("meta-modal", parsed.error);
 
-  const result = await apiFetch("PUT", collectionPath(state.active.db, state.active.collection, "/meta"), parsed.value);
+  const result = await run(connection => activeCollection(connection).setMeta(parsed.value));
+  if (result.stale) return;
   if (!result.ok) return setModalError("meta-modal", result.body?.error || "Could not save collection meta");
   state.collectionMeta = result.body || parsed.value;
   closeModal("meta-modal");
@@ -3842,10 +3787,11 @@ async function saveObject() {
     if (!isPlainObject(parsed.value)) return setModalError("object-modal", "Object JSON must be a plain object");
     const id = state.selected._id;
     const object = { ...parsed.value, _id: id };
-    const path = objectPath(state.active.db, state.active.collection, `/${enc(id)}`);
-    const result = file
-      ? await apiFetchForm("PUT", path, objectFileForm(object, file))
-      : await apiFetch("PUT", path, object);
+    const result = await run(connection => {
+      const items = activeCollection(connection);
+      return file ? items.replaceFile(id, withoutFileMetadata(object), file) : items.replace(id, object);
+    });
+    if (result.stale) return;
     if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
     closeModal("object-modal");
     showToast("Object saved");
@@ -3864,10 +3810,12 @@ async function saveObject() {
     body = { ...body, _id: explicitId };
   }
 
-  const path = objectPath(state.active.db, state.active.collection);
-  const result = file
-    ? await apiFetchForm("POST", path, objectFileForm(body, file))
-    : await apiFetch("POST", path, body);
+  const result = await run(connection => {
+    const items = activeCollection(connection);
+    if (file) return items.insertFile(withoutFileMetadata(body), file);
+    return Array.isArray(body) ? items.insertMany(body) : items.insert(body);
+  });
+  if (result.stale) return;
   if (!result.ok) return setModalError("object-modal", result.body?.error || "Could not save object");
   const newId = Array.isArray(body) ? result.body?.items?.[0]?._id : result.body?._id;
   closeModal("object-modal");
@@ -3897,13 +3845,6 @@ function updateObjectFileSummary() {
   summary.classList.remove("has-file");
 }
 
-function objectFileForm(object, file) {
-  const form = new FormData();
-  form.append("object", JSON.stringify(withoutFileMetadata(object)));
-  form.append("file", file, file.name || "blob");
-  return form;
-}
-
 function withoutFileMetadata(object) {
   const { _file, ...rest } = object || {};
   return rest;
@@ -3929,7 +3870,8 @@ async function deleteSelectedObject() {
   if (!state.active || !state.selected?._id) return;
   clearModalError("delete-object-modal");
   const id = state.selected._id;
-  const result = await apiFetch("DELETE", objectPath(state.active.db, state.active.collection, `/${enc(id)}`));
+  const result = await run(connection => activeCollection(connection).remove(id));
+  if (result.stale) return;
   if (!result.ok) return setModalError("delete-object-modal", result.body?.error || "Could not delete object");
   closeModal("delete-object-modal");
   showToast("Object deleted");
@@ -3959,9 +3901,11 @@ async function deleteSelectedContext() {
   if (!state.deleteTarget) return;
   clearModalError("delete-collection-modal");
   const target = state.deleteTarget;
-  const result = target.type === "database"
-    ? await apiFetch("DELETE", `/api/databases/${enc(target.db)}`)
-    : await apiFetch("DELETE", `/api/${enc(target.db)}/collections/${enc(target.collection)}`);
+  const result = await run(connection => {
+    const db = connection.database(target.db);
+    return target.type === "database" ? db.drop() : db.collection(target.collection).drop();
+  });
+  if (result.stale) return;
   if (!result.ok) {
     return setModalError("delete-collection-modal", result.body?.error || `Could not delete ${target.type}`);
   }
@@ -4063,7 +4007,7 @@ $("health-btn").addEventListener("click", checkHealth);
 $("api-docs-btn").addEventListener("click", openApiDocs);
 $("login-btn").addEventListener("click", login);
 $("password").addEventListener("keydown", (event) => { if (event.key === "Enter") login(); });
-$("renew-btn").addEventListener("click", () => renewToken());
+$("renew-btn").addEventListener("click", renewSession);
 $("logout-btn").addEventListener("click", () => clearSession());
 $("refresh-tree-btn").addEventListener("click", loadTree);
 $("refresh-cluster-btn").addEventListener("click", loadClusterStatus);
@@ -4150,7 +4094,7 @@ document.addEventListener("keydown", (event) => {
 loadSession();
 renderQueryMode();
 checkHealth();
-if (state.accessToken) {
+if (client.getSession()?.accessToken) {
   loadTree();
   loadClusterStatus();
 }

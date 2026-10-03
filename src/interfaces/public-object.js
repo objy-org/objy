@@ -2011,7 +2011,8 @@ function normalizeQueryPath(path) {
 function secureRoute(auth) {
   return (handler) => async (req, res) => {
     const result = auth.authenticateRequest(req);
-    if (!result.ok) return json(res, result.status, { error: result.error });
+    if (!result.ok) return json(res, result.status, { error: result.error, code: result.code, operationStarted: false });
+    res.operationStarted = true;
     return handler(req, res);
   };
 }

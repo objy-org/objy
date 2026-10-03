@@ -4,12 +4,22 @@
   "description": "In-memory, multi-master replicated database for dynamic stateless JS objects, backed by a columnar shape store.",
   "type": "module",
   "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": {
+      "types": "./client/index.d.ts",
+      "default": "./client/index.js"
+    },
+    "./*": "./*"
+  },
   "scripts": {
     "start": "node src/index.js",
     "cluster:local": "node scripts/local-cluster.js",
     "test": "node --test",
+    "test:client": "node --test test/client*.test.js",
     "deploy:hetzner": "node scripts/deploy-hetzner.js",
-    "deploy:hetzner:cluster": "node scripts/deploy-hetzner-cluster.js"
+    "deploy:hetzner:cluster": "node scripts/deploy-hetzner-cluster.js",
+    "test:browser": "playwright test"
   },
   "engines": {
     "node": ">=18.17"
@@ -17,5 +27,8 @@
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
