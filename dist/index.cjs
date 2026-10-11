@@ -6453,18 +6453,21 @@ if (_nodejs) {
 */
 
 
-let contextTemplate = {
-    activeTenant: null,
-    activeUser: null,
-    activeApp: null,
+// Each instance owns its mutable context; a shallow template copy shares queues.
+function createContext() {
+    return {
+        activeTenant: null,
+        activeUser: null,
+        activeApp: null,
 
-    alterSequence: [],
-    commandSequence: [],
-    permissionSequence: {},
-    eventAlterationSequence: [],
-    handlerSequence: {},
-    familyParams: {}
-};
+        alterSequence: [],
+        commandSequence: [],
+        permissionSequence: {},
+        eventAlterationSequence: [],
+        handlerSequence: {},
+        familyParams: {}
+    };
+}
 
 
 /**
@@ -6475,7 +6478,7 @@ function OBJY(){
 
     Object.assign(_OBJY, {
 
-        globalCtx: Object.assign({}, contextTemplate),
+        globalCtx: createContext(),
 
         ...generalAttributes(),
     
@@ -6510,7 +6513,7 @@ function OBJY(){
  */ 
 /*
 var Transaction = function(OBJY) {
-    OBJY.globalContext = Object.assign({}, contextTemplate)
+    OBJY.globalContext = createContext()
 
     var T = {};
 

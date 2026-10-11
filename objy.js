@@ -23,17 +23,20 @@ import propertyFunctions from './instance/property.js'
 import pluralConstructorFunctions from './instance/plural-constructor.js'
 import singularConstructorFunctions from './instance/singular-constructor.js'
 
-let contextTemplate = {
-    activeTenant: null,
-    activeUser: null,
-    activeApp: null,
+// Each instance owns its mutable context; a shallow template copy shares queues.
+function createContext() {
+    return {
+        activeTenant: null,
+        activeUser: null,
+        activeApp: null,
 
-    alterSequence: [],
-    commandSequence: [],
-    permissionSequence: {},
-    eventAlterationSequence: [],
-    handlerSequence: {},
-    familyParams: {}
+        alterSequence: [],
+        commandSequence: [],
+        permissionSequence: {},
+        eventAlterationSequence: [],
+        handlerSequence: {},
+        familyParams: {}
+    };
 }
 
 
@@ -45,7 +48,7 @@ export default function OBJY(){
 
     Object.assign(_OBJY, {
 
-        globalCtx: Object.assign({}, contextTemplate),
+        globalCtx: createContext(),
 
         ...generalAttributes(_OBJY),
     
@@ -80,7 +83,7 @@ export default function OBJY(){
  */ 
 /*
 var Transaction = function(OBJY) {
-    OBJY.globalContext = Object.assign({}, contextTemplate)
+    OBJY.globalContext = createContext()
 
     var T = {};
 
