@@ -5881,6 +5881,7 @@ function singularConstructorFunctions (OBJY) {
                                 OBJY.Logger.log('Updated Object: ' + data);
                                 //OBJY.deSerializePropsObject(data, params);
                                 context.alterSequence = [];
+                                OBJY.globalCtx.alterSequence = [];
 
                                 // SYNC HANDLER
                                 if (actions.onChange && Object.keys(actions.onChange || {}).length > 0) {
@@ -6007,6 +6008,7 @@ function singularConstructorFunctions (OBJY) {
                     } else updateFn();
 
                     context.commandSequence = [];
+                    OBJY.globalCtx.commandSequence = [];
 
                     return this;
                 });
