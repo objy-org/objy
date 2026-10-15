@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { normalizePermissions } from "./permissions.js";
+import { normalizeCollectionPermissions, normalizePermissions } from "./permissions.js";
 
 const require = createRequire(import.meta.url);
 const JWT = require("./lib/jwt.cjs");
@@ -176,6 +176,7 @@ export class AuthService {
   issueToken(database, collection, user, type, ttlSeconds, sessionId) {
     const now = Math.floor(Date.now() / 1000);
     const permissions = normalizePermissions(user.permissions);
+    const collectionPermissions = normalizeCollectionPermissions(user.collectionPermissions);
     const role = user.role || "user";
     const admin = user.admin === true || role === "admin";
     return JWT.sign({
@@ -188,6 +189,7 @@ export class AuthService {
       admin,
       spooAdmin: admin,
       permissions,
+      collectionPermissions,
       authorisations: user.authorisations || {},
       applications: Array.isArray(user.applications) ? user.applications : [],
       database,
@@ -230,6 +232,7 @@ export class AuthService {
           role: claims.role || "user",
           admin: claims.admin === true,
           permissions: normalizePermissions(claims.permissions),
+          collectionPermissions: normalizeCollectionPermissions(claims.collectionPermissions),
           database: claims.database,
           collection: claims.collection,
         },
@@ -283,6 +286,9 @@ export class AuthService {
     }
     if (next.tokenVersion !== undefined) next.tokenVersion = positiveInt(next.tokenVersion, 0);
     if (next.permissions !== undefined) next.permissions = normalizePermissions(next.permissions);
+    if (next.collectionPermissions !== undefined) {
+      next.collectionPermissions = normalizeCollectionPermissions(next.collectionPermissions);
+    }
     return next;
   }
 
@@ -325,6 +331,9 @@ export class AuthService {
     if (!user) return user;
     const { password, ...safe } = user;
     if (safe.permissions !== undefined) safe.permissions = normalizePermissions(safe.permissions);
+    if (safe.collectionPermissions !== undefined) {
+      safe.collectionPermissions = normalizeCollectionPermissions(safe.collectionPermissions);
+    }
     return safe;
   }
 

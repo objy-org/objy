@@ -1,10 +1,15 @@
-import { timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
+import {
+  CLUSTER_SECRET_HEADER,
+  clusterSecretFromRequest,
+  clusterSecretMatches,
+  normalizeClusterSecret,
+} from "../cluster-secret.js";
 import { json, readJson } from "../http-router.js";
 import { localClusterStatus } from "../cluster-status.js";
 import { acceptsNdjson, isNdjsonContentType, NDJSON_CONTENT_TYPE, parseNdjsonBatches } from "../ndjson.js";
 
-export const CLUSTER_SECRET_HEADER = "x-spread-db-cluster-secret";
+export { CLUSTER_SECRET_HEADER } from "../cluster-secret.js";
 export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
 
 export function createClusterInterface() {
@@ -121,7 +126,7 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
   return {
     key: base,
     url: base,
-    secret: normalizeSecret(secret),
+    secret: normalizeClusterSecret(secret),
     nodeId: null,
     pull: async (after, limit, scope) => {
       const params = new URLSearchParams({ after: String(after), node: nodeId });
@@ -210,42 +215,20 @@ export function shardMapFromHttp(map, nodeId, { secret = null, timeoutMs = DEFAU
 }
 
 function secureClusterRoute(secret) {
-  const normalized = normalizeSecret(secret);
+  const normalized = normalizeClusterSecret(secret);
   return (handler) => async (req, res) => {
-    if (normalized && !secretMatches(clusterSecretFromRequest(req), normalized)) {
+    if (normalized && !clusterSecretMatches(clusterSecretFromRequest(req, { allowBearer: true }), normalized)) {
       return json(res, 401, { error: "invalid cluster secret" });
     }
     return handler(req, res);
   };
 }
 
-function clusterSecretFromRequest(req) {
-  const header = req.headers[CLUSTER_SECRET_HEADER];
-  if (typeof header === "string" && header.length > 0) return header;
-  const authorization = req.headers.authorization;
-  if (typeof authorization === "string" && authorization.startsWith("Bearer ")) {
-    return authorization.slice("Bearer ".length).trim();
-  }
-  return null;
-}
-
-function secretMatches(actual, expected) {
-  if (!actual) return false;
-  const actualBytes = Buffer.from(actual);
-  const expectedBytes = Buffer.from(expected);
-  if (actualBytes.length !== expectedBytes.length) return false;
-  return timingSafeEqual(actualBytes, expectedBytes);
-}
-
 function clusterHeaders(secret, hasBody = false) {
   return {
     ...(hasBody ? { "content-type": "application/json" } : {}),
-    ...(normalizeSecret(secret) ? { [CLUSTER_SECRET_HEADER]: normalizeSecret(secret) } : {}),
+    ...(normalizeClusterSecret(secret) ? { [CLUSTER_SECRET_HEADER]: normalizeClusterSecret(secret) } : {}),
   };
-}
-
-function normalizeSecret(secret) {
-  return typeof secret === "string" && secret.length > 0 ? secret : null;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_REPLICATION_TIMEOUT_MS) {

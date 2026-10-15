@@ -12,7 +12,7 @@ const API_DOCS = readFileSync(
   "utf8",
 );
 const LOGO_PNG = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public", "fastobject-logo.png"),
+  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public", "objy-db-logo.png"),
 );
 
 export function createUiInterface() {
@@ -32,7 +32,7 @@ export function createUiInterface() {
       router.get("/", send);
       router.get("/ui", send);
       router.get("/index.html", send);
-      router.get("/fastobject-logo.png", sendLogo);
+      router.get("/objy-db-logo.png", sendLogo);
       router.get("/API.md", sendApiDocs);
     },
   };

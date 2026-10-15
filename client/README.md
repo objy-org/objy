@@ -1,6 +1,6 @@
 # JavaScript client
 
-One dependency-free ES module consumes spread-db's public HTTP API in browsers and Node. The same client works through objy-platform; the server decides which object behavior and operations are available.
+One dependency-free ES module consumes OBJY DB's public HTTP API in browsers and Node. The same client works through objy-platform; the server decides which object behavior and operations are available.
 
 The bundled admin UI imports this same `/client.js` module and uses its public methods for authentication, queries, CRUD, metadata, administration and file transfers. The UI retains its own presentation and local-storage preference handling; the client owns request handling and token renewal. Existing saved UI sessions migrate automatically, renewed tokens are persisted, and changing the selected server clears the old session.
 
@@ -26,7 +26,7 @@ When imported from `/client.js` or its content-addressed URL, the default server
 For an application on another origin, enable CORS on the server:
 
 ```js
-// spread-db configuration (also supported inside objy-platform's spread option)
+// OBJY DB configuration (also supported inside objy-platform's spread option)
 server: {
   port: 8080,
   cors: { origins: ['https://app.example.com'] }

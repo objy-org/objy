@@ -1067,6 +1067,65 @@ test("database user permissions filter reads and guard writes", async () => {
   }
 });
 
+test("user collection permission lists grant object read and write by name", async () => {
+  const s = await startTestServer({ port: 0 });
+  try {
+    const baseUrl = `http://localhost:${s.port}`;
+    const admin = api(baseUrl, (await login(baseUrl)).accessToken);
+    const db = "collection_grants";
+    const userPath = `/api/${db}/users/object`;
+    const created = await admin.post(userPath, {
+      _id: "editor",
+      username: "editor",
+      password: "secret",
+      collectionPermissions: { read: ["articles", "media", "articles"], write: ["articles", "drafts"] },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.deepEqual(created.body.collectionPermissions, { read: ["articles", "media"], write: ["articles", "drafts"] });
+    assert.equal((await admin.post(userPath, {
+      _id: "bad", username: "bad", password: "secret", collectionPermissions: { write: "articles" },
+    })).status, 400);
+
+    const articles = `/api/${db}/articles/object`;
+    const media = `/api/${db}/media/object`;
+    const drafts = `/api/${db}/drafts/object`;
+    const privateObjects = `/api/${db}/private/object`;
+    assert.equal((await admin.post(articles, { _id: "a", owner: "other" })).status, 201);
+    assert.equal((await admin.post(media, { _id: "m", owner: "other" })).status, 201);
+    assert.equal((await admin.post(privateObjects, { _id: "p" })).status, 201);
+
+    const editorSession = await login(baseUrl, "editor", "secret", db, "users");
+    const editor = api(baseUrl, editorSession.accessToken);
+    assert.deepEqual((await editor.get(articles)).body.map((row) => row._id), ["a"]);
+    assert.equal((await editor.get(`${media}/m`)).status, 200);
+    assert.equal((await editor.get(`${privateObjects}/p`)).status, 403);
+    assert.deepEqual((await editor.get(privateObjects)).body, []);
+    assert.equal((await editor.post(articles, { _id: "new", owner: "other" })).status, 201);
+    assert.equal((await editor.patch(`${articles}/a`, { $set: { owner: "changed" } })).status, 200);
+    assert.equal((await editor.del(`${articles}/new`)).status, 204);
+    assert.equal((await editor.post(drafts, { _id: "draft" })).status, 201);
+    assert.equal((await editor.get(`${drafts}/draft`)).status, 403);
+    assert.equal((await editor.patch(`${drafts}/draft`, { $set: { status: "done" } })).status, 200);
+    assert.equal((await editor.del(`${drafts}/draft`)).status, 204);
+    assert.equal((await editor.post(media, { _id: "new" })).status, 403);
+    assert.equal((await editor.patch(`${media}/m`, { $set: { owner: "changed" } })).status, 403);
+    assert.equal((await editor.del(`${media}/m`)).status, 403);
+    assert.equal((await editor.get(`/api/${db}/collections`)).status, 403);
+    assert.equal((await editor.get(`/api/other_db/articles/object`)).status, 403);
+
+    const changed = await admin.patch(`${userPath}/editor`, {
+      $set: { collectionPermissions: { read: ["articles", "media", "private"], write: ["articles", "drafts"] } },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.equal((await editor.get(`${privateObjects}/p`)).status, 403);
+    const renewed = await api(baseUrl).post(`/api/${db}/users/renew`, { refreshToken: editorSession.refreshToken });
+    assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
+    assert.equal((await api(baseUrl, renewed.body.accessToken).get(`${privateObjects}/p`)).status, 200);
+  } finally {
+    s.server.close();
+  }
+});
+
 test("permissions are enforced by remote shard owners", async () => {
   const { a, b, urlA, urlB } = await startRoutedTwoShardCluster();
   try {
@@ -2605,12 +2664,12 @@ test("serves the console UI at /", async () => {
     assert.equal(r.status, 200);
     assert.match(r.headers.get("content-type"), /text\/html/);
     const html = await r.text();
-    assert.match(html, /FastObject/);
-    assert.match(html, /fastobject-logo\.png/);
+    assert.match(html, /OBJY DB/);
+    assert.match(html, /objy-db-logo\.png/);
     assert.match(html, /id="object-file"/);
     assert.match(html, /id="download-file-btn"/);
 
-    const logo = await fetch(`http://localhost:${s.port}/fastobject-logo.png`);
+    const logo = await fetch(`http://localhost:${s.port}/objy-db-logo.png`);
     assert.equal(logo.status, 200);
     assert.match(logo.headers.get("content-type"), /image\/png/);
     assert.ok((await logo.arrayBuffer()).byteLength > 0);
@@ -2619,7 +2678,7 @@ test("serves the console UI at /", async () => {
     assert.equal(docs.status, 200);
     assert.match(docs.headers.get("content-type"), /text\/markdown/);
     const docsText = await docs.text();
-    assert.match(docsText, /# spread-db API/);
+    assert.match(docsText, /# OBJY DB API/);
     assert.match(docsText, /## File Handling/);
   } finally {
     s.server.close();

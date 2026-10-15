@@ -1,8 +1,8 @@
-# spread-db
+# OBJY DB
 
 An in-memory, sharded, replicated object database for large dynamic object sets.
 
-spread-db is built for plain JavaScript-style objects, fast local reads, bulk-first writes, object sharding, pull-based replication, S3 persistence, and a small admin console. It is intentionally lightweight: no OBJY, no schema-first object model, no hidden application context.
+OBJY DB is built for plain JavaScript-style objects, fast local reads, bulk-first writes, object sharding, pull-based replication, S3 persistence, and a small admin console. Its core stays lightweight: the OBJY runtime is optional, with no schema-first object model or hidden application context in the database itself.
 
 Public REST API usage is documented in `API.md`. This guide is for developing, running, and operating the database itself.
 
@@ -10,7 +10,7 @@ The [JavaScript client](client/README.md) is available at `/client.js` for brows
 
 ## Why This Exists
 
-spread-db keeps the database model simple:
+OBJY DB keeps the database model simple:
 
 - Objects are dynamic and identified by `_id`.
 - Collections own metadata such as index definitions.
@@ -75,7 +75,7 @@ Sharding is object-based. For any `{ database, collection, _id }`, the shard map
 
 ## Pluggable Components
 
-spread-db is built around small replaceable layers. The core database owns object clocks, shard routing, replication, persistence coordination, and index readiness. Everything around that should stay swappable.
+OBJY DB is built around small replaceable layers. The core database owns object clocks, shard routing, replication, persistence coordination, and index readiness. Everything around that should stay swappable.
 
 The two most important extension points are:
 
@@ -87,6 +87,80 @@ The two most important extension points are:
 Storage engines should expose the same object-level behavior: bulk insert, replace, update, delete, reads, scans, metadata access, and index maintenance hooks. Single-object operations are treated as bulks of one, so custom storage should be designed bulk-first.
 
 Interface plugins should stay thin. They translate transport concerns into database operations, but should not own storage, replication, sharding, or permission logic. The default setup uses separate public and cluster interfaces; custom interfaces can be added for specialized protocols, admin tooling, import flows, or private operational routes.
+
+### Object Hooks
+
+Object hooks are named, code-registered middleware for public create, read, update, and delete operations. They run once on the node that accepts the request, before shard fan-out, and never during replication or restore. Bulk requests invoke each hook once for the whole bulk; NDJSON streams invoke them once per bounded batch.
+
+```js
+import { createObjectHookRegistry } from "spread-db/hooks";
+import { startServer } from "spread-db/server";
+
+const hooks = createObjectHookRegistry();
+
+hooks.register("timestamps", {
+  operations: ["create", "update"],
+  handler: async (context, next) => {
+    const now = new Date().toISOString();
+    for (const object of context.input.objects || []) object._updated = now;
+    await next();
+  },
+});
+
+await startServer({ objectHooks: hooks });
+```
+
+The CLI can load hook modules from files listed in `spread-db.config.json`. Paths are relative to that config file. Each module exports `register({ objectHooks, node, options })`; registration finishes before the HTTP server starts.
+
+```json
+{
+  "plugins": [
+    { "file": "./plugins/example.js", "options": {} }
+  ]
+}
+```
+
+Collections enable registered hooks through meta. `use` applies a hook to the operations declared by its code registration; operation arrays are optional additions. Setting `enabled` to `false` preserves the configuration but bypasses the whole chain.
+
+```json
+{
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"],
+    "create": ["assets.validate"]
+  }
+}
+```
+
+Hooks may modify `context.input` before `next()` and inspect `context.result` afterward. A hook may set `context.result.responseOverride` after a successful write to replace that write's JSON response. A hook definition may also provide `validateMeta(meta)` to reject invalid collection settings when metadata is saved. OBJY DB revalidates transformed writes and still owns authentication, permissions, routing, and durability. Every public cluster node must register the same names.
+
+The optional `plugins/objy.js` module registers an `objy` hook. It loads `new-objy` only when configured and uses OBJY DB's existing writes instead of an OBJY storage mapper. For adjacent source checkouts, configure it like this on every API node:
+
+```json
+{
+  "plugins": [{
+    "file": "./plugins/objy.js",
+    "options": { "runtime": "../new-objy/index.js" }
+  }]
+}
+```
+
+Enable the hook and configure its family in collection metadata:
+
+```json
+{
+  "hooks": { "use": ["objy"] },
+  "objy": {
+    "structure": { "status": "new" },
+    "inheritFamily": "Base",
+    "affectable": false
+  }
+}
+```
+
+These settings are scoped to that database and collection. Omitted settings use OBJY defaults; the `Affectable` collection is always affectable. Metadata changes take effect on the next object operation. Any family with `"affectable": true` can supply live defaults to objects in the same database.
+
+OBJY handlers run in local QuickJS workers. Handlers run in OBJY's order; when one calls `done(value)` with a non-null value, the last such value replaces the ordinary JSON write response. Bulk writes return an array in input order, using the ordinary object for items without a handler value. A single delete with a handler value returns HTTP 200 and that value instead of an empty HTTP 204. NDJSON streams still return their minimal count summaries. Without a handler return value, changes to `afterObj` appear in the response only. The plugin stores event definitions but does not yet run a scheduler; that needs a separate event source and consumer.
 
 ## Configuration
 

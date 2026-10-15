@@ -6,6 +6,8 @@ import { createPersistence } from "./persistence.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { createRestoreStatus } from "./restore-status.js";
 import { createShardMapStore } from "./shard-map-store.js";
+import { createObjectHookRegistry } from "./object-hooks.js";
+import { loadPlugins } from "./plugin-loader.js";
 
 const config = loadConfig();
 
@@ -53,6 +55,9 @@ if (persistence) {
 }
 await new Promise((resolve) => restoreServer.server.close(resolve));
 
+const objectHooks = createObjectHookRegistry();
+await loadPlugins(config.plugins, { configPath: config.configPath, node, objectHooks });
+
 const state = await startServer({
   port: restoreServer.port,
   maxJsonBytes: config.server.maxJsonBytes,
@@ -69,9 +74,10 @@ const state = await startServer({
   replicationTimeoutMs: config.cluster.replicationTimeoutMs,
   replication,
   imports: config.imports,
+  objectHooks,
 });
 replication.start();
-console.log(`spread-db node ${state.node.id} listening on http://localhost:${state.port}`);
+console.log(`OBJY DB node ${state.node.id} listening on http://localhost:${state.port}`);
 
 let shuttingDown = false;
 

@@ -1,6 +1,7 @@
 import { DEFAULT_SHARD } from "./shard-map.js";
 import { aggregateObjects, aggregatePartialObjects, isObjectDbAggregateSpec, mergeAggregatePartials } from "./aggregate.js";
 import { accessTokenFromRequest } from "./auth.js";
+import { CLUSTER_SECRET_HEADER, clusterSecretFromRequest, clusterSecretMatches, normalizeClusterSecret } from "./cluster-secret.js";
 import { NDJSON_CONTENT_TYPE, ndjsonReadable } from "./ndjson.js";
 import { compareSortValues, getPathValue } from "./query.js";
 import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEADER } from "./query-planner.js";
@@ -10,10 +11,11 @@ export const TARGET_SHARD_HEADER = "x-spread-db-target-shard";
 export const DEFAULT_FORWARD_TIMEOUT_MS = 5_000;
 
 export class ShardRequestRouter {
-  constructor({ node, forwardTimeoutMs = DEFAULT_FORWARD_TIMEOUT_MS }) {
+  constructor({ node, forwardTimeoutMs = DEFAULT_FORWARD_TIMEOUT_MS, clusterSecret = null }) {
     if (!node) throw new Error("node is required");
     this.node = node;
     this.forwardTimeoutMs = positiveInt(forwardTimeoutMs, DEFAULT_FORWARD_TIMEOUT_MS);
+    this.clusterSecret = normalizeClusterSecret(clusterSecret);
   }
 
   targetShard(req) {
@@ -22,7 +24,9 @@ export class ShardRequestRouter {
   }
 
   isForwarded(req) {
-    return req.headers[FORWARDED_HEADER] === "1";
+    if (req.headers[FORWARDED_HEADER] !== "1") return false;
+    if (!this.clusterSecret) return true;
+    return clusterSecretMatches(clusterSecretFromRequest(req), this.clusterSecret);
   }
 
   shardForObject(database, collection, id) {
@@ -457,7 +461,9 @@ export class ShardRequestRouter {
 
   async forwardJson(req, peer, shard, path, { method = "GET", body, query, forwardedOnly = false, timeoutMs } = {}) {
     const suffix = query ? `?${query}` : "";
-    const headers = forwardedOnly ? forwardedControlHeaders(req, body !== undefined) : forwardedHeaders(req, shard, body !== undefined);
+    const headers = forwardedOnly
+      ? forwardedControlHeaders(req, body !== undefined, this.clusterSecret)
+      : forwardedHeaders(req, shard, body !== undefined, this.clusterSecret);
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
@@ -487,7 +493,7 @@ export class ShardRequestRouter {
 
   async forwardNdjson(req, peer, shard, path, { method = "POST", items = [], query, timeoutMs } = {}) {
     const suffix = query ? `?${query}` : "";
-    const headers = forwardedHeaders(req, shard, true);
+    const headers = forwardedHeaders(req, shard, true, this.clusterSecret);
     headers["content-type"] = NDJSON_CONTENT_TYPE;
     headers.prefer = preferMinimal(headers.prefer);
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
@@ -520,7 +526,7 @@ export class ShardRequestRouter {
 
   async forwardRaw(req, peer, shard, path, { method = "GET", body, contentType, query, timeoutMs } = {}) {
     const suffix = query ? `?${query}` : "";
-    const headers = forwardedHeaders(req, shard, body !== undefined);
+    const headers = forwardedHeaders(req, shard, body !== undefined, this.clusterSecret);
     if (contentType) headers["content-type"] = contentType;
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
@@ -656,10 +662,11 @@ function countIfNeeded(options, count) {
   return options.includeCount ? count() : undefined;
 }
 
-function forwardedHeaders(req, shard, hasBody) {
+function forwardedHeaders(req, shard, hasBody, clusterSecret) {
   const headers = {
     [FORWARDED_HEADER]: "1",
     [TARGET_SHARD_HEADER]: shard,
+    ...(clusterSecret ? { [CLUSTER_SECRET_HEADER]: clusterSecret } : {}),
   };
   const token = accessTokenFromRequest(req);
   if (token) headers.authorization = `Bearer ${token}`;
@@ -668,9 +675,10 @@ function forwardedHeaders(req, shard, hasBody) {
   return headers;
 }
 
-function forwardedControlHeaders(req, hasBody) {
+function forwardedControlHeaders(req, hasBody, clusterSecret) {
   const headers = {
     [FORWARDED_HEADER]: "1",
+    ...(clusterSecret ? { [CLUSTER_SECRET_HEADER]: clusterSecret } : {}),
   };
   const token = accessTokenFromRequest(req);
   if (token) headers.authorization = `Bearer ${token}`;

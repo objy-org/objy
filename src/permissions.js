@@ -28,7 +28,26 @@ export function normalizePermissions(permissions) {
   return permissions.map((rule, index) => normalizeRule(rule, index)).filter(Boolean);
 }
 
-export function mergeReadPermissionQuery(criteria = {}, user = null) {
+export function normalizeCollectionPermissions(permissions) {
+  if (permissions === undefined) return { read: [], write: [] };
+  if (!isPlainObject(permissions)) throw permissionConfigError("collectionPermissions must be an object");
+  for (const key of Object.keys(permissions)) {
+    if (key !== "read" && key !== "write") {
+      throw permissionConfigError(`collectionPermissions.${key} is not supported`);
+    }
+  }
+  const normalizeNames = (key) => {
+    const names = permissions[key] === undefined ? [] : permissions[key];
+    if (!Array.isArray(names) || names.some((name) => typeof name !== "string" || !name.trim())) {
+      throw permissionConfigError(`collectionPermissions.${key} must be a list of collection names`);
+    }
+    return [...new Set(names)];
+  };
+  return { read: normalizeNames("read"), write: normalizeNames("write") };
+}
+
+export function mergeReadPermissionQuery(criteria = {}, user = null, collection = null) {
+  if (hasCollectionPermission(user, "read", collection)) return { denied: false, query: criteria || {} };
   const permissions = readRules(user);
   if (permissions.some(isAllowAllRule)) return { denied: false, query: criteria || {} };
   if (!permissions.length) return { denied: true, query: null };
@@ -43,24 +62,28 @@ export function mergeReadPermissionQuery(criteria = {}, user = null) {
   };
 }
 
-export function canCreate(user, object) {
-  return can(user, "create", object);
+export function canCreate(user, object, collection = null) {
+  return can(user, "create", object, collection);
 }
 
-export function canRead(user, object) {
-  return can(user, "read", object);
+export function canRead(user, object, collection = null) {
+  return can(user, "read", object, collection);
 }
 
-export function canUpdate(user, before, after) {
-  return can(user, "update", before) && can(user, "update", after);
+export function canUpdate(user, before, after, collection = null) {
+  return can(user, "update", before, collection) && can(user, "update", after, collection);
 }
 
-export function canDelete(user, object) {
-  return can(user, "delete", object);
+export function canDelete(user, object, collection = null) {
+  return can(user, "delete", object, collection);
 }
 
-export function can(user, operation, object) {
+export function can(user, operation, object, collection = null) {
   const code = OP_CODES[operation] || operation;
+  const collectionAction = code === "r" ? "read" : ["c", "u", "d"].includes(code) ? "write" : null;
+  if (collectionAction && hasCollectionPermission(user, collectionAction, collection)) {
+    return true;
+  }
   return rulesFor(user).some((rule) => permits(rule, code) && matchesPermissionQuery(rule, object));
 }
 
@@ -80,6 +103,13 @@ export function permissionError(operation, id = null) {
 
 function readRules(user) {
   return rulesFor(user).filter((rule) => permits(rule, OP_CODES.read));
+}
+
+function hasCollectionPermission(user, operation, collection) {
+  if (!user || isPermissionBypass(user)) return true;
+  if (typeof collection !== "string" || !collection) return false;
+  const names = user.collectionPermissions?.[operation];
+  return Array.isArray(names) && names.includes(collection);
 }
 
 function rulesFor(user) {
