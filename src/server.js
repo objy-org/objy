@@ -9,11 +9,13 @@ import { createPublicObjectInterface } from "./interfaces/public-object.js";
 import { createUiInterface } from "./interfaces/ui.js";
 import { createClientInterface } from "./interfaces/client.js";
 import { createCorsHandler } from "./http-cors.js";
+import { normalizeClusterSecret } from "./cluster-secret.js";
 import { createMemoryGuard } from "./memory-guard.js";
+import { createObjectHookRegistry, createObjectHookRunner } from "./object-hooks.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
 
-export { httpPeer, shardMapFromHttp };
+export { createObjectHookRegistry, httpPeer, shardMapFromHttp };
 
 export async function startRestoreStatusServer({
   port = 0,
@@ -71,6 +73,7 @@ export async function startServer({
   replicationHints,
   maxJsonBytes,
   imports,
+  objectHooks,
   interfaces = [],
   useDefaultInterfaces = true,
   cors = false,
@@ -80,8 +83,9 @@ export async function startServer({
   const authService = createAuthService(n, auth);
   const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret);
   const guard = createMemoryGuard(memoryGuard);
+  const hookRunner = createObjectHookRunner(n, objectHooks || createObjectHookRegistry());
   const scheduler = replication || createReplicationScheduler({ node: n, ...normalizeReplicationHintOptions(replicationHints) });
-  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus };
+  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus, objectHooks: hookRunner };
   if (persistence?.restoreScope) {
     n.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
   }
@@ -103,6 +107,7 @@ export async function startServer({
     forwardTimeoutMs,
     replicationScheduler: scheduler,
     imports,
+    objectHooks: hookRunner,
   });
   const activeInterfaces = [
     ...(useDefaultInterfaces ? defaultInterfaces() : []),
@@ -119,6 +124,7 @@ export async function startServer({
       if (!res.writableEnded) json(res, err.status || 500, err.body || { error: err.message }, err.headers || {});
     }
   });
+  server.once("close", () => hookRunner.dispose());
 
   await new Promise((resolve) => server.listen(port, resolve));
   state.server = server;
@@ -154,6 +160,7 @@ export function createInterfaceContext({
   forwardTimeoutMs,
   replicationScheduler,
   imports,
+  objectHooks,
 }) {
   const durableWrite = durability || {
     afterWrite: () => persistence?.afterWrite?.() || Promise.resolve({ records: 0, ops: 0 }),
@@ -168,7 +175,8 @@ export function createInterfaceContext({
     clusterSecret,
     memoryGuard,
     restoreStatus,
-    routing: new ShardRequestRouter({ node, forwardTimeoutMs }),
+    routing: new ShardRequestRouter({ node, forwardTimeoutMs, clusterSecret }),
+    objectHooks,
     replicationScheduler,
     durability: {
       ...durableWrite,
@@ -191,10 +199,6 @@ export function createInterfaceContext({
       shardMapFromHttp,
     },
   };
-}
-
-function normalizeClusterSecret(secret) {
-  return typeof secret === "string" && secret.length > 0 ? secret : null;
 }
 
 function normalizeReplicationHintOptions(options = {}) {

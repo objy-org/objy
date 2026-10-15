@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FastObject</title>
+<title>OBJY DB</title>
 <style>
   :root {
     --bg: #0d0e0f;
@@ -1490,9 +1490,9 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <img class="brand-logo" src="/fastobject-logo.png" alt="{[]...}">
+      <img class="brand-logo" src="/objy-db-logo.png" alt="OBJY DB {[]...}">
       <div>
-        <h1>FastObject</h1>
+        <h1>OBJY DB</h1>
         <small id="node-label">checking node</small>
       </div>
     </div>
@@ -3953,10 +3953,8 @@ function isPlainObject(value) {
 function openModal(id, focusId) {
   const modal = $(id);
   modal.classList.add("open");
-  requestAnimationFrame(() => {
-    const target = focusId ? $(focusId) : modal.querySelector("input, textarea, button");
-    target?.focus();
-  });
+  const target = focusId ? $(focusId) : modal.querySelector("input, textarea, button");
+  target?.focus();
 }
 
 function closeModal(id) {

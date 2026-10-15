@@ -1,7 +1,7 @@
 {
   "name": "spread-db",
   "version": "0.1.0",
-  "description": "In-memory, multi-master replicated database for dynamic stateless JS objects, backed by a columnar shape store.",
+  "description": "OBJY DB: an in-memory, sharded and replicated database for dynamic JavaScript objects.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -10,6 +10,8 @@
       "types": "./client/index.d.ts",
       "default": "./client/index.js"
     },
+    "./hooks": "./src/object-hooks.js",
+    "./server": "./src/server.js",
     "./*": "./*"
   },
   "scripts": {

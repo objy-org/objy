@@ -13,6 +13,7 @@ import {
   mergeAggregatePartials,
 } from "./aggregate.js";
 import { HNSWIndex } from "./hnsw.js";
+import { normalizeObjectHooksMeta } from "./object-hooks.js";
 import { compareSortValues, getPathValue, matchesQuery, stableKey, stripQueryControls } from "./query.js";
 import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from "./query-planner.js";
 import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
@@ -2639,15 +2640,18 @@ function normalizeCollectionMeta(meta = {}) {
   const next = clone(meta);
   delete next.columnIndexes;
   delete next.tiering;
+  delete next.hooks;
   const indexes = normalizeIndexList(meta.indexes, "indexes");
   const columns = normalizeIndexList(meta.columns, "columns");
   const tiering = normalizeTieringMeta(meta.tiering);
+  const hooks = normalizeObjectHooksMeta(meta.hooks);
   const out = {
     ...next,
     indexes,
     columns,
   };
   if (tiering) out.tiering = tiering;
+  if (hooks) out.hooks = hooks;
   return out;
 }
 

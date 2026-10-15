@@ -46,7 +46,7 @@ const NDJSON_MINIMAL_REQUIRED = "NDJSON write streams require Prefer: return=min
 export function createPublicObjectInterface() {
   return {
     name: "public-object",
-    register(router, { node, auth, routing, durability, memoryGuard, restoreStatus, replicationScheduler, files, imports }) {
+    register(router, { node, auth, routing, durability, memoryGuard, restoreStatus, replicationScheduler, files, imports, objectHooks }) {
       const secure = secureRoute(auth);
       const importLimits = normalizeImportLimits(imports);
 
@@ -196,7 +196,9 @@ export function createPublicObjectInterface() {
         }
         const created = node.getCollectionMeta(req.params.database, name) === null;
         try {
-          const meta = node.createCollection(req.params.database, name, collectionMetaFromBody(body));
+          const collectionMeta = collectionMetaFromBody(body);
+          objectHooks.validateMeta(collectionMeta);
+          const meta = node.createCollection(req.params.database, name, collectionMeta);
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
             await forwardSchemaChange(
@@ -257,6 +259,7 @@ export function createPublicObjectInterface() {
         const body = await readJson(req);
         if (!isPlainObject(body)) return json(res, 400, { error: "collection meta must be a plain object" });
         try {
+          objectHooks.validateMeta(body);
           const meta = node.setCollectionMeta(req.params.database, req.params.collection, body);
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
@@ -277,7 +280,22 @@ export function createPublicObjectInterface() {
       router.post("/api/:database/:collection/search", secure(async (req, res) => {
         const query = await readJson(req);
         if (!isPlainObject(query)) return json(res, 400, { error: "search body must be a JSON object" });
-        await executeCollectionQuery(req, res, { node, auth, routing, query });
+        try {
+          const result = await runObjectOperation({
+            req, node, routing, auth, objectHooks, operation: "read", variant: "query", input: { query },
+          }, ({ query: hookedQuery }) => {
+            if (!isPlainObject(hookedQuery)) throw httpError(400, "search body must be a JSON object");
+            return executeCollectionQuery(req, { node, routing, query: hookedQuery });
+          });
+          jsonWithQueryPath(
+            res,
+            200,
+            publicQueryResult(req, auth, req.params.database, req.params.collection, result),
+            result.path,
+          );
+        } catch (err) {
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+        }
       }));
 
       router.get("/api/:database/:collection/object", secure(async (req, res) => {
@@ -288,62 +306,103 @@ export function createPublicObjectInterface() {
           json(res, 400, { error: err.message });
           return;
         }
-        await executeCollectionQuery(req, res, { node, auth, routing, query });
+        try {
+          const result = await runObjectOperation({
+            req, node, routing, auth, objectHooks, operation: "read", variant: "query", input: { query },
+          }, ({ query: hookedQuery }) => {
+            if (!isPlainObject(hookedQuery)) throw httpError(400, "q must be a JSON object");
+            return executeCollectionQuery(req, { node, routing, query: hookedQuery });
+          });
+          jsonWithQueryPath(
+            res,
+            200,
+            publicQueryResult(req, auth, req.params.database, req.params.collection, result),
+            result.path,
+          );
+        } catch (err) {
+          json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+        }
       }));
 
       router.get("/api/:database/:collection/object/:id", secure(async (req, res) => {
         const refDepth = refDepthParam(req);
         try {
-          if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
-            const remote = await routing.forwardToObject(
-              req,
-              req.params.database,
-              req.params.collection,
-              req.params.id,
-              objectPath(req.params.database, req.params.collection, req.params.id),
-              { method: "GET", query: refDepthQuery(0), retryStatuses: [404, 409, 503] },
-            );
-            if (!ok(remote.status)) return proxyJson(res, remote);
-            const object = await expandObjectForRead({
-              req,
-              node,
-              routing,
-              database: req.params.database,
-              object: stripReferenceObjects(remote.body),
-              refDepth,
-            });
-            return json(res, 200, auth.redactObject(req.params.database, req.params.collection, object));
-          }
+          const result = await runObjectOperation({
+            req,
+            node,
+            routing,
+            objectHooks,
+            operation: "read",
+            variant: "single",
+            auth,
+            input: { ids: [req.params.id], options: { refDepth } },
+          }, async () => {
+            if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+              const remote = await routing.forwardToObject(
+                req,
+                req.params.database,
+                req.params.collection,
+                req.params.id,
+                objectPath(req.params.database, req.params.collection, req.params.id),
+                { method: "GET", query: refDepthQuery(0), retryStatuses: [404, 409, 503] },
+              );
+              if (!ok(remote.status)) return { status: remote.status, body: remote.body, headers: remote.headers };
+              const object = await expandObjectForRead({
+                req,
+                node,
+                routing,
+                database: req.params.database,
+                object: stripReferenceObjects(remote.body),
+                refDepth,
+              });
+              return { status: 200, body: object };
+            }
+
+            const object = node.get(req.params.database, req.params.collection, req.params.id);
+            if (!object) return { status: 404, body: { error: "not found" } };
+            assertReadAllowed(req, object);
+            return {
+              status: 200,
+              body: await expandObjectForRead({
+                req,
+                node,
+                routing,
+                database: req.params.database,
+                object,
+                refDepth,
+              }),
+            };
+          });
+          if (result.status !== 200) return json(res, result.status, result.body, result.headers || {});
+          assertReadAllowed(req, result.body);
+          json(res, 200, auth.redactObject(req.params.database, req.params.collection, result.body));
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
-
-        const object = node.get(req.params.database, req.params.collection, req.params.id);
-        if (!object) {
-          json(res, 404, { error: "not found" });
-          return;
-        }
-        assertReadAllowed(req, object);
-        const expanded = await expandObjectForRead({
-          req,
-          node,
-          routing,
-          database: req.params.database,
-          object,
-          refDepth,
-        });
-        json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
       }));
 
       router.get("/api/:database/:collection/object/:id/blob", secure(async (req, res) => {
         if (!files) return json(res, 404, { error: "file storage is not configured" });
         try {
-          const object = await readableObjectForFile({ req, node, routing });
-          if (!object) return json(res, 404, { error: "not found" });
-          if (!object._file) return json(res, 404, { error: "object has no file" });
-          const blob = await files.get(req.params.database, req.params.collection, req.params.id, object._file);
-          if (!blob) return json(res, 404, { error: "file not found" });
-          await writeBlobResponse(res, blob, object._file.mimeType);
+          const result = await runObjectOperation({
+            req,
+            node,
+            routing,
+            objectHooks,
+            operation: "read",
+            variant: "blob",
+            auth,
+            input: { ids: [req.params.id] },
+          }, async () => {
+            const object = await readableObjectForFile({ req, node, routing });
+            if (!object) return { status: 404, body: { error: "not found" } };
+            if (!object._file) return { status: 404, body: { error: "object has no file" } };
+            const blob = await files.get(req.params.database, req.params.collection, req.params.id, object._file);
+            if (!blob) return { status: 404, body: { error: "file not found" } };
+            return { status: 200, blob, mimeType: object._file.mimeType };
+          });
+          if (result.status !== 200) return json(res, result.status, result.body);
+          await writeBlobResponse(res, result.blob, result.mimeType);
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -352,10 +411,10 @@ export function createPublicObjectInterface() {
       router.post("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isMultipartRequest(req)) {
-          return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+          return multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits, objectHooks });
         }
         if (isNdjsonRequest(req)) {
-          return streamCreateObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+          return streamCreateObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits, objectHooks });
         }
         const body = await readJson(req);
         const isBulk = Array.isArray(body);
@@ -363,22 +422,27 @@ export function createPublicObjectInterface() {
         try {
           const items = prepareCreateObjects(files, req.params.database, req.params.collection, rawItems);
           const minimalBulkReturn = isBulk && prefersMinimalReturn(req);
-          const result = await routedCreateMany({
+          const result = await runObjectOperation({
+            req, node, routing, auth, objectHooks, operation: "create", variant: isBulk ? "bulk" : "single", input: { objects: items },
+          }, ({ objects }, context) => routedCreateMany({
             req,
             routing,
             auth,
             node,
             database: req.params.database,
             collection: req.params.collection,
-            objects: items,
+            objects: context ? prepareCreateObjects(files, req.params.database, req.params.collection, objects) : objects,
             durability,
             memoryGuard,
             imports: importLimits,
             minimalReturn: minimalBulkReturn,
-          });
-          if (minimalBulkReturn) return json(res, 201, { inserted: result.inserted });
+          }));
+          if (minimalBulkReturn && !Object.hasOwn(result, "responseOverride")) {
+            return json(res, 201, { inserted: result.inserted });
+          }
           const safeRows = auth.redactObjects(req.params.database, req.params.collection, result.items);
-          json(res, 201, isBulk ? { inserted: safeRows.length, items: safeRows } : safeRows[0]);
+          json(res, 201, writeResponse(req, auth, result,
+            isBulk ? { inserted: safeRows.length, items: safeRows } : safeRows[0]));
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -387,7 +451,7 @@ export function createPublicObjectInterface() {
       router.put("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isNdjsonRequest(req)) {
-          return streamReplaceObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+          return streamReplaceObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits, objectHooks });
         }
         const body = await readJson(req);
         if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
@@ -395,14 +459,18 @@ export function createPublicObjectInterface() {
         if (error) return json(res, 400, error);
         try {
           const objects = normalizeFileObjects(files, req.params.database, req.params.collection, body);
-          const result = await routedWriteMany({
+          const result = await runObjectOperation({
+            req, node, routing, auth, objectHooks, operation: "update", variant: "bulk-replace", input: { objects },
+          }, ({ objects: hookedObjects }, context) => routedWriteMany({
             req,
             routing,
             auth,
             node,
             database: req.params.database,
             collection: req.params.collection,
-            objects,
+            objects: context
+              ? validateAndNormalizeObjects(files, req.params.database, req.params.collection, hookedObjects)
+              : hookedObjects,
             method: "PUT",
             resultKey: "replaced",
             partial: false,
@@ -413,10 +481,10 @@ export function createPublicObjectInterface() {
             imports: importLimits,
             localWriteCount: (prepared) => node.replaceManyCount(req.params.database, req.params.collection, prepared),
             minimalReturn: prefersMinimalReturn(req),
-          });
-          json(res, 200, result.items
+          }));
+          json(res, 200, writeResponse(req, auth, result, result.items
             ? auth.redactResult(req.params.database, req.params.collection, result)
-            : result);
+            : result));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -425,30 +493,32 @@ export function createPublicObjectInterface() {
       router.patch("/api/:database/:collection/object", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isNdjsonRequest(req)) {
-          return streamPatchObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+          return streamPatchObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits, objectHooks });
         }
         const body = await readJson(req);
         if (!Array.isArray(body)) return json(res, 400, { error: "body must be an array of objects with _id" });
         const error = validatePlainObjects(body, { requireId: true });
         if (error) return json(res, 400, error);
         try {
-          const result = await routedPatchMany({
+          const result = await runObjectOperation({
+            req, node, routing, auth, objectHooks, operation: "update", variant: "bulk-patch", input: { patches: body },
+          }, ({ patches }, context) => routedPatchMany({
             req,
             routing,
             auth,
             node,
             database: req.params.database,
             collection: req.params.collection,
-            patches: body,
+            patches: context ? validatePatches(patches) : patches,
             durability,
             memoryGuard,
             files,
             imports: importLimits,
             minimalReturn: prefersMinimalReturn(req),
-          });
-          json(res, 200, result.items
+          }));
+          json(res, 200, writeResponse(req, auth, result, result.items
             ? auth.redactResult(req.params.database, req.params.collection, result)
-            : result);
+            : result));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -467,6 +537,8 @@ export function createPublicObjectInterface() {
             imports: importLimits,
             database: req.params.database,
             collection: req.params.collection,
+            objectHooks,
+            auth,
           });
         }
         let ids;
@@ -476,9 +548,20 @@ export function createPublicObjectInterface() {
           return json(res, 400, errorBody(err));
         }
         try {
-          json(res, 200, await routedRemoveMany(req, routing, node, durability, req.params.database, req.params.collection, ids, files, {
-            minimalReturn: prefersMinimalReturn(req),
-          }));
+          const result = await runObjectOperation({
+            req, node, routing, auth, objectHooks, operation: "delete", variant: "bulk", input: { ids },
+          }, ({ ids: hookedIds }) => routedRemoveMany(
+            req,
+            routing,
+            node,
+            durability,
+            req.params.database,
+            req.params.collection,
+            normalizeHookIds(hookedIds),
+            files,
+            { minimalReturn: prefersMinimalReturn(req) },
+          ));
+          json(res, 200, writeResponse(req, auth, result, result));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -487,57 +570,76 @@ export function createPublicObjectInterface() {
       router.put("/api/:database/:collection/object/:id", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         if (isMultipartRequest(req)) {
-          return multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits });
+          return multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports: importLimits, objectHooks });
         }
         const body = await readJson(req);
         const error = validatePlainObjects([body || {}]);
         if (error) return json(res, 400, error);
         const refDepth = refDepthParam(req);
         try {
-          if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
-            const remote = await routing.forwardToObject(
-              req,
-              req.params.database,
-              req.params.collection,
-              req.params.id,
-              objectPath(req.params.database, req.params.collection, req.params.id),
-              { method: "PUT", body, query: refDepthQuery(0) },
-            );
-            if (!ok(remote.status)) return proxyJson(res, remote);
-            const object = await expandObjectForRead({
-              req,
-              node,
-              routing,
-              database: req.params.database,
-              object: stripReferenceObjects(remote.body),
-              refDepth,
-            });
-            return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, object));
-          }
-          const [prepared] = auth.prepareWriteObjects(
-            req.params.database,
-            req.params.collection,
-            [{ ...(body || {}), _id: req.params.id }],
-            { partial: false },
-          );
-          const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
-          assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
-          assertUpsertAllowed(req, node, req.params.database, req.params.collection, [preparedObject], { partial: false });
-          assertMemoryGuardAcceptsWrites(memoryGuard);
-          const before = node.get(req.params.database, req.params.collection, req.params.id);
-          node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
-          await afterLocalWrite(durability);
-          const object = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
-          await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [object]);
-          const expanded = await expandObjectForRead({
+          const result = await runObjectOperation({
             req,
             node,
             routing,
-            database: req.params.database,
-            object,
-            refDepth,
+            objectHooks,
+            auth,
+            operation: "update",
+            variant: "single-replace",
+            input: { objects: [{ ...(body || {}), _id: req.params.id }] },
+          }, async ({ objects }) => {
+            const object = singlePathObject(objects, req.params.id);
+            if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+              const remote = await routing.forwardToObject(
+                req,
+                req.params.database,
+                req.params.collection,
+                req.params.id,
+                objectPath(req.params.database, req.params.collection, req.params.id),
+                { method: "PUT", body: object, query: refDepthQuery(0) },
+              );
+              if (!ok(remote.status)) return { status: remote.status, body: remote.body, headers: remote.headers };
+              return {
+                status: remote.status,
+                body: await expandObjectForRead({
+                  req,
+                  node,
+                  routing,
+                  database: req.params.database,
+                  object: stripReferenceObjects(remote.body),
+                  refDepth,
+                }),
+              };
+            }
+            const [prepared] = auth.prepareWriteObjects(
+              req.params.database,
+              req.params.collection,
+              [object],
+              { partial: false },
+            );
+            const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
+            assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
+            assertUpsertAllowed(req, node, req.params.database, req.params.collection, [preparedObject], { partial: false });
+            assertMemoryGuardAcceptsWrites(memoryGuard);
+            const before = node.get(req.params.database, req.params.collection, req.params.id);
+            node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
+            await afterLocalWrite(durability);
+            const written = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
+            await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [written]);
+            return {
+              status: 200,
+              body: await expandObjectForRead({
+                req,
+                node,
+                routing,
+                database: req.params.database,
+                object: written,
+                refDepth,
+              }),
+            };
           });
-          json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
+          if (!ok(result.status)) return json(res, result.status, result.body, result.headers || {});
+          json(res, result.status, writeResponse(req, auth, result,
+            auth.redactObject(req.params.database, req.params.collection, result.body)));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -550,59 +652,78 @@ export function createPublicObjectInterface() {
         if (error) return json(res, 400, error);
         const refDepth = refDepthParam(req);
         try {
-          if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
-            const remote = await routing.forwardToObject(
-              req,
-              req.params.database,
-              req.params.collection,
-              req.params.id,
-              objectPath(req.params.database, req.params.collection, req.params.id),
-              { method: "PATCH", body, query: refDepthQuery(0) },
-            );
-            if (!ok(remote.status)) return proxyJson(res, remote);
-            const object = await expandObjectForRead({
-              req,
-              node,
-              routing,
-              database: req.params.database,
-              object: stripReferenceObjects(remote.body),
-              refDepth,
-            });
-            return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, object));
-          }
-          const patchedObject = compilePatchedObject({
-            node,
-            database: req.params.database,
-            collection: req.params.collection,
-            id: req.params.id,
-            patch: body || {},
-            files,
-          });
-          if (!patchedObject) return json(res, 404, { error: "not found" });
-          const [prepared] = auth.prepareWriteObjects(
-            req.params.database,
-            req.params.collection,
-            [patchedObject],
-            { partial: true },
-          );
-          const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
-          assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
-          assertUpdateAllowed(req, node, req.params.database, req.params.collection, [preparedObject]);
-          assertMemoryGuardAcceptsWrites(memoryGuard);
-          const before = node.get(req.params.database, req.params.collection, req.params.id);
-          node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
-          await afterLocalWrite(durability);
-          const object = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
-          await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [object]);
-          const expanded = await expandObjectForRead({
+          const result = await runObjectOperation({
             req,
             node,
             routing,
-            database: req.params.database,
-            object,
-            refDepth,
+            objectHooks,
+            operation: "update",
+            variant: "single-patch",
+            auth,
+            input: { patches: [{ ...(body || {}), _id: req.params.id }] },
+          }, async ({ patches }) => {
+            const patch = singlePathObject(patches, req.params.id);
+            if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+              const remote = await routing.forwardToObject(
+                req,
+                req.params.database,
+                req.params.collection,
+                req.params.id,
+                objectPath(req.params.database, req.params.collection, req.params.id),
+                { method: "PATCH", body: withoutObjectId(patch), query: refDepthQuery(0) },
+              );
+              if (!ok(remote.status)) return { status: remote.status, body: remote.body, headers: remote.headers };
+              return {
+                status: remote.status,
+                body: await expandObjectForRead({
+                  req,
+                  node,
+                  routing,
+                  database: req.params.database,
+                  object: stripReferenceObjects(remote.body),
+                  refDepth,
+                }),
+              };
+            }
+            const patchedObject = compilePatchedObject({
+              node,
+              database: req.params.database,
+              collection: req.params.collection,
+              id: req.params.id,
+              patch: withoutObjectId(patch),
+              files,
+            });
+            if (!patchedObject) return { status: 404, body: { error: "not found" } };
+            const [prepared] = auth.prepareWriteObjects(
+              req.params.database,
+              req.params.collection,
+              [patchedObject],
+              { partial: true },
+            );
+            const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
+            assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
+            assertUpdateAllowed(req, node, req.params.database, req.params.collection, [preparedObject]);
+            assertMemoryGuardAcceptsWrites(memoryGuard);
+            const before = node.get(req.params.database, req.params.collection, req.params.id);
+            node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
+            await afterLocalWrite(durability);
+            const written = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
+            await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [written]);
+            return {
+              status: 200,
+              body: await expandObjectForRead({
+                req,
+                node,
+                routing,
+                database: req.params.database,
+                object: written,
+                refDepth,
+              }),
+            };
           });
-          json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
+          if (!ok(result.status)) return json(res, result.status, result.body, result.headers || {});
+          json(res, result.status, writeResponse(req, auth, result,
+            auth.redactObject(req.params.database, req.params.collection, result.body)));
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -611,34 +732,148 @@ export function createPublicObjectInterface() {
       router.delete("/api/:database/:collection/object/:id", secure(async (req, res) => {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         try {
-          if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
-            const remote = await routing.forwardToObject(
-              req,
-              req.params.database,
-              req.params.collection,
-              req.params.id,
-              objectPath(req.params.database, req.params.collection, req.params.id),
-              { method: "DELETE" },
-            );
-            return proxyJson(res, remote);
-          }
+          const result = await runObjectOperation({
+            req,
+            node,
+            routing,
+            objectHooks,
+            operation: "delete",
+            variant: "single",
+            auth,
+            input: { ids: [req.params.id] },
+          }, async () => {
+            if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+              return routing.forwardToObject(
+                req,
+                req.params.database,
+                req.params.collection,
+                req.params.id,
+                objectPath(req.params.database, req.params.collection, req.params.id),
+                { method: "DELETE" },
+              );
+            }
+            const existing = node.get(req.params.database, req.params.collection, req.params.id);
+            if (!existing) return { status: 404, body: { error: "not found" } };
+            assertDeleteAllowed(req, [existing], req.params.database);
+            const removed = node.remove(req.params.database, req.params.collection, req.params.id);
+            if (!removed) return { status: 404, body: { error: "not found" } };
+            await afterLocalWrite(durability);
+            await deleteObjectFiles(files, req.params.database, req.params.collection, [existing]);
+            return { status: 204, body: null };
+          });
+          json(res, Object.hasOwn(result, "responseOverride") ? 200 : result.status,
+            writeResponse(req, auth, result, result.body), result.headers || {});
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
-        const existing = node.get(req.params.database, req.params.collection, req.params.id);
-        if (!existing) return json(res, 404, { error: "not found" });
-        assertDeleteAllowed(req, [existing], req.params.database);
-        const ok = node.remove(req.params.database, req.params.collection, req.params.id);
-        if (!ok) return json(res, 404, { error: "not found" });
-        await afterLocalWrite(durability);
-        await deleteObjectFiles(files, req.params.database, req.params.collection, [existing]);
-        json(res, 204);
       }));
     },
   };
 }
 
-async function multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+function runObjectOperation({
+  req,
+  node,
+  routing,
+  auth,
+  objectHooks,
+  operation,
+  variant,
+  input,
+  batch = null,
+}, execute) {
+  if (!objectHooks || routing.isForwarded(req)) return execute(input, null);
+  return objectHooks.run({
+    operation,
+    variant,
+    database: req.params.database,
+    collection: req.params.collection,
+    input,
+    principal: req.auth?.user || null,
+    batch,
+    lookup: createHookLookup(req, node, routing, auth),
+  }, execute);
+}
+
+function writeResponse(req, auth, result, ordinaryBody) {
+  return Object.hasOwn(result, "responseOverride")
+    ? auth.redactObject(req.params.database, req.params.collection, result.responseOverride)
+    : ordinaryBody;
+}
+
+function createHookLookup(req, node, routing, auth) {
+  const database = req.params.database;
+  const find = async (collection, criteria = {}, options = {}) => {
+    if (typeof collection !== "string" || !collection) throw httpError(400, "lookup collection is required");
+    const access = readCriteriaForRequest(req, criteria, collection);
+    if (access.denied) return [];
+    const result = await routing.find(req, database, collection, access.query, {
+      limit: options.limit ?? 250,
+      offset: options.offset ?? 0,
+      refDepth: 0,
+    });
+    const readable = (result.objects || []).filter((object) => canRead(permissionUser(req), object, collection));
+    return auth.redactObjects(database, collection, readable);
+  };
+  return Object.freeze({
+    find,
+    async get(collection, id) {
+      if (typeof collection !== "string" || !collection) throw httpError(400, "lookup collection is required");
+      const object = await resolveReferencedObject({
+        req, node, routing, database, collection, id: String(id),
+      });
+      return object ? auth.redactObject(database, collection, object) : null;
+    },
+  });
+}
+
+function publicQueryResult(req, auth, database, collection, result) {
+  if (!result.objectRows) return result.body;
+  const readable = (result.body || []).filter((object) => canRead(permissionUser(req), object, collection));
+  return auth.redactObjects(database, collection, readable);
+}
+
+function validateAndNormalizeObjects(files, database, collection, objects) {
+  const error = validatePlainObjects(objects || [], { requireId: true });
+  if (error) throw validationError(error);
+  return normalizeFileObjects(files, database, collection, objects);
+}
+
+function validatePatches(patches) {
+  const error = validatePlainObjects(patches || [], { requireId: true });
+  if (error) throw validationError(error);
+  return patches;
+}
+
+function normalizeHookIds(ids) {
+  if (!Array.isArray(ids)) throw httpError(400, "hook input.ids must be an array");
+  return parseNdjsonIds(ids);
+}
+
+function singleObject(objects) {
+  if (!Array.isArray(objects) || objects.length !== 1) {
+    throw httpError(400, "single-object hook input must contain exactly one object");
+  }
+  const error = validatePlainObjects(objects, { requireId: true });
+  if (error) throw validationError(error);
+  return objects[0];
+}
+
+function singlePathObject(objects, id) {
+  if (!Array.isArray(objects) || objects.length !== 1) {
+    throw httpError(400, "single-object hook input must contain exactly one object");
+  }
+  const error = validatePlainObjects(objects);
+  if (error) throw validationError(error);
+  return { ...objects[0], _id: String(id) };
+}
+
+function withoutObjectId(object = {}) {
+  const { _id, ...rest } = object;
+  return rest;
+}
+
+async function multipartCreateObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports, objectHooks }) {
   if (!files) return json(res, 404, { error: "file storage is not configured" });
   try {
     assertMemoryGuardAcceptsWrites(memoryGuard);
@@ -649,59 +884,77 @@ async function multipartCreateObject({ req, res, node, auth, routing, durability
     const error = validatePlainObjects([object]);
     if (error) return json(res, 400, error);
     const item = withObjectIds([object])[0];
-
-    if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, item._id)) {
-      const forwarded = buildMultipartObjectFile({ object: item, file });
-      const remote = await routing.forwardToObjectRaw(
-        req,
-        req.params.database,
-        req.params.collection,
-        item._id,
-        objectPath(req.params.database, req.params.collection),
-        {
-          method: "POST",
-          body: forwarded.body,
-          contentType: forwarded.contentType,
-          query: refDepthQuery(0),
-        },
-      );
-      if (!ok(remote.status)) return proxyJson(res, remote);
-      const expanded = await expandObjectForRead({
-        req,
-        node,
-        routing,
-        database: req.params.database,
-        object: stripReferenceObjects(remote.body),
-        refDepth: refDepthParam(req),
-      });
-      return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, expanded));
-    }
-
-    if (node.get(req.params.database, req.params.collection, item._id)) {
-      throw httpError(409, `object already exists: ${item._id}`);
-    }
-    const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
-    const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
-    assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
-    assertCreateAllowed(req, [prepared], req.params.database);
-    await files.put(req.params.database, req.params.collection, item._id, objectWithFile._file, file);
-    const [row] = node.insertMany(req.params.database, req.params.collection, [prepared]);
-    await afterLocalWrite(durability);
-    const expanded = await expandObjectForRead({
+    const result = await runObjectOperation({
       req,
       node,
       routing,
-      database: req.params.database,
-      object: stripReferenceObjects(row),
-      refDepth: refDepthParam(req),
+      objectHooks,
+      operation: "create",
+      variant: "file",
+      auth,
+      input: { objects: [item], file },
+    }, async ({ objects, file: hookedFile }) => {
+      const hookedItem = singleObject(objects);
+      if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, hookedItem._id)) {
+        const forwarded = buildMultipartObjectFile({ object: hookedItem, file: hookedFile });
+        const remote = await routing.forwardToObjectRaw(
+          req,
+          req.params.database,
+          req.params.collection,
+          hookedItem._id,
+          objectPath(req.params.database, req.params.collection),
+          {
+            method: "POST",
+            body: forwarded.body,
+            contentType: forwarded.contentType,
+            query: refDepthQuery(0),
+          },
+        );
+        if (!ok(remote.status)) return { status: remote.status, body: remote.body, headers: remote.headers };
+        return {
+          status: remote.status,
+          body: await expandObjectForRead({
+            req,
+            node,
+            routing,
+            database: req.params.database,
+            object: stripReferenceObjects(remote.body),
+            refDepth: refDepthParam(req),
+          }),
+        };
+      }
+
+      if (node.get(req.params.database, req.params.collection, hookedItem._id)) {
+        throw httpError(409, `object already exists: ${hookedItem._id}`);
+      }
+      const objectWithFile = files.attach(req.params.database, req.params.collection, hookedItem, hookedFile);
+      const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
+      assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
+      assertCreateAllowed(req, [prepared], req.params.database);
+      await files.put(req.params.database, req.params.collection, hookedItem._id, objectWithFile._file, hookedFile);
+      const [row] = node.insertMany(req.params.database, req.params.collection, [prepared]);
+      await afterLocalWrite(durability);
+      return {
+        status: 201,
+        body: await expandObjectForRead({
+          req,
+          node,
+          routing,
+          database: req.params.database,
+          object: stripReferenceObjects(row),
+          refDepth: refDepthParam(req),
+        }),
+      };
     });
-    return json(res, 201, auth.redactObject(req.params.database, req.params.collection, expanded));
+    if (!ok(result.status)) return json(res, result.status, result.body, result.headers || {});
+    return json(res, result.status, writeResponse(req, auth, result,
+      auth.redactObject(req.params.database, req.params.collection, result.body)));
   } catch (err) {
     return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
   }
 }
 
-async function multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+async function multipartReplaceObject({ req, res, node, auth, routing, durability, memoryGuard, files, imports, objectHooks }) {
   if (!files) return json(res, 404, { error: "file storage is not configured" });
   try {
     assertMemoryGuardAcceptsWrites(memoryGuard);
@@ -712,53 +965,71 @@ async function multipartReplaceObject({ req, res, node, auth, routing, durabilit
     const error = validatePlainObjects([object]);
     if (error) return json(res, 400, error);
     const item = { ...object, _id: req.params.id };
-
-    if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
-      const forwarded = buildMultipartObjectFile({ object: item, file });
-      const remote = await routing.forwardToObjectRaw(
-        req,
-        req.params.database,
-        req.params.collection,
-        req.params.id,
-        objectPath(req.params.database, req.params.collection, req.params.id),
-        {
-          method: "PUT",
-          body: forwarded.body,
-          contentType: forwarded.contentType,
-          query: refDepthQuery(0),
-        },
-      );
-      if (!ok(remote.status)) return proxyJson(res, remote);
-      const expanded = await expandObjectForRead({
-        req,
-        node,
-        routing,
-        database: req.params.database,
-        object: stripReferenceObjects(remote.body),
-        refDepth: refDepthParam(req),
-      });
-      return json(res, remote.status, auth.redactObject(req.params.database, req.params.collection, expanded));
-    }
-
-    const objectWithFile = files.attach(req.params.database, req.params.collection, item, file);
-    const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
-    assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
-    assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
-    const before = node.get(req.params.database, req.params.collection, req.params.id);
-    await files.put(req.params.database, req.params.collection, req.params.id, objectWithFile._file, file);
-    node.replace(req.params.database, req.params.collection, req.params.id, prepared);
-    await afterLocalWrite(durability);
-    const row = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
-    await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [row]);
-    const expanded = await expandObjectForRead({
+    const result = await runObjectOperation({
       req,
       node,
       routing,
-      database: req.params.database,
-      object: stripReferenceObjects(row),
-      refDepth: refDepthParam(req),
+      objectHooks,
+      operation: "update",
+      variant: "file",
+      auth,
+      input: { objects: [item], file },
+    }, async ({ objects, file: hookedFile }) => {
+      const hookedItem = singlePathObject(objects, req.params.id);
+      if (!routing.shouldHandleObjectLocally(req, req.params.database, req.params.collection, req.params.id)) {
+        const forwarded = buildMultipartObjectFile({ object: hookedItem, file: hookedFile });
+        const remote = await routing.forwardToObjectRaw(
+          req,
+          req.params.database,
+          req.params.collection,
+          req.params.id,
+          objectPath(req.params.database, req.params.collection, req.params.id),
+          {
+            method: "PUT",
+            body: forwarded.body,
+            contentType: forwarded.contentType,
+            query: refDepthQuery(0),
+          },
+        );
+        if (!ok(remote.status)) return { status: remote.status, body: remote.body, headers: remote.headers };
+        return {
+          status: remote.status,
+          body: await expandObjectForRead({
+            req,
+            node,
+            routing,
+            database: req.params.database,
+            object: stripReferenceObjects(remote.body),
+            refDepth: refDepthParam(req),
+          }),
+        };
+      }
+
+      const objectWithFile = files.attach(req.params.database, req.params.collection, hookedItem, hookedFile);
+      const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
+      assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
+      assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
+      const before = node.get(req.params.database, req.params.collection, req.params.id);
+      await files.put(req.params.database, req.params.collection, req.params.id, objectWithFile._file, hookedFile);
+      node.replace(req.params.database, req.params.collection, req.params.id, prepared);
+      await afterLocalWrite(durability);
+      const row = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
+      await deleteRemovedFiles(files, req.params.database, req.params.collection, [before], [row]);
+      return {
+        status: 200,
+        body: await expandObjectForRead({
+          req,
+          node,
+          routing,
+          database: req.params.database,
+          object: stripReferenceObjects(row),
+          refDepth: refDepthParam(req),
+        }),
+      };
     });
-    return json(res, 200, auth.redactObject(req.params.database, req.params.collection, expanded));
+    if (!ok(result.status)) return json(res, result.status, result.body, result.headers || {});
+    return json(res, result.status, writeResponse(req, auth, result,
+      auth.redactObject(req.params.database, req.params.collection, result.body)));
   } catch (err) {
     return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
   }
@@ -784,77 +1055,72 @@ async function readableObjectForFile({ req, node, routing }) {
   return object || null;
 }
 
-async function executeCollectionQuery(req, res, { node, auth, routing, query }) {
+async function executeCollectionQuery(req, { node, routing, query }) {
   const { criteria, controls } = splitQueryControls(query);
   const database = req.params.database;
   const collection = req.params.collection;
 
-  try {
-    const access = readCriteriaForRequest(req, criteria);
-    if (access.denied) return jsonWithQueryPath(res, 200, [], "permission-denied");
-    const securedCriteria = access.query;
-    const options = queryOptions(req, controls);
-    if (controls.$aggregate !== undefined) {
-      if (controls.$vector !== undefined) {
-        return json(res, 400, { error: "$aggregate and $vector are mutually exclusive" });
-      }
-      const queryDepth = referenceDepthForQuery(securedCriteria);
-      const aggregateDepth = referenceDepthForAggregateSpec(controls.$aggregate);
-      if (queryDepth > 0 || aggregateDepth > 0) {
-        const rows = await findReferenceAwareRows({
-          req,
-          node,
-          routing,
-          database,
-          collection,
-          criteria: securedCriteria,
-          options: { refDepth: Math.max(queryDepth, aggregateDepth) },
-        });
-        return jsonWithQueryPath(res, 200, aggregateRows(rows.rows, controls.$aggregate), aggregateReferencePath(rows.path));
-      }
-      const result = await routing.aggregate(req, database, collection, securedCriteria, controls.$aggregate);
-      return jsonWithQueryPath(res, 200, result.rows, result.path);
-    }
-
+  const access = readCriteriaForRequest(req, criteria);
+  if (access.denied) return { body: [], path: "permission-denied" };
+  const securedCriteria = access.query;
+  const options = queryOptions(req, controls);
+  if (controls.$aggregate !== undefined) {
     if (controls.$vector !== undefined) {
-      if (referenceDepthForQuery(securedCriteria) > 0) {
-        return json(res, 400, { error: "$vector cannot be combined with reference object paths yet" });
-      }
-      const vector = parseVectorSearch(controls.$vector);
-      const rows = await routing.vectorSearch(req, database, collection, securedCriteria, vector, options);
-      const expanded = await expandObjectsForRead({
+      throw httpError(400, "$aggregate and $vector are mutually exclusive");
+    }
+    const queryDepth = referenceDepthForQuery(securedCriteria);
+    const aggregateDepth = referenceDepthForAggregateSpec(controls.$aggregate);
+    if (queryDepth > 0 || aggregateDepth > 0) {
+      const rows = await findReferenceAwareRows({
         req,
         node,
         routing,
         database,
         collection,
-        objects: rows,
-        refDepth: options.refDepth,
+        criteria: securedCriteria,
+        options: { refDepth: Math.max(queryDepth, aggregateDepth) },
       });
-      return jsonWithQueryPath(
-        res,
-        200,
-        auth.redactObjects(database, collection, expanded),
-        Object.keys(securedCriteria || {}).length > 0 ? "vector-filter" : "vector-index",
-      );
+      return { body: aggregateRows(rows.rows, controls.$aggregate), path: aggregateReferencePath(rows.path) };
     }
+    const result = await routing.aggregate(req, database, collection, securedCriteria, controls.$aggregate);
+    return { body: result.rows, path: result.path };
+  }
 
-    const result = await findPublicObjects({
+  if (controls.$vector !== undefined) {
+    if (referenceDepthForQuery(securedCriteria) > 0) {
+      throw httpError(400, "$vector cannot be combined with reference object paths yet");
+    }
+    const vector = parseVectorSearch(controls.$vector);
+    const rows = await routing.vectorSearch(req, database, collection, securedCriteria, vector, options);
+    const expanded = await expandObjectsForRead({
       req,
       node,
       routing,
       database,
       collection,
-      criteria: securedCriteria,
-      options,
+      objects: rows,
+      refDepth: options.refDepth,
     });
-    jsonWithQueryPath(res, 200, auth.redactObjects(database, collection, result.objects), result.path);
-  } catch (err) {
-    json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
+    return {
+      body: expanded,
+      path: Object.keys(securedCriteria || {}).length > 0 ? "vector-filter" : "vector-index",
+      objectRows: true,
+    };
   }
+
+  const result = await findPublicObjects({
+    req,
+    node,
+    routing,
+    database,
+    collection,
+    criteria: securedCriteria,
+    options,
+  });
+  return { body: result.objects, path: result.path, objectRows: true };
 }
 
-async function streamCreateObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+async function streamCreateObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports, objectHooks }) {
   if (rejectNdjsonWithoutMinimal(req, res)) return;
   const result = { inserted: 0 };
   try {
@@ -868,22 +1134,34 @@ async function streamCreateObjects({ req, res, node, auth, routing, durability, 
         objects,
         { mutateIds: true },
       ),
-      write: async (objects) => {
-        const written = await routedCreateMany({
+      write: async (objects, batchIndex) => {
+        const written = await runObjectOperation({
+          req,
+          node,
+          routing,
+          objectHooks,
+          operation: "create",
+          variant: "stream",
+          auth,
+          input: { objects },
+          batch: { index: batchIndex, streaming: true },
+        }, ({ objects: hookedObjects }, context) => routedCreateMany({
           req,
           routing,
           auth,
           node,
           database: req.params.database,
           collection: req.params.collection,
-          objects,
+          objects: context
+            ? prepareCreateObjects(files, req.params.database, req.params.collection, hookedObjects)
+            : hookedObjects,
           durability,
           memoryGuard,
           imports,
           minimalReturn: true,
           ignoreBodyBytes: true,
-          validatedObjectBytes: true,
-        });
+          validatedObjectBytes: !context,
+        }));
         result.inserted += written.inserted;
       },
     });
@@ -893,7 +1171,7 @@ async function streamCreateObjects({ req, res, node, auth, routing, durability, 
   }
 }
 
-async function streamReplaceObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+async function streamReplaceObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports, objectHooks }) {
   if (rejectNdjsonWithoutMinimal(req, res)) return;
   const result = { replaced: 0 };
   try {
@@ -905,15 +1183,27 @@ async function streamReplaceObjects({ req, res, node, auth, routing, durability,
         if (error) throw validationError(error);
         return normalizeFileObjects(files, req.params.database, req.params.collection, objects);
       },
-      write: async (objects) => {
-        const written = await routedWriteMany({
+      write: async (objects, batchIndex) => {
+        const written = await runObjectOperation({
+          req,
+          node,
+          routing,
+          objectHooks,
+          operation: "update",
+          variant: "stream-replace",
+          auth,
+          input: { objects },
+          batch: { index: batchIndex, streaming: true },
+        }, ({ objects: hookedObjects }, context) => routedWriteMany({
           req,
           routing,
           auth,
           node,
           database: req.params.database,
           collection: req.params.collection,
-          objects,
+          objects: context
+            ? validateAndNormalizeObjects(files, req.params.database, req.params.collection, hookedObjects)
+            : hookedObjects,
           method: "PUT",
           resultKey: "replaced",
           partial: false,
@@ -925,8 +1215,8 @@ async function streamReplaceObjects({ req, res, node, auth, routing, durability,
           imports,
           minimalReturn: true,
           ignoreBodyBytes: true,
-          validatedObjectBytes: true,
-        });
+          validatedObjectBytes: !context,
+        }));
         result.replaced += written.replaced;
       },
     });
@@ -936,7 +1226,7 @@ async function streamReplaceObjects({ req, res, node, auth, routing, durability,
   }
 }
 
-async function streamPatchObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports }) {
+async function streamPatchObjects({ req, res, node, auth, routing, durability, memoryGuard, files, imports, objectHooks }) {
   if (rejectNdjsonWithoutMinimal(req, res)) return;
   const result = { updated: 0, skipped: 0 };
   try {
@@ -948,23 +1238,33 @@ async function streamPatchObjects({ req, res, node, auth, routing, durability, m
         if (error) throw validationError(error);
         return objects;
       },
-      write: async (patches) => {
-        const written = await routedPatchMany({
+      write: async (patches, batchIndex) => {
+        const written = await runObjectOperation({
+          req,
+          node,
+          routing,
+          objectHooks,
+          operation: "update",
+          variant: "stream-patch",
+          auth,
+          input: { patches },
+          batch: { index: batchIndex, streaming: true },
+        }, ({ patches: hookedPatches }, context) => routedPatchMany({
           req,
           routing,
           auth,
           node,
           database: req.params.database,
           collection: req.params.collection,
-          patches,
+          patches: context ? validatePatches(hookedPatches) : hookedPatches,
           durability,
           memoryGuard,
           files,
           imports,
           minimalReturn: true,
           ignoreBodyBytes: true,
-          validatedObjectBytes: true,
-        });
+          validatedObjectBytes: !context,
+        }));
         result.updated += written.updated;
         result.skipped += written.skipped;
       },
@@ -975,7 +1275,7 @@ async function streamPatchObjects({ req, res, node, auth, routing, durability, m
   }
 }
 
-async function streamRemoveObjects({ req, res, node, routing, durability, files, imports, database, collection }) {
+async function streamRemoveObjects({ req, res, node, routing, auth, durability, files, imports, database, collection, objectHooks }) {
   if (rejectNdjsonWithoutMinimal(req, res)) return;
   const result = { deleted: 0, skipped: 0 };
   try {
@@ -983,26 +1283,39 @@ async function streamRemoveObjects({ req, res, node, routing, durability, files,
       req,
       imports,
       prepare: parseNdjsonIds,
-      write: async (ids) => {
-        assertImportWriteAccepts({
+      write: async (ids, batchIndex) => {
+        const removed = await runObjectOperation({
           req,
-          imports,
-          durability,
-          objects: ids.map((id) => ({ _id: id })),
-          ignoreBodyBytes: true,
-          validatedObjectBytes: true,
-        });
-        const removed = await routedRemoveMany(
-          req,
-          routing,
           node,
-          durability,
-          database,
-          collection,
-          ids,
-          files,
-          { minimalReturn: true },
-        );
+          routing,
+          objectHooks,
+          operation: "delete",
+          variant: "stream",
+          auth,
+          input: { ids },
+          batch: { index: batchIndex, streaming: true },
+        }, ({ ids: hookedIds }, context) => {
+          const normalizedIds = normalizeHookIds(hookedIds);
+          assertImportWriteAccepts({
+            req,
+            imports,
+            durability,
+            objects: normalizedIds.map((id) => ({ _id: id })),
+            ignoreBodyBytes: true,
+            validatedObjectBytes: !context,
+          });
+          return routedRemoveMany(
+            req,
+            routing,
+            node,
+            durability,
+            database,
+            collection,
+            normalizedIds,
+            files,
+            { minimalReturn: true },
+          );
+        });
         result.deleted += removed.deleted;
         result.skipped += removed.skipped;
       },
@@ -1489,7 +1802,7 @@ async function resolveReferencedObject({ req, node, routing, database, collectio
   const shard = routing.shardForObject(database, collection, id);
   if (routing.ownsShard(shard)) {
     const object = node.get(database, collection, id, { refDepth: 0 }) || null;
-    if (object) assertReadAllowed(req, object);
+    if (object) assertReadAllowed(req, object, collection);
     return object;
   }
 
@@ -1537,19 +1850,19 @@ function isAdminRequest(req, auth) {
   return auth.enabled === false || isPermissionBypass(permissionUser(req));
 }
 
-function readCriteriaForRequest(req, criteria = {}) {
-  return mergeReadPermissionQuery(criteria, permissionUser(req));
+function readCriteriaForRequest(req, criteria = {}, collection = req.params?.collection) {
+  return mergeReadPermissionQuery(criteria, permissionUser(req), collection);
 }
 
-function assertReadAllowed(req, object) {
-  if (!canRead(permissionUser(req), object)) throw permissionError("read", object?._id);
+function assertReadAllowed(req, object, collection = req.params?.collection) {
+  if (!canRead(permissionUser(req), object, collection)) throw permissionError("read", object?._id);
 }
 
 function assertCreateAllowed(req, objects = [], database = null) {
   assertDatabaseWritable(database);
   const user = permissionUser(req);
   for (const object of objects || []) {
-    if (!canCreate(user, object)) throw permissionError("create", object?._id);
+    if (!canCreate(user, object, req.params?.collection)) throw permissionError("create", object?._id);
   }
 }
 
@@ -1560,7 +1873,7 @@ function assertUpsertAllowed(req, node, database, collection, objects = [], { pa
   for (const object of objects || []) {
     const before = existing.get(String(object._id));
     const after = partial && before ? { ...before, ...object, _id: object._id } : object;
-    const allowed = before ? canUpdate(user, before, after) : canCreate(user, after);
+    const allowed = before ? canUpdate(user, before, after, collection) : canCreate(user, after, collection);
     if (!allowed) throw permissionError(before ? "update" : "create", object?._id);
   }
 }
@@ -1571,7 +1884,7 @@ function assertUpdateAllowed(req, node, database, collection, objects = []) {
   const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
   for (const object of objects || []) {
     const before = existing.get(String(object._id));
-    if (!before || !canUpdate(user, before, object)) throw permissionError("update", object?._id);
+    if (!before || !canUpdate(user, before, object, collection)) throw permissionError("update", object?._id);
   }
 }
 
@@ -1579,7 +1892,7 @@ function assertDeleteAllowed(req, objects = [], database = null) {
   assertDatabaseWritable(database);
   const user = permissionUser(req);
   for (const object of objects || []) {
-    if (!canDelete(user, object)) throw permissionError("delete", object?._id);
+    if (!canDelete(user, object, req.params?.collection)) throw permissionError("delete", object?._id);
   }
 }
 
@@ -1701,6 +2014,7 @@ async function forwardSchemaChange(routing, req, path, options, message) {
 async function consumeNdjsonChunks({ req, imports, prepare, write }) {
   let entries = [];
   let bytes = 0;
+  let batchIndex = 0;
   const maxObjects = Math.max(1, Number(imports.maxBulkObjects) || DEFAULT_IMPORT_CONFIG.maxBulkObjects);
   const maxBytes = Math.max(1, Number(imports.maxBulkBytes) || DEFAULT_IMPORT_CONFIG.maxBulkBytes);
 
@@ -1714,27 +2028,27 @@ async function consumeNdjsonChunks({ req, imports, prepare, write }) {
       });
     }
     if (entries.length && bytes + entry.bytes > maxBytes) {
-      await flushNdjsonChunk(entries, prepare, write);
+      await flushNdjsonChunk(entries, prepare, write, batchIndex++);
       entries = [];
       bytes = 0;
     }
     entries.push(entry);
     bytes += entry.bytes;
     if (entries.length >= maxObjects || bytes >= maxBytes) {
-      await flushNdjsonChunk(entries, prepare, write);
+      await flushNdjsonChunk(entries, prepare, write, batchIndex++);
       entries = [];
       bytes = 0;
     }
   }
 
-  if (entries.length) await flushNdjsonChunk(entries, prepare, write);
+  if (entries.length) await flushNdjsonChunk(entries, prepare, write, batchIndex);
 }
 
-async function flushNdjsonChunk(entries, prepare, write) {
+async function flushNdjsonChunk(entries, prepare, write, batchIndex) {
   const lines = entries.map((entry) => entry.line);
   try {
     const values = entries.map((entry) => entry.value);
-    await write(prepare(values));
+    await write(prepare(values), batchIndex);
   } catch (err) {
     throw annotateStreamLine(err, lines);
   }
@@ -1971,10 +2285,6 @@ function jsonByteLength(value, label) {
     }
     throw err;
   }
-}
-
-function proxyJson(res, remote) {
-  return json(res, remote.status, remote.body === null ? undefined : remote.body);
 }
 
 function rejectIfMemoryGuardBlocked(res, memoryGuard) {

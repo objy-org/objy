@@ -1,6 +1,6 @@
-# spread-db API
+# OBJY DB API
 
-HTTP API for the default public spread-db interface.
+HTTP API for the default public OBJY DB interface.
 
 The [JavaScript client](client/README.md) exposes these public operations. `GET /client.js` serves its ES module without authentication; `HEAD` and ETag revalidation are supported. The response's `Link` header identifies the current content-addressed module URL.
 
@@ -8,7 +8,7 @@ Examples use `{URL}` as the base URL. In a cluster, public `/api` requests may h
 
 ## Context
 
-spread-db stores data in three contexts: `database / collection / object`. Object endpoints always include the database and collection:
+OBJY DB stores data in three contexts: `database / collection / object`. Object endpoints always include the database and collection:
 
 ```text
 {URL}/api/{db}/{collection}/object/{_id}
@@ -66,6 +66,22 @@ Content-Type: application/json
 
 Passwords are hashed on write and redacted from responses.
 
+A user may grant object access by collection name. Database access still follows the token's existing scope. `read` allows object reads and queries; `write` allows object create, update, and delete. A write-only grant does not allow GET or list requests, though write responses may contain the affected object. Existing `permissions` query rules can be used alongside these lists.
+
+```json
+{
+  "_id": "editor",
+  "username": "editor",
+  "password": "secret",
+  "collectionPermissions": {
+    "read": ["articles", "media"],
+    "write": ["articles"]
+  }
+}
+```
+
+Create this user with `POST /api/{db}/users/object`. Collection schema management still requires an admin token. Permission changes take effect when the user receives a new access token (login or renewal).
+
 **Field Indexes**
 
 `indexes` are in-memory field indexes. They are best for equality-style filtering, `$in`, narrowing candidate ids, and indexed sorting. They are also used by the query planner before falling back to scans.
@@ -99,6 +115,20 @@ Passwords are hashed on write and redacted from responses.
 ```
 
 Fields listed in `indexes` or `columns` are kept hot automatically, even if a broader parent object is offloaded. This lets indexes and column aggregates stay fast without inflating compressed data. Queries on non-indexed compressed fields still work, but they require scan-time hydration.
+
+**Object Hooks**
+
+`hooks` enables server-registered object middleware for a collection. Collection meta stores names and activation only; executable code stays in the server deployment. `use` applies named hooks according to their registered operations, while `create`, `read`, `update`, and `delete` can add operation-specific hooks. Set `enabled` to `false` to bypass all configured hooks without deleting the lists.
+
+```json
+{
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"],
+    "create": ["assets.validate"]
+  }
+}
+```
 
 **Vector Index**
 
@@ -291,6 +321,10 @@ Content-Type: application/json
   "name": "{collection}",
   "indexes": ["status", "tenantId"],
   "columns": ["score"],
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"]
+  },
   "tiering": {
     "mode": "compressedMemory",
     "keep": ["name", "status", "tenantId"],
@@ -308,6 +342,10 @@ Response:
   "meta": {
     "indexes": ["status", "tenantId"],
     "columns": ["score"],
+    "hooks": {
+      "enabled": true,
+      "use": ["timestamps", "audit"]
+    },
     "tiering": {
       "mode": "compressedMemory",
       "keep": ["name", "status", "tenantId"],
@@ -334,6 +372,10 @@ Response:
 {
   "indexes": ["status", "tenantId"],
   "columns": ["score"],
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"]
+  },
   "tiering": {
     "mode": "compressedMemory",
     "keep": ["name", "status", "tenantId"],
@@ -354,6 +396,10 @@ Content-Type: application/json
 {
   "indexes": ["status", "tenantId"],
   "columns": ["score"],
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"]
+  },
   "tiering": {
     "mode": "compressedMemory",
     "keep": ["name", "status", "tenantId"],
@@ -368,6 +414,10 @@ Response:
 {
   "indexes": ["status", "tenantId"],
   "columns": ["score"],
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"]
+  },
   "tiering": {
     "mode": "compressedMemory",
     "keep": ["name", "status", "tenantId"],
@@ -376,7 +426,7 @@ Response:
 }
 ```
 
-Changing `indexes`, `columns`, or `tiering` rebuilds derived in-memory structures.
+Changing `indexes`, `columns`, or `tiering` rebuilds derived in-memory structures. Changing `hooks` only invalidates the collection's cached hook plan.
 
 ### Delete Collection
 
@@ -590,7 +640,7 @@ Content-Type: application/pdf
 
 ### Replace Object With File
 
-`PUT` replaces the full wrapping object and stores the new file under a new server-derived blob key. No old file version is exposed by spread-db; old blob cleanup is best-effort after the object pointer is durable.
+`PUT` replaces the full wrapping object and stores the new file under a new server-derived blob key. No old file version is exposed by OBJY DB; old blob cleanup is best-effort after the object pointer is durable.
 
 Request:
 
@@ -779,7 +829,7 @@ The delete body may also be a plain array of ids.
 
 ### Streamed Bulk Writes
 
-Large imports can use NDJSON so the server does not need to hold one giant JSON array in memory. Each line is one JSON value. Internally, spread-db buffers lines into bounded chunks and then uses the same bulk storage, routing, replication, durability, permission, and index paths as normal bulk writes.
+Large imports can use NDJSON so the server does not need to hold one giant JSON array in memory. Each line is one JSON value. Internally, OBJY DB buffers lines into bounded chunks and then uses the same bulk storage, routing, replication, durability, permission, and index paths as normal bulk writes.
 
 Streamed writes require minimal responses:
 
