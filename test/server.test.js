@@ -2887,7 +2887,10 @@ test("replication hints wake shard replicas through the existing pull path", asy
     const created = await client.post("/api/app/events/object", { _id: "e1", value: 1 });
     assert.equal(created.status, 201, JSON.stringify(created.body));
 
-    await waitFor(() => b.node.get("app", "events", "e1")?.value === 1);
+    await waitFor(() => (
+      b.node.get("app", "events", "e1")?.value === 1
+      && b.replication.status().pullSyncs === 1
+    ));
     assert.equal(a.replication.status().hintsSent, 1);
     assert.equal(b.replication.status().hintsReceived, 1);
     assert.equal(b.replication.status().pullSyncs, 1);
