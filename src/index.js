@@ -62,6 +62,7 @@ const state = await startServer({
   port: restoreServer.port,
   maxJsonBytes: config.server.maxJsonBytes,
   cors: config.server.cors,
+  maintenance: config.server.maintenance,
   node,
   shardMapStore,
   auth: config.auth,

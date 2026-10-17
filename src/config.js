@@ -15,7 +15,22 @@ export const DEFAULT_IMPORT_CONFIG = {
 
 export function loadConfig(argv = process.argv.slice(2), cwd = process.cwd(), options = {}) {
   const configPath = resolve(cwd, configPathFromArgs(argv) || DEFAULT_CONFIG_PATH);
-  const fileConfig = existsSync(configPath) ? readJsonFile(configPath) : {};
+  const environment = options.environment || process.env;
+  const document = existsSync(configPath) ? readJsonFile(configPath) : {};
+  const fileConfig = resolveEnvironmentReferences(document.database || document, environment);
+  if (environment.OBJYDB_S3_ENDPOINT) {
+    fileConfig.persistence ||= {};
+    fileConfig.persistence.s3 ||= {};
+    fileConfig.persistence.s3.endpoint = environment.OBJYDB_S3_ENDPOINT;
+  }
+  if (environment.OBJYDB_RESTORE_MODE) {
+    fileConfig.persistence ||= {};
+    fileConfig.persistence.restoreMode = environment.OBJYDB_RESTORE_MODE;
+  }
+  if (environment.OBJYDB_MAINTENANCE === "1") {
+    fileConfig.server ||= {};
+    fileConfig.server.maintenance = true;
+  }
   return normalizeConfig(fileConfig, configPath, cliOverridesFromArgs(argv), options);
 }
 
@@ -42,6 +57,7 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
       port,
       maxJsonBytes: positiveInt(serverConfig.maxJsonBytes, DEFAULT_MAX_JSON_BYTES),
       cors: serverConfig.cors ?? false,
+      maintenance: serverConfig.maintenance === true,
     },
     imports: normalizeImportConfig(config.imports),
     plugins: config.plugins ?? [],
@@ -262,6 +278,26 @@ function readJsonFile(path) {
   } catch (err) {
     throw new Error(`failed to read config ${path}: ${err.message}`);
   }
+}
+
+function resolveEnvironmentReferences(value, environment) {
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveEnvironmentReferences(item, environment));
+  }
+  if (!value || typeof value !== "object") return value;
+  const keys = Object.keys(value);
+  if (keys.length === 1 && keys[0] === "fromEnvironment") {
+    const name = value.fromEnvironment;
+    const resolved = environment[name];
+    if (typeof resolved !== "string" || resolved.length === 0) {
+      throw new Error(`required environment variable is missing: ${name}`);
+    }
+    return resolved;
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    resolveEnvironmentReferences(item, environment),
+  ]));
 }
 
 function positiveInt(value, fallback) {
