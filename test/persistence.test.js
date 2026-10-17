@@ -824,16 +824,19 @@ test("planned reshard restore redistributes old shard snapshots and journals thr
   const router = new CRDTNode({ id: "router" });
   router.replaceShardMap(shardMapFor(newShardNames));
   const restored = new Map();
+  const newPeers = Object.fromEntries(newShardNames.map((shard) => [shard, [{ url: `http://${shard}` }]]));
 
   for (const shard of newShardNames) {
-    const node = new CRDTNode({ id: `${shard}-node` });
-    node.replaceShardMap(shardMapFor(newShardNames));
-    await new PersistenceManager({
+    const node = new CRDTNode({ id: `${shard}-node`, url: `http://${shard}` });
+    node.replaceShardMap(shardMapFor(newShardNames, newPeers));
+    const stats = await new PersistenceManager({
       node,
       storage,
       restoreMode: "reshard",
       restoreScopes: [{ database: "app", collection: "events", shard }],
     }).restore();
+    assert.equal(stats.reshardCheckpoint.scopes, 1);
+    assert.ok(await storage.get(`spread-db/db/app/collection/events/shard/${shard}/latest.json`));
     restored.set(shard, node);
   }
 

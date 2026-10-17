@@ -1,0 +1,16 @@
+.git
+.github
+.spread-db
+.npm-cache
+node_modules
+test
+test-results
+browser-tests
+scripts
+deploy
+examples
+coverage
+*.log
+*.config.json
+docker-compose.yml
+playwright.config.js

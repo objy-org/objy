@@ -119,7 +119,6 @@ export class PersistenceManager {
         progress?.add?.("localWalOps", local.ops);
         maxLocalSeq = Math.max(maxLocalSeq, local.maxLocalSeq);
       }
-      progress?.done?.(stats);
     } catch (err) {
       progress?.fail?.(err);
       throw err;
@@ -129,6 +128,16 @@ export class PersistenceManager {
 
     this.node.seq = Math.max(this.node.seq, maxLocalSeq);
     if (this.node.log.length === 0) this.node.trimmed = Math.max(this.node.trimmed, this.node.seq);
+    try {
+      if (this.restoreMode === "reshard") {
+        progress?.update?.({ phase: "checkpointing" });
+        stats.reshardCheckpoint = await this.checkpoint({ primaryOnly: true });
+      }
+      progress?.done?.(stats);
+    } catch (err) {
+      progress?.fail?.(err);
+      throw err;
+    }
     return stats;
   }
 
@@ -643,12 +652,13 @@ export class PersistenceManager {
     return stats;
   }
 
-  _snapshotScopes({ automatic = false } = {}) {
+  _snapshotScopes({ automatic = false, primaryOnly = false } = {}) {
     const scopes = [];
     const ownedShards = this._ownedShardNames();
     for (const collection of this._collectionScopes()) {
       const shards = ownedShards.length ? ownedShards : this.node.shardMap.shardsForCollection(collection.database, collection.collection);
       for (const shard of shards.length ? shards : [DEFAULT_SHARD]) {
+        if (primaryOnly && !this._shouldSnapshotForRole(shard)) continue;
         const scope = { database: collection.database, collection: collection.collection, shard };
         if (automatic && !this._shouldAutoSnapshot(scope)) continue;
         const dirty = this.dirtyScopes.get(scopeKey(scope));

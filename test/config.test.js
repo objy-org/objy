@@ -257,6 +257,89 @@ test("loads node identity overrides from cli arguments", () => {
   });
 });
 
+test("topology migration runtime overrides are explicit and temporary", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spread-db-migration-config-"));
+  const path = join(dir, "objydb.json");
+  writeFileSync(path, JSON.stringify({
+    node: {},
+    server: {},
+    persistence: { mode: "memory", restoreMode: "scoped" },
+    auth: TEST_AUTH,
+  }));
+
+  const config = loadConfig(["--config", path, "--node", "migration-node"], dir, {
+    environment: {
+      OBJYDB_RESTORE_MODE: "reshard",
+      OBJYDB_MAINTENANCE: "1",
+    },
+  });
+
+  assert.equal(config.persistence.restoreMode, "reshard");
+  assert.equal(config.server.maintenance, true);
+});
+
+test("loads the database section from a combined installer configuration", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spread-db-combined-config-"));
+  const path = join(dir, "objydb.json");
+  writeFileSync(path, JSON.stringify({
+    apiVersion: "objydb.io/v1",
+    kind: "Installation",
+    installation: { topology: { shards: 1, replicas: 1 } },
+    database: {
+      node: { retainOps: 512 },
+      cluster: { secret: { fromEnvironment: "CLUSTER_SECRET" } },
+      auth: {
+        jwtSecret: { fromEnvironment: "JWT_SECRET" },
+        users: [{ username: "admin", password: { fromEnvironment: "ADMIN_PASSWORD" } }],
+      },
+      persistence: {
+        mode: "s3",
+        s3: {
+          endpoint: "https://s3.example.com",
+          accessKeyId: { fromEnvironment: "S3_ACCESS_KEY" },
+          secretAccessKey: { fromEnvironment: "S3_SECRET_KEY" },
+        },
+      },
+    },
+    target: { driver: "docker" },
+  }));
+
+  const config = loadConfig(["--config", path, "--node", "node-a"], dir, {
+    environment: {
+      CLUSTER_SECRET: "cluster-secret",
+      JWT_SECRET: "jwt-secret",
+      ADMIN_PASSWORD: "admin-password",
+      S3_ACCESS_KEY: "access",
+      S3_SECRET_KEY: "secret",
+      OBJYDB_S3_ENDPOINT: "http://host.docker.internal:9000",
+    },
+  });
+
+  assert.equal(config.configPath, path);
+  assert.equal(config.node.retainOps, 512);
+  assert.equal(config.cluster.secret, "cluster-secret");
+  assert.equal(config.auth.jwtSecret, "jwt-secret");
+  assert.equal(config.auth.users[0].password, "admin-password");
+  assert.equal(config.persistence.s3.accessKeyId, "access");
+  assert.equal(config.persistence.s3.secretAccessKey, "secret");
+  assert.equal(config.persistence.s3.endpoint, "http://host.docker.internal:9000");
+});
+
+test("combined configuration reports missing environment references", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spread-db-combined-config-"));
+  const path = join(dir, "objydb.json");
+  writeFileSync(path, JSON.stringify({
+    database: {
+      auth: { jwtSecret: { fromEnvironment: "MISSING_SECRET" } },
+    },
+  }));
+
+  assert.throws(
+    () => loadConfig(["--config", path, "--node", "node-a"], dir, { environment: {} }),
+    /required environment variable is missing: MISSING_SECRET/,
+  );
+});
+
 test("rejects invalid persistence snapshot roles", () => {
   assert.throws(
     () => normalizeConfig({

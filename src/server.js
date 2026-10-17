@@ -77,6 +77,7 @@ export async function startServer({
   interfaces = [],
   useDefaultInterfaces = true,
   cors = false,
+  maintenance = false,
 } = {}) {
   const handleCors = createCorsHandler(cors);
   const n = node || new CRDTNode();
@@ -118,6 +119,9 @@ export async function startServer({
   const server = createServer(async (req, res) => {
     try {
       if (handleCors(req, res)) return;
+      if (maintenance && !isMaintenanceRoute(req.url)) {
+        return json(res, 503, { error: "database topology migration is in progress" }, { "retry-after": "5" });
+      }
       if (await router.handle(req, res)) return;
       json(res, 404, { error: "not found" });
     } catch (err) {
@@ -135,6 +139,11 @@ export async function startServer({
     console.error(`vector index warmup failed: ${err.message}`);
   });
   return state;
+}
+
+function isMaintenanceRoute(value = "") {
+  const path = new URL(value || "/", "http://localhost").pathname;
+  return path === "/health" || path === "/api/config" || path.startsWith("/cluster/") || path.startsWith("/replicate");
 }
 
 export function defaultInterfaces() {
