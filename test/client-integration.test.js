@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
-import { createClient } from 'spread-db/client';
+import { createClient } from 'objydb/client';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 
@@ -15,7 +15,11 @@ const collect = async iterator => { const rows = []; for await (const row of ite
 
 async function setup(t, options = {}) {
   const files = createFileService({ mode: 'memory' });
-  const server = await startServer({ auth: { jwtSecret: secret }, files, ...options });
+  const server = await startServer({
+    auth: { jwtSecret: secret, users: [{ _id: 'admin', username: 'admin', password: '123', role: 'admin', admin: true }] },
+    files,
+    ...options,
+  });
   t.after(() => new Promise(resolve => { server.server.close(resolve); server.server.closeAllConnections(); }));
   const url = `http://127.0.0.1:${server.port}`;
   const client = createClient({ url });

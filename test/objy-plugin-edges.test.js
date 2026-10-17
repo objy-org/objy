@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createObjectHookRegistry } from "../src/object-hooks.js";
@@ -9,7 +10,13 @@ import { createFileService } from "../src/files.js";
 import { loadPlugins } from "../src/plugin-loader.js";
 
 const configPath = fileURLToPath(new URL("../spread-db.config.json", import.meta.url));
-const auth = { jwtSecret: "objy-integration-secret" };
+const objyTest = existsSync(fileURLToPath(new URL("../../new-objy/index.js", import.meta.url)))
+  ? test
+  : test.skip;
+const auth = {
+  jwtSecret: "objy-integration-secret",
+  users: [{ _id: "admin", username: "admin", password: "123", role: "admin", admin: true }],
+};
 
 async function startObjyNode({ id, port = 0, url, shardMap, files } = {}) {
   const node = new CRDTNode({ id: id || "objy-edge", url });
@@ -55,7 +62,7 @@ async function createCollection(call, database, name, objy = {}) {
   assert.equal(created.status, 201, JSON.stringify(created.body));
 }
 
-test("OBJY reference hydration, nested properties, validation and failed-handler continuation", async (t) => {
+objyTest("OBJY reference hydration, nested properties, validation and failed-handler continuation", async (t) => {
   const state = await startObjyNode();
   t.after(() => closeNode(state));
   const { call } = await adminApi(state.base);
@@ -121,7 +128,7 @@ test("OBJY reference hydration, nested properties, validation and failed-handler
   assert.ok(state.node.get("app", "Article", "handler-failure"));
 });
 
-test("OBJY-enabled multipart writes preserve blob CRUD and run handlers", async (t) => {
+objyTest("OBJY-enabled multipart writes preserve blob CRUD and run handlers", async (t) => {
   const files = createFileService({ mode: "memory", prefix: "objy-test-files" });
   const state = await startObjyNode({ files });
   t.after(() => closeNode(state));
@@ -166,7 +173,7 @@ test("OBJY-enabled multipart writes preserve blob CRUD and run handlers", async 
   assert.equal(state.node.get("app", "Document", "doc"), undefined);
 });
 
-test("OBJY handler timeout does not block later handlers or later requests", { timeout: 30_000 }, async (t) => {
+objyTest("OBJY handler timeout does not block later handlers or later requests", { timeout: 30_000 }, async (t) => {
   const state = await startObjyNode();
   t.after(() => closeNode(state));
   const { call } = await adminApi(state.base);
@@ -190,7 +197,7 @@ test("OBJY handler timeout does not block later handlers or later requests", { t
   assert.equal(next.body, "ready");
 });
 
-test("OBJY persists nested schedule changes and removes obsolete occurrences", async (t) => {
+objyTest("OBJY persists nested schedule changes and removes obsolete occurrences", async (t) => {
   const state = await startObjyNode();
   t.after(() => closeNode(state));
   const { call } = await adminApi(state.base);
@@ -234,7 +241,7 @@ function idForShard(node, database, collection, shard) {
   throw new Error(`no id maps to ${shard}`);
 }
 
-test("OBJY runs once at ingress and resolves data across two OBJY DB shards", async (t) => {
+objyTest("OBJY runs once at ingress and resolves data across two OBJY DB shards", async (t) => {
   const [portA, portB] = await Promise.all([freePort(), freePort()]);
   const urlA = `http://localhost:${portA}`;
   const urlB = `http://localhost:${portB}`;

@@ -6,12 +6,13 @@ import { createClient } from '../client/index.js';
 
 const { sign } = createRequire(import.meta.url)('../src/lib/jwt.cjs');
 const secret = 'ui-client-secret';
+const auth = { jwtSecret: secret, users: [{ _id: 'admin', username: 'admin', password: '123', role: 'admin', admin: true }] };
 const expired = token => sign({ ...JSON.parse(Buffer.from(token.split('.')[1], 'base64url')), exp: 1 }, secret);
 let server, base, admin, renewals;
 
 test.beforeEach(async () => {
   renewals = 0;
-  server = await startServer({ auth: { jwtSecret: secret }, files: createFileService({ mode: 'memory' }), cors: { origins: ['*'] } });
+  server = await startServer({ auth, files: createFileService({ mode: 'memory' }), cors: { origins: ['*'] } });
   server.server.on('request', req => { if (req.method === 'POST' && req.url.endsWith('/renew')) renewals++; });
   base = `http://127.0.0.1:${server.port}`;
   admin = createClient({ url: base });
@@ -173,7 +174,7 @@ test('logging out while renewal is in flight cannot restore old views or tokens'
 
 test('switching servers replaces the client without forwarding the old session', async ({ page }) => {
   await login(page);
-  const remote = await startServer({ auth: { jwtSecret: secret }, cors: { origins: ['*'] } });
+  const remote = await startServer({ auth, cors: { origins: ['*'] } });
   const headers = [];
   remote.server.on('request', req => headers.push(req.headers.authorization));
   try {

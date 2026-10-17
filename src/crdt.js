@@ -747,6 +747,12 @@ export class CRDTNode {
     return peers.some((peer) => this._isSelfPeer(peer));
   }
 
+  isPrimaryForShard(shard = DEFAULT_SHARD) {
+    if (!this.url) return true;
+    const peers = this.peersForShard(shard);
+    return !peers.length || this._isSelfPeer(peers[0]);
+  }
+
   routingPeersForShard(shard = DEFAULT_SHARD) {
     return this.peersForShard(shard).filter((peer) => peer.url && !this._isSelfPeer(peer));
   }

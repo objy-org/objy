@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { shardMapFromHttp, startRestoreStatusServer, startServer } from "./server.js";
 import { CRDTNode } from "./crdt.js";
 import { loadConfig } from "./config.js";
@@ -8,6 +9,7 @@ import { createRestoreStatus } from "./restore-status.js";
 import { createShardMapStore } from "./shard-map-store.js";
 import { createObjectHookRegistry } from "./object-hooks.js";
 import { loadPlugins } from "./plugin-loader.js";
+import { resolveSystemSecrets } from "./system-secrets.js";
 
 const config = loadConfig();
 
@@ -20,6 +22,20 @@ const node = new CRDTNode({
   vector: config.vector,
 });
 const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence);
+const persistence = createPersistence(node, config.persistence);
+const sharedSecrets = config.persistence.mode === "s3"
+  ? { storage: persistence.storage, prefix: config.persistence.prefix }
+  : config.cluster.shardMapStore.mode === "s3"
+    ? { storage: shardMapStore.storage, prefix: config.cluster.shardMapStore.prefix }
+    : {};
+const secrets = await resolveSystemSecrets({
+  jwtSecret: config.auth.jwtSecret,
+  clusterSecret: config.cluster.secret,
+  ...sharedSecrets,
+  localPath: resolve(config.persistence.localWal.dir, "..", "system-secrets.json"),
+});
+config.auth = { ...config.auth, jwtSecret: secrets.jwtSecret };
+config.cluster.secret = secrets.clusterSecret;
 const storedShardMap = await shardMapStore?.load();
 const configuredShardMap = storedShardMap || config.cluster.shardMap;
 if (configuredShardMap) {
@@ -35,7 +51,6 @@ const replication = createReplicationScheduler({
   debounceMs: config.cluster.hints.debounceMs,
   maxScopesPerHint: config.cluster.hints.maxScopesPerHint,
 });
-const persistence = createPersistence(node, config.persistence);
 const files = createFileService(config.files, config.persistence);
 const restoreStatus = createRestoreStatus();
 const restoreServer = await startRestoreStatusServer({
@@ -62,7 +77,6 @@ const state = await startServer({
   port: restoreServer.port,
   maxJsonBytes: config.server.maxJsonBytes,
   cors: config.server.cors,
-  maintenance: config.server.maintenance,
   node,
   shardMapStore,
   auth: config.auth,

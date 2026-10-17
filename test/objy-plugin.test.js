@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createObjectHookRegistry } from "../src/object-hooks.js";
 import { CRDTNode } from "../src/crdt.js";
 import { startServer } from "../src/server.js";
 import { loadPlugins } from "../src/plugin-loader.js";
 
-test("OBJY file plugin adds object behavior through OBJY DB hooks", async (t) => {
+const objyTest = existsSync(fileURLToPath(new URL("../../new-objy/index.js", import.meta.url)))
+  ? test
+  : test.skip;
+
+objyTest("OBJY file plugin adds object behavior through OBJY DB hooks", async (t) => {
   const node = new CRDTNode({ id: "objy-plugin" });
   const objectHooks = createObjectHookRegistry();
   await loadPlugins([{
@@ -17,7 +22,14 @@ test("OBJY file plugin adds object behavior through OBJY DB hooks", async (t) =>
     node,
     objectHooks,
   });
-  const state = await startServer({ node, objectHooks, auth: { jwtSecret: "plugin-test-secret" } });
+  const state = await startServer({
+    node,
+    objectHooks,
+    auth: {
+      jwtSecret: "plugin-test-secret",
+      users: [{ _id: "admin", username: "admin", password: "123", role: "admin", admin: true }],
+    },
+  });
   t.after(async () => {
     state.server.closeAllConnections?.();
     await new Promise((resolve) => state.server.close(resolve));

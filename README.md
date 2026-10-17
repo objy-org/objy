@@ -6,7 +6,7 @@ OBJY DB is built for plain JavaScript-style objects, fast local reads, bulk-firs
 
 Public REST API usage is documented in `API.md`. This guide is for developing, running, and operating the database itself.
 
-The [JavaScript client](client/README.md) is available at `/client.js` for browser imports and `spread-db/client` for Node and bundlers. It includes CRUD, queries, files, bulk imports and automatic token renewal.
+The [JavaScript client](client/README.md) is available at `/client.js` for browser imports and `objydb/client` for Node and bundlers. It includes CRUD, queries, files, bulk imports and automatic token renewal.
 
 ## Why This Exists
 
@@ -41,10 +41,10 @@ Open the console:
 http://localhost:8080/
 ```
 
-Default local login from the sample config:
+On the first boot, OBJY DB creates the global `admin` user and prints its generated password once. For unattended startup, provide the initial password only for that first boot:
 
-```text
-admin / 123
+```bash
+OBJYDB_ADMIN_PASSWORD="your-initial-password" node src/index.js --config spread-db.config.json --node node-a
 ```
 
 ## The Mental Model
@@ -93,8 +93,8 @@ Interface plugins should stay thin. They translate transport concerns into datab
 Object hooks are named, code-registered middleware for public create, read, update, and delete operations. They run once on the node that accepts the request, before shard fan-out, and never during replication or restore. Bulk requests invoke each hook once for the whole bulk; NDJSON streams invoke them once per bounded batch.
 
 ```js
-import { createObjectHookRegistry } from "spread-db/hooks";
-import { startServer } from "spread-db/server";
+import { createObjectHookRegistry } from "objydb/hooks";
+import { startServer } from "objydb/server";
 
 const hooks = createObjectHookRegistry();
 
@@ -237,7 +237,6 @@ This sample shows the runtime defaults explicitly. Values like node identity and
     "syncMs": 2500,
     "forwardTimeoutMs": 60000,
     "replicationTimeoutMs": 60000,
-    "secret": "change-me",
     "hints": {
       "enabled": true,
       "debounceMs": 25,
@@ -259,19 +258,9 @@ This sample shows the runtime defaults explicitly. Values like node identity and
   },
   "auth": {
     "enabled": true,
-    "jwtSecret": "change-me",
     "accessTokenTtlSeconds": 3600,
     "refreshTokenTtlSeconds": 1209600,
-    "clockToleranceSeconds": 0,
-    "users": [
-      {
-        "_id": "admin",
-        "username": "admin",
-        "password": "123",
-        "role": "admin",
-        "admin": true
-      }
-    ]
+    "clockToleranceSeconds": 0
   },
   "persistence": {
     "mode": "off",
@@ -328,7 +317,7 @@ This sample shows the runtime defaults explicitly. Values like node identity and
 
 `cluster` controls peer behavior: request forwarding, replication timeouts, anti-entropy sync, hinted pull replication, cluster route authentication, and where the shard map is loaded from.
 
-`auth` enables JWT login and bootstraps the global admin user. Keep `jwtSecret` private.
+`auth` enables JWT login. OBJY DB generates and persists JWT and cluster secrets automatically. When `_global/users/admin` does not exist, the primary replica creates it using `OBJYDB_ADMIN_PASSWORD` when provided, or prints a generated password once.
 
 `persistence` controls S3 journals, snapshots, restore behavior, and optional local WAL acknowledgements.
 
@@ -480,7 +469,7 @@ curl http://localhost:8080/health
 
 - Prefer `storage.engine: "object"` for the current fast path.
 - Use `localWal` acknowledgements when acknowledged writes must survive process failure before S3 journal flush.
-- Keep `cluster.secret` identical across peers.
+- Let OBJY DB persist shared secrets automatically, or keep an explicitly configured `cluster.secret` identical across peers.
 - Keep `forwardTimeoutMs` realistic for heavy shard owners.
 - Keep `syncMs` high enough that anti-entropy does not waste work, but low enough to recover from missed hints.
 - Upload or embed the shard map before starting peers.

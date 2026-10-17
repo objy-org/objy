@@ -688,11 +688,7 @@ export class PersistenceManager {
   _shouldSnapshotForRole(shard) {
     if (this.snapshotRole === "all") return true;
     if (this.snapshotRole === "none") return false;
-    if (!this.node.url) return true;
-    const peers = this.node.peersForShard(shard).filter((peer) => peer.url);
-    if (!peers.length) return true;
-    const primary = peers[0];
-    return normalizeUrl(primary.url) === this.node.url || primary.nodeId === this.node.id || primary.key === this.node.id;
+    return this.node.isPrimaryForShard(shard);
   }
 
   _markCheckpointed(scope) {
@@ -1921,11 +1917,6 @@ function normalizePrefix(prefix) {
 function normalizeSnapshotRole(value) {
   if (value === "all" || value === "none" || value === "primary") return value;
   throw new Error("persistence.snapshotRole must be one of: primary, all, none");
-}
-
-
-function normalizeUrl(url) {
-  return url ? String(url).replace(/\/+$/, "") : null;
 }
 
 function normalizeRetention(config = {}) {

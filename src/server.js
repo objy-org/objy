@@ -14,6 +14,7 @@ import { createMemoryGuard } from "./memory-guard.js";
 import { createObjectHookRegistry, createObjectHookRunner } from "./object-hooks.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
+import { randomSecret } from "./system-secrets.js";
 
 export { createObjectHookRegistry, httpPeer, shardMapFromHttp };
 
@@ -74,25 +75,26 @@ export async function startServer({
   maxJsonBytes,
   imports,
   objectHooks,
+  environment = process.env,
+  bootstrapLogger = console.log,
   interfaces = [],
   useDefaultInterfaces = true,
   cors = false,
-  maintenance = false,
 } = {}) {
   const handleCors = createCorsHandler(cors);
   const n = node || new CRDTNode();
-  const authService = createAuthService(n, auth);
-  const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret);
+  const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret) || randomSecret();
   const guard = createMemoryGuard(memoryGuard);
   const hookRunner = createObjectHookRunner(n, objectHooks || createObjectHookRegistry());
   const scheduler = replication || createReplicationScheduler({ node: n, ...normalizeReplicationHintOptions(replicationHints) });
-  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus, objectHooks: hookRunner };
   if (persistence?.restoreScope) {
     n.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
   }
 
   if (shardMap) n.replaceShardMap(shardMapFromHttp(shardMap, n.id, { secret, timeoutMs: replicationTimeoutMs }));
   for (const peer of peers) n.addPeer(httpPeer(peer, n.id, { secret, timeoutMs: replicationTimeoutMs }));
+  const authService = createAuthService(n, auth, { environment });
+  const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus, objectHooks: hookRunner };
 
   const router = new HttpRouter({ maxBodyBytes: maxJsonBytes });
   const context = createInterfaceContext({
@@ -119,9 +121,6 @@ export async function startServer({
   const server = createServer(async (req, res) => {
     try {
       if (handleCors(req, res)) return;
-      if (maintenance && !isMaintenanceRoute(req.url)) {
-        return json(res, 503, { error: "database topology migration is in progress" }, { "retry-after": "5" });
-      }
       if (await router.handle(req, res)) return;
       json(res, 404, { error: "not found" });
     } catch (err) {
@@ -134,6 +133,13 @@ export async function startServer({
   state.server = server;
   state.port = server.address().port;
   state.router = router;
+  const bootstrap = authService.consumeBootstrapNotice?.();
+  if (bootstrap) {
+    await persistence?.afterWrite?.();
+    await persistence?.flush?.();
+    scheduler.afterLocalWrite?.();
+    bootstrapLogger?.(bootstrapMessage(bootstrap));
+  }
   n.startIndexWarmup?.();
   n.startVectorIndexWarmup().catch((err) => {
     console.error(`vector index warmup failed: ${err.message}`);
@@ -141,9 +147,14 @@ export async function startServer({
   return state;
 }
 
-function isMaintenanceRoute(value = "") {
-  const path = new URL(value || "/", "http://localhost").pathname;
-  return path === "/health" || path === "/api/config" || path.startsWith("/cluster/") || path.startsWith("/replicate");
+function bootstrapMessage({ username, password, supplied }) {
+  if (supplied) return `OBJY DB initialized global administrator ${username} from OBJYDB_ADMIN_PASSWORD`;
+  return [
+    "OBJY DB initialized global administrator",
+    `username: ${username}`,
+    `password: ${password}`,
+    "This password will not be displayed again.",
+  ].join("\n");
 }
 
 export function defaultInterfaces() {

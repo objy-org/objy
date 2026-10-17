@@ -8,10 +8,11 @@ import { clientPath } from '../src/interfaces/client.js';
 const { sign } = createRequire(import.meta.url)('../src/lib/jwt.cjs');
 let server, app, base, appUrl, renewals;
 const secret = 'browser-client-secret';
+const auth = { jwtSecret: secret, users: [{ _id: 'admin', username: 'admin', password: '123', role: 'admin', admin: true }] };
 
 test.beforeAll(async () => {
   renewals = 0;
-  server = await startServer({ auth: { jwtSecret: secret }, cors: { origins: ['*'] }, files: createFileService({ mode: 'memory' }) });
+  server = await startServer({ auth, cors: { origins: ['*'] }, files: createFileService({ mode: 'memory' }) });
   server.server.on('request', req => { if (req.method === 'POST' && req.url.endsWith('/renew')) renewals++; });
   base = `http://127.0.0.1:${server.port}`;
   app = createServer((_req, res) => { res.setHeader('content-type', 'text/html'); res.end('<!doctype html><title>Client integration test</title>'); });

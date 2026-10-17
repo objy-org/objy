@@ -5,7 +5,10 @@ import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { startServer } from "../src/server.js";
 
-const TEST_AUTH = { jwtSecret: "test-jwt-secret" };
+const TEST_AUTH = {
+  jwtSecret: "test-jwt-secret",
+  users: [{ _id: "admin", username: "admin", password: "123", role: "admin", admin: true }],
+};
 const TEST_CLUSTER_SECRET = TEST_AUTH.jwtSecret;
 
 function startTestServer(options = {}) {

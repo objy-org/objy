@@ -21,6 +21,12 @@ export class MemoryObjectStorage {
     });
   }
 
+  async putIfAbsent(key, body, contentType = "application/json") {
+    if (this.objects.has(key)) return false;
+    await this.put(key, body, contentType);
+    return true;
+  }
+
   async putBlob(key, body, contentType = "application/octet-stream") {
     this.objects.set(key, {
       body: Buffer.isBuffer(body) ? Buffer.from(body) : Buffer.from(body || ""),
@@ -116,6 +122,24 @@ export class S3ObjectStorage {
       Body: typeof body === "string" ? body : JSON.stringify(body),
       ContentType: contentType,
     }));
+  }
+
+  async putIfAbsent(key, body, contentType = "application/json") {
+    await this.ensureBucket();
+    try {
+      await this.client.send(new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: typeof body === "string" ? body : JSON.stringify(body),
+        ContentType: contentType,
+        IfNoneMatch: "*",
+      }));
+      return true;
+    } catch (err) {
+      const status = err.$metadata?.httpStatusCode;
+      if (status === 409 || status === 412 || err.name === "PreconditionFailed") return false;
+      throw err;
+    }
   }
 
   async putBlob(key, body, contentType = "application/octet-stream") {

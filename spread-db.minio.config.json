@@ -49,17 +49,8 @@
     }
   },
   "auth": {
-    "jwtSecret": "local-dev-jwt-secret-change-me",
     "accessTokenTtlSeconds": 3600,
-    "refreshTokenTtlSeconds": 1209600,
-    "users": [
-      {
-        "_id": "admin",
-        "username": "admin",
-        "password": "123",
-        "role": "admin"
-      }
-    ]
+    "refreshTokenTtlSeconds": 1209600
   },
   "persistence": {
     "mode": "s3",

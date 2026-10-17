@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClient, SpreadDBError } from 'spread-db/client';
+import { createClient, SpreadDBError } from 'objydb/client';
 
 const session = { database: 'auth', collection: 'users', accessToken: 'old', refreshToken: 'refresh', user: { _id: 'alice' } };
 const tokens = { accessToken: 'new', refreshToken: 'next' };

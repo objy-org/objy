@@ -12,7 +12,6 @@
       "debounceMs": 25,
       "maxScopesPerHint": 128
     },
-    "secret": "local-dev-cluster-secret-change-me",
     "shardMapStore": {
       "mode": "s3",
       "prefix": "spread-db",
@@ -20,17 +19,8 @@
     }
   },
   "auth": {
-    "jwtSecret": "local-dev-jwt-secret-change-me",
     "accessTokenTtlSeconds": 900,
-    "refreshTokenTtlSeconds": 1209600,
-    "users": [
-      {
-        "_id": "admin",
-        "username": "admin",
-        "password": "123",
-        "role": "admin"
-      }
-    ]
+    "refreshTokenTtlSeconds": 1209600
   },
   "persistence": {
     "mode": "s3",

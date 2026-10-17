@@ -40,7 +40,7 @@ The application can then import `https://db.example.com/client.js`. CORS is disa
 ## Node and bundlers
 
 ```js
-import { createClient, SpreadDBError } from 'spread-db/client';
+import { createClient, SpreadDBError } from 'objydb/client';
 
 const client = createClient({ url: 'http://127.0.0.1:8080' });
 ```
