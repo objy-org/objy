@@ -1,31 +1,50 @@
 {
-  "name": "spread-db",
+  "name": "objydb",
   "version": "0.1.0",
   "description": "OBJY DB: an in-memory, sharded and replicated database for dynamic JavaScript objects.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/api.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": "./src/api.js",
     "./client": {
       "types": "./client/index.d.ts",
       "default": "./client/index.js"
     },
     "./hooks": "./src/object-hooks.js",
-    "./server": "./src/server.js",
-    "./*": "./*"
+    "./server": "./src/server.js"
   },
+  "bin": {
+    "objydb": "bin/objydb.js"
+  },
+  "files": [
+    "bin/",
+    "client/",
+    "plugins/",
+    "public/",
+    "src/",
+    "API.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node bin/objydb.js",
     "cluster:local": "node scripts/local-cluster.js",
     "test": "node --test",
     "test:client": "node --test test/client*.test.js",
-    "deploy:hetzner": "node scripts/deploy-hetzner.js",
-    "deploy:hetzner:cluster": "node scripts/deploy-hetzner-cluster.js",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "check:package": "node scripts/check-package.js"
   },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=20"
   },
+  "author": "SPOO Technologies",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spoo-technologies/spread-db.git"
+  },
+  "bugs": {
+    "url": "https://github.com/spoo-technologies/spread-db/issues"
+  },
+  "homepage": "https://github.com/spoo-technologies/spread-db#readme",
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0"

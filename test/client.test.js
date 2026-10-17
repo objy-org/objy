@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { createClient, SpreadDBError } from 'spread-db/client';
+import { createClient, SpreadDBError } from 'objydb/client';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 import { clientPath } from '../src/interfaces/client.js';
@@ -17,7 +17,11 @@ const mock = fetch => createClient({ url: 'http://example.test', session: oldSes
 const defer = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
 async function setup(t, options = {}) {
-  const server = await startServer({ auth: { jwtSecret: secret }, files: createFileService({ mode: 'memory' }), ...options });
+  const server = await startServer({
+    auth: { jwtSecret: secret, users: [{ _id: 'admin', username: 'admin', password: '123', role: 'admin', admin: true }] },
+    files: createFileService({ mode: 'memory' }),
+    ...options,
+  });
   t.after(() => new Promise(resolve => { server.server.close(resolve); server.server.closeIdleConnections(); }));
   const url = `http://127.0.0.1:${server.port}`;
   const client = createClient({ url });

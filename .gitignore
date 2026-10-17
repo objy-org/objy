@@ -53,6 +53,10 @@ web_modules/
 
 # Optional npm cache directory
 .npm
+.npm-cache/
+
+# OS metadata
+.DS_Store
 
 # Optional eslint cache
 .eslintcache
@@ -81,7 +85,6 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
-deploy/*.json
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

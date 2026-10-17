@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { normalizeCollectionPermissions, normalizePermissions } from "./permissions.js";
+import { randomSecret } from "./system-secrets.js";
 
 const require = createRequire(import.meta.url);
 const JWT = require("./lib/jwt.cjs");
@@ -10,36 +11,26 @@ export const USERS_COLLECTION = "users";
 
 const DEFAULT_ACCESS_TTL_SECONDS = 60 * 60;
 const DEFAULT_REFRESH_TTL_SECONDS = 14 * 24 * 60 * 60;
-const DEFAULT_BOOTSTRAP_USERS = Object.freeze([
-  { _id: "admin", username: "admin", password: "123", role: "admin", admin: true },
-]);
 
 export function normalizeAuthConfig(config = {}) {
   if (config === false || config.enabled === false) return { enabled: false };
 
-  const jwtSecret = config.jwtSecret;
-  if (typeof jwtSecret !== "string" || jwtSecret.length === 0) {
-    throw new Error("auth.jwtSecret is required");
-  }
-
   return {
     enabled: true,
-    jwtSecret,
+    jwtSecret: optionalString(config.jwtSecret),
     accessTokenTtlSeconds: positiveInt(config.accessTokenTtlSeconds, DEFAULT_ACCESS_TTL_SECONDS),
     refreshTokenTtlSeconds: positiveInt(config.refreshTokenTtlSeconds, DEFAULT_REFRESH_TTL_SECONDS),
     clockToleranceSeconds: positiveInt(config.clockToleranceSeconds, 0),
-    users: [
-      ...(Array.isArray(config.users) ? config.users : []),
-      ...DEFAULT_BOOTSTRAP_USERS,
-    ],
+    users: Array.isArray(config.users) ? config.users : [],
   };
 }
 
-export function createAuthService(node, config = {}) {
+export function createAuthService(node, config = {}, { environment = process.env } = {}) {
   const normalized = normalizeAuthConfig(config);
   if (normalized.enabled === false) return new DisabledAuthService();
+  normalized.jwtSecret ||= randomSecret();
   const auth = new AuthService(node, normalized);
-  auth.ensureGlobalUsers();
+  auth.ensureGlobalUsers({ adminPassword: environment?.OBJYDB_ADMIN_PASSWORD });
   return auth;
 }
 
@@ -49,9 +40,10 @@ export class AuthService {
     this.node = node;
     this.config = config;
     this.enabled = true;
+    this.bootstrapNotice = null;
   }
 
-  ensureGlobalUsers() {
+  ensureGlobalUsers({ adminPassword } = {}) {
     if (this.node.getDatabaseMeta(GLOBAL_DATABASE) === null) {
       this.node.createDatabase(GLOBAL_DATABASE, { system: true });
     }
@@ -70,6 +62,33 @@ export class AuthService {
     }
 
     for (const user of this.config.users) this.ensureBootstrapUser(user);
+    this.ensureDefaultAdmin(adminPassword);
+  }
+
+  ensureDefaultAdmin(adminPassword) {
+    const id = "admin";
+    const shard = this.node.shardForObject(GLOBAL_DATABASE, USERS_COLLECTION, id);
+    if (!this.node.isPrimaryForShard(shard)) return null;
+    if (this.node.get(GLOBAL_DATABASE, USERS_COLLECTION, id)) return null;
+    if (this.findUserByUsername(GLOBAL_DATABASE, USERS_COLLECTION, "admin")) return null;
+
+    const supplied = typeof adminPassword === "string" && adminPassword.length > 0;
+    const password = supplied ? adminPassword : randomSecret(18);
+    const user = this.ensureBootstrapUser({
+      _id: id,
+      username: "admin",
+      password,
+      role: "admin",
+      admin: true,
+    });
+    if (user) this.bootstrapNotice = { username: "admin", password: supplied ? null : password, supplied };
+    return user;
+  }
+
+  consumeBootstrapNotice() {
+    const notice = this.bootstrapNotice;
+    this.bootstrapNotice = null;
+    return notice;
   }
 
   ensureBootstrapUser(user) {
@@ -427,6 +446,10 @@ function redactSensitiveValue(value) {
 
 function isAuthObject(object) {
   return object && object.password !== undefined;
+}
+
+function optionalString(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function unique(values) {

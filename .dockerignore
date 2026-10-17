@@ -7,7 +7,6 @@ test
 test-results
 browser-tests
 scripts
-deploy
 examples
 coverage
 *.log

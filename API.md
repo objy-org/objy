@@ -50,11 +50,11 @@ Public object routes use this shape:
 
 **Authentication**
 
-Auth is collection-based. Any collection can contain authable user objects. The default bootstrap user lives in `_global/users`:
+Auth is collection-based. Any collection can contain authable user objects. On first boot, OBJY DB creates `admin` in `_global/users` and prints a generated password once. `OBJYDB_ADMIN_PASSWORD` may provide that initial password for unattended startup.
 
 ```text
 username: admin
-password: 123
+password: <generated during first boot>
 ```
 
 Most public endpoints require:
@@ -160,7 +160,7 @@ Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "123"
+  "password": "<initial-password>"
 }
 ```
 

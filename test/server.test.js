@@ -15,7 +15,10 @@ import { ShardRequestRouter } from "../src/shard-router.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
 import { createRestoreStatus } from "../src/restore-status.js";
 
-const TEST_AUTH = { jwtSecret: "test-jwt-secret" };
+const TEST_AUTH = {
+  jwtSecret: "test-jwt-secret",
+  users: [{ _id: "admin", username: "admin", password: "123", role: "admin", admin: true }],
+};
 const TEST_CLUSTER_SECRET = TEST_AUTH.jwtSecret;
 
 function startTestServer(options = {}) {
@@ -467,6 +470,90 @@ test("auth issues and renews global user JWTs", async () => {
   }
 });
 
+test("first boot generates and prints a random global admin password", async () => {
+  const messages = [];
+  const s = await startServer({
+    auth: { jwtSecret: "generated-admin-test" },
+    environment: {},
+    bootstrapLogger: (message) => messages.push(message),
+  });
+  try {
+    assert.equal(messages.length, 1);
+    const password = messages[0].match(/^password: (.+)$/m)?.[1];
+    assert.equal(typeof password, "string");
+    assert.equal(password.length, 24);
+    const session = await api(`http://localhost:${s.port}`).post("/api/_global/users/auth", {
+      username: "admin",
+      password,
+    });
+    assert.equal(session.status, 200);
+  } finally {
+    await new Promise((resolve) => s.server.close(resolve));
+  }
+});
+
+test("first boot accepts OBJYDB_ADMIN_PASSWORD without printing it", async () => {
+  const messages = [];
+  const s = await startServer({
+    auth: { jwtSecret: "supplied-admin-test" },
+    environment: { OBJYDB_ADMIN_PASSWORD: "supplied-test-password" },
+    bootstrapLogger: (message) => messages.push(message),
+  });
+  try {
+    assert.equal(messages.length, 1);
+    assert.doesNotMatch(messages[0], /supplied-test-password/);
+    const session = await api(`http://localhost:${s.port}`).post("/api/_global/users/auth", {
+      username: "admin",
+      password: "supplied-test-password",
+    });
+    assert.equal(session.status, 200);
+    s.auth.ensureGlobalUsers({ adminPassword: "replacement-password" });
+    assert.equal(messages.length, 1);
+    assert.equal((await api(`http://localhost:${s.port}`).post("/api/_global/users/auth", {
+      username: "admin",
+      password: "replacement-password",
+    })).status, 401);
+  } finally {
+    await new Promise((resolve) => s.server.close(resolve));
+  }
+});
+
+test("only the primary replica bootstraps the generated global admin", async () => {
+  const shardMap = {
+    shards: {
+      "shard-0": {
+        peers: [
+          { nodeId: "primary", url: "http://primary" },
+          { nodeId: "replica", url: "http://replica" },
+        ],
+      },
+    },
+  };
+  const primary = await startServer({
+    node: new CRDTNode({ id: "primary", url: "http://primary" }),
+    shardMap,
+    auth: { jwtSecret: "primary-bootstrap-test" },
+    environment: { OBJYDB_ADMIN_PASSWORD: "cluster-test-password" },
+    bootstrapLogger: () => {},
+  });
+  const replica = await startServer({
+    node: new CRDTNode({ id: "replica", url: "http://replica" }),
+    shardMap,
+    auth: { jwtSecret: "primary-bootstrap-test" },
+    environment: { OBJYDB_ADMIN_PASSWORD: "cluster-test-password" },
+    bootstrapLogger: () => {},
+  });
+  try {
+    assert.ok(primary.node.get("_global", "users", "admin"));
+    assert.equal(replica.node.get("_global", "users", "admin"), undefined);
+  } finally {
+    await Promise.all([
+      new Promise((resolve) => primary.server.close(resolve)),
+      new Promise((resolve) => replica.server.close(resolve)),
+    ]);
+  }
+});
+
 test("api config keeps normal status compact and loads diagnostics on demand", async () => {
   const { a, b, urlA } = await startRoutedTwoShardCluster();
   try {
@@ -680,6 +767,7 @@ test("context endpoints require global or database admin tokens", async () => {
     auth: {
       ...TEST_AUTH,
       users: [
+        ...TEST_AUTH.users,
         {
           _id: "global-reader",
           username: "global-reader",

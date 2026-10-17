@@ -7,7 +7,10 @@ import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { startServer } from "../src/server.js";
 
-const AUTH = { jwtSecret: "hook-test-secret" };
+const AUTH = {
+  jwtSecret: "hook-test-secret",
+  users: [{ _id: "admin", username: "admin", password: "123", role: "admin", admin: true }],
+};
 
 test("hook registry resolves common and operation hooks in order and honors collection switches", async () => {
   const calls = [];

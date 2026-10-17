@@ -17,20 +17,7 @@ export function loadConfig(argv = process.argv.slice(2), cwd = process.cwd(), op
   const configPath = resolve(cwd, configPathFromArgs(argv) || DEFAULT_CONFIG_PATH);
   const environment = options.environment || process.env;
   const document = existsSync(configPath) ? readJsonFile(configPath) : {};
-  const fileConfig = resolveEnvironmentReferences(document.database || document, environment);
-  if (environment.OBJYDB_S3_ENDPOINT) {
-    fileConfig.persistence ||= {};
-    fileConfig.persistence.s3 ||= {};
-    fileConfig.persistence.s3.endpoint = environment.OBJYDB_S3_ENDPOINT;
-  }
-  if (environment.OBJYDB_RESTORE_MODE) {
-    fileConfig.persistence ||= {};
-    fileConfig.persistence.restoreMode = environment.OBJYDB_RESTORE_MODE;
-  }
-  if (environment.OBJYDB_MAINTENANCE === "1") {
-    fileConfig.server ||= {};
-    fileConfig.server.maintenance = true;
-  }
+  const fileConfig = resolveEnvironmentReferences(document, environment);
   return normalizeConfig(fileConfig, configPath, cliOverridesFromArgs(argv), options);
 }
 
@@ -57,7 +44,6 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
       port,
       maxJsonBytes: positiveInt(serverConfig.maxJsonBytes, DEFAULT_MAX_JSON_BYTES),
       cors: serverConfig.cors ?? false,
-      maintenance: serverConfig.maintenance === true,
     },
     imports: normalizeImportConfig(config.imports),
     plugins: config.plugins ?? [],
@@ -70,7 +56,7 @@ export function normalizeConfig(config = {}, configPath = null, overrides = {}, 
       forwardTimeoutMs: positiveInt(config.cluster?.forwardTimeoutMs, 60_000),
       replicationTimeoutMs: positiveInt(config.cluster?.replicationTimeoutMs, 60_000),
       hints: normalizeReplicationHintsConfig(config.cluster?.hints),
-      secret: clusterSecret(config.cluster, config.auth),
+      secret: clusterSecret(config.cluster),
       shardMap: config.cluster?.shardMap,
       shardMapStore: normalizeShardMapStoreConfig(config.cluster?.shardMapStore, config.persistence),
     },
@@ -366,6 +352,6 @@ function optionalString(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function clusterSecret(cluster = {}, auth = {}) {
-  return optionalString(cluster?.secret) || optionalString(cluster?.clusterSecret) || optionalString(auth?.jwtSecret);
+function clusterSecret(cluster = {}) {
+  return optionalString(cluster?.secret) || optionalString(cluster?.clusterSecret);
 }
