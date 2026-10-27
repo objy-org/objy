@@ -1,6 +1,6 @@
 ![OBJY DB](https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-header-deep-field.png)
 
-# OBJY DB
+# OBJY - In Memory Object Database
 
 <p align="center"><strong>Dynamic objects in memory. Sharded across nodes. Durable in S3.</strong></p>
 
