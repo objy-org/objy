@@ -1,9 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="public/branding/objy-db-logo-arctic.png">
-    <img src="public/branding/objy-db-logo-cobalt.png" width="280" alt="OBJY DB">
-  </picture>
-</p>
+![OBJY DB](https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-logo-signal.png)
 
 # OBJY DB HTTP API
 

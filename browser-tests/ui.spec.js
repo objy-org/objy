@@ -38,6 +38,18 @@ async function savedSession(page, session) {
   await page.evaluate(session => localStorage.setItem('spread-db-ui:session', JSON.stringify(session)), session);
 }
 
+test('API documentation renders its public GitHub logo', async ({ page }) => {
+  await page.goto(base + '/ui');
+  await page.locator('#api-docs-btn').click();
+  await expect(page.locator('#api-docs-modal')).toBeVisible();
+  const logo = page.locator('#api-docs-view img[alt="OBJY DB"]');
+  await expect(logo).toBeVisible();
+  await expect(logo).toHaveAttribute(
+    'src',
+    'https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-logo-signal.png',
+  );
+});
+
 test('UI uses the client for administration, JSON and bulk CRUD, queries, metadata and files', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

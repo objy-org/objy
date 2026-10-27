@@ -924,6 +924,26 @@
     color: var(--muted);
   }
 
+  .markdown-view img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 4px auto 20px;
+  }
+
+  .markdown-view > p:first-child img {
+    width: min(360px, 100%);
+  }
+
+  .markdown-view a {
+    color: var(--blue);
+    text-decoration: none;
+  }
+
+  .markdown-view a:hover {
+    text-decoration: underline;
+  }
+
   .markdown-view ul {
     margin: 0 0 14px 20px;
     padding: 0;
@@ -2219,14 +2239,31 @@ function renderMarkdown(markdown) {
 }
 
 function renderInlineMarkdown(text) {
-  const codes = [];
+  const protectedParts = [];
+  const protect = (html) => `@@PART_${protectedParts.push(html) - 1}@@`;
   const protectedText = String(text).replace(/`([^`]+)`/g, (match, value) => {
-    const index = codes.push(`<code>${escapeHtml(value)}</code>`) - 1;
-    return `@@CODE_${index}@@`;
+    return protect(`<code>${escapeHtml(value)}</code>`);
+  }).replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
+    const safeUrl = markdownUrl(url);
+    return safeUrl
+      ? protect(`<img src="${escapeHtml(safeUrl)}" alt="${escapeHtml(alt)}" loading="lazy">`)
+      : match;
+  }).replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
+    const safeUrl = markdownUrl(url);
+    if (!safeUrl) return match;
+    const external = /^https?:\/\//i.test(safeUrl) ? ' target="_blank" rel="noreferrer"' : "";
+    return protect(`<a href="${escapeHtml(safeUrl)}"${external}>${escapeHtml(label)}</a>`);
   });
   return escapeHtml(protectedText)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/@@CODE_(\d+)@@/g, (match, index) => codes[Number(index)] || match);
+    .replace(/@@PART_(\d+)@@/g, (match, index) => protectedParts[Number(index)] || match);
+}
+
+function markdownUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || /[\u0000-\u001f\u007f]/.test(url)) return null;
+  if (/^(?:https?:\/\/|#|\/|\.\.\/|\.\/)/i.test(url)) return url;
+  return /^[a-z0-9][a-z0-9._/-]*$/i.test(url) ? url : null;
 }
 
 async function checkHealth() {
