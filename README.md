@@ -89,6 +89,31 @@ async function closeDatabase() {
 
 `startServer()` is the lightweight embedded path: it creates an in-memory node and its interfaces without loading the CLI configuration or S3 lifecycle. The returned runtime owns the server, node, replication scheduler, router, and authentication service. Use `objy run` for durable or clustered nodes. Direct access to database internals is intentionally not part of the public package API.
 
+## Run in a Browser
+
+The same in-memory store, query engine, field indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering can run directly in a browser. This mode has no server, authentication, replication, sharding, or persistence; its data lives only for the lifetime of the page.
+
+```js
+import { createDatabase } from "objydb/browser";
+
+const objy = createDatabase({ storage: { engine: "object" } });
+await objy.createDatabase("app");
+await objy.database("app").createCollection("assets", {
+  indexes: ["status"],
+  columns: ["score"]
+});
+
+const assets = objy.database("app").collection("assets");
+await assets.insertMany([
+  { name: "Laptop", status: "active", score: 9 },
+  { name: "Phone", status: "archived", score: 4 }
+]);
+
+const active = await assets.find({ status: "active" });
+```
+
+Single writes use the same bulk path as `insertMany()`, `replaceMany()`, `patchMany()`, and `removeMany()`. Call `await assets.ready()` before benchmarking newly configured indexes or vector search.
+
 ## What You Get
 
 | Capability | What it means |

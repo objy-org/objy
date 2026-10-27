@@ -124,6 +124,41 @@ export function splitQueryControls(query = {}) {
   return { criteria, controls };
 }
 
+export function parseQuerySort(value) {
+  if (typeof value === "string" && value.length > 0) {
+    return value.startsWith("-")
+      ? { sortBy: value.slice(1), sort: "desc" }
+      : { sortBy: value.replace(/^\+/, ""), sort: "asc" };
+  }
+  if (isPlainObject(value)) {
+    const [field, direction] = Object.entries(value)[0] || [];
+    if (!field) return {};
+    return { sortBy: field, sort: direction === -1 || direction === "desc" ? "desc" : "asc" };
+  }
+  return {};
+}
+
+export function queryInteger(value) {
+  if (value === null || value === undefined || value === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : undefined;
+}
+
+export function firstQueryInteger(...values) {
+  for (const value of values) {
+    const parsed = queryInteger(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+export function queryPageOffset(page, pageSize) {
+  const parsedPage = queryInteger(page);
+  return parsedPage === undefined || pageSize === undefined
+    ? undefined
+    : Math.max(0, parsedPage - 1) * pageSize;
+}
+
 export function compareSortValues(left, right) {
   if (Object.is(left, right)) return 0;
   if (left === undefined || left === null) return 1;

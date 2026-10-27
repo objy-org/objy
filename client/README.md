@@ -1,5 +1,3 @@
-![OBJY DB](https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-header-deep-field.png)
-
 # OBJY DB JavaScript Client
 
 <p align="center"><strong>One client. Browser and Node. No runtime dependencies.</strong></p>

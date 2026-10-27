@@ -1,5 +1,3 @@
-import { getHeapStatistics } from "node:v8";
-import { constants as zlibConstants, deflateSync, inflateSync } from "node:zlib";
 import { ObjectRowStore } from "./object-store.js";
 import { ShapeStore } from "./shape.js";
 import { gt } from "./clock.js";
@@ -17,6 +15,7 @@ import { normalizeObjectHooksMeta } from "./object-hooks.js";
 import { compareSortValues, getPathValue, matchesQuery, stableKey, stripQueryControls } from "./query.js";
 import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from "./query-planner.js";
 import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
+import * as portableCompression from "./compression.js";
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
 const FIELD_BUILD_BATCH_SIZE = 4096;
@@ -26,12 +25,12 @@ const INDEX_WARMUP_MAX_HEAP_RATIO = 0.9;
 const INDEX_WARMUP_RETRY_MS = 30_000;
 const VECTOR_BUILD_BATCH_SIZE = 4096;
 const DEFAULT_TIERING_MIN_BYTES = 4096;
-const TIERING_DEFLATE_OPTIONS = Object.freeze({ level: zlibConstants.Z_BEST_SPEED });
 
 class Collection {
   constructor(name, options = {}) {
     this.name = name;
     this.disposed = false;
+    this.compression = options.compression || portableCompression;
     this.vectorConfig = normalizeVectorConfig(options.vector);
     this.vectorField = this.vectorConfig.enabled ? this.vectorConfig.field : null;
     this.store = createPhysicalStore(options);
@@ -209,16 +208,14 @@ class Collection {
       return value || {};
     }
 
-    const json = JSON.stringify(split.cold);
-    const rawBytes = Buffer.byteLength(json);
+    const encoded = this.compression.encodeUtf8(JSON.stringify(split.cold));
+    const rawBytes = encoded.byteLength;
     if (rawBytes < tiering.minBytes) {
       this._clearCompressedCold(rid);
       return value || {};
     }
 
-    const compressed = deflateSync(Buffer.from(json), TIERING_DEFLATE_OPTIONS);
-    const compact = new Uint8Array(compressed.byteLength);
-    compact.set(compressed);
+    const compact = this.compression.compress(encoded);
     this._setCompressedCold(rid, {
       bytes: rawBytes,
       compressed: compact,
@@ -257,7 +254,7 @@ class Collection {
   _hydrateCompressedCold(value = {}, rid) {
     const entry = this.compressedCold[rid];
     if (!entry) return value || {};
-    const cold = JSON.parse(inflateSync(entry.compressed).toString("utf8"));
+    const cold = JSON.parse(this.compression.decodeUtf8(this.compression.decompress(entry.compressed)));
     return mergePlainObjects(cold, value || {});
   }
 
@@ -2837,11 +2834,10 @@ function hasVectorIndexValue(vector = null) {
   );
 }
 
-function heapUsageRatio() {
-  const stats = getHeapStatistics();
-  const limit = Number(stats.heap_size_limit) || 0;
-  if (limit <= 0) return 0;
-  return (Number(stats.used_heap_size) || 0) / limit;
+function heapUsageRatio(readRatio) {
+  if (typeof readRatio !== "function") return 0;
+  const ratio = Number(readRatio());
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : 0;
 }
 
 function normalizeVectorWarmupPlans(plans = []) {
@@ -2910,6 +2906,17 @@ export class Store {
     this.bulkLoadDirty = new Set();
     this.indexWarmupPending = new Set();
     this.indexWarmupRetryTimer = null;
+    this.readHeapUsageRatio = options.readHeapUsageRatio;
+  }
+
+  dispose() {
+    if (this.indexWarmupRetryTimer) clearTimeout(this.indexWarmupRetryTimer);
+    this.indexWarmupRetryTimer = null;
+    for (const db of this.dbs.values()) {
+      for (const collection of db.collections.values()) this._disposeCollection(collection);
+    }
+    this.derivedStateScheduler.close();
+    this.dbs.clear();
   }
 
   db(name) {
@@ -3109,7 +3116,7 @@ export class Store {
 
   startIndexWarmup() {
     if (!this.indexWarmupPending.size) return 0;
-    if (heapUsageRatio() >= INDEX_WARMUP_MAX_HEAP_RATIO) {
+    if (heapUsageRatio(this.readHeapUsageRatio) >= INDEX_WARMUP_MAX_HEAP_RATIO) {
       this._scheduleIndexWarmupRetry();
       return 0;
     }

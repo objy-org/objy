@@ -20,7 +20,13 @@ import {
   permissionError,
 } from "../permissions.js";
 import { DEFAULT_IMPORT_CONFIG } from "../config.js";
-import { matchesQuery, splitQueryControls } from "../query.js";
+import {
+  firstQueryInteger,
+  matchesQuery,
+  parseQuerySort,
+  queryPageOffset,
+  splitQueryControls,
+} from "../query.js";
 import { QUERY_PATH_HEADER } from "../query-planner.js";
 import {
   baseCriteriaForReferenceQuery,
@@ -2331,21 +2337,21 @@ function parseQueryParam(req) {
 }
 
 function queryOptions(req, controls = {}) {
-  const parsedSort = parseSortControl(controls.$sort);
-  const limit = publicQueryLimit(firstNumberParam(
+  const parsedSort = parseQuerySort(controls.$sort);
+  const limit = publicQueryLimit(firstQueryInteger(
     req.query.get("limit"),
     req.query.get("$limit"),
     controls.$limit,
     controls.$pageSize,
   ));
-  const offset = firstNumberParam(
+  const offset = firstQueryInteger(
     req.query.get("offset"),
     req.query.get("skip"),
     req.query.get("$offset"),
     req.query.get("$skip"),
     controls.$offset,
     controls.$skip,
-    pageOffset(controls.$page, limit),
+    queryPageOffset(controls.$page, limit),
   );
   return {
     sortBy: req.query.get("sortBy") || parsedSort.sortBy || undefined,
@@ -2370,20 +2376,6 @@ function parseVectorSearch(value) {
   };
 }
 
-function parseSortControl(value) {
-  if (typeof value === "string" && value.length > 0) {
-    return value.startsWith("-")
-      ? { sortBy: value.slice(1), sort: "desc" }
-      : { sortBy: value.replace(/^\+/, ""), sort: "asc" };
-  }
-  if (isPlainObject(value)) {
-    const [field, direction] = Object.entries(value)[0] || [];
-    if (!field) return {};
-    return { sortBy: field, sort: direction === -1 || direction === "desc" ? "desc" : "asc" };
-  }
-  return {};
-}
-
 function refDepthParam(req, controls = {}) {
   if (req?.query?.has("$refDepth")) return normalizeRefDepth(req.query.get("$refDepth"), 1);
   if (req?.query?.has("refDepth")) return normalizeRefDepth(req.query.get("refDepth"), 1);
@@ -2397,29 +2389,9 @@ function refDepthQuery(depth) {
   return params.toString();
 }
 
-function numberParam(value) {
-  if (value === null || value === undefined || value === "") return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
-}
-
-function firstNumberParam(...values) {
-  for (const value of values) {
-    const parsed = numberParam(value);
-    if (parsed !== undefined) return parsed;
-  }
-  return undefined;
-}
-
 function positiveInt(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
-}
-
-function pageOffset(page, pageSize) {
-  const parsedPage = numberParam(page);
-  if (parsedPage === undefined || pageSize === undefined) return undefined;
-  return Math.max(0, parsedPage - 1) * pageSize;
 }
 
 function publicQueryLimit(value) {

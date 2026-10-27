@@ -11,6 +11,7 @@ import { createObjectHookRegistry } from "./object-hooks.js";
 import { loadPlugins } from "./plugin-loader.js";
 import { resolveSystemSecrets } from "./system-secrets.js";
 import { isTopologyResharding } from "./shard-map.js";
+import { nodeCompression, readHeapUsageRatio } from "./node-runtime.js";
 
 const config = loadConfig();
 
@@ -19,7 +20,7 @@ const node = new CRDTNode({
   url: config.node.url,
   retainOps: config.node.retainOps,
   syncBatchSize: config.node.syncBatchSize,
-  storage: config.storage,
+  storage: { ...config.storage, compression: nodeCompression, readHeapUsageRatio },
   vector: config.vector,
 });
 const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence);

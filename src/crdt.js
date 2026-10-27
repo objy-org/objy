@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Store } from "./store.js";
 import { makeClock, nextTs, touch } from "./clock.js";
 import { DEFAULT_SHARD, GLOBAL_COLLECTION, GLOBAL_DATABASE, ShardMap } from "./shard-map.js";
@@ -17,14 +16,16 @@ import {
   stripReferenceObjects,
 } from "./references.js";
 import { createObjectId } from "./object-id.js";
+import { randomUUID, yieldToEventLoop } from "./runtime.js";
 
 export class CRDTNode {
-  constructor({ id = randomUUID(), url, clock, retainOps = 256, syncBatchSize = 1024, shardMap, storage, vector } = {}) {
+  constructor({ id = randomUUID(), url, clock, retainOps = 256, syncBatchSize = 1024, shardMap, storage, vector, operationLog = true } = {}) {
     this.id = id;
     this.url = normalizeUrl(url);
     this.db = new Store({ ...(storage || {}), vector });
     this.clock = clock || makeClock(id);
     this.log = [];
+    this.operationLog = operationLog !== false;
     this.seq = 0;
     this.trimmed = 0;
     this.scopeTrimmed = new Map();
@@ -50,7 +51,7 @@ export class CRDTNode {
     op.shard = op.shard || this.shardForObject(op.db, op.coll, op.id);
     op.from = this.id;
     op.seq = ++this.seq;
-    this.log.push(op);
+    if (this.operationLog) this.log.push(op);
     return op;
   }
 
@@ -791,7 +792,7 @@ export class CRDTNode {
   _scheduleVectorIndexWarmup() {
     if (!this.vectorWarmupEnabled || this.vectorWarmupScheduled) return;
     this.vectorWarmupScheduled = true;
-    setImmediate(() => {
+    yieldToEventLoop().then(() => {
       this.vectorWarmupScheduled = false;
       this.startVectorIndexWarmup().catch(() => {});
     });

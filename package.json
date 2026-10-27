@@ -11,6 +11,10 @@
       "default": "./client/index.js"
     },
     "./hooks": "./src/object-hooks.js",
+    "./browser": {
+      "types": "./src/browser.d.ts",
+      "default": "./src/browser.js"
+    },
     "./server": "./src/server.js"
   },
   "bin": {
@@ -56,7 +60,8 @@
   "homepage": "https://github.com/objy-org/objy.db#readme",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1107.0"
+    "@aws-sdk/client-s3": "^3.1107.0",
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"

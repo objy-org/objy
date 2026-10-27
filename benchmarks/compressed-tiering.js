@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { Store } from "../src/store.js";
+import { nodeCompression } from "../src/node-runtime.js";
 
 const DEFAULTS = Object.freeze({
   objects: 100_000,
@@ -77,6 +78,7 @@ async function runChild(options) {
   forceGc();
   const before = memory();
   const store = new Store({
+    compression: nodeCompression,
     engine: "object",
     object: {
       valueDirectory: {

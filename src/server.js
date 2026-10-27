@@ -15,6 +15,7 @@ import { createObjectHookRegistry, createObjectHookRunner } from "./object-hooks
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
 import { randomSecret } from "./system-secrets.js";
+import { nodeCompression, readHeapUsageRatio } from "./node-runtime.js";
 
 export { createObjectHookRegistry, httpPeer, shardMapFromHttp };
 
@@ -25,7 +26,7 @@ export async function startRestoreStatusServer({
   replication,
   restoreStatus,
 } = {}) {
-  const n = node || new CRDTNode();
+  const n = node || new CRDTNode({ storage: { compression: nodeCompression, readHeapUsageRatio } });
   const server = createServer((req, res) => {
     const url = new URL(req.url || "/", "http://localhost");
     if (url.pathname === "/health") {
@@ -82,7 +83,7 @@ export async function startServer({
   cors = false,
 } = {}) {
   const handleCors = createCorsHandler(cors);
-  const n = node || new CRDTNode();
+  const n = node || new CRDTNode({ storage: { compression: nodeCompression, readHeapUsageRatio } });
   const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret) || randomSecret();
   const guard = createMemoryGuard(memoryGuard);
   const hookRunner = createObjectHookRunner(n, objectHooks || createObjectHookRegistry());

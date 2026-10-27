@@ -1,4 +1,4 @@
-import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+import { yieldToEventLoop } from "./runtime.js";
 
 const DEFAULT_MAX_CONCURRENT = 1;
 const DEFAULT_BATCH_SIZE = 4096;

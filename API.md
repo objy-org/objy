@@ -1,5 +1,3 @@
-![OBJY DB](https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-header-deep-field.png)
-
 # OBJY DB HTTP API
 
 <p align="center"><strong>Plain objects. Bulk-first operations. One public API.</strong></p>

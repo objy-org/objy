@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "./runtime.js";
 
 export const GLOBAL_DATABASE = "*";
 export const GLOBAL_COLLECTION = "*";
