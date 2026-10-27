@@ -41,14 +41,6 @@
     "snapshotMs": 60000,
     "segmentBytes": 16777216,
     "compactJournals": true,
-    "restoreMode": "scoped",
-    "s3": {
-      "bucket": "spread-db",
-      "endpoint": "http://localhost:9000",
-      "region": "us-east-1",
-      "accessKeyId": "minioadmin",
-      "secretAccessKey": "minioadmin",
-      "forcePathStyle": true
-    }
+    "restoreMode": "scoped"
   }
 }

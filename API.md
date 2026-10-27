@@ -1272,7 +1272,7 @@ Authorization: Bearer <accessToken>
     "type": "reference",
     "collection": "users",
     "value": "user-1",
-    "object": { "_id": "user-1", "username": "marco" }
+    "object": { "_id": "user-1", "username": "alice" }
   }
 }
 ```
@@ -1314,7 +1314,7 @@ Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 {
-  "author.object.username": "marco"
+  "author.object.username": "alice"
 }
 ```
 
@@ -1329,7 +1329,7 @@ Content-Type: application/json
       "type": "reference",
       "collection": "users",
       "value": "user-1",
-      "object": { "_id": "user-1", "username": "marco" }
+      "object": { "_id": "user-1", "username": "alice" }
     }
   }
 ]

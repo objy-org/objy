@@ -1,6 +1,6 @@
 ![OBJY DB](https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-header-deep-field.png)
 
-# OBJY - In Memory Object Database
+# OBJY DB
 
 <p align="center"><strong>Dynamic objects in memory. Sharded across nodes. Durable in S3.</strong></p>
 
@@ -362,3 +362,7 @@ Keep changes bulk-first and preserve the layer boundaries above. Public HTTP beh
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [License](LICENSE)
+
+## License
+
+Original source code is available under the [MIT License](LICENSE). OBJY and OBJY DB names, logos, brand artwork, and product copy remain reserved as described in [NOTICE.md](NOTICE.md). Third-party materials retain their respective licenses.

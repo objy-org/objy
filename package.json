@@ -19,10 +19,12 @@
   "files": [
     "bin/",
     "client/",
-    "public/",
+    "public/index.html",
+    "public/objy-db-logo.png",
     "src/",
     "API.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE.md"
   ],
   "scripts": {
     "start": "node bin/objydb.js",
@@ -38,12 +40,12 @@
   "author": "SPOO Technologies",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/spoo-technologies/spread-db.git"
+    "url": "git+https://github.com/spoo-technologies/objy-db.git"
   },
   "bugs": {
-    "url": "https://github.com/spoo-technologies/spread-db/issues"
+    "url": "https://github.com/spoo-technologies/objy-db/issues"
   },
-  "homepage": "https://github.com/spoo-technologies/spread-db#readme",
+  "homepage": "https://github.com/spoo-technologies/objy-db#readme",
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0"

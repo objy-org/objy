@@ -587,7 +587,7 @@ test("compressed memory tiering keeps hot paths queryable and hydrates full obje
     _id: "a1",
     name: "Thinkpad",
     status: "active",
-    applications: ["assetmanagement", "objy-agent"],
+    applications: ["inventory", "operations"],
     score: 42,
     history: {
       notes: coldNotes,
@@ -600,17 +600,17 @@ test("compressed memory tiering keeps hot paths queryable and hydrates full obje
   assert.deepEqual(collection.store.readForQuery("a1"), {
     name: "Thinkpad",
     status: "active",
-    applications: ["assetmanagement", "objy-agent"],
+    applications: ["inventory", "operations"],
   });
   assert.equal(collection.shapeStats()[0].tiering.objects, 1);
 
   assert.deepEqual(n.find("db", "assets", {
-    applications: { $contains: "assetmanagement" },
+    applications: { $contains: "inventory" },
   }), [{
     _id: "a1",
     name: "Thinkpad",
     status: "active",
-    applications: ["assetmanagement", "objy-agent"],
+    applications: ["inventory", "operations"],
     score: 42,
     history: {
       notes: coldNotes,
@@ -780,7 +780,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   for (let i = 0; i < 1000; i++) {
     const department = departments[i % departments.length];
     const score = i % 11;
-    const applications = i % 2 === 0 ? ["assetmanagement", "core"] : ["crm"];
+    const applications = i % 2 === 0 ? ["inventory", "core"] : ["crm"];
     rows.push({
       _id: `asset-${i}`,
       applications,
@@ -789,7 +789,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
       },
       score,
     });
-    if (applications.includes("assetmanagement")) {
+    if (applications.includes("inventory")) {
       expected.get(department).count++;
       expected.get(department).score += score;
     }
@@ -805,8 +805,8 @@ test("indexed grouped count aggregates use bucket counts", async () => {
     $sort: { "properties.department.value": 1 },
   };
   const collection = n.db.collection("db", "assets");
-  assert.equal(collection._planAggregate({ applications: "assetmanagement" }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
-  assert.equal(collection._planAggregate({ applications: { $contains: "assetmanagement" } }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
+  assert.equal(collection._planAggregate({ applications: "inventory" }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
+  assert.equal(collection._planAggregate({ applications: { $contains: "inventory" } }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
 
   const groupIndex = collection.indexes.get("properties.department.value");
   const originalIterateGroups = groupIndex.iterateGroups;
@@ -819,14 +819,14 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   };
   try {
     assert.deepEqual(
-      n.aggregate("db", "assets", { applications: "assetmanagement" }, spec),
+      n.aggregate("db", "assets", { applications: "inventory" }, spec),
       [...expected.entries()].map(([department, values]) => ({
         "properties.department.value": department,
         _count: values.count,
       })),
     );
     assert.deepEqual(
-      n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+      n.aggregate("db", "assets", { applications: { $contains: "inventory" } }, spec),
       [...expected.entries()].map(([department, values]) => ({
         "properties.department.value": department,
         _count: values.count,
@@ -845,7 +845,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   });
   expected.get("ops").count--;
   assert.deepEqual(
-    n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+    n.aggregate("db", "assets", { applications: { $contains: "inventory" } }, spec),
     [...expected.entries()].map(([department, values]) => ({
       "properties.department.value": department,
       _count: values.count,
@@ -856,7 +856,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   expected.get("ops").count--;
   expected.get("ops").score -= 6;
   assert.deepEqual(
-    n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+    n.aggregate("db", "assets", { applications: { $contains: "inventory" } }, spec),
     [...expected.entries()].map(([department, values]) => ({
       "properties.department.value": department,
       _count: values.count,
@@ -864,7 +864,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   );
 
   assert.deepEqual(
-    n.aggregate("db", "assets", { applications: "assetmanagement" }, {
+    n.aggregate("db", "assets", { applications: "inventory" }, {
       groupBy: "properties.department.value",
       fields: {
         _count: { $count: true },
@@ -882,7 +882,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
   const strings = new CRDTNode({ id: "strings" });
   strings.createCollection("db", "docs", { indexes: ["title"] });
   strings.insertMany("db", "docs", [
-    { _id: "a", title: "assetmanagement" },
+    { _id: "a", title: "inventory" },
     { _id: "b", title: "asset" },
   ]);
   assert.equal(strings.db.collection("db", "docs")._planRead({ title: { $contains: "asset" } }, {}).path, READ_PATH.SCAN);
@@ -890,7 +890,7 @@ test("indexed grouped count aggregates use bucket counts", async () => {
     groupBy: "title",
     fields: { _count: { $count: true } },
   }).path, AGGREGATE_PATH.SCAN);
-  assert.equal(collection._planAggregate({ applications: { $in: ["assetmanagement", "core"] } }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
+  assert.equal(collection._planAggregate({ applications: { $in: ["inventory", "core"] } }, spec).path, AGGREGATE_PATH.GROUP_INDEX);
 });
 
 test("indexed grouped metric aggregates use forward index values and column maps", async () => {
@@ -902,7 +902,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
   n.insertMany("db", "assets", [
     {
       _id: "a1",
-      applications: ["assetmanagement", "core"],
+      applications: ["inventory", "core"],
       properties: { department: { value: "ops" } },
       score: 10,
       cost: 100,
@@ -910,7 +910,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
     },
     {
       _id: "a2",
-      applications: ["assetmanagement"],
+      applications: ["inventory"],
       properties: { department: { value: "ops" } },
       score: 20,
       cost: 50,
@@ -918,7 +918,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
     },
     {
       _id: "a3",
-      applications: ["assetmanagement"],
+      applications: ["inventory"],
       properties: { department: { value: "rd" } },
       score: 5,
       cost: 30,
@@ -948,7 +948,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
   };
   const collection = n.db.collection("db", "assets");
   assert.equal(
-    collection._planAggregate({ applications: { $contains: "assetmanagement" } }, spec).path,
+    collection._planAggregate({ applications: { $contains: "inventory" } }, spec).path,
     AGGREGATE_PATH.GROUP_FORWARD_INDEX,
   );
 
@@ -963,7 +963,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
   };
   try {
     assert.deepEqual(
-      n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+      n.aggregate("db", "assets", { applications: { $contains: "inventory" } }, spec),
       [
         {
           "properties.department.value": "ops",
@@ -989,7 +989,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
   }
 
   n.update("db", "assets", "a2", {
-    applications: ["assetmanagement"],
+    applications: ["inventory"],
     properties: { department: { value: "rd" } },
     score: 25,
     cost: 70,
@@ -998,7 +998,7 @@ test("indexed grouped metric aggregates use forward index values and column maps
   n.remove("db", "assets", "a1");
 
   assert.deepEqual(
-    n.aggregate("db", "assets", { applications: { $contains: "assetmanagement" } }, spec),
+    n.aggregate("db", "assets", { applications: { $contains: "inventory" } }, spec),
     [
       {
         "properties.department.value": "rd",
@@ -1030,14 +1030,14 @@ test("shard scoped grouped count aggregates use shard id sets", () => {
   const rows = [];
   for (let i = 0; i < 1000; i++) {
     const department = i % 3 === 0 ? "ops" : "rd";
-    const applications = i % 2 === 0 ? ["assetmanagement"] : ["crm"];
+    const applications = i % 2 === 0 ? ["inventory"] : ["crm"];
     const row = {
       _id: `asset-${i}`,
       applications,
       properties: { department: { value: department } },
     };
     rows.push(row);
-    if (n.shardForObject("db", "assets", row._id) === "shard-0" && applications.includes("assetmanagement")) {
+    if (n.shardForObject("db", "assets", row._id) === "shard-0" && applications.includes("inventory")) {
       expected.set(department, (expected.get(department) || 0) + 1);
     }
   }
@@ -1047,7 +1047,7 @@ test("shard scoped grouped count aggregates use shard id sets", () => {
   assert.equal(options.includeIds instanceof Set, true);
   assert.equal(typeof options.includeId, "undefined");
   assert.equal([...options.includeIds].every((rid) => Number.isInteger(rid)), true);
-  assert.equal([...n.db.collection("db", "assets").indexes.get("applications").idsForValues(["assetmanagement"])]
+  assert.equal([...n.db.collection("db", "assets").indexes.get("applications").idsForValues(["inventory"])]
     .every((rid) => Number.isInteger(rid)), true);
 
   n.shardForObject = () => {
@@ -1055,7 +1055,7 @@ test("shard scoped grouped count aggregates use shard id sets", () => {
   };
 
   assert.deepEqual(
-    n.aggregateShards("db", "assets", { applications: { $contains: "assetmanagement" } }, {
+    n.aggregateShards("db", "assets", { applications: { $contains: "inventory" } }, {
       groupBy: "properties.department.value",
       fields: { _count: { $count: true } },
       $sort: { "properties.department.value": 1 },

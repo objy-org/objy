@@ -103,11 +103,11 @@ async function runChild(options) {
   });
 
   const indexedRead = time(() => {
-    return collection.find({ applications: { $contains: "assetmanagement" } }, { limit: 50 }).length;
+    return collection.find({ applications: { $contains: "inventory" } }, { limit: 50 }).length;
   });
 
   const aggregate = time(() => {
-    return collection.aggregate({ applications: { $contains: "assetmanagement" } }, {
+    return collection.aggregate({ applications: { $contains: "inventory" } }, {
       groupBy: "department",
       fields: {
         total: { $sum: "cost" },
@@ -126,8 +126,8 @@ async function runChild(options) {
     randomFullReadMs: round(randomFullReads.ms),
     indexedReadMs: round(indexedRead.ms),
     aggregateMs: round(aggregate.ms),
-    readPath: collection.readPath({ applications: { $contains: "assetmanagement" } }),
-    aggregatePath: collection.aggregatePath({ applications: { $contains: "assetmanagement" } }, {
+    readPath: collection.readPath({ applications: { $contains: "inventory" } }),
+    aggregatePath: collection.aggregatePath({ applications: { $contains: "inventory" } }, {
       groupBy: "department",
       fields: {
         total: { $sum: "cost" },
@@ -168,7 +168,7 @@ function assetObject(i) {
   return {
     name: `Asset ${i}`,
     status: statuses[i % statuses.length],
-    applications: activeApp ? ["assetmanagement", "objy-agent"] : ["objy-agent"],
+    applications: activeApp ? ["inventory", "operations"] : ["operations"],
     department,
     cost,
     history: {
@@ -196,7 +196,7 @@ function expectedAggregate(count) {
   const groups = new Map();
   for (let i = 0; i < count; i++) {
     const object = assetObject(i);
-    if (!object.applications.includes("assetmanagement")) continue;
+    if (!object.applications.includes("inventory")) continue;
     const group = groups.get(object.department) || { total: 0, n: 0 };
     group.total += object.cost;
     group.n++;

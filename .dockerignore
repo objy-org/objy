@@ -11,5 +11,6 @@ examples
 coverage
 *.log
 *.config.json
+!spread-db.config.json
 docker-compose.yml
 playwright.config.js

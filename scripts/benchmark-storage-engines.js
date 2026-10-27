@@ -94,11 +94,11 @@ async function runChild(options) {
   });
 
   const indexedRead = time(() => {
-    return collection.find({ applications: { $contains: "assetmanagement" } }, { limit: 50 }).length;
+    return collection.find({ applications: { $contains: "inventory" } }, { limit: 50 }).length;
   });
 
   const flatAggregate = time(() => {
-    return collection.aggregate({ applications: { $contains: "assetmanagement" } }, {
+    return collection.aggregate({ applications: { $contains: "inventory" } }, {
       fields: {
         total: { $sum: "cost" },
         n: { $count: true },
@@ -107,7 +107,7 @@ async function runChild(options) {
   });
 
   const groupedAggregate = time(() => {
-    return collection.aggregate({ applications: { $contains: "assetmanagement" } }, {
+    return collection.aggregate({ applications: { $contains: "inventory" } }, {
       groupBy: "properties.department.value",
       fields: {
         total: { $sum: "properties.cost.value" },
@@ -129,8 +129,8 @@ async function runChild(options) {
     indexedReadMs: round(indexedRead.ms),
     flatAggregateMs: round(flatAggregate.ms),
     groupedAggregateMs: round(groupedAggregate.ms),
-    readPath: collection.readPath({ applications: { $contains: "assetmanagement" } }),
-    aggregatePath: collection.aggregatePath({ applications: { $contains: "assetmanagement" } }, {
+    readPath: collection.readPath({ applications: { $contains: "inventory" } }),
+    aggregatePath: collection.aggregatePath({ applications: { $contains: "inventory" } }, {
       groupBy: "properties.department.value",
       fields: {
         total: { $sum: "properties.cost.value" },
@@ -171,7 +171,7 @@ function assetObject(i) {
   const activeApp = i % 3 !== 0;
   const object = {
     status: statuses[i % statuses.length],
-    applications: activeApp ? ["assetmanagement", "objy-agent"] : ["objy-agent"],
+    applications: activeApp ? ["inventory", "operations"] : ["operations"],
     role: "asset",
     name: `Asset ${i}`,
     display_name: `Asset ${i}`,
@@ -199,7 +199,7 @@ function expectedAggregate(count) {
   let n = 0;
   for (let i = 0; i < count; i++) {
     const object = assetObject(i);
-    if (!object.applications.includes("assetmanagement")) continue;
+    if (!object.applications.includes("inventory")) continue;
     total += object.cost;
     n++;
     const key = object.properties.department.value;

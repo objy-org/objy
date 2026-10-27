@@ -206,7 +206,6 @@ export class AuthService {
       role,
       userFamily: role,
       admin,
-      spooAdmin: admin,
       permissions,
       collectionPermissions,
       authorisations: user.authorisations || {},

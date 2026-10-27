@@ -26,6 +26,7 @@ async function login(page) {
   const module = page.waitForResponse(response => response.url() === base + '/client.js');
   await page.goto(base + '/ui');
   expect((await module).status()).toBe(200);
+  await page.locator('#password').fill('123');
   await page.locator('#login-btn').click();
   await expect(page.locator('#login-panel')).toBeHidden();
   await expect(page.locator('#tree')).toContainText('_global');
