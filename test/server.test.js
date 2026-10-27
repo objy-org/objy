@@ -2766,7 +2766,7 @@ test("serves the console UI at /", async () => {
     assert.equal(docs.status, 200);
     assert.match(docs.headers.get("content-type"), /text\/markdown/);
     const docsText = await docs.text();
-    assert.match(docsText, /# OBJY DB API/);
+    assert.match(docsText, /# OBJY DB HTTP API/);
     assert.match(docsText, /## File Handling/);
   } finally {
     s.server.close();

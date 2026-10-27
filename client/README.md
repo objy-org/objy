@@ -1,12 +1,39 @@
-# JavaScript client
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../public/branding/objy-db-logo-arctic.png">
+    <img src="../public/branding/objy-db-logo-cobalt.png" width="280" alt="OBJY DB">
+  </picture>
+</p>
 
-One dependency-free ES module consumes OBJY DB's public HTTP API in browsers and Node. The same client works through objy-platform; the server decides which object behavior and operations are available.
+# OBJY DB JavaScript Client
 
-The bundled admin UI imports this same `/client.js` module and uses its public methods for authentication, queries, CRUD, metadata, administration and file transfers. The UI retains its own presentation and local-storage preference handling; the client owns request handling and token renewal. Existing saved UI sessions migrate automatically, renewed tokens are persisted, and changing the selected server clears the old session.
+<p align="center"><strong>One client. Browser and Node. No runtime dependencies.</strong></p>
 
-## Browser
+The OBJY DB client is a small ES module over the public HTTP API. It handles URLs, authentication, token renewal, queries, bulk imports, files, cancellation, and native server errors without adding an ORM or hiding database behavior.
 
-The server exposes the module without requiring login:
+[Quick start](#quick-start) | [API reference](../API.md) | [Database README](../README.md)
+
+## Quick Start
+
+### Node and Bundlers
+
+```js
+import { createClient } from 'objydb/client';
+
+const client = createClient({ url: 'http://127.0.0.1:8080' });
+await client.login({ username: 'admin', password: 'your-password' });
+
+const items = client.database('app').collection('items');
+
+await items.insert({ _id: 'hello', title: 'Hello' });
+console.log(await items.get('hello'));
+```
+
+The `objydb/client` subpath imports only the client. It never starts the database server or loads its server dependencies.
+
+### Browser
+
+Every OBJY DB node serves the client at `/client.js` without authentication:
 
 ```html
 <script type="module">
@@ -16,42 +43,190 @@ The server exposes the module without requiring login:
   await client.login({ username: 'admin', password: 'your-password' });
 
   const items = client.database('app').collection('items');
-  await items.insert({ _id: 'hello', title: 'Hello' });
-  console.log(await items.get('hello'));
+  console.log(await items.find({ status: 'active' }));
 </script>
 ```
 
-When imported from `/client.js` or its content-addressed URL, the default server URL comes from the module URL, including any proxy path prefix. Importing through objy-platform therefore connects to that gateway. Applications that bundle or copy the module must provide `url` explicitly.
+When loaded from `/client.js`, the default server URL is derived from the module URL, including a reverse-proxy path prefix. Bundled or copied clients should pass `url` explicitly.
 
-For an application on another origin, enable CORS on the server:
+## The Client Model
+
+```text
+client
+  database("app")
+    collection("items")
+```
+
+Database and collection handles are immutable. Creating a handle does not change global context, so one client can safely work across many databases and collections.
 
 ```js
-// OBJY DB configuration (also supported inside objy-platform's spread option)
-server: {
-  port: 8080,
-  cors: { origins: ['https://app.example.com'] }
+const app = client.database('app');
+const archive = client.database('archive');
+
+const activeItems = app.collection('items');
+const oldItems = archive.collection('items');
+```
+
+Methods return native server results:
+
+- Single writes and reads return objects.
+- Queries and aggregations return arrays.
+- Bulk operations return their normal count and item summaries.
+- Successful `204` deletions return `undefined`.
+- Missing objects throw `SpreadDBError` with status `404`.
+
+## API at a Glance
+
+| Handle | Methods |
+| --- | --- |
+| Client | `login`, `renew`, `getSession`, `setSession`, `logout`, `health`, `status`, `listDatabases`, `createDatabase`, `database` |
+| Database | `collection`, `listCollections`, `createCollection`, `drop` |
+| Collection | `get`, `insert`, `replace`, `patch`, `remove`, `find`, `search`, `count`, `iterate` |
+| Bulk | `insertMany`, `replaceMany`, `patchMany`, `removeMany`, `import` |
+| Files | `insertFile`, `replaceFile`, `download` |
+| Metadata | `getMeta`, `setMeta`, `drop` |
+
+## Context and CRUD
+
+```js
+await client.createDatabase('app', {
+  meta: { purpose: 'demo' },
+  adminUser: {
+    collection: 'users',
+    username: 'owner',
+    password: 'your-password',
+  },
+});
+
+const db = client.database('app');
+await db.createCollection('items', { indexes: ['status'] });
+
+const items = db.collection('items');
+
+await items.insert({ _id: 'hello', title: 'Hello', status: 'draft' });
+await items.replace('hello', { title: 'Full replacement' });
+await items.patch('hello', {
+  $set: { status: 'active' },
+  $unset: ['unused'],
+});
+
+const item = await items.get('hello');
+await items.remove('hello');
+```
+
+`replace` stores the complete supplied object and also creates it when absent. `patch` uses the server's Mongo-like `$set` and `$unset` semantics.
+
+## Query and Aggregate
+
+```js
+const rows = await items.find(
+  { status: 'active' },
+  { limit: 20, offset: 0, sortBy: '_id', sort: 'asc' },
+);
+
+await items.search({
+  status: 'active',
+  $sort: { score: -1 },
+  $pageSize: 50,
+});
+
+await items.search({
+  status: 'active',
+  $aggregate: {
+    groupBy: 'category',
+    fields: {
+      total: { $sum: 'score' },
+      count: { $count: true },
+    },
+  },
+});
+
+await items.search({
+  $vector: { vector: [1, 0, 0], limit: 10 },
+});
+
+await items.get('hello', { refDepth: 0 });
+```
+
+`find` encodes a GET query. `search` sends the query as a POST body and is the natural choice for large filters, aggregation, and vectors. URL options passed to `find` override controls inside the query body. `count` returns a number through native aggregation.
+
+For ordinary paged reads:
+
+```js
+for await (const item of items.iterate(
+  { status: 'active' },
+  { pageSize: 100, limit: 1000 },
+)) {
+  console.log(item);
 }
 ```
 
-The application can then import `https://db.example.com/client.js`. CORS is disabled by default. Preflight permits Authorization, Content-Type and Prefer; additional request headers can be configured with `cors.headers`. Authentication uses bearer tokens, not cookies. objy-platform may override CORS with `gateway.cors`.
+`iterate` requests pages of at most 250 and defaults to `_id` order. Its offset and limit apply to the complete iteration. It is not a snapshot: concurrent writes can change page membership. Vector and aggregate queries are not iterable.
 
-`/client.js` uses ETag revalidation. Its `Link` header identifies `/client/<content-hash>.js`, served with immutable caching. A server serves only its current content hash; deployments retaining older pinned versions must retain those artifacts in their static hosting/cache. A missing old hash fails rather than returning different code under the same URL.
-
-## Node and bundlers
+## Bulk and Streaming
 
 ```js
-import { createClient, SpreadDBError } from 'objydb/client';
+await items.insertMany(
+  [{ _id: 'one' }, { _id: 'two' }],
+  { minimal: true },
+);
 
-const client = createClient({ url: 'http://127.0.0.1:8080' });
+await items.replaceMany([
+  { _id: 'one', title: 'Replacement' },
+]);
+
+await items.patchMany([
+  { _id: 'one', $set: { title: 'Patched' } },
+]);
+
+await items.removeMany(['one', 'two']);
 ```
 
-This subpath imports only the client, never the database server or its dependencies. It uses the runtime's fetch, Blob, FormData and Web Streams APIs. A custom `fetch` implementation can be supplied. TypeScript declarations are included; collection handles accept a record type:
+For large writes, `import` sends NDJSON and keeps the server's bounded, bulk-first path:
 
-```ts
-const items = client.database('app').collection<{ _id: string; title: string }>('items');
+```js
+await items.import(new Blob([
+  '{"_id":"one","score":1}\n',
+  '{"_id":"two","score":2}\n',
+]));
+
+await items.import(
+  [{ _id: 'one', $set: { score: 3 } }],
+  { operation: 'patch' },
+);
+
+await items.import(async function* () {
+  yield { _id: 'three', score: 3 };
+  yield { _id: 'four', score: 4 };
+});
 ```
 
-## Authentication and renewal
+Operations are `insert` (default), `replace`, `patch`, and `remove`. Sources may be NDJSON text, Blob/File, arrays, byte streams, object iterables, or factories returning fresh sources.
+
+The client sets NDJSON and minimal-response headers automatically. It never silently buffers a large iterable or splits it into unrelated requests. Earlier server-side chunks may remain committed if a later chunk fails.
+
+## Files
+
+```js
+await items.insertFile(
+  { _id: 'document', title: 'Notes' },
+  new Blob(['hello']),
+  { filename: 'notes.txt' },
+);
+
+await items.replaceFile(
+  'document',
+  { title: 'Revised notes' },
+  new Blob(['revised']),
+);
+
+const response = await items.download('document');
+const blob = await response.blob();
+```
+
+`download` returns the native `Response`, so callers can read it as a blob, stream `response.body`, or cancel the body when abandoning a download.
+
+## Authentication
 
 ```js
 await client.login({
@@ -62,106 +237,111 @@ await client.login({
 });
 
 const saved = client.getSession();
-client.setSession(saved); // restore explicitly when needed
-await client.renew();     // optional manual renewal
-client.logout();          // clear this client's session
+client.setSession(saved);
+
+await client.renew();
+client.logout();
 ```
 
-Tokens stay in memory, isolated per client. Session snapshots are detached copies and include the authentication database and collection. Applications choose whether and where to persist them. Logout does not revoke existing tokens at the server.
+Sessions live in memory and are isolated per client. `getSession()` returns a detached snapshot containing tokens and the authentication database and collection. The application decides whether and where to persist it. Logout clears local state but does not revoke tokens at the server.
 
-Automatic renewal is enabled by default. A protected request receiving `401` with `code: "ACCESS_TOKEN_EXPIRED"` and `operationStarted: false` renews the token pair and replays once. Concurrent requests share one renewal; late rejections reuse the newer access token. Login, renewal and the replay itself never recursively refresh. Set `autoRenew: false` to disable this behavior.
+Automatic renewal is enabled by default. When a protected request receives an explicit, safe-to-replay token-expiration response, concurrent callers share one renewal and each request replays at most once. Disable this with `autoRenew: false`.
 
-Permission failures, generic 401 responses, and errors after an operation began do not trigger replay. Rejected refresh tokens clear the session; network failures preserve it. Logout or replacing the session while renewal is pending prevents that renewal from restoring the previous identity. Cancelling one waiting request does not cancel renewal for other callers.
+<details>
+<summary><strong>Renewal and replay safety</strong></summary>
 
-Older servers without the explicit expiration marker still support normal operations, but cannot trigger automatic renewal safely. Upgrade the server or call `renew()` explicitly.
+Automatic replay requires `401`, `code: "ACCESS_TOKEN_EXPIRED"`, and `operationStarted: false`. Generic authentication failures, permission denials, and failures after execution began are never replayed.
 
-## Operations
+Rejected refresh tokens clear the session; transport failures preserve it. Login, renewal, and replay never recursively renew. Logging out or replacing the session during renewal prevents the old identity from returning. Cancelling one waiter does not cancel a shared renewal needed by other requests.
 
-`client.database(name)` and `database.collection(name)` return immutable handles without changing global context.
+Replayable bodies include JSON, text, Blob/File, arrays, and multipart files. Streams and general iterators need a factory that creates a fresh source; otherwise the client reports `BODY_NOT_REPLAYABLE`. Array imports snapshot their JSON before sending.
 
-| Handle | Methods |
-|---|---|
-| Client | `login`, `renew`, `getSession`, `setSession`, `logout`, `health`, `status`, `listDatabases`, `createDatabase`, `database` |
-| Database | `collection`, `listCollections`, `createCollection`, `drop` |
-| Collection | `get`, `insert`, `replace`, `patch`, `remove`, `find`, `search`, `count`, `iterate` |
-| Collection bulk | `insertMany`, `replaceMany`, `patchMany`, `removeMany`, `import` |
-| Collection files | `insertFile`, `replaceFile`, `download` |
-| Collection metadata | `getMeta`, `setMeta`, `drop` |
+Older servers without the explicit expiration marker still work, but cannot safely trigger automatic renewal. Call `renew()` explicitly or upgrade the server.
 
-Methods return the native response body. Single writes return objects, queries return arrays, bulk operations return their native counts/items, and successful 204 deletions return `undefined`. Missing objects throw `SpreadDBError` with status 404. `count` returns a number using native aggregation.
+</details>
+
+## Errors and Cancellation
 
 ```js
-await client.createDatabase('app', { meta: { purpose: 'demo' }, adminUser: {
-  collection: 'users', username: 'owner', password: 'your-password',
-} });
-const db = client.database('app');
-await db.createCollection('items', { indexes: ['status'] });
-const items = db.collection('items');
+import { SpreadDBError } from 'objydb/client';
 
-await items.replace('hello', { title: 'Full replacement' }); // also creates if absent
-await items.patch('hello', { $set: { status: 'active' }, $unset: ['unused'] });
-
-await items.find({ status: 'active' }, { limit: 20, offset: 0, sortBy: '_id', sort: 'asc' });
-await items.search({ status: 'active', $sort: { score: -1 } });
-await items.search({ $aggregate: { fields: { total: { $sum: 'score' } } } });
-await items.search({ $vector: { vector: [1, 0, 0], limit: 10 } });
-await items.get('hello', { refDepth: 0 });
-
-for await (const item of items.iterate({ status: 'active' }, { pageSize: 100, limit: 1000 })) {
-  console.log(item);
-}
-
-await items.insertMany([{ _id: 'one' }, { _id: 'two' }], { minimal: true });
-await items.replaceMany([{ _id: 'one', title: 'Replacement' }]);
-await items.patchMany([{ _id: 'one', $set: { title: 'Patched' } }]);
-await items.removeMany(['one', 'two']);
-```
-
-`find` encodes a GET query; `search` posts the query unchanged. URL controls (`limit`, `offset`, `sortBy`, `sort`, `refDepth`) override query-body controls. Aggregates and vector search use `search`; no separate endpoint is invented. Queries run on stored data, including through OBJY.
-
-`iterate` fetches ordinary queries in pages of at most 250, defaulting to `_id` order unless a sort was supplied. Its `offset` and `limit` options describe the entire iteration. It does not provide a snapshot or guarantee uniqueness while other clients mutate the collection. It does not paginate vector or aggregate queries.
-
-## Files and imports
-
-```js
-await items.insertFile({ _id: 'document', title: 'Notes' }, new Blob(['hello']), { filename: 'notes.txt' });
-await items.replaceFile('document', { title: 'Revised notes' }, new Blob(['revised']));
-const response = await items.download('document');
-const blob = await response.blob(); // or consume response.body; cancel it if abandoning a download
-
-await items.import(new Blob(['{"_id":"one","score":1}\n']));
-await items.import([{ _id: 'one', $set: { score: 2 } }], { operation: 'patch' });
-
-// Node or a browser/connection supporting streaming uploads:
-await items.import(async function* () {
-  yield { _id: 'two', score: 2 };
-  yield { _id: 'three', score: 3 };
-});
-```
-
-Import operations are `insert` (default), `replace`, `patch`, and `remove`. Sources may be NDJSON text, Blob/File, arrays, byte ReadableStreams, object iterables, or a factory returning a fresh source. The client sets NDJSON content type and minimal-response headers. Runtime support is checked for streaming request bodies; connection restrictions may still reject streaming uploads. Blob/text uploads work across the tested browsers. Large iterables are never silently buffered or split into different requests.
-
-Text, blobs, arrays and multipart files can be replayed after authentication rejection. A stream or general iterator needs a factory to produce a fresh source for replay; otherwise expiration reports `BODY_NOT_REPLAYABLE`. Importing arrays snapshots their JSON before sending. Earlier server-side import chunks may remain committed after a later failure.
-
-## Errors, cancellation and limits
-
-```js
 try {
-  await items.patch('hello', { $set: { status: 'done' } }, {
-    signal: abortController.signal,
-    timeoutMs: 10_000,
-  });
+  await items.patch(
+    'hello',
+    { $set: { status: 'done' } },
+    {
+      signal: abortController.signal,
+      timeoutMs: 10_000,
+    },
+  );
 } catch (error) {
   if (error instanceof SpreadDBError) {
-    console.log(error.status, error.code, error.body, error.writeMayHaveSucceeded);
+    console.log({
+      status: error.status,
+      code: error.code,
+      body: error.body,
+      writeMayHaveSucceeded: error.writeMayHaveSucceeded,
+    });
   }
 }
 ```
 
-The default timeout is 30 seconds; `timeoutMs: 0` disables it. A request's deadline covers asynchronous import factories, token renewal and replay, and downloads retain their deadline until their body is consumed or cancelled. Errors preserve server status, body and headers. Network failures and cancellations after sending a write may leave its outcome uncertain; writes are never automatically retried for transport failures. Failed imports with nonzero committed counts also set `writeMayHaveSucceeded`; inspect the error body for those counts before deciding how to proceed. Redirects are rejected, and credentials are never forwarded to another origin.
+The default timeout is 30 seconds; `timeoutMs: 0` disables it. A deadline covers asynchronous source creation, token renewal, replay, response parsing, and download consumption.
 
-The client does not add transactions, realtime subscriptions, server-side session revocation, or private cluster/replication operations. Through objy-platform, managed collections currently reject bulk, NDJSON and multipart writes; the client surfaces that response without substituting multiple writes. OBJY behavior executes on the server.
+Errors preserve server status, body, and headers. Transport failures are never used to retry writes automatically. If a timeout, cancellation, or connection failure happens after sending a write, `writeMayHaveSucceeded` can be true. Partial imports report committed counts in the error body. Redirects are rejected so credentials never cross origins.
 
-## Validation
+## TypeScript and Runtime Support
 
-Run `npm run test:client` for the focused Node client suite, `npm test` for all Node tests, and `npm run test:browser` for Chromium, Firefox and WebKit tests. The client suite covers authentication races, concurrent writes, file integrity and cleanup, bulk imports, partial failures, pagination, cancellation, timeouts and HTTP errors. Browser engines can be installed with `npx playwright install chromium firefox webkit`. objy-platform contains additional Node and browser integration tests exercising this same client through its public gateway.
+TypeScript declarations are included:
+
+```ts
+type Item = {
+  _id: string;
+  title: string;
+  status?: string;
+};
+
+const items = client
+  .database('app')
+  .collection<Item>('items');
+```
+
+The client uses the host runtime's `fetch`, `Blob`, `FormData`, and Web Streams APIs. A custom `fetch` implementation may be supplied. Streaming request-body support is detected at runtime; Blob and text imports remain the portable fallback.
+
+## Browser Delivery and CORS
+
+For an application on another origin, enable CORS:
+
+```js
+server: {
+  port: 8080,
+  cors: {
+    origins: ['https://app.example.com'],
+  },
+}
+```
+
+CORS is disabled by default. Preflight permits `Authorization`, `Content-Type`, and `Prefer`; configure extra request headers with `cors.headers`. Authentication uses bearer tokens, not cookies.
+
+`/client.js` supports ETag revalidation. Its `Link` header identifies an immutable `/client/<content-hash>.js` URL. A server exposes only its current hash, so deployments pinning older versions must retain those files in their own static hosting or cache.
+
+## Deliberate Boundaries
+
+The client does not add:
+
+- Transactions.
+- Realtime subscriptions.
+- Server-side session revocation.
+- Private cluster or replication operations.
+- Automatic transport retries for writes.
+- Hidden global database or collection context.
+
+It stays thin on purpose: the server owns data semantics, permissions, routing, durability, and query planning.
+
+## Development
+
+Run `npm run test:client` for the focused Node suite or `npm run test:browser` for Chromium, Firefox, and WebKit coverage. Browser engines can be installed with:
+
+```sh
+npx playwright install chromium firefox webkit
+```

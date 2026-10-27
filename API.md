@@ -1,158 +1,72 @@
-# OBJY DB API
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/branding/objy-db-logo-arctic.png">
+    <img src="public/branding/objy-db-logo-cobalt.png" width="280" alt="OBJY DB">
+  </picture>
+</p>
 
-HTTP API for the default public OBJY DB interface.
+# OBJY DB HTTP API
 
-The [JavaScript client](client/README.md) exposes these public operations. `GET /client.js` serves its ES module without authentication; `HEAD` and ETag revalidation are supported. The response's `Link` header identifies the current content-addressed module URL.
+<p align="center"><strong>Plain objects. Bulk-first operations. One public API.</strong></p>
 
-Examples use `{URL}` as the base URL. In a cluster, public `/api` requests may hit any public node; the node routes object operations to the owning shard when needed.
+This is the public HTTP contract for OBJY DB. The [JavaScript client](client/README.md) exposes the same operations for browsers and Node.
 
-## Context
+[Start here](#start-here) | [JavaScript client](client/README.md) | [Database README](README.md)
 
-OBJY DB stores data in three contexts: `database / collection / object`. Object endpoints always include the database and collection:
+## Start Here
 
-```text
-{URL}/api/{db}/{collection}/object/{_id}
-```
-
-**Database**
-
-A database is the top-level namespace. It separates application or customer data from other databases. Database names are part of every collection and object URL. The built-in `_global` database is used for the default global admin user.
-
-**Collection**
-
-A collection is a named group of objects inside one database. Collections are dynamic; they do not require a schema before objects are inserted.
-
-Each collection also has a small `meta` JavaScript object. It is kept in memory and persisted separately from object data. Custom keys are allowed, and these built-in keys affect query planning:
-
-```json
-{
-  "indexes": ["status", "tenantId"],
-  "columns": ["score"],
-  "tiering": {
-    "mode": "compressedMemory",
-    "keep": ["name", "status", "tenantId"],
-    "minBytes": 4096
-  }
-}
-```
-
-**Object**
-
-Objects are plain dynamic JSON-style records. They can have different shapes in the same collection, and values can be strings, numbers, booleans, arrays, nested objects, or `null`.
-
-Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact URL-safe id. `PUT` replaces the full object, `PATCH` applies Mongo-like `$set` and `$unset` operators, and `DELETE` creates a replicated delete. Special fields such as `_vec` are handled by storage features and are hidden from normal read responses.
-
-Public object routes use this shape:
+Examples use `{URL}` as the server base URL. Public requests may reach any cluster node; OBJY DB routes them to the owning object shard.
 
 ```text
-{URL}/api/{db}/{collection}/object/{_id}
+database
+  collection
+    object _id=...
 ```
 
-**Authentication**
+| Placeholder | Meaning |
+| --- | --- |
+| `{URL}` | Public node or gateway URL, without a trailing slash. |
+| `{db}` | Database namespace. |
+| `{collection}` | Collection inside the database. |
+| `{_id}` | Caller-provided or generated object id. |
 
-Auth is collection-based. Any collection can contain authable user objects. On first boot, OBJY DB creates `admin` in `_global/users` and prints a generated password once. `OBJYDB_ADMIN_PASSWORD` may provide that initial password for unattended startup.
-
-```text
-username: admin
-password: <generated during first boot>
-```
-
-Most public endpoints require:
+Most routes require a bearer token:
 
 ```http
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 ```
 
-Passwords are hashed on write and redacted from responses.
+Objects are dynamic JSON-style records. Collections require no schema, and objects in one collection may have different shapes and value types. Every object has an `_id`; inserts generate a compact URL-safe id when it is omitted.
 
-A user may grant object access by collection name. Database access still follows the token's existing scope. `read` allows object reads and queries; `write` allows object create, update, and delete. A write-only grant does not allow GET or list requests, though write responses may contain the affected object. Existing `permissions` query rules can be used alongside these lists.
+`PUT` replaces a complete object, `PATCH` applies Mongo-like `$set` and `$unset`, and `DELETE` creates a replicated delete. Query, search, and aggregation responses are plain arrays rather than envelopes.
 
-```json
-{
-  "_id": "editor",
-  "username": "editor",
-  "password": "secret",
-  "collectionPermissions": {
-    "read": ["articles", "media"],
-    "write": ["articles"]
-  }
-}
-```
+`GET /client.js` serves the dependency-free JavaScript client without authentication. It supports `HEAD`, ETag revalidation, and a `Link` header pointing to the current content-addressed module.
 
-Create this user with `POST /api/{db}/users/object`. Collection schema management still requires an admin token. Permission changes take effect when the user receives a new access token (login or renewal).
+## Endpoint Map
 
-**Field Indexes**
+| Area | Routes |
+| --- | --- |
+| [Authentication](#authentication-and-permissions) | Login and renew against any auth-enabled collection. |
+| [Databases](#databases) | List, create, bootstrap an administrator, and delete. |
+| [Collections](#collections) | List, create, delete, and manage collection metadata. |
+| [Objects](#objects) | Single and bulk create, read, replace, patch, and delete. |
+| [Imports](#streamed-bulk-writes) | Bounded NDJSON insert, replace, patch, and delete. |
+| [Search](#query) | Filters, sorting, paging, aggregation, vectors, and references. |
+| [Files](#file-handling) | Object-backed multipart upload, replacement, download, and deletion. |
+| [Operations](#health-and-cluster-status) | Health and authenticated public cluster status. |
 
-`indexes` are in-memory field indexes. They are best for equality-style filtering, `$in`, narrowing candidate ids, and indexed sorting. They are also used by the query planner before falling back to scans.
+## Authentication and Permissions
 
-**Columns**
+Authentication is collection-based: any collection may contain user objects. On first boot, OBJY DB creates `admin` in `_global/users` and prints its generated password once. `OBJYDB_ADMIN_PASSWORD` may supply that initial password for unattended startup.
 
-`columns` move selected field values into RID-addressed column storage. Numeric, boolean, and repeated string values are kept compactly, while dynamic object reads still hydrate as ordinary full objects. They help `$sum`, `$avg`, `$min`, `$max`, `$count`, and grouped aggregates avoid reading full objects when the planner can combine indexed ids with column values. Column builds run in the background.
-
-**Compressed Memory Tiering**
-
-`tiering` can compress cold object fields in memory while keeping snapshots and journals as full logical objects. API reads still return ordinary full objects. Use either `keep` to name the fields that should remain hot, or `offload` to name fields that should be compressed; do not use both in the same meta object.
-
-```json
-{
-  "tiering": {
-    "mode": "compressedMemory",
-    "keep": ["name", "status", "applications"],
-    "minBytes": 4096
-  }
-}
-```
-
-```json
-{
-  "tiering": {
-    "mode": "compressedMemory",
-    "offload": ["history", "rawPayload"],
-    "minBytes": 4096
-  }
-}
-```
-
-Fields listed in `indexes` or `columns` are kept hot automatically, even if a broader parent object is offloaded. This lets indexes and column aggregates stay fast without inflating compressed data. Queries on non-indexed compressed fields still work, but they require scan-time hydration.
-
-**Object Hooks**
-
-`hooks` enables server-registered object middleware for a collection. Collection meta stores names and activation only; executable code stays in the server deployment. `use` applies named hooks according to their registered operations, while `create`, `read`, `update`, and `delete` can add operation-specific hooks. Set `enabled` to `false` to bypass all configured hooks without deleting the lists.
-
-```json
-{
-  "hooks": {
-    "enabled": true,
-    "use": ["timestamps", "audit"],
-    "create": ["assets.validate"]
-  }
-}
-```
-
-**Vector Index**
-
-Objects may include `_vec`, an embedding vector. `_vec` is stored separately from the public object shape and is redacted from normal responses. Vector search uses the collection search endpoint with `$vector`. If the vector index is warming, search returns `503`.
-
-**Live References**
-
-A reference is a stored descriptor:
-
-```json
-{
-  "type": "reference",
-  "collection": "users",
-  "value": "user-1"
-}
-```
-
-Reads expand references by default with `$refDepth=1`, adding an `object` field. Use `$refDepth=0` to keep descriptors unexpanded.
-
-## Auth
+Passwords are hashed on write and redacted from responses. Tokens are scoped to the database and collection used for authentication.
 
 ### Login
 
-Request:
+`POST /api/{db}/{collection}/auth`
+
+**Request**
 
 ```http
 POST {URL}/api/_global/users/auth
@@ -164,7 +78,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -178,7 +92,9 @@ Response:
 
 ### Renew Token
 
-Request:
+`POST /api/{db}/{collection}/renew`
+
+**Request**
 
 ```http
 POST {URL}/api/_global/users/renew
@@ -189,7 +105,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -201,22 +117,72 @@ Response:
 }
 ```
 
-Refresh tokens must be renewed against the same database and collection they were issued from.
+Refresh tokens must be renewed against the same database and collection that issued them.
 
-Access-token expiration rejected before an operation begins returns HTTP 401 with `code: "ACCESS_TOKEN_EXPIRED"` and `operationStarted: false`. The client may renew and replay that request once. These markers do not authorize replay when `operationStarted` is true or `writeMayHaveSucceeded` is true. Other authentication failures and permission errors are not expiration signals.
+<details>
+<summary><strong>Safe renewal and replay</strong></summary>
+
+Access-token expiration rejected before an operation begins returns HTTP 401 with `code: "ACCESS_TOKEN_EXPIRED"` and `operationStarted: false`. A client may renew and replay that request once.
+
+These markers do not authorize replay when `operationStarted` is true or `writeMayHaveSucceeded` is true. Other authentication failures and permission errors are not expiration signals.
+
+</details>
+
+### Permission Model
+
+Database users can access only the database where they authenticated. A global user can address other databases, but database and collection administration requires `admin: true` or `role: "admin"`. Creating or deleting databases and reading `/api/config` specifically require a global admin token.
+
+The built-in `_global` database is read-only through the public API after bootstrap. Object writes, metadata changes, collection changes, and database deletion are rejected even for a global administrator.
+
+Collection grants provide broad read or write access by collection name:
+
+```json
+{
+  "_id": "editor",
+  "username": "editor",
+  "password": "secret",
+  "collectionPermissions": {
+    "read": ["articles", "media"],
+    "write": ["articles"]
+  }
+}
+```
+
+`read` allows object reads and queries. `write` allows create, update, and delete, but does not imply read access. Create users through `POST /api/{db}/users/object`; permission changes apply after login or renewal issues a new token.
+
+Object-level rules combine a query with `c`, `r`, `u`, and `d` permissions:
+
+```json
+{
+  "_id": "editor",
+  "username": "editor",
+  "password": "secret",
+  "permissions": [
+    {
+      "name": "own articles",
+      "query": { "ownerId": "editor" },
+      "perm": "crud"
+    }
+  ]
+}
+```
+
+Read rules are merged into the requested query. Updates must permit both the stored object and its resulting value. A non-admin user without a matching rule or collection grant is denied by default.
 
 ## Databases
 
 ### List Databases
 
-Request:
+`GET /api/databases`
+
+**Request**
 
 ```http
 GET {URL}/api/databases
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -226,7 +192,9 @@ Response:
 
 ### Create Database
 
-Request:
+`POST /api/databases`
+
+**Request**
 
 ```http
 POST {URL}/api/databases
@@ -239,7 +207,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -251,7 +219,9 @@ Response:
 
 ### Create Database With First Admin User
 
-Request:
+`POST /api/databases`
+
+**Request**
 
 ```http
 POST {URL}/api/databases
@@ -268,7 +238,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -288,18 +258,74 @@ Response:
 
 If `adminUser.collection` is omitted, `users` is used. The users collection receives a `username` index.
 
+### Delete Database
+
+`DELETE /api/databases/{db}`
+
+This requires a global admin token. Deletion removes the database metadata and objects across the cluster and attempts to remove associated file blobs. `_global` cannot be deleted.
+
+**Request**
+
+```http
+DELETE {URL}/api/databases/{db}
+Authorization: Bearer <accessToken>
+```
+
+**Response**
+
+```http
+HTTP/1.1 204 No Content
+```
+
 ## Collections
+
+A collection is a dynamic group of objects plus a small metadata document. Metadata is kept in memory, persisted separately from objects, and may contain custom application keys.
+
+These built-in keys change runtime behavior:
+
+| Key | Purpose |
+| --- | --- |
+| `indexes` | Field indexes for equality filters, candidate narrowing, grouped values, and sorting. |
+| `columns` | RID-addressed typed values for compact storage and numeric aggregation. |
+| `tiering` | Compressed-memory offloading for selected cold object fields. |
+| `hooks` | Names and activation settings for server-registered object middleware. |
+
+```json
+{
+  "indexes": ["status", "tenantId"],
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "tenantId"],
+    "minBytes": 4096
+  },
+  "hooks": {
+    "enabled": true,
+    "use": ["timestamps", "audit"]
+  }
+}
+```
+
+Field indexes accelerate supported filter and sort paths. Columns use typed arrays for numbers and booleans, dictionary codes for strings, and an overflow map for unsupported values. They support `$sum`, `$avg`, `$min`, `$max`, `$count`, and grouped aggregation without changing hydrated API objects.
+
+Tiering accepts either `keep` or `offload`, never both. For example, `"offload": ["history", "rawPayload"]` compresses only those paths. Indexed and column fields remain hot automatically. Queries over non-indexed compressed fields remain correct but require scan-time hydration.
+
+Hooks store configuration only; executable code is registered on the server. `use` enables hooks for their registered operations, operation-specific arrays may target `create`, `read`, `update`, or `delete`, and `enabled: false` bypasses the chain.
+
+Changing indexes, columns, or tiering rebuilds derived in-memory state through cooperative bounded tasks. Changing hooks only invalidates the cached hook plan.
 
 ### List Collections
 
-Request:
+`GET /api/{db}/collections`
+
+**Request**
 
 ```http
 GET {URL}/api/{db}/collections
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -310,7 +336,9 @@ Response:
 
 ### Create Collection
 
-Request:
+`POST /api/{db}/collections`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/collections
@@ -333,7 +361,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -359,14 +387,16 @@ You may also send `{ "name": "{collection}", "meta": { ... } }`.
 
 ### Read Collection Meta
 
-Request:
+`GET /api/{db}/{collection}/meta`
+
+**Request**
 
 ```http
 GET {URL}/api/{db}/{collection}/meta
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -386,7 +416,9 @@ Response:
 
 ### Replace Collection Meta
 
-Request:
+`PUT /api/{db}/{collection}/meta`
+
+**Request**
 
 ```http
 PUT {URL}/api/{db}/{collection}/meta
@@ -408,7 +440,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -426,18 +458,18 @@ Response:
 }
 ```
 
-Changing `indexes`, `columns`, or `tiering` rebuilds derived in-memory structures. Changing `hooks` only invalidates the collection's cached hook plan.
-
 ### Delete Collection
 
-Request:
+`DELETE /api/{db}/collections/{collection}`
+
+**Request**
 
 ```http
 DELETE {URL}/api/{db}/collections/{collection}
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```http
 HTTP/1.1 204 No Content
@@ -445,11 +477,15 @@ HTTP/1.1 204 No Content
 
 ## Objects
 
-Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact 16-character URL-safe id. Single operations and bulk operations use the same base route.
+Objects are plain dynamic JSON-style records. Strings, numbers, booleans, arrays, nested objects, and `null` may coexist across different shapes in one collection.
+
+Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact 16-character URL-safe id. Single and bulk operations use the same base route. Special fields such as `_vec` are handled by storage features and hidden from ordinary read responses.
 
 ### Insert One
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object
@@ -464,7 +500,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -477,14 +513,16 @@ Response:
 
 ### Get One
 
-Request:
+`GET /api/{db}/{collection}/object/{_id}`
+
+**Request**
 
 ```http
 GET {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -496,9 +534,11 @@ Response:
 
 ### Replace One
 
+`PUT /api/{db}/{collection}/object/{_id}`
+
 `PUT` is a full object replacement. The URL object id is authoritative.
 
-Request:
+**Request**
 
 ```http
 PUT {URL}/api/{db}/{collection}/object/object-1
@@ -511,7 +551,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -523,9 +563,11 @@ Response:
 
 ### Patch One
 
+`PATCH /api/{db}/{collection}/object/{_id}`
+
 `PATCH` is a Mongo-like partial update. Use `$set` for dot-path writes and `$unset` for dot-path removals. `_id` cannot be changed.
 
-Request:
+**Request**
 
 ```http
 PATCH {URL}/api/{db}/{collection}/object/object-1
@@ -541,7 +583,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -556,14 +598,16 @@ Response:
 
 ### Delete One
 
-Request:
+`DELETE /api/{db}/{collection}/object/{_id}`
+
+**Request**
 
 ```http
 DELETE {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```http
 HTTP/1.1 204 No Content
@@ -587,7 +631,9 @@ File handling is object-backed. One object can wrap one S3-backed blob, while th
 
 ### Create Object With File
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object
@@ -605,7 +651,7 @@ part "file":
 <binary file content>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -622,14 +668,16 @@ Response:
 
 ### Read File Blob
 
-Request:
+`GET /api/{db}/{collection}/object/{_id}/blob`
+
+**Request**
 
 ```http
 GET {URL}/api/{db}/{collection}/object/object-1/blob
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```http
 HTTP/1.1 200 OK
@@ -640,9 +688,11 @@ Content-Type: application/pdf
 
 ### Replace Object With File
 
+`PUT /api/{db}/{collection}/object/{_id}`
+
 `PUT` replaces the full wrapping object and stores the new file under a new server-derived blob key. No old file version is exposed by OBJY DB; old blob cleanup is best-effort after the object pointer is durable.
 
-Request:
+**Request**
 
 ```http
 PUT {URL}/api/{db}/{collection}/object/object-1
@@ -659,7 +709,7 @@ part "file":
 <binary file content>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -676,16 +726,18 @@ Response:
 
 ### Delete File Object
 
+`DELETE /api/{db}/{collection}/object/{_id}`
+
 Delete the wrapping object through normal object CRUD. The object delete is durable first; blob deletion is then attempted best-effort.
 
-Request:
+**Request**
 
 ```http
 DELETE {URL}/api/{db}/{collection}/object/object-1
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```http
 HTTP/1.1 204 No Content
@@ -697,7 +749,9 @@ Batches are split by object shard internally. Duplicate ids inside one bulk requ
 
 ### Insert Many
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object
@@ -710,7 +764,7 @@ Content-Type: application/json
 ]
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -724,7 +778,9 @@ Response:
 
 ### Insert Many With Minimal Response
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object
@@ -738,7 +794,7 @@ Prefer: return=minimal
 ]
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -748,7 +804,9 @@ Response:
 
 ### Replace Many
 
-Request:
+`PUT /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 PUT {URL}/api/{db}/{collection}/object
@@ -761,7 +819,7 @@ Content-Type: application/json
 ]
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -775,7 +833,9 @@ Response:
 
 ### Patch Many
 
-Request:
+`PATCH /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 PATCH {URL}/api/{db}/{collection}/object
@@ -788,7 +848,7 @@ Content-Type: application/json
 ]
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -803,7 +863,9 @@ Response:
 
 ### Delete Many
 
-Request:
+`DELETE /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 DELETE {URL}/api/{db}/{collection}/object
@@ -815,7 +877,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -842,7 +904,9 @@ If a streamed request fails after earlier chunks were written, those earlier chu
 
 #### Stream Insert
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object
@@ -855,7 +919,7 @@ Prefer: return=minimal
 {"_id":"object-3","status":"generated","score":3}
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -865,7 +929,9 @@ Response:
 
 #### Stream Replace
 
-Request:
+`PUT /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 PUT {URL}/api/{db}/{collection}/object
@@ -877,7 +943,7 @@ Prefer: return=minimal
 {"_id":"object-2","status":"archived","score":12}
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -887,7 +953,9 @@ Response:
 
 #### Stream Patch
 
-Request:
+`PATCH /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 PATCH {URL}/api/{db}/{collection}/object
@@ -900,7 +968,7 @@ Prefer: return=minimal
 {"_id":"missing","$set":{"score":99}}
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -911,7 +979,9 @@ Response:
 
 #### Stream Delete
 
-Request:
+`DELETE /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 DELETE {URL}/api/{db}/{collection}/object
@@ -924,7 +994,7 @@ Prefer: return=minimal
 {"_id":"missing"}
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -939,16 +1009,18 @@ Query responses are plain arrays. Use GET for small URL-safe queries and POST `/
 
 ### GET Query
 
+`GET /api/{db}/{collection}/object`
+
 `q` is URL-encoded JSON. The decoded query in this example is `{"status":"active","score":{"$gte":10}}`.
 
-Request:
+**Request**
 
 ```http
 GET {URL}/api/{db}/{collection}/object?q=%7B%22status%22%3A%22active%22%2C%22score%22%3A%7B%22%24gte%22%3A10%7D%7D&sortBy=score&sort=desc&limit=50&offset=0
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 [
@@ -959,7 +1031,9 @@ Response:
 
 ### POST Search
 
-Request:
+`POST /api/{db}/{collection}/search`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/search
@@ -977,7 +1051,7 @@ Content-Type: application/json
 
 You may also use `$limit` and `$skip` in the POST body. URL `limit` / `offset` parameters take precedence when both are present. Page size is capped at `250`.
 
-Response:
+**Response**
 
 ```json
 [
@@ -987,7 +1061,9 @@ Response:
 
 ### Operator Query
 
-Request:
+`POST /api/{db}/{collection}/search`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/search
@@ -1005,7 +1081,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 [
@@ -1013,13 +1089,32 @@ Response:
 ]
 ```
 
-Also supported: `$eq`, `$ne`, `$nin`, `$regex`, `$startsWith`, `$endsWith`, `$exists`, `$null`, `$type`, `$size`, `$mod`, `$between`, `$before`, `$after`, `$and`, `$not`, `$nor`.
+Also supported: `$eq`, `$equal`, `$deepEquals`, `$ne`, `$in`, `$nin`, `$regex`, `$like`, `$likeI`, `$startsWith`, `$endsWith`, `$contains`, `$elemMatch`, `$exists`, `$null`, `$type`, `$size`, `$mod`, `$between`, `$before`, `$after`, `$and`, `$or`, `$nor`, `$not`, `$all`, and `$any`.
+
+### Query Path
+
+Query, vector-search, and aggregation responses include the planner decision in:
+
+```http
+x-spread-db-query-path: index-full
+```
+
+<details>
+<summary><strong>Planner path values</strong></summary>
+
+Read paths include `scan`, `index-full`, `index-partial`, and `ordered-index`. Vector paths are `vector-index` and `vector-filter`. Aggregate paths include `aggregate-column-summary`, `aggregate-column-scan`, `aggregate-group-index`, `aggregate-group-forward-index`, `aggregate-group-column-scan`, and `aggregate-scan`.
+
+Permission-denied reads report `permission-denied`; reference queries add `reference-` or `aggregate-reference-`. A sharded response may contain multiple comma-separated paths when shards use different plans.
+
+</details>
 
 ## Aggregation
 
 Aggregation is supplied as `$aggregate` inside the query object. Supported operators are `$sum`, `$avg`, `$min`, `$max`, and `$count`.
 
-Request:
+`POST /api/{db}/{collection}/search`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/search
@@ -1042,7 +1137,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 [
@@ -1056,7 +1151,9 @@ Store embeddings on `_vec`. The vector is indexed separately and hidden from nor
 
 ### Insert Vector Object
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object
@@ -1070,7 +1167,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -1081,7 +1178,9 @@ Response:
 
 ### Search Vectors
 
-Request:
+`POST /api/{db}/{collection}/search`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/search
@@ -1097,7 +1196,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 [
@@ -1117,11 +1216,13 @@ If the needed vector index is still warming:
 
 ## Live References
 
-Reference descriptors can point to another collection. `database` is optional; if omitted, the current database is used.
+Reference descriptors point to another object without embedding a stored copy. `database` is optional; if omitted, the current database is used. Reads expand references by default with depth `1`; use `$refDepth: 0` to retain the descriptor only.
 
 ### Store Reference
 
-Request:
+`POST /api/{db}/{collection}/object`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/object?$refDepth=0
@@ -1139,7 +1240,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -1155,16 +1256,18 @@ Response:
 
 ### Read Expanded Reference
 
+`GET /api/{db}/{collection}/object/{_id}`
+
 Reads expand references by default with depth `1`.
 
-Request:
+**Request**
 
 ```http
 GET {URL}/api/{db}/{collection}/object/post-1
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -1181,14 +1284,16 @@ Response:
 
 ### Read Unexpanded Reference
 
-Request:
+`GET /api/{db}/{collection}/object/{_id}`
+
+**Request**
 
 ```http
 GET {URL}/api/{db}/{collection}/object/post-1?$refDepth=0
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+**Response**
 
 ```json
 {
@@ -1204,7 +1309,9 @@ Response:
 
 ### Query Reference Path
 
-Request:
+`POST /api/{db}/{collection}/search`
+
+**Request**
 
 ```http
 POST {URL}/api/{db}/{collection}/search
@@ -1216,7 +1323,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+**Response**
 
 ```json
 [
@@ -1235,21 +1342,63 @@ Response:
 
 Vector search cannot currently be combined with reference object paths.
 
-## Public Cluster Status
+## Health and Cluster Status
 
-`/api/config` is the compact public status endpoint for the UI and operators. It requires a global user token. Cluster collection is cached for one second so concurrent status requests reuse the same peer fan-out.
+### Health
 
-Request:
+The health route does not require authentication. During restore it remains available while data routes return `503` with `Retry-After: 5`.
+
+`GET /health`
+
+**Request**
+
+```http
+GET {URL}/health
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "node": "node-8080",
+  "restore": null
+}
+```
+
+While restoring, the response also has `"restoring": true` and `restore` contains current progress.
+
+### Public Cluster Status
+
+`/api/config` is the compact public status endpoint for the UI and operators. It requires a global admin token. Cluster collection is cached for one second so concurrent status requests reuse the same peer fan-out.
+
+`GET /api/config`
+
+**Request**
 
 ```http
 GET {URL}/api/config
 Authorization: Bearer <accessToken>
 ```
 
-Response:
+<details>
+<summary><strong>Response example</strong></summary>
 
 ```json
 {
+  "ok": true,
+  "generatedAt": "2026-09-18T08:41:22.000Z",
+  "node": { "id": "node-8080", "url": "{URL}" },
+  "rss": {
+    "cluster": { "rss": 2190999552, "nodeCount": 1, "onlineNodeCount": 1 },
+    "logical": { "rss": 2190999552, "nodeCount": 1, "onlineNodeCount": 1 },
+    "physical": { "rss": 2190999552, "nodeCount": 1, "onlineNodeCount": 1 }
+  },
+  "heap": {
+    "cluster": { "used": 1701040128, "total": 4294967296, "percent": 39.6 },
+    "logical": { "used": 1701040128, "total": 4294967296, "percent": 39.6 },
+    "physical": { "used": 1701040128, "total": 4294967296, "percent": 39.6 }
+  },
   "indexes": {
     "ready": 18,
     "building": 2,
@@ -1293,7 +1442,11 @@ Response:
 }
 ```
 
-The normal response contains one shard topology, lightweight node health, per-node heap/RSS and memory-guard state, and aggregate index, vector, and logical compression information. It omits duplicated peer topology and collection-level diagnostics.
+</details>
+
+The normal response contains one shard topology, lightweight node health, logical and physical heap/RSS totals, per-node memory-guard state, and aggregate index, vector, and logical compression information. Logical totals select one reachable replica per shard; physical totals count every process. The example abbreviates fields inside the memory summaries; the live response also includes byte/MiB totals, capacity percentages, and online/offline counts.
+
+`indexes.activeWorkers` is retained as a status-field name for compatibility. It counts active cooperative derived-state tasks in the node process; it does not mean worker threads or child processes.
 
 `replication.healthy` means the node has no known replication failure or queued/in-flight catch-up work. It is an operational health signal, not a full data-checksum comparison between replicas.
 
@@ -1306,10 +1459,20 @@ Authorization: Bearer <accessToken>
 
 The detailed response adds per-collection index, vector, and compression state plus full replication diagnostics. The admin UI requests it only when the cluster-status modal is opened. Restore progress is included only while a peer is restoring.
 
-## Response Notes
+## Responses, Errors, and Limits
 
-- Query, search, and aggregation responses are arrays.
-- Single-object creates and reads return one object.
-- Bulk writes return `{ inserted|updated|replaced, items }`.
-- Bulk delete returns `{ deleted, ids, skipped }`.
-- Error responses use `{ "error": "message" }`.
+OBJY DB keeps public responses close to the requested operation:
+
+| Operation | Response shape |
+| --- | --- |
+| Single create, read, replace, or patch | One object. |
+| Query, search, vector search, or aggregation | An array. |
+| Bulk write | Count fields plus returned items unless minimal response was requested. |
+| Bulk delete | `{ deleted, ids, skipped }`. |
+| Successful delete | `204 No Content`. |
+
+Errors use a JSON body containing at least `error`. Additional fields may include `code`, `operationStarted`, `writeMayHaveSucceeded`, committed import counts, restore progress, or index readiness.
+
+Normal object queries default to 250 rows and cap a page at 250. JSON bodies, individual objects, bulk counts, bulk bytes, file uploads, and pending persistence pressure are bounded by server configuration. Oversized requests return `413`; temporary restore or pressure responses may include `Retry-After`.
+
+NDJSON streams commit bounded batches as they are processed. A later malformed line or failed batch does not roll back earlier committed batches.

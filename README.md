@@ -1,53 +1,80 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/branding/objy-db-logo-arctic.png">
+    <img src="public/branding/objy-db-logo-cobalt.png" width="360" alt="OBJY DB">
+  </picture>
+</p>
+
 # OBJY DB
 
-An in-memory, sharded, replicated object database for large dynamic object sets.
+<p align="center"><strong>Dynamic objects in memory. Sharded across nodes. Durable in S3.</strong></p>
 
-OBJY DB is built for plain JavaScript-style objects, fast local reads, bulk-first writes, object sharding, pull-based replication, S3 persistence, and a small admin console. Its core stays lightweight: the OBJY runtime is optional, with no schema-first object model or hidden application context in the database itself.
+OBJY DB is a bulk-first database for large, dynamic JavaScript object sets. It combines fast in-memory access with object sharding, replication, indexed queries, and S3-backed recovery.
 
-Public REST API usage is documented in `API.md`. This guide is for developing, running, and operating the database itself.
-
-The [JavaScript client](client/README.md) is available at `/client.js` for browser imports and `objydb/client` for Node and bundlers. It includes CRUD, queries, files, bulk imports and automatic token renewal.
-
-## Why This Exists
-
-OBJY DB keeps the database model simple:
-
-- Objects are dynamic and identified by `_id`.
-- Collections own metadata such as index definitions.
-- Databases are top-level namespaces.
-- Shards distribute objects globally across all databases and collections.
-- Replicas converge through the replication log.
-- Persistence is journals plus compacted snapshots on S3.
-
-The goal is a system that stays understandable while still handling very large object counts.
+[Quick start](#quick-start) | [API](API.md) | [JavaScript client](client/README.md) | [Contributing](CONTRIBUTING.md) | [Security](SECURITY.md)
 
 ## Quick Start
 
-Install dependencies:
+Install dependencies and start one node:
 
 ```sh
 npm ci
-```
-
-Start a node:
-
-```sh
 node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
 ```
 
-Open the console:
+Open the admin console at:
 
 ```text
 http://localhost:8080/
 ```
 
-On the first boot, OBJY DB creates the global `admin` user and prints its generated password once. For unattended startup, provide the initial password only for that first boot:
+On first boot, OBJY DB creates the global `admin` user and prints a generated password once. For unattended first boot, provide it explicitly:
 
-```bash
-OBJYDB_ADMIN_PASSWORD="your-initial-password" node src/index.js --config spread-db.config.json --node node-a
+```sh
+OBJYDB_ADMIN_PASSWORD="your-initial-password" node src/index.js \
+  --config spread-db.config.json \
+  --node node-a
 ```
 
-## The Mental Model
+## What You Get
+
+| Capability | What it means |
+| --- | --- |
+| Dynamic objects | Collections accept different object shapes and value types without a schema. |
+| Bulk-first writes | Storage, routing, replication, persistence, and hooks operate on bounded batches. |
+| Object sharding | Objects from every database and collection are distributed by `_id`. |
+| Replication | Hinted pull handles the fast path; anti-entropy closes missed gaps. |
+| S3 durability | Journals capture changes and snapshots compact durable state. |
+| Fast query paths | Field indexes, RID columns, and HNSW vector indexes accelerate different workloads. |
+| Memory control | Value dictionaries, typed columns, and compressed-memory tiering reduce resident data. |
+| Complete object model | References, files, authentication, permissions, hooks, and aggregation are built in. |
+| Simple access | Use the REST API, the browser-ready JavaScript client, or the admin console. |
+
+OBJY DB uses whole-object last-write-wins convergence. Updates replace the replicated object value rather than merging individual fields.
+
+## How It Works
+
+```text
+                         +----------------------+
+Client ----> any node -->| auth, hooks, routing |
+                         +----------+-----------+
+                                    |
+                          owning object shard
+                                    |
+                 +------------------+------------------+
+                 |                                     |
+          in-memory objects                    replica hint
+       indexes / columns / vectors                  |
+                 |                              peer pulls
+                 |
+          WAL -> S3 journals -> snapshots
+```
+
+Any public node can accept a request. The shard router handles it locally when possible and otherwise forwards it to an owner. Replicas pull acknowledged operations from one another and converge independently.
+
+S3 is the durable source for cluster recovery. A local WAL can protect acknowledged writes before the next asynchronous S3 journal flush.
+
+## Data Model
 
 ```text
 database
@@ -57,337 +84,46 @@ database
     object _id=...
 ```
 
-Objects live under `database/collection/object`. A collection can contain fully dynamic objects, and collection meta carries optional indexes and vector settings.
+- A **database** is the top-level namespace.
+- A **collection** owns objects and a small metadata document.
+- An **object** is a dynamic JSON-style record identified by `_id`.
 
-Sharding is object-based. For any `{ database, collection, _id }`, the shard map decides the owner shard. Any node can receive a request; if it does not own the shard, it forwards the operation to a peer that does.
+Collection metadata activates derived structures and optional behavior:
 
-## Runtime Pieces
-
-| Piece | Responsibility |
-| --- | --- |
-| Store | Keeps objects in memory. `object` is the current high-throughput path; `shape` remains available. |
-| CRDT node | Applies whole-object writes, deletes, clocks, tombstones, and convergence rules. |
-| Shard router | Finds object owners and fans reads/writes across shards when needed. |
-| Replication scheduler | Uses hinted pull plus periodic anti-entropy sync. |
-| Persistence manager | Flushes journals, writes snapshots, restores data on boot. |
-| Index layer | Maintains field, column, and vector index readiness. |
-| Interfaces | Mount public, cluster, and optional plugin routes. |
-
-## Pluggable Components
-
-OBJY DB is built around small replaceable layers. The core database owns object clocks, shard routing, replication, persistence coordination, and index readiness. Everything around that should stay swappable.
-
-The two most important extension points are:
-
-| Component | What can be changed |
-| --- | --- |
-| Storage engine | Replace how objects are represented in memory while keeping the same database/collection/object behavior. |
-| Interfaces | Add, remove, or replace HTTP-facing route modules without changing the storage or replication layers. |
-
-Storage engines should expose the same object-level behavior: bulk insert, replace, update, delete, reads, scans, metadata access, and index maintenance hooks. Single-object operations are treated as bulks of one, so custom storage should be designed bulk-first.
-
-Interface plugins should stay thin. They translate transport concerns into database operations, but should not own storage, replication, sharding, or permission logic. The default setup uses separate public and cluster interfaces; custom interfaces can be added for specialized protocols, admin tooling, import flows, or private operational routes.
-
-### Object Hooks
-
-Object hooks are named, code-registered middleware for public create, read, update, and delete operations. They run once on the node that accepts the request, before shard fan-out, and never during replication or restore. Bulk requests invoke each hook once for the whole bulk; NDJSON streams invoke them once per bounded batch.
-
-```js
-import { createObjectHookRegistry } from "objydb/hooks";
-import { startServer } from "objydb/server";
-
-const hooks = createObjectHookRegistry();
-
-hooks.register("timestamps", {
-  operations: ["create", "update"],
-  handler: async (context, next) => {
-    const now = new Date().toISOString();
-    for (const object of context.input.objects || []) object._updated = now;
-    await next();
+```json
+{
+  "indexes": ["status", "ownerId"],
+  "columns": ["score"],
+  "tiering": {
+    "mode": "compressedMemory",
+    "keep": ["name", "status", "ownerId"],
+    "minBytes": 4096
   },
-});
-
-await startServer({ objectHooks: hooks });
-```
-
-The CLI can load hook modules from files listed in `spread-db.config.json`. Paths are relative to that config file. Each module exports `register({ objectHooks, node, options })`; registration finishes before the HTTP server starts.
-
-```json
-{
-  "plugins": [
-    { "file": "./plugins/example.js", "options": {} }
-  ]
-}
-```
-
-Collections enable registered hooks through meta. `use` applies a hook to the operations declared by its code registration; operation arrays are optional additions. Setting `enabled` to `false` preserves the configuration but bypasses the whole chain.
-
-```json
-{
   "hooks": {
-    "enabled": true,
-    "use": ["timestamps", "audit"],
-    "create": ["assets.validate"]
+    "use": ["timestamps"]
   }
 }
 ```
 
-Hooks may modify `context.input` before `next()` and inspect `context.result` afterward. A hook may set `context.result.responseOverride` after a successful write to replace that write's JSON response. A hook definition may also provide `validateMeta(meta)` to reject invalid collection settings when metadata is saved. OBJY DB revalidates transformed writes and still owns authentication, permissions, routing, and durability. Every public cluster node must register the same names.
+Sharding is global, not configured per database or collection. The tuple `{ database, collection, _id }` deterministically selects an object shard.
 
-The optional `plugins/objy.js` module registers an `objy` hook. It loads `new-objy` only when configured and uses OBJY DB's existing writes instead of an OBJY storage mapper. For adjacent source checkouts, configure it like this on every API node:
+## Runtime Architecture
 
-```json
-{
-  "plugins": [{
-    "file": "./plugins/objy.js",
-    "options": { "runtime": "../new-objy/index.js" }
-  }]
-}
-```
-
-Enable the hook and configure its family in collection metadata:
-
-```json
-{
-  "hooks": { "use": ["objy"] },
-  "objy": {
-    "structure": { "status": "new" },
-    "inheritFamily": "Base",
-    "affectable": false
-  }
-}
-```
-
-These settings are scoped to that database and collection. Omitted settings use OBJY defaults; the `Affectable` collection is always affectable. Metadata changes take effect on the next object operation. Any family with `"affectable": true` can supply live defaults to objects in the same database.
-
-OBJY handlers run in local QuickJS workers. Handlers run in OBJY's order; when one calls `done(value)` with a non-null value, the last such value replaces the ordinary JSON write response. Bulk writes return an array in input order, using the ordinary object for items without a handler value. A single delete with a handler value returns HTTP 200 and that value instead of an empty HTTP 204. NDJSON streams still return their minimal count summaries. Without a handler return value, changes to `afterObj` appear in the response only. The plugin stores event definitions but does not yet run a scheduler; that needs a separate event source and consumer.
-
-## Configuration
-
-The default config path is:
-
-```text
-spread-db.config.json
-```
-
-Use another file with `--config`. The same config can be shared by every peer; peer identity is usually supplied at startup:
-
-```sh
-node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
-```
-
-This sample shows the runtime defaults explicitly. Values like node identity and secrets should be replaced for real deployments.
-
-```json
-{
-  "node": {
-    "id": "node-a",
-    "url": "http://localhost:8080",
-    "retainOps": 256,
-    "syncBatchSize": 1024
-  },
-  "server": {
-    "port": 8080
-  },
-  "storage": {
-    "engine": "shape",
-    "object": {
-      "valueDirectory": {
-        "enabled": true,
-        "minRefs": 2,
-        "maxEntries": 100000,
-        "maxCandidates": 4096,
-        "maxCandidatesPerPath": 256,
-        "maxPaths": 1024,
-        "maxStringLength": 256,
-        "maxKeyBytes": 512
-      }
-    }
-  },
-  "files": {
-    "mode": "off",
-    "prefix": "spread-db/files",
-    "maxUploadBytes": 268435456,
-    "s3": {
-      "bucket": "spread-db",
-      "endpoint": null,
-      "region": "us-east-1",
-      "accessKeyId": null,
-      "secretAccessKey": null,
-      "forcePathStyle": null
-    }
-  },
-  "vector": {
-    "enabled": true,
-    "field": "_vec",
-    "hnsw": {
-      "M": 16,
-      "efConstruction": 200,
-      "efSearch": 0
-    }
-  },
-  "memoryGuard": {
-    "enabled": false,
-    "limitMb": null,
-    "rejectWritesPercent": 85,
-    "resumeWritesPercent": 78,
-    "checkMs": 1000
-  },
-  "cluster": {
-    "syncMs": 2500,
-    "forwardTimeoutMs": 60000,
-    "replicationTimeoutMs": 60000,
-    "hints": {
-      "enabled": true,
-      "debounceMs": 25,
-      "maxScopesPerHint": 128
-    },
-    "shardMapStore": {
-      "mode": "off",
-      "prefix": "spread-db",
-      "key": "cluster/shard-map.json",
-      "s3": {
-        "bucket": "spread-db",
-        "endpoint": null,
-        "region": "us-east-1",
-        "accessKeyId": null,
-        "secretAccessKey": null,
-        "forcePathStyle": null
-      }
-    }
-  },
-  "auth": {
-    "enabled": true,
-    "accessTokenTtlSeconds": 3600,
-    "refreshTokenTtlSeconds": 1209600,
-    "clockToleranceSeconds": 0
-  },
-  "persistence": {
-    "mode": "off",
-    "prefix": "spread-db",
-    "flushMs": 5000,
-    "opBatchSize": 1000,
-    "snapshotMs": 60000,
-    "segmentBytes": 16777216,
-    "compactJournals": true,
-    "snapshotRetention": {
-      "keepLatest": 0,
-      "keepForMs": 0
-    },
-    "journalRetention": {
-      "keepLatest": 0,
-      "keepForMs": 0
-    },
-    "snapshotDirtyOnly": true,
-    "snapshotRole": "primary",
-    "restoreMode": "scoped",
-    "restoreSnapshotId": null,
-    "ack": "memory",
-    "localWal": {
-      "mode": "off",
-      "dir": ".spread-db/wal",
-      "fsync": true,
-      "flushMs": 0
-    },
-    "s3": {
-      "bucket": "spread-db",
-      "endpoint": null,
-      "region": "us-east-1",
-      "accessKeyId": null,
-      "secretAccessKey": null,
-      "forcePathStyle": null
-    }
-  }
-}
-```
-
-### Config Parts
-
-`node` identifies the peer. `id` must be unique in the cluster, and `url` must be reachable by other peers. CLI flags can override `id`, `url`, and `port`, which lets all peers use one shared config.
-
-`server` controls the local HTTP listener.
-
-`storage` selects the in-memory engine. The runtime default is `shape`. For the current object-store path, set `storage.engine` to `object`; the value directory then pools repeated small values to reduce object memory pressure.
-
-`files` enables object-backed blobs. When set to `s3`, file bytes live in S3 under server-derived per-write keys, while the database stores only a small `_file` metadata object on the wrapping object. If `files.s3` is omitted, the file layer can reuse the persistence S3 settings.
-
-`vector` controls the `_vec` field and HNSW tuning used by vector search.
-
-`memoryGuard` can stop accepting local public writes when RSS crosses the reject threshold, then resume after RSS falls below the resume threshold.
-
-`cluster` controls peer behavior: request forwarding, replication timeouts, anti-entropy sync, hinted pull replication, cluster route authentication, and where the shard map is loaded from.
-
-`auth` enables JWT login. OBJY DB generates and persists JWT and cluster secrets automatically. When `_global/users/admin` does not exist, the primary replica creates it using `OBJYDB_ADMIN_PASSWORD` when provided, or prints a generated password once.
-
-`persistence` controls S3 journals, snapshots, restore behavior, and optional local WAL acknowledgements.
-
-## S3 Persistence
-
-Persistence is designed around S3. The database writes append-friendly journal segments and periodic snapshots under the configured `prefix`.
-
-At startup, a peer:
-
-1. Loads the shard map.
-2. Restores snapshots for owned scopes.
-3. Replays journals newer than the restored snapshot.
-4. Restores metadata.
-5. Rebuilds or warms indexes.
-6. Starts persistence, replication, and HTTP interfaces.
-
-At runtime, a peer:
-
-1. Applies writes in memory.
-2. Records local WAL entries first when `ack` is `localWal`.
-3. Flushes journal segments to S3 asynchronously.
-4. Writes snapshots for dirty scopes.
-5. Compacts journal history covered by retained snapshots.
-
-Minimal S3 persistence shape:
-
-```json
-{
-  "persistence": {
-    "mode": "s3",
-    "prefix": "spread-db",
-    "ack": "localWal",
-    "localWal": {
-      "mode": "on",
-      "dir": ".spread-db/wal",
-      "fsync": true,
-      "flushMs": 0
-    },
-    "s3": {
-      "bucket": "spread-db",
-      "endpoint": "https://s3.example.com",
-      "region": "us-east-1",
-      "accessKeyId": "replace-me",
-      "secretAccessKey": "replace-me",
-      "forcePathStyle": false
-    }
-  }
-}
-```
-
-`ack: "memory"` is fastest but only acknowledges in-memory acceptance. `ack: "localWal"` acknowledges after the local write-ahead log has flushed, which is safer during process failure before the next S3 journal flush.
-
-Restore modes:
-
-| Mode | Behavior |
+| Layer | Responsibility |
 | --- | --- |
-| `scoped` | Restore scopes owned by the current shard map. |
-| `reshard` | Scan old persisted shard scopes and redistribute objects through the current shard map. |
+| Store | Keeps objects in memory. `object` is the recommended high-throughput engine; `shape` remains available. |
+| CRDT node | Applies whole-object writes, clocks, tombstones, and convergence rules. |
+| Shard router | Locates object owners and fans operations across shards. |
+| Replication scheduler | Coordinates hinted pull and periodic anti-entropy. |
+| Persistence manager | Flushes journals, writes snapshots, and restores owned data. |
+| Derived structures | Maintains field indexes, RID columns, and vector indexes. |
+| Interfaces | Exposes public, cluster, UI, and plugin routes. |
 
-`restoreSnapshotId` is normally omitted. Set it only for an intentional restore from a retained snapshot.
+Single-object operations are bulks of one. This keeps the write model consistent from the HTTP boundary down to storage and replication.
 
-## Shards and Replication
+## Run a Cluster
 
-The shard map is global. It is not defined per database or per collection.
-
-Each shard has one or more peers. When a shard has one peer, that peer is the only owner for objects assigned to the shard. When a shard has multiple peers, those peers are replicas of the same shard. Any one replica can accept the shard's writes, and the replication scheduler brings the other replicas into convergence.
-
-Replication is scoped by shard. A node only stores and replicates the shards it owns, so adding replicas increases availability and read/write placement options, but it also increases physical memory usage. Logical capacity should count one replica per shard; physical capacity includes every running replica process.
-
-The first reachable peer in a shard is treated as the preferred owner for routed operations. If a request reaches a node that does not own the target object shard, the shard router forwards it to an owning peer. Hinted pull replication then wakes shard replicas quickly after writes, while periodic anti-entropy sync remains as the safety net.
+Every peer loads the same global shard map and determines ownership from its node id or URL.
 
 ```json
 {
@@ -408,17 +144,15 @@ The first reachable peer in a shard is treated as the preferred owner for routed
 }
 ```
 
-If `cluster.shardMapStore.mode` is `s3`, write the map before starting or restarting peers:
+One peer means one copy of a shard. Multiple peers are replicas of that shard. Any replica can accept writes; the first reachable peer is preferred for routed requests.
+
+When the shard map lives in S3, publish it before starting peers:
 
 ```sh
 node scripts/put-shard-map.js --config spread-db.config.json --map shard-map.json
 ```
 
-If no shard map store is enabled, embed the map under `cluster.shardMap`.
-
-## Cluster Startup
-
-Start multiple peers from the same config and override the local identity:
+Then start peers from the same config with individual identities:
 
 ```sh
 node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
@@ -427,52 +161,209 @@ node src/index.js --config spread-db.config.json --node node-c --url http://loca
 node src/index.js --config spread-db.config.json --node node-d --url http://localhost:8083 --port 8083
 ```
 
-Each peer loads the same global shard map and determines ownership from its node id or URL.
+If no shard-map store is enabled, place the map under `cluster.shardMap` in the config. A node stores and replicates only its owned shards. Replicas improve availability but also consume another full physical copy; logical capacity counts one replica per shard.
 
-## Indexes
+Planned shard-count changes use `restoreMode: "reshard"` for the redistribution boot. Return to `scoped` after the new topology is established.
 
-Collection meta controls indexes.
+## Durability
 
-| Index | Used for |
+S3 persistence uses append-friendly journal segments and periodic snapshots under one configured prefix.
+
+```json
+{
+  "persistence": {
+    "mode": "s3",
+    "prefix": "objydb",
+    "ack": "localWal",
+    "localWal": {
+      "mode": "on",
+      "dir": ".spread-db/wal",
+      "fsync": true
+    },
+    "s3": {
+      "bucket": "objydb",
+      "endpoint": "https://s3.example.com",
+      "region": "us-east-1",
+      "accessKeyId": "replace-me",
+      "secretAccessKey": "replace-me",
+      "forcePathStyle": false
+    }
+  }
+}
+```
+
+| Setting | Behavior |
 | --- | --- |
-| Field index | Equality-style filters, old query planner paths, selected sorted paging. |
-| Column index | Numeric aggregate paths such as `$sum`, `$avg`, and count-style summaries. |
-| Vector index | `_vec` search using stored client-provided embeddings. |
+| `ack: "memory"` | Acknowledge after in-memory acceptance. Fastest, but process failure can lose an unflushed write. |
+| `ack: "localWal"` | Acknowledge after the local WAL flush. Protects the gap before S3 journal upload. |
+| `restoreMode: "scoped"` | Restore only scopes owned by the current shard map. |
+| `restoreMode: "reshard"` | Read old shard scopes and redistribute them through a new map. |
 
-Index readiness is visible in the admin console cluster status popup.
+On boot, a peer loads shared secrets and the shard map, restores metadata, streams owned snapshot segments, replays newer journals and the optional WAL, then opens the full public server. Objects are readable while derived structures continue warming.
+
+At runtime, dirty scopes produce snapshots and covered journals are compacted according to retention settings. `restoreSnapshotId` is normally omitted and should be set only for an intentional restore from a retained snapshot.
+
+## Query Speed
+
+Collection metadata chooses which derived structure supports a workload:
+
+| Structure | Best for |
+| --- | --- |
+| Field index | Equality filters, candidate narrowing, grouped values, and indexed sorting. |
+| RID column | Compact field storage and `$sum`, `$avg`, `$min`, `$max`, and `$count`. |
+| Vector index | HNSW search over client-provided `_vec` embeddings. |
+
+Index and column builds are cooperative same-thread tasks. They yield between bounded batches so the API remains available, but they are not separate worker processes. Queries fall back to correct scan paths while required structures are warming; vector search returns `503` until its index is ready.
+
+The `x-spread-db-query-path` response header shows which path served a query or aggregation.
+
+## Extend OBJY DB
+
+The database keeps core ownership clear:
+
+- **Storage engines** decide how objects live in memory.
+- **Interfaces** translate transports into database operations.
+- **Object hooks** add application behavior around public CRUD.
+
+Custom storage engines must preserve bulk CRUD, reads, scans, metadata, and derived-state integration. Interfaces should remain thin and leave authentication, permissions, routing, replication, and durability in the database.
+
+### Object Hooks
+
+Hooks are named middleware for create, read, update, and delete. They run once on the accepting node, never during replication or restore. Bulk requests invoke a hook once for the full bulk; NDJSON streams invoke it once per bounded batch.
+
+```js
+import { createObjectHookRegistry } from "objydb/hooks";
+import { startServer } from "objydb/server";
+
+const hooks = createObjectHookRegistry();
+
+hooks.register("timestamps", {
+  operations: ["create", "update"],
+  handler: async (context, next) => {
+    const now = new Date().toISOString();
+    for (const object of context.input.objects || []) object._updated = now;
+    await next();
+  },
+});
+
+await startServer({ objectHooks: hooks });
+```
+
+The CLI loads hook modules listed under `plugins`. Paths are relative to the config file, and every public cluster node must register the same hook names.
+
+```json
+{
+  "plugins": [
+    { "file": "./plugins/example.js", "options": {} }
+  ]
+}
+```
+
+Hooks may transform `context.input`, inspect `context.result`, provide a successful `responseOverride`, and validate their collection metadata. OBJY DB revalidates transformed writes before storage.
+
+## Configuration
+
+The default config path is `spread-db.config.json`. Use `--config` to select another file, and override peer-local identity with `--node`, `--url`, and `--port`.
+
+A shared cluster config can stay compact because omitted settings use runtime defaults:
+
+```json
+{
+  "node": {
+    "id": "node-a",
+    "url": "http://localhost:8080"
+  },
+  "server": {
+    "port": 8080
+  },
+  "storage": {
+    "engine": "object"
+  },
+  "memoryGuard": {
+    "enabled": true
+  },
+  "cluster": {
+    "syncMs": 2500,
+    "forwardTimeoutMs": 60000,
+    "replicationTimeoutMs": 60000,
+    "shardMapStore": {
+      "mode": "off"
+    }
+  },
+  "auth": {
+    "enabled": true
+  },
+  "persistence": {
+    "mode": "off"
+  }
+}
+```
+
+| Section | Controls |
+| --- | --- |
+| `node` | Peer identity, URL, retained operations, and replication batch size. |
+| `server` | HTTP port, JSON-body limit, and optional CORS origins. |
+| `imports` | Bulk object count, object size, request size, persistence pressure, and retry delay. |
+| `storage` | `object` or `shape` in-memory representation and value-directory tuning. |
+| `files` | Object-backed blob mode, upload limit, prefix, and optional S3 override. |
+| `vector` | Embedding field and HNSW construction/search tuning. |
+| `memoryGuard` | Write rejection and recovery thresholds. |
+| `cluster` | Forwarding, replication, hints, shared secret, and shard-map storage. |
+| `auth` | JWT enablement and access/refresh token lifetimes. |
+| `persistence` | S3, WAL, journals, snapshots, retention, acknowledgements, and restore. |
+| `plugins` | Code modules loaded before the public server starts. |
+
+OBJY DB generates JWT and cluster secrets and persists them beside durable state. Explicit secrets remain supported and must be identical across peers. The initial global admin password can come from `OBJYDB_ADMIN_PASSWORD`; subsequent boots use the stored user.
+
+The shipped [spread-db.config.json](spread-db.config.json) is a local development baseline. Keep credentials and deployment-specific addresses outside source control.
 
 ## Console and Status
 
-The admin console is served by the running node:
+Every running node serves the admin console at its root URL. It provides:
+
+- Database, collection, and object management.
+- Collection metadata editing.
+- Query and aggregation tools.
+- Peer and shard topology.
+- Logical and physical RSS and heap usage.
+- Index, vector, compression, and replication readiness.
+
+The lightweight unauthenticated health route is:
 
 ```text
-http://localhost:8080/
+GET /health
 ```
 
-It shows:
+The authenticated `GET /api/config` route provides compact cluster status, with deeper diagnostics available through `?details=1`.
 
-- Database and collection tree.
-- Object list and JSON viewer.
-- Collection meta editor.
-- Cluster peers and shard state.
-- Logical and physical RSS memory.
-- Index and vector readiness.
-- Replication scheduler state.
+## Develop
 
-The lightweight health check is:
+The repository follows the runtime layers:
 
-```sh
-curl http://localhost:8080/health
-```
+| Path | Contains |
+| --- | --- |
+| `src/` | Storage, queries, routing, replication, persistence, auth, and interfaces. |
+| `client/` | The browser and Node JavaScript client. |
+| `scripts/` | Cluster, shard-map, migration, and operational utilities. |
+| `test/` | Unit, integration, sharding, persistence, and failure coverage. |
+| `public/` | Admin console and branding assets. |
 
-## Practical Notes
+Keep changes bulk-first and preserve the layer boundaries above. Public HTTP behavior belongs in interfaces; storage engines should not absorb routing or authentication; replication and restore must never execute public object hooks.
 
-- Prefer `storage.engine: "object"` for the current fast path.
-- Use `localWal` acknowledgements when acknowledged writes must survive process failure before S3 journal flush.
-- Let OBJY DB persist shared secrets automatically, or keep an explicitly configured `cluster.secret` identical across peers.
-- Keep `forwardTimeoutMs` realistic for heavy shard owners.
-- Keep `syncMs` high enough that anti-entropy does not waste work, but low enough to recover from missed hints.
-- Upload or embed the shard map before starting peers.
-- Restart the whole cluster after planned resharding.
-- Avoid repeated meta/index changes during large imports unless rebuild cost is acceptable.
-- Watch logical memory for capacity planning; watch physical memory for replica and process pressure.
+## Operating Principles
+
+- Prefer `storage.engine: "object"` for the current high-throughput path.
+- Use local-WAL acknowledgements when process-failure durability matters.
+- Keep forwarding timeouts realistic for heavily loaded shard owners.
+- Let hints handle normal replication and anti-entropy handle recovery.
+- Avoid repeated metadata rebuilds during large imports.
+- Watch logical memory for capacity and physical memory for replica cost.
+- Publish the shard map before peers start, and restart the cluster for a planned reshard.
+
+## Documentation
+
+- [Public REST API](API.md)
+- [JavaScript client](client/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [License](LICENSE)
