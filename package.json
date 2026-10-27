@@ -1,6 +1,6 @@
 {
   "name": "objydb",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
   "description": "OBJY DB: an in-memory, sharded and replicated database for dynamic JavaScript objects.",
   "type": "module",
   "main": "src/api.js",
@@ -14,7 +14,8 @@
     "./server": "./src/server.js"
   },
   "bin": {
-    "objydb": "bin/objydb.js"
+    "objy": "bin/objy.js",
+    "objydb": "bin/objy.js"
   },
   "files": [
     "bin/",
@@ -28,8 +29,8 @@
     "objydb.config.json"
   ],
   "scripts": {
-    "start": "node bin/objydb.js",
-    "cluster:local": "node scripts/local-cluster.js",
+    "start": "node bin/objy.js run",
+    "cluster:local": "node bin/objy.js start --instances 4",
     "test": "node --test",
     "test:client": "node --test test/client*.test.js",
     "test:browser": "playwright test",
@@ -47,12 +48,12 @@
   "author": "SPOO Technologies",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/spoo-technologies/objy-db.git"
+    "url": "git+https://github.com/objy-org/objy.db.git"
   },
   "bugs": {
-    "url": "https://github.com/spoo-technologies/objy-db/issues"
+    "url": "https://github.com/objy-org/objy.db/issues"
   },
-  "homepage": "https://github.com/spoo-technologies/objy-db#readme",
+  "homepage": "https://github.com/objy-org/objy.db#readme",
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0"

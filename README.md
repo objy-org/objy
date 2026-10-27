@@ -10,14 +10,35 @@ OBJY DB is a bulk-first database for large, dynamic JavaScript object sets. It c
 
 ## Quick Start
 
-Install dependencies and start one node:
+Install the OBJY DB CLI:
 
 ```sh
-npm ci
-node src/index.js --config objydb.config.json --node node-a --url http://localhost:8080 --port 8080
+npm install --global objydb
 ```
 
-Open the admin console at:
+Create `objydb.config.json`:
+
+```json
+{
+  "node": {
+    "id": "node-8080",
+    "url": "http://localhost:8080"
+  },
+  "server": {
+    "port": 8080
+  }
+}
+```
+
+Start the node:
+
+```sh
+objy run
+```
+
+The CLI loads `objydb.config.json` from the current directory. Use `--config <file>` to select another native OBJY DB config.
+
+Open the admin console:
 
 ```text
 http://localhost:8080/
@@ -26,10 +47,47 @@ http://localhost:8080/
 On first boot, OBJY DB creates the global `admin` user and prints a generated password once. For unattended first boot, provide it explicitly:
 
 ```sh
-OBJYDB_ADMIN_PASSWORD="your-initial-password" node src/index.js \
-  --config objydb.config.json \
-  --node node-a
+OBJYDB_ADMIN_PASSWORD="your-initial-password" objy run
 ```
+
+Run the node as a managed background process when preferred:
+
+```sh
+objy start
+objy status
+objy logs --follow
+objy restart
+objy stop
+```
+
+For development from a source checkout, install dependencies and link the same CLI locally:
+
+```sh
+npm ci
+npm link
+objy run
+```
+
+Managed process state and logs stay under `.objydb/`; infrastructure provisioning remains outside this runtime CLI.
+
+## Embed in Node.js
+
+OBJY DB can live inside an existing Node.js application while retaining its HTTP interface, authentication, permissions, hooks, and admin console.
+
+```js
+import { startServer } from "objydb/server";
+
+const database = await startServer({ port: 8080 });
+
+console.log(`OBJY DB is running on port ${database.port}`);
+
+async function closeDatabase() {
+  await database.replication.stop();
+  await new Promise((resolve) => database.server.close(resolve));
+}
+```
+
+`startServer()` is the lightweight embedded path: it creates an in-memory node and its interfaces without loading the CLI configuration or S3 lifecycle. The returned runtime owns the server, node, replication scheduler, router, and authentication service. Use `objy run` for durable or clustered nodes. Direct access to database internals is intentionally not part of the public package API.
 
 ## What You Get
 
@@ -118,25 +176,39 @@ Single-object operations are bulks of one. This keeps the write model consistent
 
 ## Run a Cluster
 
-Every peer loads the same global shard map and determines ownership from its node id or URL.
+Every peer loads the same global shard map and determines ownership from its node id or URL. For a local cluster with two shards and two replicas per shard, use:
 
 ```json
 {
-  "shards": {
-    "shard-0": {
-      "peers": [
-        { "id": "node-a", "url": "http://localhost:8080" },
-        { "id": "node-b", "url": "http://localhost:8081" }
-      ]
+  "node": {
+    "id": "node-8080",
+    "url": "http://localhost:8080"
+  },
+  "server": {
+    "port": 8080
+  },
+  "cluster": {
+    "shardMap": {
+      "shards": {
+        "shard-0": { "peers": [
+          { "url": "http://localhost:8080" },
+          { "url": "http://localhost:8081" }
+        ] },
+        "shard-1": { "peers": [
+          { "url": "http://localhost:8082" },
+          { "url": "http://localhost:8083" }
+        ] }
+      }
     },
-    "shard-1": {
-      "peers": [
-        { "id": "node-c", "url": "http://localhost:8082" },
-        { "id": "node-d", "url": "http://localhost:8083" }
-      ]
-    }
+    "shardMapStore": { "mode": "off" }
   }
 }
+```
+
+```sh
+objy start --instances 4
+objy status
+objy stop
 ```
 
 One peer means one copy of a shard. Multiple peers are replicas of that shard. Any replica can accept writes; the first reachable peer is preferred for routed requests.
@@ -147,16 +219,7 @@ When the shard map lives in S3, publish it before starting peers:
 node scripts/put-shard-map.js --config objydb.config.json --map shard-map.json
 ```
 
-Gracefully stop every peer and let its WAL and journal flush complete before publishing a shard-count change. Peer and replica changes keep the active topology; a partition change creates a new generation and is completed during the following cluster boot.
-
-Then start peers from the same config with individual identities:
-
-```sh
-node src/index.js --config objydb.config.json --node node-a --url http://localhost:8080 --port 8080
-node src/index.js --config objydb.config.json --node node-b --url http://localhost:8081 --port 8081
-node src/index.js --config objydb.config.json --node node-c --url http://localhost:8082 --port 8082
-node src/index.js --config objydb.config.json --node node-d --url http://localhost:8083 --port 8083
-```
+Gracefully stop every peer and let its WAL and journal flush complete before publishing a shard-count change. Peer and replica changes keep the active topology; a partition change creates a new generation and is completed during the following cluster boot. On separate hosts, use `objy run` with that peer's `--node`, `--url`, and `--port` values.
 
 If no shard-map store is enabled, place the map under `cluster.shardMap` in the config. A node stores and replicates only its owned shards. Replicas improve availability but also consume another full physical copy; logical capacity counts one replica per shard.
 

@@ -5,7 +5,7 @@ const [pack] = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json"], {
 }));
 const paths = pack.files.map((file) => file.path);
 const required = [
-  "bin/objydb.js",
+  "bin/objy.js",
   "client/index.js",
   "LICENSE",
   "NOTICE.md",
