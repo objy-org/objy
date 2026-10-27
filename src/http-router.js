@@ -69,6 +69,13 @@ export async function readJson(req, fallback = {}) {
   return JSON.parse(raw);
 }
 
+export function remoteHttpError(remote, fallback) {
+  const err = new Error(remote.body?.error || fallback);
+  err.status = remote.status;
+  err.body = remote.body;
+  return err;
+}
+
 export function isNdjsonRequest(req) {
   return isNdjsonContentType(req.headers?.["content-type"]);
 }

@@ -421,11 +421,10 @@ export function isPasswordHash(value) {
 export function accessTokenFromRequest(req) {
   const header = req?.headers?.authorization;
   if (typeof header === "string") {
-    const match = header.match(/^(Bearer|Baerer)\s+(.+)$/i);
-    if (match) return match[2].trim() || null;
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (match) return match[1].trim() || null;
   }
-  const queryToken = req?.query?.get?.("token");
-  return typeof queryToken === "string" && queryToken.trim() ? queryToken.trim() : null;
+  return null;
 }
 
 function isPlainObject(value) {

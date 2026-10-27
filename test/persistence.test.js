@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { CRDTNode } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { finalizeShardMap, publishShardMap, TOPOLOGY_ACTIVE, TOPOLOGY_RESHARDING } from "../src/shard-map.js";
 
 function shardMapFor(shards, peerByShard = {}) {
   return {
@@ -39,7 +40,7 @@ class HookedMemoryObjectStorage extends MemoryObjectStorage {
 }
 
 test("local WAL restores acknowledged writes before S3 journal flush", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spread-db-wal-"));
+  const dir = mkdtempSync(join(tmpdir(), "objydb-wal-"));
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "n1" });
   const persistence = new PersistenceManager({
@@ -61,7 +62,7 @@ test("local WAL restores acknowledged writes before S3 journal flush", async () 
 
     assert.equal(flushed.records, 1);
     assert.equal(flushed.ops, 2);
-    assert.deepEqual(await storage.list("spread-db/"), []);
+    assert.deepEqual(await storage.list("objydb/"), []);
     assert.equal(readFileSync(join(dir, "n1", "wal.jsonl"), "utf8").trim().split("\n").length, 1);
 
     const fresh = new CRDTNode({ id: "n1" });
@@ -84,7 +85,7 @@ test("local WAL restores acknowledged writes before S3 journal flush", async () 
 });
 
 test("local WAL splits large bulk writes into smaller durable records", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spread-db-wal-split-"));
+  const dir = mkdtempSync(join(tmpdir(), "objydb-wal-split-"));
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "n1" });
   const persistence = new PersistenceManager({
@@ -136,8 +137,8 @@ test("journaled writes restore by database, collection, and shard", async () => 
   node.update("app", "users", "u1", { active: true });
   await persistence.stop();
 
-  const keys = await storage.list("spread-db/");
-  assert.ok(keys.some((key) => key.startsWith("spread-db/db/app/collection/users/shard/default/journal/n1/")));
+  const keys = await storage.list("objydb/");
+  assert.ok(keys.some((key) => key.startsWith("objydb/db/app/collection/users/shard/default/journal/n1/")));
   assert.ok(keys.some((key) => key.endsWith(".jsonl")));
 
   const fresh = new CRDTNode({ id: "n1" });
@@ -167,7 +168,7 @@ test("journal flush splits large batches by byte budget", async () => {
   })));
   await persistence.stop();
 
-  const keys = await storage.list("spread-db/db/app/collection/events/shard/default/journal/n1/");
+  const keys = await storage.list("objydb/db/app/collection/events/shard/default/journal/n1/");
   assert.ok(keys.length > 1);
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -188,60 +189,14 @@ test("snapshots restore full objects and tombstones", async () => {
 
   assert.equal(written.scopes, 1);
   assert.equal(written.objects, 2);
-  assert.ok(await storage.get("spread-db/db/app/collection/users/shard/default/latest.json"));
-  assert.ok((await storage.list("spread-db/")).some((key) => key.includes("/snapshots/") && key.endsWith(".jsonl")));
+  assert.ok(await storage.get("objydb/db/app/collection/users/shard/default/latest.json"));
+  assert.ok((await storage.list("objydb/")).some((key) => key.includes("/snapshots/") && key.endsWith(".jsonl")));
 
   const fresh = new CRDTNode({ id: "fresh" });
   const restored = await new PersistenceManager({ node: fresh, storage }).restore();
   assert.equal(restored.snapshots, 1);
   assert.equal(fresh.get("app", "users", "u1"), undefined);
   assert.deepEqual(fresh.get("app", "users", "u2"), { _id: "u2", name: "Grace" });
-});
-
-test("restore reads legacy JSON snapshot and journal segments", async () => {
-  const storage = new MemoryObjectStorage();
-  const writer = new CRDTNode({ id: "legacy-writer" });
-  writer.insert("app", "users", { _id: "u1", name: "Ada" });
-
-  const scopePrefix = "spread-db/db/app/collection/users/shard/default";
-  const snapshotId = "20260817T000000000Z-000001-legacy";
-  const segmentKey = `${scopePrefix}/snapshots/${snapshotId}/segment-000000.json`;
-  const snapshot = writer.snapshot({ database: "app", collection: "users" });
-  await storage.put(segmentKey, JSON.stringify(snapshot.collections[0].objects));
-  await storage.put(`${scopePrefix}/latest.json`, JSON.stringify({
-    version: 1,
-    id: snapshotId,
-    node: writer.id,
-    seq: writer.seq,
-    createdAt: "2026-08-17T00:00:00.000Z",
-    database: "app",
-    collection: "users",
-    shard: "default",
-    cursors: { [writer.id]: writer.seq },
-    objectCount: 1,
-    segments: [{ key: segmentKey, count: 1 }],
-  }));
-
-  writer.update("app", "users", "u1", { active: true });
-  await storage.put(
-    `${scopePrefix}/journal/${writer.id}/1723852800000-0000000000000002-0000000000000002-legacy.json`,
-    JSON.stringify({ version: 1, node: writer.id, ops: [writer.log.at(-1)] }),
-  );
-
-  const streamingStorage = {
-    get: async (key) => {
-      if (key === segmentKey) throw new Error("legacy snapshot segment must be streamed");
-      return storage.get(key);
-    },
-    getStream: (key) => storage.getStream(key),
-    list: (prefix) => storage.list(prefix),
-  };
-  const fresh = new CRDTNode({ id: "fresh" });
-  const restored = await new PersistenceManager({ node: fresh, storage: streamingStorage }).restore();
-
-  assert.equal(restored.snapshots, 1);
-  assert.equal(restored.journalOps, 1);
-  assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada", active: true });
 });
 
 test("restore seeds replication cursors from persisted source nodes", async () => {
@@ -291,11 +246,11 @@ test("snapshot cursors only cover writes that existed before snapshot streaming"
   await persistence.flush();
   await persistence.stop();
 
-  const manifest = JSON.parse(await storage.get("spread-db/db/app/collection/events/shard/default/latest.json"));
+  const manifest = JSON.parse(await storage.get("objydb/db/app/collection/events/shard/default/latest.json"));
   assert.equal(manifest.cursors.n1, 1);
   assert.equal(insertedDuringSnapshot, true);
 
-  const journalKeys = await storage.list("spread-db/db/app/collection/events/shard/default/journal/n1/");
+  const journalKeys = await storage.list("objydb/db/app/collection/events/shard/default/journal/n1/");
   assert.ok(journalKeys.some((key) => key.includes("-0000000000000002-0000000000000002-")));
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -319,16 +274,16 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   node.insert("app", "orders", { _id: "o1", status: "paid", amount: 10 });
   await persistence.stop();
 
-  const rawMeta = await storage.get("spread-db/db/app/collection/orders/meta.json");
+  const rawMeta = await storage.get("objydb/db/app/collection/orders/meta.json");
   assert.deepEqual(JSON.parse(rawMeta), {
     indexes: ["status"],
     columns: [],
     owner: "events-team",
   });
-  assert.deepEqual(JSON.parse(await storage.get("spread-db/db/empty/meta.json")), {
+  assert.deepEqual(JSON.parse(await storage.get("objydb/db/empty/meta.json")), {
     owner: "platform",
   });
-  assert.deepEqual(JSON.parse(await storage.get("spread-db/db/app/collection/empty_collection/meta.json")), {
+  assert.deepEqual(JSON.parse(await storage.get("objydb/db/app/collection/empty_collection/meta.json")), {
     indexes: [],
     columns: [],
   });
@@ -416,16 +371,16 @@ test("collection removal deletes the persisted collection prefix", async () => {
   node.insert("app", "orders", { _id: "o1", status: "paid" });
   await persistence.checkpoint();
   const staleObjects = new Map();
-  for (const key of await storage.list("spread-db/db/app/collection/orders/")) {
+  for (const key of await storage.list("objydb/db/app/collection/orders/")) {
     staleObjects.set(key, await storage.get(key));
   }
-  assert.ok(await storage.get("spread-db/db/app/collection/orders/meta.json"));
-  assert.ok((await storage.list("spread-db/db/app/collection/orders/")).length > 0);
+  assert.ok(await storage.get("objydb/db/app/collection/orders/meta.json"));
+  assert.ok((await storage.list("objydb/db/app/collection/orders/")).length > 0);
 
   node.removeCollection("app", "orders");
   await persistence.flush();
-  assert.deepEqual(await storage.list("spread-db/db/app/collection/orders/"), []);
-  assert.ok(await storage.get("spread-db/db/app/collection-tombstones/orders.json"));
+  assert.deepEqual(await storage.list("objydb/db/app/collection/orders/"), []);
+  assert.ok(await storage.get("objydb/db/app/collection-tombstones/orders.json"));
 
   // A stale checkpoint finishing after the drop must not resurrect the collection.
   for (const [key, body] of staleObjects) await storage.put(key, body);
@@ -448,12 +403,12 @@ test("explicit collection recreation clears its durable tombstone", async () => 
   await persistence.flush();
   node.removeCollection("app", "orders");
   await persistence.flush();
-  assert.ok(await storage.get("spread-db/db/app/collection-tombstones/orders.json"));
+  assert.ok(await storage.get("objydb/db/app/collection-tombstones/orders.json"));
 
   node.createCollection("app", "orders", { indexes: ["state"] });
   node.insert("app", "orders", { _id: "new", state: "open" });
   await persistence.checkpoint();
-  assert.equal(await storage.get("spread-db/db/app/collection-tombstones/orders.json"), null);
+  assert.equal(await storage.get("objydb/db/app/collection-tombstones/orders.json"), null);
 
   const fresh = new CRDTNode({ id: "fresh" });
   await new PersistenceManager({ node: fresh, storage }).restore();
@@ -471,12 +426,12 @@ test("database removal is durable against stale collection data", async () => {
   node.insert("app", "orders", { _id: "old", status: "open" });
   await persistence.checkpoint();
   const staleObjects = new Map();
-  for (const key of await storage.list("spread-db/db/app/")) staleObjects.set(key, await storage.get(key));
+  for (const key of await storage.list("objydb/db/app/")) staleObjects.set(key, await storage.get(key));
 
   node.removeDatabase("app");
   await persistence.flush();
-  assert.deepEqual(await storage.list("spread-db/db/app/"), []);
-  assert.ok(await storage.get("spread-db/database-tombstones/app.json"));
+  assert.deepEqual(await storage.list("objydb/db/app/"), []);
+  assert.ok(await storage.get("objydb/database-tombstones/app.json"));
   for (const [key, body] of staleObjects) await storage.put(key, body);
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -490,7 +445,7 @@ test("database removal is durable against stale collection data", async () => {
   fresh.createDatabase("app", { label: "new" });
   await freshPersistence.flush();
   assert.deepEqual(fresh.getDatabaseMeta("app"), { label: "new" });
-  assert.equal(await storage.get("spread-db/database-tombstones/app.json"), null);
+  assert.equal(await storage.get("objydb/database-tombstones/app.json"), null);
 });
 
 test("checkpoints are partitioned per object shard", async () => {
@@ -506,9 +461,9 @@ test("checkpoints are partitioned per object shard", async () => {
   const written = await persistence.checkpoint();
   assert.equal(written.scopes, 3);
 
-  const keys = await storage.list("spread-db/db/app/collection/events/shard/");
+  const keys = await storage.list("objydb/db/app/collection/events/shard/");
   for (const shard of ["events-0", "events-1", "events-2"]) {
-    assert.ok(keys.includes(`spread-db/db/app/collection/events/shard/${shard}/latest.json`));
+    assert.ok(keys.includes(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
   }
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -558,12 +513,12 @@ test("checkpoint compacts journal segments for the snapshotted scope", async () 
   node.insert("app", "users", { _id: "u2", name: "Grace" });
   await persistence.flush();
 
-  const journalPrefix = "spread-db/db/app/collection/users/shard/default/journal/";
+  const journalPrefix = "objydb/db/app/collection/users/shard/default/journal/";
   assert.equal((await storage.list(journalPrefix)).length, 1);
 
   await persistence.checkpoint();
   assert.equal((await storage.list(journalPrefix)).length, 0);
-  assert.ok(await storage.get("spread-db/db/app/collection/users/shard/default/latest.json"));
+  assert.ok(await storage.get("objydb/db/app/collection/users/shard/default/latest.json"));
 
   const fresh = new CRDTNode({ id: "fresh" });
   await new PersistenceManager({ node: fresh, storage }).restore();
@@ -586,13 +541,13 @@ test("snapshot retention prunes old snapshot folders but keeps latest restore po
   node.update("app", "users", "u1", { version: 3 });
   const third = await persistence.checkpoint();
 
-  const snapshotPrefix = "spread-db/db/app/collection/users/shard/default/snapshots/";
+  const snapshotPrefix = "objydb/db/app/collection/users/shard/default/snapshots/";
   const keys = await storage.list(snapshotPrefix);
   assert.equal(keys.some((key) => key.includes(`/${first.id}/`)), false);
   assert.ok(keys.some((key) => key.includes(`/${second.id}/`)));
   assert.ok(keys.some((key) => key.includes(`/${third.id}/`)));
 
-  const latest = JSON.parse(await storage.get("spread-db/db/app/collection/users/shard/default/latest.json"));
+  const latest = JSON.parse(await storage.get("objydb/db/app/collection/users/shard/default/latest.json"));
   assert.equal(latest.id, third.id);
 });
 
@@ -613,7 +568,7 @@ test("journal retention keeps incremental history without replaying covered jour
   const checkpoint = await persistence.checkpoint();
   assert.ok(checkpoint.id);
 
-  const journalPrefix = "spread-db/db/app/collection/users/shard/default/journal/";
+  const journalPrefix = "objydb/db/app/collection/users/shard/default/journal/";
   assert.equal((await storage.list(journalPrefix)).length, 1);
 
   node.update("app", "users", "u1", { version: 2 });
@@ -683,7 +638,7 @@ test("automatic checkpoints are dirty-only and primary-only", async () => {
   const first = await primaryPersistence.checkpoint({ automatic: true });
   assert.equal(first.scopes, 1);
   assert.equal(first.objects, 1);
-  assert.ok(await primaryStorage.get("spread-db/db/app/collection/events/shard/events-0/latest.json"));
+  assert.ok(await primaryStorage.get("objydb/db/app/collection/events/shard/events-0/latest.json"));
   assert.equal(primaryPersistence.getStats().dirtyScopes, 0);
 
   const clean = await primaryPersistence.checkpoint({ automatic: true });
@@ -698,11 +653,11 @@ test("automatic checkpoints are dirty-only and primary-only", async () => {
 
   const skipped = await secondaryPersistence.checkpoint({ automatic: true });
   assert.equal(skipped.scopes, 0);
-  assert.equal(await secondaryStorage.get("spread-db/db/app/collection/events/shard/events-0/latest.json"), null);
+  assert.equal(await secondaryStorage.get("objydb/db/app/collection/events/shard/events-0/latest.json"), null);
 
   const manual = await secondaryPersistence.checkpoint();
   assert.equal(manual.scopes, 1);
-  assert.ok(await secondaryStorage.get("spread-db/db/app/collection/events/shard/events-0/latest.json"));
+  assert.ok(await secondaryStorage.get("objydb/db/app/collection/events/shard/events-0/latest.json"));
 
   await primaryPersistence.stop();
   await secondaryPersistence.stop();
@@ -770,8 +725,8 @@ test("restore and checkpoint use node url ownership when a full global map is lo
   const checkpointStorage = new MemoryObjectStorage();
   const checkpoint = await new PersistenceManager({ node: owned, storage: checkpointStorage }).checkpoint();
   assert.equal(checkpoint.scopes, 1);
-  assert.ok(await checkpointStorage.get("spread-db/db/app/collection/events/shard/shard-0/latest.json"));
-  assert.equal(await checkpointStorage.get("spread-db/db/app/collection/events/shard/shard-1/latest.json"), null);
+  assert.ok(await checkpointStorage.get("objydb/db/app/collection/events/shard/shard-0/latest.json"));
+  assert.equal(await checkpointStorage.get("objydb/db/app/collection/events/shard/shard-1/latest.json"), null);
 });
 
 test("default shard ownership restores only default shard scopes", async () => {
@@ -803,10 +758,11 @@ test("default shard ownership restores only default shard scopes", async () => {
   assert.equal(owned.count("app", "events"), expected);
 });
 
-test("planned reshard restore redistributes old shard snapshots and journals through the new map", async () => {
+test("topology reshard preserves source snapshots, checkpoints targets, and finalizes safely", async () => {
   const storage = new MemoryObjectStorage();
   const oldWriter = new CRDTNode({ id: "old-writer" });
-  oldWriter.replaceShardMap(shardMapFor(["old-0", "old-1"]));
+  const oldShardNames = ["shard-0", "shard-1"];
+  oldWriter.replaceShardMap(shardMapFor(oldShardNames));
   const persistence = new PersistenceManager({ node: oldWriter, storage, flushMs: 0, snapshotMs: 0 });
   persistence.start();
 
@@ -820,25 +776,88 @@ test("planned reshard restore redistributes old shard snapshots and journals thr
   }
   await persistence.flush();
 
-  const newShardNames = ["new-0", "new-1", "new-2"];
-  const router = new CRDTNode({ id: "router" });
-  router.replaceShardMap(shardMapFor(newShardNames));
-  const restored = new Map();
-  const newPeers = Object.fromEntries(newShardNames.map((shard) => [shard, [{ url: `http://${shard}` }]]));
+  const sourceLatest = new Map();
+  for (const shard of oldShardNames) {
+    const key = `objydb/db/app/collection/events/shard/${shard}/latest.json`;
+    sourceLatest.set(key, await storage.get(key));
+  }
+  await storage.put(
+    "objydb/db/app/collection/events/shard/stale-generation/latest.json",
+    "not valid JSON and must never be read",
+  );
 
-  for (const shard of newShardNames) {
-    const node = new CRDTNode({ id: `${shard}-node`, url: `http://${shard}` });
-    node.replaceShardMap(shardMapFor(newShardNames, newPeers));
-    const stats = await new PersistenceManager({
+  const desiredSlots = ["slot-0", "slot-1", "slot-2"];
+  const desiredPeers = Object.fromEntries(desiredSlots.map((slot, index) => [slot, [{ url: `http://target-${index}` }]]));
+  const targetMap = publishShardMap(oldWriter.shardMapSnapshot(), shardMapFor(desiredSlots, desiredPeers));
+  const newShardNames = Object.keys(targetMap.shards).sort();
+  assert.equal(targetMap.topology.state, TOPOLOGY_RESHARDING);
+  assert.deepEqual(targetMap.topology.source.shards, oldShardNames);
+  assert.equal(newShardNames.some((shard) => oldShardNames.includes(shard)), false);
+
+  const router = new CRDTNode({ id: "router" });
+  router.replaceShardMap(targetMap);
+  const restored = new Map();
+  let lastPersistence;
+
+  for (const [index, shard] of newShardNames.entries()) {
+    const node = new CRDTNode({ id: `${shard}-node`, url: `http://target-${index}` });
+    node.replaceShardMap(targetMap);
+    lastPersistence = new PersistenceManager({
       node,
       storage,
-      restoreMode: "reshard",
       restoreScopes: [{ database: "app", collection: "events", shard }],
-    }).restore();
+    });
+    const stats = await lastPersistence.restore();
+    assert.equal(stats.snapshots, oldShardNames.length);
     assert.equal(stats.reshardCheckpoint.scopes, 1);
-    assert.ok(await storage.get(`spread-db/db/app/collection/events/shard/${shard}/latest.json`));
     restored.set(shard, node);
+
+    if (index === 0) {
+      const partial = await lastPersistence.reshardReadiness();
+      assert.equal(partial.ready, false);
+      assert.equal(partial.completedScopes, 1);
+      assert.equal(partial.missing.length, 2);
+
+      const retry = new CRDTNode({ id: `${shard}-retry`, url: `http://target-${index}` });
+      retry.replaceShardMap(targetMap);
+      const retryStats = await new PersistenceManager({
+        node: retry,
+        storage,
+        restoreScopes: [{ database: "app", collection: "events", shard }],
+      }).restore();
+      assert.equal(retryStats.snapshots, oldShardNames.length);
+      assert.equal(retry.count("app", "events"), node.count("app", "events"));
+    }
   }
+
+  for (const [key, manifest] of sourceLatest) assert.equal(await storage.get(key), manifest);
+  for (const shard of newShardNames) {
+    assert.ok(await storage.get(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
+  }
+
+  const invalidTargetKey = `objydb/db/app/collection/events/shard/${newShardNames[0]}/latest.json`;
+  const validTargetManifest = await storage.get(invalidTargetKey);
+  const invalidTargetManifest = JSON.parse(validTargetManifest);
+  invalidTargetManifest.topologyId = "wrong-generation";
+  await storage.put(invalidTargetKey, JSON.stringify(invalidTargetManifest));
+  const incomplete = await lastPersistence.reshardReadiness();
+  assert.equal(incomplete.ready, false);
+  assert.equal(incomplete.completedScopes, 2);
+  assert.deepEqual(incomplete.missing, [{ database: "app", collection: "events", shard: newShardNames[0] }]);
+  await storage.put(invalidTargetKey, validTargetManifest);
+
+  const readiness = await lastPersistence.reshardReadiness();
+  assert.deepEqual(readiness, {
+    ready: true,
+    topologyId: targetMap.topology.id,
+    sourceScopes: 1,
+    expectedScopes: 3,
+    completedScopes: 3,
+    missing: [],
+  });
+  const finalized = finalizeShardMap(targetMap, readiness.topologyId);
+  assert.equal(finalized.topology.state, TOPOLOGY_ACTIVE);
+  assert.equal(finalized.topology.source, undefined);
 
   const counts = Object.fromEntries(newShardNames.map((shard) => [shard, restored.get(shard).count("app", "events")]));
   assert.equal(Object.values(counts).reduce((sum, count) => sum + count, 0), 300);
@@ -852,5 +871,13 @@ test("planned reshard restore redistributes old shard snapshots and journals thr
     for (const other of newShardNames.filter((candidate) => candidate !== shard)) {
       assert.equal(restored.get(other).get("app", "events", id), undefined);
     }
+  }
+
+  for (const [index, shard] of newShardNames.entries()) {
+    const rebooted = new CRDTNode({ id: `rebooted-${index}`, url: `http://target-${index}` });
+    rebooted.replaceShardMap(finalized);
+    const stats = await new PersistenceManager({ node: rebooted, storage }).restore();
+    assert.equal(stats.snapshots, 1);
+    assert.equal(rebooted.count("app", "events"), restored.get(shard).count("app", "events"));
   }
 });

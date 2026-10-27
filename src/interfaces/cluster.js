@@ -8,6 +8,7 @@ import {
 import { json, readJson } from "../http-router.js";
 import { localClusterStatus } from "../cluster-status.js";
 import { acceptsNdjson, isNdjsonContentType, NDJSON_CONTENT_TYPE, parseNdjsonBatches } from "../ndjson.js";
+import { publishShardMap, TOPOLOGY_RESHARDING } from "../shard-map.js";
 
 export { CLUSTER_SECRET_HEADER } from "../cluster-secret.js";
 export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
@@ -15,7 +16,7 @@ export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
 export function createClusterInterface() {
   return {
     name: "cluster",
-    register(router, { node, shardMapStore, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
+    register(router, { node, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
       const secure = secureClusterRoute(clusterSecret);
 
       router.get("/health", (req, res) => {
@@ -33,10 +34,26 @@ export function createClusterInterface() {
       }));
 
       router.put("/cluster/shards", secure(async (req, res) => {
-        const body = await readJson(req);
-        node.replaceShardMap(shardMapFromHttp(body.shardMap || body, node.id, { secret: clusterSecret }));
-        await shardMapStore?.save(node.shardMapSnapshot());
-        json(res, 200, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
+        try {
+          const body = await readJson(req);
+          const desired = body.shardMap || body;
+          const next = publishShardMap(node.shardMapSnapshot(), desired);
+          const startsReshard = next.topology.state === TOPOLOGY_RESHARDING
+            && node.shardMapSnapshot().topology?.id !== next.topology.id;
+          if (startsReshard && (!shardMapStore?.durable || !persistence?.durable)) {
+            json(res, 409, { error: "resharding requires S3 persistence and an S3 shard map store" });
+            return;
+          }
+          if (startsReshard) {
+            json(res, 409, { error: "partition changes must be published while the cluster is stopped" });
+            return;
+          }
+          const published = shardMapStore ? (await shardMapStore.save(desired)).shardMap : next;
+          node.replaceShardMap(shardMapFromHttp(published, node.id, { secret: clusterSecret }));
+          json(res, 200, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
+        } catch (err) {
+          json(res, err.status || 409, { error: err.message });
+        }
       }));
 
       router.post("/cluster/peers", secure(async (req, res) => {
@@ -45,11 +62,14 @@ export function createClusterInterface() {
           json(res, 400, { error: "url is required" });
           return;
         }
-        node.addPeerToShard({
-          shard: String(body.shard || "default"),
-          peer: httpPeer(String(body.url), node.id, { secret: clusterSecret }),
-        });
-        await shardMapStore?.save(node.shardMapSnapshot());
+        const desired = node.shardMapSnapshot();
+        const shard = String(body.shard || "default");
+        desired.shards[shard] ||= { peers: [] };
+        if (!desired.shards[shard].peers.some((peer) => peer.url === body.url)) {
+          desired.shards[shard].peers.push({ url: String(body.url) });
+        }
+        const published = shardMapStore ? (await shardMapStore.save(desired)).shardMap : desired;
+        node.replaceShardMap(shardMapFromHttp(published, node.id, { secret: clusterSecret }));
         json(res, 201, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
       }));
 
@@ -99,7 +119,7 @@ export function createClusterInterface() {
 
       router.post("/replicate", secure(async (req, res) => {
         if (isNdjsonContentType(req.headers["content-type"])) {
-          const from = String(req.headers["x-spread-db-node"] || req.query.get("node") || "");
+          const from = String(req.headers["x-objydb-node"] || req.query.get("node") || "");
           let applied = 0;
           let batches = 0;
           for await (const ops of parseNdjsonBatches(req, {
@@ -141,8 +161,8 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
       if (r.status === 200 && isNdjsonResponse(r)) {
         return {
           status: r.status,
-          node: r.headers.get("x-spread-db-node") || undefined,
-          lastSeq: numberHeader(r.headers, "x-spread-db-last-seq"),
+          node: r.headers.get("x-objydb-node") || undefined,
+          lastSeq: numberHeader(r.headers, "x-objydb-last-seq"),
           opBatches: parseNdjsonBatches(r.body, {
             maxBatchObjects: replicationBatchObjects(limit),
             label: "replication stream",
@@ -174,8 +194,8 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
 async function writeReplicationNdjson(res, node, after, limit, scope) {
   res.writeHead(200, {
     "content-type": NDJSON_CONTENT_TYPE,
-    "x-spread-db-node": node.id,
-    "x-spread-db-last-seq": String(node.seq),
+    "x-objydb-node": node.id,
+    "x-objydb-last-seq": String(node.seq),
   });
   for (const op of node._opsAfterIterable(after, limit, scope)) {
     if (!res.write(`${JSON.stringify(op)}\n`)) await once(res, "drain");
@@ -201,6 +221,8 @@ function replicationBatchObjects(limit) {
 
 export function shardMapFromHttp(map, nodeId, { secret = null, timeoutMs = DEFAULT_REPLICATION_TIMEOUT_MS } = {}) {
   return {
+    ...(map.version ? { version: map.version } : {}),
+    ...(map.topology ? { topology: map.topology } : {}),
     shards: Object.fromEntries(
       Object.entries(map.shards || {}).map(([shard, shardConfig]) => [
         shard,

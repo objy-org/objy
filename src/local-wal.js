@@ -2,9 +2,10 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { DEFAULT_LOCAL_WAL_DIR } from "./config.js";
 
 export class LocalWalStore {
-  constructor({ dir = ".spread-db/wal", nodeId, fsync = true, flushMs = 0, maxRecordBytes = 4 * 1024 * 1024, maxOpsPerRecord = 1000 } = {}) {
+  constructor({ dir = DEFAULT_LOCAL_WAL_DIR, nodeId, fsync = true, flushMs = 0, maxRecordBytes = 4 * 1024 * 1024, maxOpsPerRecord = 1000 } = {}) {
     if (!nodeId) throw new Error("local WAL node id is required");
     this.dir = resolve(dir);
     this.nodeId = String(nodeId);

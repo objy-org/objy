@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 const command = process.argv[2] || "status";
-const config = arg("--config") || "spread-db.minio.config.json";
+const config = arg("--config") || "examples/objydb.s3.local.json";
 const maxOldSpaceSizeMb = positiveInt(
   arg("--max-old-space-size") || arg("--heap") || runtimeConfigValue(config, "maxOldSpaceSizeMb"),
   0,
@@ -18,8 +18,8 @@ const nodes = ports.map((port) => ({
   port,
   url: `http://localhost:${port}`,
 }));
-const runDir = resolve(".spread-db/run");
-const logDir = resolve(".spread-db/logs");
+const runDir = resolve(".objydb/run");
+const logDir = resolve(".objydb/logs");
 
 if (command === "start") await start();
 else if (command === "stop") await stop();

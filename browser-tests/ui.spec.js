@@ -36,7 +36,7 @@ async function savedSession(page, session) {
   await page.goto(base + '/ui');
   // Startup health handling persists the current session; let it finish before seeding storage.
   await expect(page.locator('#node-label')).toContainText('node ');
-  await page.evaluate(session => localStorage.setItem('spread-db-ui:session', JSON.stringify(session)), session);
+  await page.evaluate(session => localStorage.setItem('objydb-ui:session', JSON.stringify(session)), session);
 }
 
 test('API documentation renders its public GitHub header image', async ({ page }) => {
@@ -135,19 +135,18 @@ test('UI uses the client for administration, JSON and bulk CRUD, queries, metada
   expect(errors).toEqual([]);
 });
 
-test('legacy saved sessions migrate and parallel startup requests share renewal', async ({ page }) => {
+test('saved sessions renew once across parallel startup requests', async ({ page }) => {
   const session = admin.getSession();
   const token = expired(session.accessToken);
-  await savedSession(page, { accessToken: token, refreshToken: session.refreshToken, user: session.user, authDb: '_global', authColl: 'users' });
+  await savedSession(page, { ...session, accessToken: token });
   await page.reload();
   await expect(page.locator('#login-panel')).toBeHidden();
   await expect(page.locator('#tree')).toContainText('_global');
   await expect.poll(() => renewals).toBe(1);
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('spread-db-ui:session')));
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('objydb-ui:session')));
   expect(saved.accessToken).not.toBe(token);
   expect(saved.database).toBe('_global');
   expect(saved.collection).toBe('users');
-  expect(saved.authDb).toBeUndefined();
   await page.reload();
   await expect(page.locator('#tree')).toContainText('_global');
   expect(renewals).toBe(1);
@@ -160,7 +159,7 @@ test('invalid refresh tokens clear the visible and persisted session', async ({ 
   await expect(page.locator('#toast')).toContainText('Session expired');
   await expect(page.locator('#login-panel')).toBeVisible();
   await expect(page.locator('#logout-btn')).toBeDisabled();
-  expect(await page.evaluate(() => localStorage.getItem('spread-db-ui:session'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('objydb-ui:session'))).toBeNull();
 });
 
 test('logging out while renewal is in flight cannot restore old views or tokens', async ({ page }) => {
@@ -182,7 +181,7 @@ test('logging out while renewal is in flight cannot restore old views or tokens'
   await page.waitForLoadState('networkidle');
   await expect(page.locator('#login-panel')).toBeVisible();
   await expect(page.locator('#tree')).toHaveText('Sign in to load databases.');
-  expect(await page.evaluate(() => localStorage.getItem('spread-db-ui:session'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('objydb-ui:session'))).toBeNull();
 });
 
 test('switching servers replaces the client without forwarding the old session', async ({ page }) => {
@@ -198,7 +197,7 @@ test('switching servers replaces the client without forwarding the old session',
     await expect(page.locator('#server-label')).toContainText(String(remote.port));
     await expect.poll(() => headers.length).toBeGreaterThan(0);
     expect(headers.every(value => value === undefined)).toBe(true);
-    expect(await page.evaluate(() => localStorage.getItem('spread-db-ui:session'))).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem('objydb-ui:session'))).toBeNull();
     await page.locator('#password').fill('123');
     await page.locator('#login-btn').click();
     await expect(page.locator('#tree')).toContainText('_global');

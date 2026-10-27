@@ -10,7 +10,7 @@ test("S3 persistence adapter stores journals through an S3-compatible API", asyn
   const port = await mock.start();
   try {
     const storage = new S3ObjectStorage({
-      bucket: "spread-db-test",
+      bucket: "objydb-test",
       endpoint: `http://127.0.0.1:${port}`,
       region: "us-east-1",
       accessKeyId: "test",
@@ -23,7 +23,7 @@ test("S3 persistence adapter stores journals through an S3-compatible API", asyn
     node.insert("app", "users", { _id: "u1", name: "Ada" });
     await persistence.stop();
 
-    assert.ok([...mock.objects.keys()].some((key) => key.startsWith("spread-db/db/app/collection/users/shard/default/journal/n1/")));
+    assert.ok([...mock.objects.keys()].some((key) => key.startsWith("objydb/db/app/collection/users/shard/default/journal/n1/")));
 
     const fresh = new CRDTNode({ id: "fresh" });
     await new PersistenceManager({ node: fresh, storage }).restore();
@@ -38,7 +38,7 @@ test("S3 adapter creates non-us-east-1 buckets with a location constraint", asyn
   const port = await mock.start();
   try {
     const storage = new S3ObjectStorage({
-      bucket: "spread-db-test",
+      bucket: "objydb-test",
       endpoint: `http://127.0.0.1:${port}`,
       region: "fsn1",
       accessKeyId: "test",
@@ -48,7 +48,7 @@ test("S3 adapter creates non-us-east-1 buckets with a location constraint", asyn
 
     await storage.put("probe.json", "{}");
 
-    const createBucket = mock.log.find((entry) => entry.method === "PUT" && entry.path.replace(/\/$/, "") === "/spread-db-test");
+    const createBucket = mock.log.find((entry) => entry.method === "PUT" && entry.path.replace(/\/$/, "") === "/objydb-test");
     assert.ok(createBucket);
     assert.match(createBucket.body, /<LocationConstraint>fsn1<\/LocationConstraint>/);
   } finally {

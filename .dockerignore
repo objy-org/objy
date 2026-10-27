@@ -1,5 +1,6 @@
 .git
 .github
+.objydb
 .spread-db
 .npm-cache
 node_modules
@@ -11,6 +12,6 @@ examples
 coverage
 *.log
 *.config.json
-!spread-db.config.json
+!objydb.config.json
 docker-compose.yml
 playwright.config.js

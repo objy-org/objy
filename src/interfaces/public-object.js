@@ -1,7 +1,7 @@
 import { GLOBAL_DATABASE, USERS_COLLECTION } from "../auth.js";
 import { aggregateRows } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
-import { isNdjsonRequest, json, readJson, readNdjson } from "../http-router.js";
+import { isNdjsonRequest, json, readJson, readNdjson, remoteHttpError } from "../http-router.js";
 import {
   buildMultipartObjectFile,
   isMultipartRequest,
@@ -1046,7 +1046,7 @@ async function readableObjectForFile({ req, node, routing }) {
       { method: "GET", query: refDepthQuery(0), retryStatuses: [404, 409, 503] },
     );
     if (remote.status === 404) return null;
-    if (!ok(remote.status)) throw remoteError(remote, "file object lookup failed");
+    if (!ok(remote.status)) throw remoteHttpError(remote, "file object lookup failed");
     return stripReferenceObjects(remote.body);
   }
 
@@ -1377,7 +1377,7 @@ async function routedCreateMany({
         query: refDepthQuery(0),
         minimalReturn,
       });
-      if (!ok(remote.status)) throw remoteError(remote, `POST failed on shard ${group.shard}`);
+      if (!ok(remote.status)) throw remoteHttpError(remote, `POST failed on shard ${group.shard}`);
       const remoteRows = remoteInsertedItems(remote.body);
       if (!minimalReturn) rows.push(...remoteRows);
       inserted += remoteInsertedCount(remote.body, remoteRows.length);
@@ -1464,7 +1464,7 @@ async function routedWriteMany({
         query: refDepthQuery(0),
         minimalReturn,
       });
-      if (!ok(remote.status)) throw remoteError(remote, `${method} failed on shard ${group.shard}`);
+      if (!ok(remote.status)) throw remoteHttpError(remote, `${method} failed on shard ${group.shard}`);
       total += Number(remote.body?.[resultKey]) || 0;
       if (!minimalReturn) rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
     }
@@ -1569,7 +1569,7 @@ async function routedPatchMany({
         query: refDepthQuery(0),
         minimalReturn,
       });
-      if (!ok(remote.status)) throw remoteError(remote, `PATCH failed on shard ${group.shard}`);
+      if (!ok(remote.status)) throw remoteHttpError(remote, `PATCH failed on shard ${group.shard}`);
       updated += Number(remote.body?.updated) || 0;
       if (!minimalReturn) {
         rows.push(...(Array.isArray(remote.body?.items) ? remote.body.items : []));
@@ -1662,7 +1662,7 @@ async function routedRemoveMany(req, routing, node, durability, database, collec
         body: { ids: group.items },
         minimalReturn,
       });
-      if (!ok(remote.status)) throw remoteError(remote, `DELETE failed on shard ${group.shard}`);
+      if (!ok(remote.status)) throw remoteHttpError(remote, `DELETE failed on shard ${group.shard}`);
       result.deleted += Number(remote.body?.deleted) || 0;
       if (minimalReturn) {
         result.skipped += responseSkippedCount(remote.body);
@@ -1812,7 +1812,7 @@ async function resolveReferencedObject({ req, node, routing, database, collectio
     retryStatuses: [404, 409, 503],
   });
   if (remote.status === 404) return null;
-  if (!ok(remote.status)) throw remoteError(remote, `reference lookup failed for ${database}/${collection}/${id}`);
+  if (!ok(remote.status)) throw remoteHttpError(remote, `reference lookup failed for ${database}/${collection}/${id}`);
   return remote.body ? stripReferenceObjects(remote.body) : null;
 }
 
@@ -2007,7 +2007,7 @@ async function forwardSchemaChange(routing, req, path, options, message) {
     ...forwardOptions,
     allowUnavailable,
   });
-  if (!ok(remote.status)) throw remoteError(remote, message);
+  if (!ok(remote.status)) throw remoteHttpError(remote, message);
   return remote;
 }
 
@@ -2192,13 +2192,6 @@ function orderLikeInput(input, rows) {
   return input.map((item) => byId.get(String(item._id))).filter(Boolean);
 }
 
-function remoteError(remote, fallback) {
-  const err = new Error(remote.body?.error || fallback);
-  err.status = remote.status;
-  err.body = remote.body;
-  return err;
-}
-
 function httpError(status, message, body, headers) {
   const err = new Error(message);
   err.status = status;
@@ -2245,7 +2238,7 @@ function assertImportWriteAccepts({ req, imports, durability, objects = [], igno
       maxPendingPersistenceBytes: imports.maxPendingPersistenceBytes,
     }, {
       "retry-after": String(retryAfterSeconds),
-      "x-spread-db-pressure": "persistence",
+      "x-objydb-pressure": "persistence",
     });
   }
 }

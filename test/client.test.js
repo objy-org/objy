@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { createClient, SpreadDBError } from 'objydb/client';
+import { createClient, ObjyDBError } from 'objydb/client';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 import { clientPath } from '../src/interfaces/client.js';
@@ -59,7 +59,7 @@ test('public client CRUD, queries, iteration, bulk, metadata and independent dat
   assert.equal((await items.get('one')).value, 5);
   assert.equal((await other.get('one')).value, 99);
   assert.equal((await items.removeMany(['one'])).deleted, 1);
-  await assert.rejects(items.get('one'), error => error instanceof SpreadDBError && error.status === 404);
+  await assert.rejects(items.get('one'), error => error instanceof ObjyDBError && error.status === 404);
   assert.ok((await client.listDatabases()).databases.includes('client-a'));
   assert.equal((await client.health()).ok, true);
   assert.ok(await client.status());

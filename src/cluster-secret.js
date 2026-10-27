@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 
-export const CLUSTER_SECRET_HEADER = "x-spread-db-cluster-secret";
+export const CLUSTER_SECRET_HEADER = "x-objydb-cluster-secret";
 
 export function normalizeClusterSecret(secret) {
   return typeof secret === "string" && secret.length > 0 ? secret : null;

@@ -58,8 +58,6 @@ export function getPathValue(source, path) {
   }, source);
 }
 
-export const undot = getPathValue;
-
 export function stableKey(value) {
   return JSON.stringify(sortForKey(value));
 }
@@ -99,15 +97,6 @@ export function matchesQuery(object, query = {}) {
   }
 
   return true;
-}
-
-export function isOperatorExpression(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).some((key) => rhsOperators.has(key)),
-  );
 }
 
 export function stripQueryControls(query = {}) {

@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import { normalizeAuthConfig } from "./auth.js";
 import { normalizeVectorConfig } from "./vector.js";
 
-export const DEFAULT_CONFIG_PATH = "spread-db.config.json";
+export const DEFAULT_CONFIG_PATH = "objydb.config.json";
+export const DEFAULT_DATA_PREFIX = "objydb";
+export const DEFAULT_FILE_PREFIX = `${DEFAULT_DATA_PREFIX}/files`;
+export const DEFAULT_LOCAL_WAL_DIR = ".objydb/wal";
+export const DEFAULT_S3_BUCKET = "objydb";
 export const DEFAULT_MAX_JSON_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_IMPORT_CONFIG = {
   maxBulkObjects: 10_000,
@@ -78,7 +82,7 @@ function normalizeFilesConfig(config = {}, persistenceConfig = {}) {
     : (config.s3 || {});
   return {
     mode,
-    prefix: config.prefix || "spread-db/files",
+    prefix: config.prefix || DEFAULT_FILE_PREFIX,
     maxUploadBytes: positiveInt(config.maxUploadBytes, 256 * 1024 * 1024),
     s3: normalizeS3Config(s3Config, "files.s3"),
   };
@@ -147,7 +151,7 @@ function normalizeShardMapStoreConfig(config = {}, persistenceConfig = {}) {
   }
   return {
     mode,
-    prefix: config.prefix || persistenceConfig?.prefix || "spread-db",
+    prefix: config.prefix || persistenceConfig?.prefix || DEFAULT_DATA_PREFIX,
     key: config.key || "cluster/shard-map.json",
     s3: {
       ...(persistenceConfig?.s3 || {}),
@@ -165,7 +169,7 @@ function normalizePersistenceConfig(config = {}) {
 
   return {
     mode,
-    prefix: config.prefix || "spread-db",
+    prefix: config.prefix || DEFAULT_DATA_PREFIX,
     flushMs: positiveInt(config.flushMs, 5000),
     opBatchSize: positiveInt(config.opBatchSize, 1000),
     journalMaxBytes: positiveInt(config.journalMaxBytes, 4 * 1024 * 1024),
@@ -176,7 +180,6 @@ function normalizePersistenceConfig(config = {}) {
     journalRetention: normalizeRetentionConfig(config.journalRetention),
     snapshotDirtyOnly: config.snapshotDirtyOnly !== false,
     snapshotRole: snapshotRole(config.snapshotRole),
-    restoreMode: config.restoreMode || "scoped",
     restoreSnapshotId: optionalString(config.restoreSnapshotId),
     restoreScopes: Array.isArray(config.restoreScopes) ? config.restoreScopes : undefined,
     ack,
@@ -196,7 +199,7 @@ function normalizeS3Config(config = {}, label = "persistence.s3") {
     throw new Error(`${label}.region must be ${endpointLocation} for endpoint ${endpoint}`);
   }
   return {
-    bucket: config.bucket || "spread-db",
+    bucket: config.bucket || DEFAULT_S3_BUCKET,
     endpoint,
     region,
     accessKeyId: config.accessKeyId,
@@ -323,7 +326,7 @@ function normalizeLocalWalConfig(config = {}, ack = "memory") {
   }
   return {
     mode,
-    dir: config.dir || ".spread-db/wal",
+    dir: config.dir || DEFAULT_LOCAL_WAL_DIR,
     fsync: config.fsync !== false,
     flushMs: positiveInt(config.flushMs, 0),
     maxRecordBytes: positiveInt(config.maxRecordBytes, 4 * 1024 * 1024),

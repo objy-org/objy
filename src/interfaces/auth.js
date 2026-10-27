@@ -1,4 +1,4 @@
-import { json, readJson } from "../http-router.js";
+import { json, readJson, remoteHttpError } from "../http-router.js";
 
 export function createAuthInterface() {
   return {
@@ -77,7 +77,7 @@ async function loginWithRouting(req, { auth, node, routing, database, collection
     });
     if (remote.status === 200) return remote.body;
     if (remote.status === 401 || remote.status === 404) continue;
-    throw remoteError(remote, `auth failed on shard ${target.shard}`);
+    throw remoteHttpError(remote, `auth failed on shard ${target.shard}`);
   }
 
   return null;
@@ -105,7 +105,7 @@ async function renewWithRouting(req, { auth, node, routing, database, collection
     retryStatuses: [409, 503],
   });
   if (remote.status === 200) return remote.body;
-  throw remoteError(remote, `renew failed on shard ${shard}`);
+  throw remoteHttpError(remote, `renew failed on shard ${shard}`);
 }
 
 function localAuthUsers({ node, routing, database, collection, username, shard }) {
@@ -120,11 +120,4 @@ function authPath(database, collection) {
 
 function renewPath(database, collection) {
   return `/api/${encodeURIComponent(database)}/${encodeURIComponent(collection)}/renew`;
-}
-
-function remoteError(remote, fallback) {
-  const err = new Error(remote.body?.error || fallback);
-  err.status = remote.status;
-  err.body = remote.body;
-  return err;
 }

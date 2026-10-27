@@ -149,9 +149,9 @@ await timed("checkpoint one replica per shard", async () => {
   }
 });
 
-const latestKeys = await storage.list("spread-db/db/app/collection/events/shard/");
+const latestKeys = await storage.list("objydb/db/app/collection/events/shard/");
 for (const shard of shardNames) {
-  assert.ok(latestKeys.includes(`spread-db/db/app/collection/events/shard/${shard}/latest.json`));
+  assert.ok(latestKeys.includes(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
 }
 console.log("persistent shard latest files", shardNames.length);
 

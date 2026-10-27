@@ -261,7 +261,7 @@ test("sharded fan-out runs hooks once on ingress and rejects spoofed forward mar
   assert.equal(inserted.status, 201);
   assert.deepEqual(calls, [1, 0]);
 
-  const spoofed = await api(urls[0], token, { "x-spread-db-forwarded": "1" })
+  const spoofed = await api(urls[0], token, { "x-objydb-forwarded": "1" })
     .post("/api/app/items/object", { _id: idForShard(nodes[0], "app", "items", "shard-a", "spoof") });
   assert.equal(spoofed.status, 201);
   assert.deepEqual(calls, [2, 0]);
@@ -282,7 +282,7 @@ test("replication and persistence restore never execute object hooks", async (t)
   source.insert("app", "items", { _id: "replicated", value: 1 });
   const replicated = await fetch(`http://localhost:${state.port}/replicate`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-spread-db-cluster-secret": AUTH.jwtSecret },
+    headers: { "content-type": "application/json", "x-objydb-cluster-secret": AUTH.jwtSecret },
     body: JSON.stringify({ node: source.id, ops: source.log }),
   });
   assert.equal(replicated.status, 200);

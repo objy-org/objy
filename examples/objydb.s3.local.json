@@ -31,7 +31,7 @@
   },
   "files": {
     "mode": "s3",
-    "prefix": "spread-db/files"
+    "prefix": "objydb/files"
   },
   "cluster": {
     "syncMs": 2500,
@@ -44,7 +44,7 @@
     },
     "shardMapStore": {
       "mode": "s3",
-      "prefix": "spread-db",
+      "prefix": "objydb",
       "key": "cluster/shard-map.json"
     }
   },
@@ -54,7 +54,7 @@
   },
   "persistence": {
     "mode": "s3",
-    "prefix": "spread-db",
+    "prefix": "objydb",
     "flushMs": 5000,
     "opBatchSize": 10000,
     "snapshotMs": 3600000,
@@ -65,16 +65,15 @@
     "snapshotRetention": {
       "keepLatest": 5
     },
-    "restoreMode": "scoped",
     "ack": "localWal",
     "localWal": {
       "mode": "on",
-      "dir": ".spread-db/wal",
+      "dir": ".objydb/wal",
       "fsync": true,
       "flushMs": 5000
     },
     "s3": {
-      "bucket": "spread-db",
+      "bucket": "objydb",
       "endpoint": "http://localhost:9000",
       "region": "us-east-1",
       "accessKeyId": "minioadmin",

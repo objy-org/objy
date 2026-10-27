@@ -89,18 +89,6 @@ export function mergeAggregatePartials(rows, spec) {
   return result.slice(start, start + normalized.pageSize);
 }
 
-export function combineAggregatePartials(rows, spec) {
-  const normalized = normalizeAggregateSpec(spec);
-  const buckets = aggregatePartialBuckets(rows, normalized);
-  if (buckets === null) return [];
-
-  return [...buckets.values()].map((bucket) => {
-    const out = cloneGroupValues(bucket.groupValues);
-    for (const field of normalized.fields) writePartialField(out, bucket.fields[field.resultKey], field);
-    return out;
-  });
-}
-
 function aggregatePartialBuckets(rows, normalized) {
   const buckets = new Map();
   let rowsSeen = 0;

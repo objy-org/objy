@@ -16,7 +16,3 @@ export function gt(a, b) {
   if (a.c !== b.c) return a.c > b.c;
   return a.n > b.n;
 }
-
-export function eqTs(a, b) {
-  return a && b && a.c === b.c && a.n === b.n;
-}

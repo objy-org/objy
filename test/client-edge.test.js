@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClient, SpreadDBError } from 'objydb/client';
+import { createClient, ObjyDBError } from 'objydb/client';
 
 const session = { database: 'auth', collection: 'users', accessToken: 'old', refreshToken: 'refresh', user: { _id: 'alice' } };
 const tokens = { accessToken: 'new', refreshToken: 'next' };
@@ -128,7 +128,7 @@ for (const method of ['insert', 'replace', 'patch', 'remove']) test(`${method} s
     const items = itemsOf(client);
     const operation = method === 'insert' ? items.insert({}) : method === 'remove' ? items.remove('x') : items[method]('x', {});
     await assert.rejects(operation, error => {
-      assert.ok(error instanceof SpreadDBError);
+      assert.ok(error instanceof ObjyDBError);
       assert.equal(error.status, status); assert.equal(error.code, 'TEST_ERROR');
       assert.equal(error.headers['retry-after'], '10');
       assert.equal(error.writeMayHaveSucceeded, status >= 500 && status !== 501);

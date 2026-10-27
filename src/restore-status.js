@@ -55,6 +55,14 @@ export function createRestoreStatus() {
         error: error?.message || String(error),
       });
     },
+    waiting(patch = {}) {
+      Object.assign(state, {
+        status: "restoring",
+        phase: "waiting-topology",
+        finishedAt: null,
+        ...patch,
+      });
+    },
     snapshot() {
       return {
         ...state,

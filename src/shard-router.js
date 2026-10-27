@@ -6,8 +6,8 @@ import { NDJSON_CONTENT_TYPE, ndjsonReadable } from "./ndjson.js";
 import { compareSortValues, getPathValue } from "./query.js";
 import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEADER } from "./query-planner.js";
 
-export const FORWARDED_HEADER = "x-spread-db-forwarded";
-export const TARGET_SHARD_HEADER = "x-spread-db-target-shard";
+export const FORWARDED_HEADER = "x-objydb-forwarded";
+export const TARGET_SHARD_HEADER = "x-objydb-target-shard";
 export const DEFAULT_FORWARD_TIMEOUT_MS = 5_000;
 
 export class ShardRequestRouter {

@@ -133,13 +133,13 @@ function compactReplicationStatus(replicationScheduler) {
 }
 
 function aggregateIndexSummary(nodes) {
-  const summary = { ready: 0, building: 0, error: 0, activeWorkers: 0 };
+  const summary = { ready: 0, building: 0, error: 0, activeTasks: 0 };
   for (const status of nodes) {
     const indexes = status.indexes || {};
     summary.ready += Number(indexes.ready) || 0;
     summary.building += Number(indexes.building) || 0;
     summary.error += Number(indexes.error) || 0;
-    summary.activeWorkers += Number(indexes.activeWorkers) || 0;
+    summary.activeTasks += Number(indexes.activeTasks) || 0;
   }
   return summary;
 }

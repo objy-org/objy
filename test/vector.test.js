@@ -115,7 +115,7 @@ test("snapshots persist vectors but not vector indexes", async () => {
   node.vectorSearch("app", "docs", [1, 0], 1);
   await persistence.checkpoint();
 
-  const keys = await storage.list("spread-db/");
+  const keys = await storage.list("objydb/");
   assert.equal(keys.some((key) => /hnsw|vector-index/i.test(key)), false);
 
   const segmentKey = keys.find((key) => key.includes("/snapshots/") && key.endsWith(".jsonl") && key.includes("segment-"));

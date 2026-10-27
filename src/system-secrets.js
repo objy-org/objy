@@ -3,12 +3,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const DEFAULT_KEY = "system/secrets.json";
+const DEFAULT_PREFIX = "objydb";
 
 export async function resolveSystemSecrets({
   jwtSecret,
   clusterSecret,
   storage,
-  prefix = "spread-db",
+  prefix = DEFAULT_PREFIX,
   localPath,
 } = {}) {
   const configured = {

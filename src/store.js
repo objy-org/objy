@@ -825,7 +825,7 @@ class Collection {
     return {
       configured: statuses.length > 0,
       status: overallIndexStatus(statuses),
-      activeWorkers: activeFieldBuilds + this.columnBuilds.size + this.vectorBuilds.size,
+      activeTasks: activeFieldBuilds + this.columnBuilds.size + this.vectorBuilds.size,
     };
   }
 
@@ -3258,11 +3258,11 @@ export class Store {
   }
 
   indexSummary() {
-    const summary = { ready: 0, building: 0, error: 0, activeWorkers: 0 };
+    const summary = { ready: 0, building: 0, error: 0, activeTasks: 0 };
     for (const db of this.dbs.values()) {
       for (const collection of db.collections.values()) {
         const readiness = collection.indexSummary();
-        summary.activeWorkers += readiness.activeWorkers;
+        summary.activeTasks += readiness.activeTasks;
         if (!readiness.configured) continue;
         summary[readiness.status === "ready" ? "ready" : readiness.status === "building" ? "building" : "error"]++;
       }

@@ -7,7 +7,7 @@ export const READ_PATH = {
   SCAN: "scan",
 };
 
-export const QUERY_PATH_HEADER = "x-spread-db-query-path";
+export const QUERY_PATH_HEADER = "x-objydb-query-path";
 
 export const AGGREGATE_PATH = {
   COLUMN_SUMMARY: "aggregate-column-summary",

@@ -68,7 +68,7 @@ Methods return native server results:
 - Queries and aggregations return arrays.
 - Bulk operations return their normal count and item summaries.
 - Successful `204` deletions return `undefined`.
-- Missing objects throw `SpreadDBError` with status `404`.
+- Missing objects throw `ObjyDBError` with status `404`.
 
 ## API at a Glance
 
@@ -258,7 +258,7 @@ Older servers without the explicit expiration marker still work, but cannot safe
 ## Errors and Cancellation
 
 ```js
-import { SpreadDBError } from 'objydb/client';
+import { ObjyDBError } from 'objydb/client';
 
 try {
   await items.patch(
@@ -270,7 +270,7 @@ try {
     },
   );
 } catch (error) {
-  if (error instanceof SpreadDBError) {
+  if (error instanceof ObjyDBError) {
     console.log({
       status: error.status,
       code: error.code,

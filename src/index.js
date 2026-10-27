@@ -10,6 +10,7 @@ import { createShardMapStore } from "./shard-map-store.js";
 import { createObjectHookRegistry } from "./object-hooks.js";
 import { loadPlugins } from "./plugin-loader.js";
 import { resolveSystemSecrets } from "./system-secrets.js";
+import { isTopologyResharding } from "./shard-map.js";
 
 const config = loadConfig();
 
@@ -44,6 +45,9 @@ if (configuredShardMap) {
     timeoutMs: config.cluster.replicationTimeoutMs,
   }));
 }
+if (isTopologyResharding(node.shardMapSnapshot()) && (!persistence?.durable || !shardMapStore?.durable)) {
+  throw new Error("resharding requires S3 persistence and an S3 shard map store");
+}
 const replication = createReplicationScheduler({
   node,
   hintsEnabled: config.cluster.hints.enabled,
@@ -63,6 +67,24 @@ const restoreServer = await startRestoreStatusServer({
 if (persistence) {
   node.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
   const restored = await persistence.restore({ progress: restoreStatus });
+  if (restored.reshardCheckpoint && shardMapStore?.durable && persistence.durable) {
+    const readiness = await persistence.reshardReadiness();
+    restored.reshardReadiness = readiness;
+    let activeMap;
+    if (readiness.ready) {
+      const finalized = await shardMapStore.finalize(readiness.topologyId);
+      activeMap = finalized.shardMap;
+      restored.reshardFinalized = true;
+    } else {
+      restoreStatus.waiting({ topologyId: readiness.topologyId });
+      activeMap = await shardMapStore.waitForActive(readiness.topologyId);
+    }
+    node.replaceShardMap(shardMapFromHttp(activeMap, node.id, {
+      secret: config.cluster.secret,
+      timeoutMs: config.cluster.replicationTimeoutMs,
+    }));
+    restoreStatus.done(restored);
+  }
   persistence.start();
   console.log(`persistence restored ${restored.snapshotObjects} snapshot objects and ${restored.journalOps} journal ops`);
 } else {

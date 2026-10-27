@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_FILE_PREFIX } from "./config.js";
 import { createObjectId } from "./object-id.js";
 import { createObjectStorage } from "./object-storage.js";
 
-const DEFAULT_PREFIX = "spread-db/files";
 const DEFAULT_MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
 const ALLOWED_FILE_KEYS = new Set(["storage", "key", "mimeType"]);
 
@@ -18,14 +18,14 @@ export function createFileService(config = {}, persistenceConfig = {}) {
   });
   return new FileService({
     storage,
-    prefix: config.prefix || DEFAULT_PREFIX,
+    prefix: config.prefix || DEFAULT_FILE_PREFIX,
     storageName: config.storageName || mode,
     maxUploadBytes: positiveInt(config.maxUploadBytes, DEFAULT_MAX_UPLOAD_BYTES),
   });
 }
 
 export class FileService {
-  constructor({ storage, prefix = DEFAULT_PREFIX, storageName = "s3", maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES } = {}) {
+  constructor({ storage, prefix = DEFAULT_FILE_PREFIX, storageName = "s3", maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES } = {}) {
     if (!storage) throw new Error("file storage is required");
     this.storage = storage;
     this.prefix = normalizePrefix(prefix);
@@ -173,7 +173,7 @@ export async function readMultipartObjectFile(req, { maxBytes = DEFAULT_MAX_UPLO
 }
 
 export function buildMultipartObjectFile({ object, file }) {
-  const boundary = `spread-db-${randomUUID()}`;
+  const boundary = `objydb-${randomUUID()}`;
   const chunks = [
     Buffer.from(`--${boundary}\r\ncontent-disposition: form-data; name="object"\r\ncontent-type: application/json\r\n\r\n`),
     Buffer.from(JSON.stringify(object)),
@@ -296,8 +296,8 @@ function cleanMimeType(value) {
 }
 
 function normalizePrefix(value) {
-  const cleaned = String(value || DEFAULT_PREFIX).replace(/^\/+|\/+$/g, "");
-  return cleaned || DEFAULT_PREFIX;
+  const cleaned = String(value || DEFAULT_FILE_PREFIX).replace(/^\/+|\/+$/g, "");
+  return cleaned || DEFAULT_FILE_PREFIX;
 }
 
 function encodeKeyPart(value) {

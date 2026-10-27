@@ -31,10 +31,10 @@ test("normalizes a single-node config with runtime defaults", () => {
   assert.equal(config.storage.engine, "shape");
   assert.deepEqual(config.files, {
     mode: "off",
-    prefix: "spread-db/files",
+    prefix: "objydb/files",
     maxUploadBytes: 256 * 1024 * 1024,
     s3: {
-      bucket: "spread-db",
+      bucket: "objydb",
       endpoint: undefined,
       region: "us-east-1",
       accessKeyId: undefined,
@@ -92,7 +92,7 @@ test("normalizes a single-node config with runtime defaults", () => {
   assert.equal(config.persistence.restoreSnapshotId, null);
   assert.deepEqual(config.persistence.localWal, {
     mode: "off",
-    dir: ".spread-db/wal",
+    dir: ".objydb/wal",
     fsync: true,
     flushMs: 0,
     maxRecordBytes: 4 * 1024 * 1024,
@@ -117,7 +117,7 @@ test("shared config requires node id from the command line", () => {
 });
 
 test("loads node identity overrides from cli arguments", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spread-db-config-"));
+  const dir = mkdtempSync(join(tmpdir(), "objydb-config-"));
   const path = join(dir, "cluster.json");
   writeFileSync(path, JSON.stringify({
     node: { retainOps: 0, syncBatchSize: 4096 },
@@ -149,7 +149,6 @@ test("loads node identity overrides from cli arguments", () => {
     },
     persistence: {
       mode: "memory",
-      restoreMode: "reshard",
       flushMs: 25,
       journalMaxBytes: 4096,
       snapshotDirtyOnly: false,
@@ -241,7 +240,6 @@ test("loads node identity overrides from cli arguments", () => {
     checkMs: 500,
   });
   assert.equal(config.persistence.mode, "memory");
-  assert.equal(config.persistence.restoreMode, "reshard");
   assert.equal(config.persistence.flushMs, 25);
   assert.equal(config.persistence.journalMaxBytes, 4096);
   assert.equal(config.persistence.snapshotDirtyOnly, false);
@@ -267,7 +265,7 @@ test("loads node identity overrides from cli arguments", () => {
 });
 
 test("loads environment references from native configuration", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spread-db-environment-config-"));
+  const dir = mkdtempSync(join(tmpdir(), "objydb-environment-config-"));
   const path = join(dir, "objydb.json");
   writeFileSync(path, JSON.stringify({
     node: { retainOps: 512 },
@@ -307,7 +305,7 @@ test("loads environment references from native configuration", () => {
 });
 
 test("native configuration reports missing environment references", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spread-db-environment-config-"));
+  const dir = mkdtempSync(join(tmpdir(), "objydb-environment-config-"));
   const path = join(dir, "objydb.json");
   writeFileSync(path, JSON.stringify({
     auth: { jwtSecret: { fromEnvironment: "MISSING_SECRET" } },
@@ -373,7 +371,7 @@ test("infers Hetzner object storage region from the endpoint location", () => {
     persistence: {
       mode: "s3",
       s3: {
-        bucket: "spread-db",
+        bucket: "objydb",
         endpoint: "https://fsn1.your-objectstorage.com",
         region: "us-east-1",
       },
@@ -391,7 +389,7 @@ test("rejects mismatched Hetzner object storage region and endpoint", () => {
       persistence: {
         mode: "s3",
         s3: {
-          bucket: "spread-db",
+          bucket: "objydb",
           endpoint: "https://fsn1.your-objectstorage.com",
           region: "nbg1",
         },
@@ -411,14 +409,14 @@ test("file storage can inherit persistence S3 settings when enabled", () => {
     persistence: {
       mode: "s3",
       s3: {
-        bucket: "spread-db",
+        bucket: "objydb",
         endpoint: "https://fsn1.your-objectstorage.com",
       },
     },
     auth: TEST_AUTH,
   });
 
-  assert.equal(config.files.s3.bucket, "spread-db");
+  assert.equal(config.files.s3.bucket, "objydb");
   assert.equal(config.files.s3.endpoint, "https://fsn1.your-objectstorage.com");
   assert.equal(config.files.s3.region, "fsn1");
 });

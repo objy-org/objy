@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig } from "../src/config.js";
 import { createShardMapStore } from "../src/shard-map-store.js";
+import { isTopologyResharding, partitionSignature } from "../src/shard-map.js";
 
 const args = process.argv.slice(2);
 const mapPath = valueAfter(args, "--map") || positional(args)[0];
 if (!mapPath) {
-  console.error("usage: node scripts/put-shard-map.js --config spread-db.minio.config.json --map shard-map.json");
+  console.error("usage: node scripts/put-shard-map.js --config examples/objydb.s3.local.json --map shard-map.json");
   process.exit(1);
 }
 
@@ -18,8 +19,16 @@ if (!store) {
 }
 
 const shardMap = JSON.parse(readFileSync(resolve(process.cwd(), mapPath), "utf8"));
-await store.save(shardMap.shardMap || shardMap);
-console.log(`shard map saved to ${config.cluster.shardMapStore.prefix}/${config.cluster.shardMapStore.key}`);
+const desired = shardMap.shardMap || shardMap;
+const current = await store.load();
+const requiresReshard = isTopologyResharding(current)
+  || (current && partitionSignature(current) !== partitionSignature(desired));
+if (requiresReshard && (!store.durable || config.persistence.mode !== "s3")) {
+  console.error("resharding requires S3 persistence and an S3 shard map store");
+  process.exit(1);
+}
+const saved = await store.save(desired);
+console.log(`shard map ${saved.shardMap.topology.id} (${saved.shardMap.topology.state}) saved to ${config.cluster.shardMapStore.prefix}/${config.cluster.shardMapStore.key}`);
 
 function valueAfter(argv, name) {
   for (let i = 0; i < argv.length; i++) {

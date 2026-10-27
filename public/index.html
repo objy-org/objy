@@ -1915,7 +1915,8 @@
 import { createClient } from "./client.js";
 
 const $ = (id) => document.getElementById(id);
-const STORE_KEY = "spread-db-ui:session";
+const STORE_KEY = "objydb-ui:session";
+const SERVER_KEY = "objydb-ui:server";
 
 const state = {
   server: defaultServer(),
@@ -1983,16 +1984,11 @@ function normalizeServer(value) {
 
 function loadSession() {
   try {
-    state.server = normalizeServer(localStorage.getItem("spread-db-ui:server") || state.server);
+    state.server = normalizeServer(localStorage.getItem(SERVER_KEY) || state.server);
     client = createClient({ url: state.server });
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
     if (saved?.accessToken) {
-      const { authDb, authColl, ...session } = saved;
-      client.setSession({
-        ...session,
-        database: session.database || authDb || "_global",
-        collection: session.collection || authColl || "users",
-      });
+      client.setSession(saved);
       state.authDb = client.getSession().database;
       state.authColl = client.getSession().collection;
     }
@@ -2009,7 +2005,7 @@ function loadSession() {
 }
 
 function saveSession() {
-  localStorage.setItem("spread-db-ui:server", state.server);
+  localStorage.setItem(SERVER_KEY, state.server);
   const session = client.getSession();
   if (session) localStorage.setItem(STORE_KEY, JSON.stringify(session));
   else localStorage.removeItem(STORE_KEY);
@@ -2373,7 +2369,7 @@ function renderClusterStatus(config) {
   const nodes = Array.isArray(config.nodes) ? config.nodes : [];
   const shards = Array.isArray(config.shards) ? config.shards : [];
   const memory = configMemory(config, nodes);
-  const workerCount = Number(config.indexes?.activeWorkers) || 0;
+  const taskCount = Number(config.indexes?.activeTasks) || 0;
 
   root.title = clusterTitle({ nodes, shards });
   const stats = [
@@ -2381,8 +2377,8 @@ function renderClusterStatus(config) {
     memoryStat("heap logical", memory.cluster, memoryClusterTitle(memory)),
     ...memory.nodes.map((entry) => memoryStat(memoryNodeLabel(entry), entry, memoryNodeTitle(entry), "node-rss")),
   ];
-  if (workerCount > 0) {
-    stats.push(topStat("workers", workerCount, "warn", `${workerCount} active index workers`));
+  if (taskCount > 0) {
+    stats.push(topStat("tasks", taskCount, "warn", `${taskCount} active derived-state tasks`));
   }
   root.innerHTML = stats.join("");
 }
@@ -2411,7 +2407,7 @@ function renderClusterStatsModal(config) {
   const online = nodes.filter((nodeStatus) => isNodeOnline(nodeStatus)).length;
   const indexes = config.indexes || {};
   const indexCount = (Number(indexes.ready) || 0) + (Number(indexes.building) || 0) + (Number(indexes.error) || 0);
-  const workerCount = Number(indexes.activeWorkers) || 0;
+  const taskCount = Number(indexes.activeTasks) || 0;
   const vectors = config.vectors || {};
 
   $("cluster-modal-body").innerHTML = `
@@ -2425,7 +2421,7 @@ function renderClusterStatsModal(config) {
         ${clusterMetric("nodes", `${online}/${nodes.length}`, "online", nodesTone(online, nodes.length))}
         ${clusterMetric("shards", shards.length, `${coveredShardText(memory.cluster)}`, shards.length ? "ok" : "warn")}
         ${clusterMetric("indexes", `${Number(indexes.ready) || 0}/${indexCount}`, "collections ready", Number(indexes.building) || Number(indexes.error) ? "warn" : "ok")}
-        ${clusterMetric("workers", workerCount, "active", workerCount ? "warn" : "ok")}
+        ${clusterMetric("tasks", taskCount, "active", taskCount ? "warn" : "ok")}
         ${clusterMetric("vectors", formatNumber(vectors.storedVectors), `${formatNumber(vectors.activeIndexes)} active indexes`, Number(vectors.errors) ? "warn" : "ok")}
         ${hasCompression ? clusterMetric("compression", formatPercent(compression.logical.savedPercent), "logical payload saved", "ok") : ""}
       </div>

@@ -13,7 +13,7 @@ Use this before publishing an OBJY DB release to GitHub, npm, or a container reg
 - [ ] Confirm that all ported source code is owned by the project and may be released under MIT.
 - [x] Scan tracked files and the complete Git history for credentials, private keys, production endpoints, and customer data.
 - [x] Review production dependencies for known vulnerabilities.
-- [ ] Confirm that examples contain no reusable secrets or unsafe production defaults.
+- [x] Confirm that examples contain no reusable secrets or unsafe production defaults.
 
 ## Validation
 
@@ -22,7 +22,7 @@ Use this before publishing an OBJY DB release to GitHub, npm, or a container reg
 - [x] Run `npm run check:package` and inspect `npm pack --dry-run`.
 - [x] Build and smoke-test the Docker image.
 - [ ] Start a multi-node cluster and verify routing, replication, persistence, queries, aggregations, references, and vector search.
-- [ ] Verify the README, API documentation, client documentation, links, and images.
+- [x] Verify the README, API documentation, client documentation, links, and images.
 
 ## Publish
 

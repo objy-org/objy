@@ -1,8 +1,8 @@
 /** The same dependency-free module runs in browsers and Node. */
-export class SpreadDBError extends Error {
+export class ObjyDBError extends Error {
   constructor(message, details = {}) {
     super(message, details.cause ? { cause: details.cause } : undefined);
-    this.name = 'SpreadDBError';
+    this.name = 'ObjyDBError';
     this.status = 0;
     this.code = 'REQUEST_FAILED';
     this.writeMayHaveSucceeded = false;
@@ -17,11 +17,11 @@ const segment = value => {
   }
   return encodeURIComponent(String(value));
 };
-const changedSession = () => new SpreadDBError('The session changed during this request', { code: 'SESSION_CHANGED' });
+const changedSession = () => new ObjyDBError('The session changed during this request', { code: 'SESSION_CHANGED' });
 
 function tokenSession(result, database, collection) {
   if (typeof result?.accessToken !== 'string' || !result.accessToken || typeof result?.refreshToken !== 'string' || !result.refreshToken) {
-    throw new SpreadDBError('Authentication response is missing tokens', { code: 'INVALID_RESPONSE' });
+    throw new ObjyDBError('Authentication response is missing tokens', { code: 'INVALID_RESPONSE' });
   }
   return { ...copy(result), database, collection };
 }
@@ -42,7 +42,7 @@ function deadline(signal, timeoutMs) {
   const abort = () => controller.abort(signal.reason);
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
-  const timer = timeoutMs ? setTimeout(() => controller.abort(new SpreadDBError('Request timed out', { code: 'TIMEOUT' })), timeoutMs) : null;
+  const timer = timeoutMs ? setTimeout(() => controller.abort(new ObjyDBError('Request timed out', { code: 'TIMEOUT' })), timeoutMs) : null;
   return { signal: controller.signal, close() { clearTimeout(timer); signal?.removeEventListener('abort', abort); } };
 }
 
@@ -122,7 +122,7 @@ export function createClient({ url, fetch: fetcher = globalThis.fetch, autoRenew
         const streaming = body instanceof ReadableStream;
         if (streaming && !supportsRequestStreams()) {
           await body.cancel();
-          throw new SpreadDBError('This runtime cannot stream uploads; use an NDJSON Blob or text instead', { code: 'STREAMING_UNSUPPORTED' });
+          throw new ObjyDBError('This runtime cannot stream uploads; use an NDJSON Blob or text instead', { code: 'STREAMING_UNSUPPORTED' });
         }
         sent = true;
         const response = await fetcher(destination.href, {
@@ -137,12 +137,12 @@ export function createClient({ url, fetch: fetcher = globalThis.fetch, autoRenew
         let data;
         try { data = text ? JSON.parse(text) : undefined; }
         catch (cause) {
-          if (response.ok) throw new SpreadDBError('Invalid JSON response', { code: 'INVALID_RESPONSE', status: response.status, cause, writeMayHaveSucceeded: write });
+          if (response.ok) throw new ObjyDBError('Invalid JSON response', { code: 'INVALID_RESPONSE', status: response.status, cause, writeMayHaveSucceeded: write });
           data = { error: text || response.statusText };
         }
         if (response.ok) return data;
         sent = false;
-        const error = new SpreadDBError(data?.error || `HTTP ${response.status}`, {
+        const error = new ObjyDBError(data?.error || `HTTP ${response.status}`, {
           status: response.status, code: data?.code || 'HTTP_ERROR', body: data,
           headers: Object.fromEntries(response.headers),
           writeMayHaveSucceeded: Boolean(data?.writeMayHaveSucceeded ?? (write && (
@@ -155,7 +155,7 @@ export function createClient({ url, fetch: fetcher = globalThis.fetch, autoRenew
         if (attempt || !auth || !autoRenew || !expired || error.writeMayHaveSucceeded || !session?.refreshToken) throw error;
         if (identity !== startedIdentity) throw changedSession();
         if (!replayable) {
-          throw new SpreadDBError('Expired token: provide a fresh stream factory to allow request replay', {
+          throw new ObjyDBError('Expired token: provide a fresh stream factory to allow request replay', {
             ...error, code: 'BODY_NOT_REPLAYABLE', cause: error,
           });
         }
@@ -163,11 +163,11 @@ export function createClient({ url, fetch: fetcher = globalThis.fetch, autoRenew
       }
     } catch (cause) {
       if (life.signal.aborted) cause = life.signal.reason;
-      if (cause instanceof SpreadDBError) {
+      if (cause instanceof ObjyDBError) {
         if (life.signal.aborted && write && sent) cause.writeMayHaveSucceeded = true;
         throw cause;
       }
-      throw new SpreadDBError(life.signal.aborted ? 'Request cancelled' : 'Request failed', {
+      throw new ObjyDBError(life.signal.aborted ? 'Request cancelled' : 'Request failed', {
         code: life.signal.aborted ? 'ABORTED' : 'NETWORK_ERROR', cause,
         writeMayHaveSucceeded: write && sent,
       });
@@ -175,7 +175,7 @@ export function createClient({ url, fetch: fetcher = globalThis.fetch, autoRenew
   }
 
   function renew() {
-    if (!session?.refreshToken) return Promise.reject(new SpreadDBError('No refresh token is available', { code: 'NO_REFRESH_TOKEN' }));
+    if (!session?.refreshToken) return Promise.reject(new ObjyDBError('No refresh token is available', { code: 'NO_REFRESH_TOKEN' }));
     if (refreshing) return refreshing;
     const previous = session;
     const startedIdentity = identity;

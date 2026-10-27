@@ -14,7 +14,7 @@ Install dependencies and start one node:
 
 ```sh
 npm ci
-node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
+node src/index.js --config objydb.config.json --node node-a --url http://localhost:8080 --port 8080
 ```
 
 Open the admin console at:
@@ -27,7 +27,7 @@ On first boot, OBJY DB creates the global `admin` user and prints a generated pa
 
 ```sh
 OBJYDB_ADMIN_PASSWORD="your-initial-password" node src/index.js \
-  --config spread-db.config.json \
+  --config objydb.config.json \
   --node node-a
 ```
 
@@ -144,21 +144,23 @@ One peer means one copy of a shard. Multiple peers are replicas of that shard. A
 When the shard map lives in S3, publish it before starting peers:
 
 ```sh
-node scripts/put-shard-map.js --config spread-db.config.json --map shard-map.json
+node scripts/put-shard-map.js --config objydb.config.json --map shard-map.json
 ```
+
+Gracefully stop every peer and let its WAL and journal flush complete before publishing a shard-count change. Peer and replica changes keep the active topology; a partition change creates a new generation and is completed during the following cluster boot.
 
 Then start peers from the same config with individual identities:
 
 ```sh
-node src/index.js --config spread-db.config.json --node node-a --url http://localhost:8080 --port 8080
-node src/index.js --config spread-db.config.json --node node-b --url http://localhost:8081 --port 8081
-node src/index.js --config spread-db.config.json --node node-c --url http://localhost:8082 --port 8082
-node src/index.js --config spread-db.config.json --node node-d --url http://localhost:8083 --port 8083
+node src/index.js --config objydb.config.json --node node-a --url http://localhost:8080 --port 8080
+node src/index.js --config objydb.config.json --node node-b --url http://localhost:8081 --port 8081
+node src/index.js --config objydb.config.json --node node-c --url http://localhost:8082 --port 8082
+node src/index.js --config objydb.config.json --node node-d --url http://localhost:8083 --port 8083
 ```
 
 If no shard-map store is enabled, place the map under `cluster.shardMap` in the config. A node stores and replicates only its owned shards. Replicas improve availability but also consume another full physical copy; logical capacity counts one replica per shard.
 
-Planned shard-count changes use `restoreMode: "reshard"` for the redistribution boot. Return to `scoped` after the new topology is established.
+Shard-count changes publish a new topology generation. OBJY DB restores only from the declared source generation, checkpoints the new shards under distinct names, and activates the topology after every target shard is durable. Resharding requires shared S3 persistence and an S3 shard-map store.
 
 ## Durability
 
@@ -172,7 +174,7 @@ S3 persistence uses append-friendly journal segments and periodic snapshots unde
     "ack": "localWal",
     "localWal": {
       "mode": "on",
-      "dir": ".spread-db/wal",
+      "dir": ".objydb/wal",
       "fsync": true
     },
     "s3": {
@@ -191,8 +193,6 @@ S3 persistence uses append-friendly journal segments and periodic snapshots unde
 | --- | --- |
 | `ack: "memory"` | Acknowledge after in-memory acceptance. Fastest, but process failure can lose an unflushed write. |
 | `ack: "localWal"` | Acknowledge after the local WAL flush. Protects the gap before S3 journal upload. |
-| `restoreMode: "scoped"` | Restore only scopes owned by the current shard map. |
-| `restoreMode: "reshard"` | Read old shard scopes and redistribute them through a new map. |
 
 On boot, a peer loads shared secrets and the shard map, restores metadata, streams owned snapshot segments, replays newer journals and the optional WAL, then opens the full public server. Objects are readable while derived structures continue warming.
 
@@ -210,7 +210,7 @@ Collection metadata chooses which derived structure supports a workload:
 
 Index and column builds are cooperative same-thread tasks. They yield between bounded batches so the API remains available, but they are not separate worker processes. Queries fall back to correct scan paths while required structures are warming; vector search returns `503` until its index is ready.
 
-The `x-spread-db-query-path` response header shows which path served a query or aggregation.
+The `x-objydb-query-path` response header shows which path served a query or aggregation.
 
 ## Extend OBJY DB
 
@@ -258,7 +258,7 @@ Hooks may transform `context.input`, inspect `context.result`, provide a success
 
 ## Configuration
 
-The default config path is `spread-db.config.json`. Use `--config` to select another file, and override peer-local identity with `--node`, `--url`, and `--port`.
+The default config path is `objydb.config.json`. Use `--config` to select another file, and override peer-local identity with `--node`, `--url`, and `--port`.
 
 A shared cluster config can stay compact because omitted settings use runtime defaults:
 
@@ -310,7 +310,7 @@ A shared cluster config can stay compact because omitted settings use runtime de
 
 OBJY DB generates JWT and cluster secrets and persists them beside durable state. Explicit secrets remain supported and must be identical across peers. The initial global admin password can come from `OBJYDB_ADMIN_PASSWORD`; subsequent boots use the stored user.
 
-The shipped [spread-db.config.json](spread-db.config.json) is a local development baseline. Keep credentials and deployment-specific addresses outside source control.
+The shipped [objydb.config.json](objydb.config.json) is a local development baseline. Keep credentials and deployment-specific addresses outside source control.
 
 ## Console and Status
 

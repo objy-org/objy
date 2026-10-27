@@ -616,7 +616,7 @@ File handling is object-backed. One object can wrap one S3-backed blob, while th
 {
   "_file": {
     "storage": "s3",
-    "key": "spread-db/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
+    "key": "objydb/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
     "mimeType": "application/pdf"
   }
 }
@@ -655,7 +655,7 @@ part "file":
   "status": "received",
   "_file": {
     "storage": "s3",
-    "key": "spread-db/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
+    "key": "objydb/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
     "mimeType": "application/pdf"
   }
 }
@@ -713,7 +713,7 @@ part "file":
   "status": "approved",
   "_file": {
     "storage": "s3",
-    "key": "spread-db/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
+    "key": "objydb/files/db/{db}/collection/{collection}/object/object-1/blob/{fileId}",
     "mimeType": "application/pdf"
   }
 }
@@ -1091,7 +1091,7 @@ Also supported: `$eq`, `$equal`, `$deepEquals`, `$ne`, `$in`, `$nin`, `$regex`, 
 Query, vector-search, and aggregation responses include the planner decision in:
 
 ```http
-x-spread-db-query-path: index-full
+x-objydb-query-path: index-full
 ```
 
 <details>
@@ -1398,7 +1398,7 @@ Authorization: Bearer <accessToken>
     "ready": 18,
     "building": 2,
     "error": 0,
-    "activeWorkers": 1
+    "activeTasks": 1
   },
   "vectors": {
     "storedVectors": 4200,
@@ -1441,7 +1441,7 @@ Authorization: Bearer <accessToken>
 
 The normal response contains one shard topology, lightweight node health, logical and physical heap/RSS totals, per-node memory-guard state, and aggregate index, vector, and logical compression information. Logical totals select one reachable replica per shard; physical totals count every process. The example abbreviates fields inside the memory summaries; the live response also includes byte/MiB totals, capacity percentages, and online/offline counts.
 
-`indexes.activeWorkers` is retained as a status-field name for compatibility. It counts active cooperative derived-state tasks in the node process; it does not mean worker threads or child processes.
+`indexes.activeTasks` counts active cooperative index, column, and vector maintenance tasks in the node process.
 
 `replication.healthy` means the node has no known replication failure or queued/in-flight catch-up work. It is an operational health signal, not a full data-checksum comparison between replicas.
 

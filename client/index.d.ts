@@ -74,7 +74,7 @@ export interface Client {
   health(options?: RequestOptions): Promise<ObjectData>;
   status(options?: RequestOptions & { details?: boolean }): Promise<ObjectData>;
 }
-export class SpreadDBError extends Error {
+export class ObjyDBError extends Error {
   constructor(message: string, details?: Record<string, unknown>);
   status: number;
   code: string;

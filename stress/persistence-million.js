@@ -55,7 +55,7 @@ for (let i = 0; i < count; i++) {
 await persistence.flush();
 mark("insert and journal flush");
 
-const journalPrefix = "spread-db/db/app/collection/events/shard/default/journal/";
+const journalPrefix = "objydb/db/app/collection/events/shard/default/journal/";
 const journalBefore = (await storage.list(journalPrefix)).length;
 assert.ok(journalBefore > 0, "journals should exist before checkpoint");
 console.log(`journals before checkpoint: ${journalBefore}`);

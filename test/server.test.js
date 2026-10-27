@@ -134,7 +134,7 @@ async function ndjsonRequest(base, token, method, path, lines, headers = {}) {
 }
 
 function clusterHeaders() {
-  return { "x-spread-db-cluster-secret": TEST_CLUSTER_SECRET };
+  return { "x-objydb-cluster-secret": TEST_CLUSTER_SECRET };
 }
 
 function headerValue(headers, name) {
@@ -303,7 +303,7 @@ test("sharded aggregates start remote work before local shard aggregation", asyn
     return {
       status: 200,
       body: [{ group: "remote", _count: 1 }],
-      headers: { "x-spread-db-query-path": "aggregate-group-index" },
+      headers: { "x-objydb-query-path": "aggregate-group-index" },
       shard,
     };
   };
@@ -418,12 +418,12 @@ test("auth issues and renews global user JWTs", async () => {
 
     const authed = api(base, session.body.accessToken);
     assert.deepEqual((await authed.get("/api/databases")).body.databases, ["_global"]);
-    const legacyHeader = await fetch(`${base}/api/databases`, {
+    const invalidScheme = await fetch(`${base}/api/databases`, {
       headers: { authorization: `Baerer ${session.body.accessToken}` },
     });
-    assert.equal(legacyHeader.status, 200);
+    assert.equal(invalidScheme.status, 401);
     const queryToken = await fetch(`${base}/api/databases?token=${encodeURIComponent(session.body.accessToken)}`);
-    assert.equal(queryToken.status, 200);
+    assert.equal(queryToken.status, 401);
     s.node.createCollection("compression", "docs", {
       tiering: { mode: "compressedMemory", offload: ["payload"], minBytes: 1 },
     });
@@ -601,7 +601,7 @@ test("api config keeps normal status compact and loads diagnostics on demand", a
     assert.equal(typeof local.replication.healthy, "boolean");
     assert.equal(Number.isInteger(local.replication.inflightPulls), true);
     assert.equal(local.indexes, undefined);
-    assert.deepEqual(Object.keys(status.body.indexes).sort(), ["activeWorkers", "building", "error", "ready"]);
+    assert.deepEqual(Object.keys(status.body.indexes).sort(), ["activeTasks", "building", "error", "ready"]);
     assert.deepEqual(Object.keys(status.body.vectors).sort(), ["activeIndexes", "errors", "storedVectors", "warmingIndexes"]);
     assert.equal(status.body.shards.find((shard) => shard.name === "shard-b").peers[0].online, true);
     assert.equal(status.body.shards[0].peers[0].rss, undefined);
@@ -857,8 +857,8 @@ test("auth routes database users to the owning shard", async () => {
     assert.equal(session.body.user._id, remoteUserId);
     assert.equal(session.body.user.password, undefined);
 
-    const remoteByQueryToken = await fetch(`${urlA}/api/${db}/${coll}/object/${remoteUserId}?token=${encodeURIComponent(root.accessToken)}`);
-    assert.equal(remoteByQueryToken.status, 200, await remoteByQueryToken.text());
+    const remoteWithoutHeader = await fetch(`${urlA}/api/${db}/${coll}/object/${remoteUserId}?token=${encodeURIComponent(root.accessToken)}`);
+    assert.equal(remoteWithoutHeader.status, 401);
 
     const renewed = await api(urlA, null).post(`/api/${db}/${coll}/renew`, {
       refreshToken: session.body.refreshToken,
@@ -1671,7 +1671,7 @@ test("public bulk imports reject excessive batch and persistence backlog pressur
 
     const backedUp = await c.post("/api/app/items/object", { _id: "c" });
     assert.equal(backedUp.status, 503);
-    assert.equal(backedUp.headers.get("x-spread-db-pressure"), "persistence");
+    assert.equal(backedUp.headers.get("x-objydb-pressure"), "persistence");
     assert.equal(backedUp.body.error, "persistence backlog is full");
   } finally {
     s.server.close();
@@ -1730,7 +1730,7 @@ test("public bulk object routes reject duplicate _ids", async () => {
 });
 
 test("public object writes ack after local WAL flush", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spread-db-http-wal-"));
+  const dir = mkdtempSync(join(tmpdir(), "objydb-http-wal-"));
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "http-wal" });
   const persistence = new PersistenceManager({
@@ -2373,17 +2373,17 @@ test("public query responses expose planner path headers", async () => {
 
     const listed = await c.get(`${base}?limit=2`);
     assert.equal(listed.status, 200);
-    assert.equal(listed.headers.get("x-spread-db-query-path"), "scan");
+    assert.equal(listed.headers.get("x-objydb-query-path"), "scan");
 
     const indexedQuery = encodeURIComponent(JSON.stringify({ status: "active" }));
     const indexed = await c.get(`${base}?q=${indexedQuery}`);
     assert.equal(indexed.status, 200);
-    assert.equal(indexed.headers.get("x-spread-db-query-path"), "index-full");
+    assert.equal(indexed.headers.get("x-objydb-query-path"), "index-full");
 
     const partialQuery = encodeURIComponent(JSON.stringify({ status: "active", score: { $gt: 1 } }));
     const partial = await c.get(`${base}?q=${partialQuery}`);
     assert.equal(partial.status, 200);
-    assert.equal(partial.headers.get("x-spread-db-query-path"), "index-partial");
+    assert.equal(partial.headers.get("x-objydb-query-path"), "index-partial");
 
     const aggregateQuery = encodeURIComponent(JSON.stringify({
       $aggregate: {
@@ -2395,7 +2395,7 @@ test("public query responses expose planner path headers", async () => {
     const aggregate = await c.get(`${base}?q=${aggregateQuery}`);
     assert.equal(aggregate.status, 200);
     assert.deepEqual(aggregate.body, [{ total: 6 }]);
-    assert.equal(aggregate.headers.get("x-spread-db-query-path"), "aggregate-column-summary");
+    assert.equal(aggregate.headers.get("x-objydb-query-path"), "aggregate-column-summary");
 
     const groupedCountQuery = encodeURIComponent(JSON.stringify({
       status: "active",
@@ -2407,7 +2407,7 @@ test("public query responses expose planner path headers", async () => {
     const groupedCount = await c.get(`${base}?q=${groupedCountQuery}`);
     assert.equal(groupedCount.status, 200);
     assert.deepEqual(groupedCount.body, [{ status: "active", n: 2 }]);
-    assert.equal(groupedCount.headers.get("x-spread-db-query-path"), "aggregate-group-index");
+    assert.equal(groupedCount.headers.get("x-objydb-query-path"), "aggregate-group-index");
 
     const groupedMetricQuery = encodeURIComponent(JSON.stringify({
       status: "active",
@@ -2422,7 +2422,7 @@ test("public query responses expose planner path headers", async () => {
     const groupedMetric = await c.get(`${base}?q=${groupedMetricQuery}`);
     assert.equal(groupedMetric.status, 200);
     assert.deepEqual(groupedMetric.body, [{ status: "active", total: 3, n: 2 }]);
-    assert.equal(groupedMetric.headers.get("x-spread-db-query-path"), "aggregate-group-forward-index");
+    assert.equal(groupedMetric.headers.get("x-objydb-query-path"), "aggregate-group-forward-index");
   } finally {
     s.server.close();
   }
@@ -2483,7 +2483,7 @@ test("sharded object-db aggregate merges shard partials without fetching raw obj
       { status: "done", score: 30, average: 15, n: 2 },
       { status: "new", score: 3, average: 1.5, n: 2 },
     ]);
-    assert.equal(result.headers.get("x-spread-db-query-path"), "aggregate-group-forward-index");
+    assert.equal(result.headers.get("x-objydb-query-path"), "aggregate-group-forward-index");
     assert.equal(
       forwarded.some((entry) => entry.method === "GET" && entry.url.includes("%22%24aggregate%22")),
       true,
@@ -2826,7 +2826,7 @@ test("replication across two HTTP nodes", async () => {
     });
     assert.equal(streamPull.status, 200);
     assert.match(streamPull.headers.get("content-type"), /application\/x-ndjson/);
-    assert.equal(streamPull.headers.get("x-spread-db-node"), a.node.id);
+    assert.equal(streamPull.headers.get("x-objydb-node"), a.node.id);
     const streamedOps = (await streamPull.text()).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
     assert.ok(streamedOps.length >= 1);
     assert.ok(streamedOps.some((op) => op.kind === "putObj" && op.id === "i1"));
@@ -2846,7 +2846,7 @@ test("replication across two HTTP nodes", async () => {
       headers: {
         ...clusterHeaders(),
         "content-type": "application/x-ndjson",
-        "x-spread-db-node": "manual",
+        "x-objydb-node": "manual",
       },
       body: `${JSON.stringify(pushedOp)}\n`,
     });

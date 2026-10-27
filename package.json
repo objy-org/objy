@@ -24,7 +24,8 @@
     "src/",
     "API.md",
     "LICENSE",
-    "NOTICE.md"
+    "NOTICE.md",
+    "objydb.config.json"
   ],
   "scripts": {
     "start": "node bin/objydb.js",
@@ -32,6 +33,12 @@
     "test": "node --test",
     "test:client": "node --test test/client*.test.js",
     "test:browser": "playwright test",
+    "test:stress:million": "node stress/million.js",
+    "test:stress:persistence": "node stress/persistence-million.js",
+    "test:stress:reshard": "node stress/reshard-restart-million.js",
+    "test:stress:sharded": "node stress/sharded-persistence-million.js",
+    "benchmark:storage": "node --expose-gc benchmarks/storage-engines.js",
+    "benchmark:tiering": "node --expose-gc benchmarks/compressed-tiering.js",
     "check:package": "node scripts/check-package.js"
   },
   "engines": {

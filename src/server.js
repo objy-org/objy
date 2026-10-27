@@ -189,6 +189,7 @@ export function createInterfaceContext({
   return {
     node,
     shardMapStore,
+    persistence,
     auth,
     files,
     imports,

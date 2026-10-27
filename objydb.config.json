@@ -25,7 +25,7 @@
     },
     "shardMapStore": {
       "mode": "off",
-      "prefix": "spread-db",
+      "prefix": "objydb",
       "key": "cluster/shard-map.json"
     }
   },
@@ -35,12 +35,11 @@
   },
   "persistence": {
     "mode": "off",
-    "prefix": "spread-db",
+    "prefix": "objydb",
     "flushMs": 5000,
     "opBatchSize": 1000,
     "snapshotMs": 60000,
     "segmentBytes": 16777216,
-    "compactJournals": true,
-    "restoreMode": "scoped"
+    "compactJournals": true
   }
 }

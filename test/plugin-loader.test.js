@@ -7,7 +7,7 @@ import { createObjectHookRegistry } from "../src/object-hooks.js";
 import { loadPlugins } from "../src/plugin-loader.js";
 
 test("file plugins register hooks relative to the config file", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "spread-db-plugin-"));
+  const directory = await mkdtemp(join(tmpdir(), "objydb-plugin-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, "example.mjs"), `
     export function register({ objectHooks, options }) {
@@ -20,7 +20,7 @@ test("file plugins register hooks relative to the config file", async (t) => {
 
   const objectHooks = createObjectHookRegistry();
   await loadPlugins([{ file: "./example.mjs", options: { name: "example" } }], {
-    configPath: join(directory, "spread-db.config.json"),
+    configPath: join(directory, "objydb.config.json"),
     objectHooks,
   });
 
@@ -32,7 +32,7 @@ test("file plugins register hooks relative to the config file", async (t) => {
 });
 
 test("invalid plugin files fail at startup", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "spread-db-plugin-"));
+  const directory = await mkdtemp(join(tmpdir(), "objydb-plugin-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, "invalid.mjs"), "export const name = 'invalid';\n");
   await assert.rejects(

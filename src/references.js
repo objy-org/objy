@@ -76,12 +76,6 @@ export async function expandReferences(value, {
   });
 }
 
-export async function expandReferenceObjects(objects, options = {}) {
-  const out = [];
-  for (const object of objects || []) out.push(await expandReferences(object, options));
-  return out;
-}
-
 export function referenceDepthForQuery(query = {}) {
   return referenceDepthForCriteria(query);
 }
@@ -107,10 +101,6 @@ export function referenceDepthForAggregateSpec(spec = {}) {
 
 export function pathHasReferenceObject(path) {
   return referenceDepthForPath(path) > 0;
-}
-
-export function hasReferenceQuery(query = {}) {
-  return referenceDepthForQuery(query) > 0;
 }
 
 export function referenceReadPlan(criteria = {}, options = {}) {

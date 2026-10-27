@@ -1,4 +1,4 @@
-export { createClient, SpreadDBError } from "../client/index.js";
+export { createClient, ObjyDBError } from "../client/index.js";
 export {
   ObjectHookRegistry,
   ObjectHookRunner,

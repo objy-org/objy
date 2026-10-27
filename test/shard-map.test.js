@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CRDTNode, localPeer } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { ShardMapStore } from "../src/shard-map-store.js";
 import { startServer } from "../src/server.js";
 
 const TEST_AUTH = {
@@ -18,7 +19,7 @@ function startTestServer(options = {}) {
 function clusterHeaders(hasBody = false) {
   return {
     ...(hasBody ? { "content-type": "application/json" } : {}),
-    "x-spread-db-cluster-secret": TEST_CLUSTER_SECRET,
+    "x-objydb-cluster-secret": TEST_CLUSTER_SECRET,
   };
 }
 
@@ -49,11 +50,12 @@ test("top-level shards apply globally to every database and collection", () => {
     },
   });
 
-  assert.deepEqual(a.shardMapSnapshot(), {
-    shards: {
-      "shard-0": { peers: [{ nodeId: "b", key: "b" }] },
-      "shard-1": { peers: [] },
-    },
+  const snapshot = a.shardMapSnapshot();
+  assert.equal(snapshot.version, 2);
+  assert.equal(snapshot.topology.state, "active");
+  assert.deepEqual(snapshot.shards, {
+    "shard-0": { peers: [{ nodeId: "b", key: "b" }] },
+    "shard-1": { peers: [] },
   });
   assert.deepEqual(a.shardMap.shardsForCollection("app", "users"), ["shard-0", "shard-1"]);
   assert.deepEqual(a.shardMap.shardsForCollection("analytics", "events"), ["shard-0", "shard-1"]);
@@ -105,14 +107,12 @@ test("peers are grouped by global shard", async () => {
 
   assert.equal(a.peersForShard("shard-0")[0].nodeId, "b");
   assert.equal(a.peersForShard("shard-1")[0].nodeId, "c");
-  assert.deepEqual(a.shardMapSnapshot(), {
-    shards: {
-      "shard-0": {
-        peers: [{ nodeId: "b", key: "b" }],
-      },
-      "shard-1": {
-        peers: [{ nodeId: "c", key: "c" }],
-      },
+  assert.deepEqual(a.shardMapSnapshot().shards, {
+    "shard-0": {
+      peers: [{ nodeId: "b", key: "b" }],
+    },
+    "shard-1": {
+      peers: [{ nodeId: "c", key: "c" }],
     },
   });
 });
@@ -221,6 +221,47 @@ test("replacing the shard map swaps peer membership", () => {
 
   assert.equal(a.peersForShard("0").length, 1);
   assert.equal(a.peersForShard("0")[0].nodeId, "c");
+});
+
+test("cluster shard updates require durable shared storage for partition changes", async () => {
+  const node = new CRDTNode({ id: "node-a", url: "http://node-a" });
+  node.replaceShardMap(shardMapFor(["shard-0", "shard-1"]));
+  const server = await startTestServer({ port: 0, node });
+  try {
+    const res = await fetch(`http://localhost:${server.port}/cluster/shards`, {
+      method: "PUT",
+      headers: clusterHeaders(true),
+      body: JSON.stringify(shardMapFor(["slot-0", "slot-1", "slot-2"])),
+    });
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /requires S3 persistence/);
+    assert.deepEqual(node.shardMap.shardsForCollection("app", "events"), ["shard-0", "shard-1"]);
+  } finally {
+    server.server.close();
+  }
+});
+
+test("live cluster routes reject partition changes even with durable storage", async () => {
+  const storage = new MemoryObjectStorage();
+  const node = new CRDTNode({ id: "node-a", url: "http://node-a" });
+  node.replaceShardMap(shardMapFor(["shard-0", "shard-1"]));
+  const shardMapStore = new ShardMapStore({ storage, durable: true });
+  await shardMapStore.save(node.shardMapSnapshot());
+  const persistence = new PersistenceManager({ node, storage, durable: true });
+  const server = await startTestServer({ port: 0, node, shardMapStore, persistence });
+  try {
+    const res = await fetch(`http://localhost:${server.port}/cluster/shards`, {
+      method: "PUT",
+      headers: clusterHeaders(true),
+      body: JSON.stringify(shardMapFor(["slot-0", "slot-1", "slot-2"])),
+    });
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.match(body.error, /cluster is stopped/);
+    assert.equal(Object.keys((await shardMapStore.load()).shards).length, 2);
+  } finally {
+    server.server.close();
+  }
 });
 
 test("large object-sharded dataset replicates only to owning shard nodes", async () => {
