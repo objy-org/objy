@@ -1,6 +1,7 @@
 .git
 .github
 .objydb
+.release
 .spread-db
 .npm-cache
 node_modules

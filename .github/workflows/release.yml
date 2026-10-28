@@ -1,28 +1,119 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without the v prefix
+        required: true
+        type: string
+      npm_tag:
+        description: npm distribution tag
+        required: true
+        default: alpha
+        type: choice
+        options:
+          - alpha
+          - beta
+          - latest
 
 permissions:
   contents: write
+  id-token: write
+
+concurrency:
+  group: objydb-release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      NPM_TAG: ${{ inputs.npm_tag }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Validate release request
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]]; then
+            echo "Releases must run from the default branch: $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must be an explicit semantic version without a v prefix" >&2
+            exit 1
+          fi
+          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
+            echo "Repository secret NPM_TOKEN is required" >&2
+            exit 1
+          fi
       - run: npm ci
+      - name: Verify npm credentials
+        run: npm whoami
+      - name: Apply release version
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm test
       - run: npm run check:package
-      - name: Verify tag matches package version
-        run: node -e 'if (`v${require("./package.json").version}` !== process.env.GITHUB_REF_NAME) throw new Error("release tag must match package version")'
-      - run: npm pack
-      - run: gh release create "$GITHUB_REF_NAME" ./*.tgz --generate-notes --verify-tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npx playwright install --with-deps
+      - run: npm run test:browser
+      - run: npm run test:packages
+      - name: Verify release artifacts
+        working-directory: .release/artifacts
+        run: shasum -a 256 -c SHA256SUMS
+      - name: Commit and tag the release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Release $RELEASE_VERSION"
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
+
+          TAG="v$RELEASE_VERSION"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            if [[ "$(git rev-list -n 1 "$TAG")" != "$(git rev-parse HEAD)" ]]; then
+              echo "Tag $TAG already points to another commit" >&2
+              exit 1
+            fi
+          else
+            git tag -a "$TAG" -m "OBJY DB $RELEASE_VERSION"
+            git push origin "refs/tags/$TAG"
+          fi
+      - name: Publish npm packages
+        run: |
+          publish_if_missing() {
+            local package_name="$1"
+            local artifact="$2"
+            shift 2
+            if npm view "$package_name@$RELEASE_VERSION" version >/dev/null 2>&1; then
+              echo "$package_name@$RELEASE_VERSION is already published"
+              npm dist-tag add "$package_name@$RELEASE_VERSION" "$NPM_TAG"
+              return
+            fi
+            npm publish "$artifact" --tag "$NPM_TAG" --provenance "$@"
+          }
+
+          publish_if_missing "objydb" ".release/artifacts/objydb-core-$RELEASE_VERSION.tgz"
+          publish_if_missing "@objydb/browser" ".release/artifacts/objydb-browser-$RELEASE_VERSION.tgz" --access public
+          publish_if_missing "@objydb/server" ".release/artifacts/objydb-server-$RELEASE_VERSION.tgz" --access public
+      - name: Create GitHub release
+        run: |
+          TAG="v$RELEASE_VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" .release/artifacts/* --clobber
+          elif [[ "$RELEASE_VERSION" == *-* ]]; then
+            gh release create "$TAG" .release/artifacts/* --generate-notes --verify-tag --prerelease
+          else
+            gh release create "$TAG" .release/artifacts/* --generate-notes --verify-tag
+          fi

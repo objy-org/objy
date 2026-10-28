@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import * as api from "objydb";
+import * as core from "objydb";
 
-test("package root exposes APIs without starting a server", () => {
-  assert.equal(typeof api.createClient, "function");
-  assert.equal(typeof api.createObjectHookRegistry, "function");
-  assert.equal(typeof api.startServer, "function");
+test("package root exposes the portable core", () => {
+  assert.deepEqual(Object.keys(core), ["createDatabase"]);
+  assert.equal(typeof core.createDatabase, "function");
+});
+
+test("server APIs are isolated behind the server entry", async () => {
+  const server = await import("objydb/server");
+  assert.equal(typeof server.createClient, "function");
+  assert.equal(typeof server.createObjectHookRegistry, "function");
+  assert.equal(typeof server.startServer, "function");
 });
 
 test("browser database is available through its isolated package entry", async () => {

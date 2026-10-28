@@ -1,39 +1,48 @@
-import { execFileSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildReleaseVariants } from "./build-release-variants.js";
 
-const [pack] = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json"], {
-  encoding: "utf8",
-}));
-const paths = pack.files.map((file) => file.path);
-const required = [
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const manifest = await buildReleaseVariants();
+
+check("core", ["index.js", "index.d.ts", "browser.d.ts", "LICENSE", "NOTICE.md", "package.json", "README.md"]);
+check("browser", ["index.js", "index.d.ts", "LICENSE", "NOTICE.md", "package.json", "README.md"]);
+check("server", [
+  "API.md",
   "bin/objy.js",
   "client/index.js",
   "LICENSE",
   "NOTICE.md",
   "objydb.config.json",
   "package.json",
+  "public/index.html",
   "src/api.js",
   "src/index.js",
-];
-const forbidden = [
-  /^\.npm-cache\//,
-  /^\.DS_Store$/,
-  /^browser-tests\//,
-  /^benchmarks\//,
-  /^examples\//,
-  /^public\/branding\//,
-  /^scripts\//,
-  /^stress\//,
-  /^test\//,
-  /^test-results\//,
-];
+]);
 
-for (const path of required) {
-  if (!paths.includes(path)) throw new Error(`published package is missing ${path}`);
-}
-for (const path of paths) {
-  if (forbidden.some((pattern) => pattern.test(path))) {
-    throw new Error(`published package contains private development file ${path}`);
+const portable = ["core", "browser"];
+for (const id of portable) {
+  const source = await readFile(join(root, manifest.packages[id].stage, "index.js"), "utf8");
+  if (/["']node:[^"']+["']/.test(source)) {
+    throw new Error(`${id} package contains a Node.js runtime import`);
+  }
+  for (const forbidden of ["@aws-sdk/", "src/server.js", "src/persistence.js"]) {
+    if (source.includes(forbidden)) throw new Error(`${id} package contains forbidden runtime reference ${forbidden}`);
   }
 }
 
-console.log(`package ${pack.id}: ${paths.length} files, ${pack.size} bytes`);
+for (const path of manifest.packages.server.files.map(({ path }) => path)) {
+  if (path === "src/browser.js" || path === "src/browser.d.ts" || path.startsWith("release/")) {
+    throw new Error(`server package contains browser or release source ${path}`);
+  }
+}
+
+function check(id, required) {
+  const item = manifest.packages[id];
+  const paths = new Set(item.files.map(({ path }) => path));
+  for (const path of required) {
+    if (!paths.has(path)) throw new Error(`${id} package is missing ${path}`);
+  }
+  console.log(`${item.name}@${item.version}: ${paths.size} files, ${item.size} bytes`);
+}

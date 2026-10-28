@@ -2767,7 +2767,6 @@ test("serves the console UI at /", async () => {
     assert.match(docs.headers.get("content-type"), /text\/markdown/);
     const docsText = await docs.text();
     assert.match(docsText, /# OBJY DB HTTP API/);
-    assert.match(docsText, /!\[OBJY DB\]\(https:\/\/raw\.githubusercontent\.com\/spoo-technologies\/objy-db\/main\/public\/branding\/objy-db-header-deep-field\.png\)/);
     assert.match(docsText, /## File Handling/);
   } finally {
     s.server.close();

@@ -39,16 +39,12 @@ async function savedSession(page, session) {
   await page.evaluate(session => localStorage.setItem('objydb-ui:session', JSON.stringify(session)), session);
 }
 
-test('API documentation renders its public GitHub header image', async ({ page }) => {
+test('API documentation renders without the README header artwork', async ({ page }) => {
   await page.goto(base + '/ui');
   await page.locator('#api-docs-btn').click();
   await expect(page.locator('#api-docs-modal')).toBeVisible();
-  const logo = page.locator('#api-docs-view img[alt="OBJY DB"]');
-  await expect(logo).toHaveCount(1);
-  await expect(logo).toHaveAttribute(
-    'src',
-    'https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-header-deep-field.png',
-  );
+  await expect(page.locator('#api-docs-view')).toContainText('OBJY DB HTTP API');
+  await expect(page.locator('#api-docs-view img[alt="OBJY DB"]')).toHaveCount(0);
 });
 
 test('UI uses the client for administration, JSON and bulk CRUD, queries, metadata and files', async ({ page }) => {
