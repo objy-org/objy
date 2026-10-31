@@ -29,7 +29,6 @@
   },
   "files": [
     "bin/",
-    "client/",
     "public/index.html",
     "public/objy-db-logo.png",
     "src/",
@@ -42,7 +41,6 @@
     "start": "node bin/objy.js run",
     "cluster:local": "node bin/objy.js start --instances 4",
     "test": "node --test",
-    "test:client": "node --test test/client*.test.js",
     "test:browser": "npm run package:variants && playwright test",
     "test:packages": "node scripts/verify-release-variants.js",
     "test:universal": "node scripts/run-universal-tests.js",

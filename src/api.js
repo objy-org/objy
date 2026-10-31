@@ -1,4 +1,3 @@
-export { createClient, ObjyDBError } from "../client/index.js";
 export {
   ObjectHookRegistry,
   ObjectHookRunner,

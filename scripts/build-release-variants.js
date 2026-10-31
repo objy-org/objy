@@ -119,7 +119,6 @@ async function buildServer(sourcePackage) {
   const stage = join(stagingRoot, "server");
   await mkdir(stage, { recursive: true });
   await cp(join(root, "bin"), join(stage, "bin"), { recursive: true });
-  await cp(join(root, "client"), join(stage, "client"), { recursive: true });
   await cp(join(root, "src"), join(stage, "src"), { recursive: true });
   await rm(join(stage, "src/browser.js"));
   await rm(join(stage, "src/core.js"));
@@ -145,15 +144,14 @@ async function buildServer(sourcePackage) {
     main: "./src/api.js",
     exports: {
       ".": "./src/api.js",
-      "./client": {
-        types: "./client/index.d.ts",
-        default: "./client/index.js",
-      },
       "./hooks": "./src/object-hooks.js",
     },
     bin: sourcePackage.bin,
     engines: sourcePackage.engines,
-    dependencies: without(sourcePackage.dependencies, "fflate"),
+    dependencies: {
+      ...without(sourcePackage.dependencies, "fflate"),
+      "@objy/client": "^0.1.0-alpha.0",
+    },
     publishConfig: { access: "public" },
   });
   await writeJson(join(stage, "package.json"), manifest);

@@ -2,7 +2,9 @@ import { test, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
-import { createClient } from '../client/index.js';
+
+const clientModule = await import('@objy/client').catch(() => import('../../objy-client/index.js'));
+const { createClient } = clientModule;
 
 const { sign } = createRequire(import.meta.url)('../src/lib/jwt.cjs');
 const secret = 'ui-client-secret';

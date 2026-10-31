@@ -67,10 +67,14 @@ objy stop
 
 ## Work with Objects
 
-The server ships a small JavaScript client for Node.js and browsers:
+Install the small, dependency-free server client in your application:
+
+```sh
+npm install @objy/client
+```
 
 ```js
-import { createClient } from "@objy/server/client";
+import { createClient } from "@objy/client";
 
 const client = createClient({ url: "http://localhost:8080" });
 await client.login({ username: "admin", password: "<printed-password>" });
@@ -112,7 +116,7 @@ const totals = await assets.search({
 
 Single writes and their bulk equivalents share the same behavior: `insert` / `insertMany`, `patch` / `patchMany`, `replace` / `replaceMany`, and `remove` / `removeMany`. IDs are generated when omitted.
 
-Use the [JavaScript client guide](client/README.md) for the complete client API or [API.md](API.md) for direct HTTP requests.
+Use the [JavaScript client guide](https://github.com/objy-org/objy-client) for the complete client API or [API.md](API.md) for direct HTTP requests.
 
 ## The Object Model
 
@@ -165,7 +169,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the test matrix and contribution work
 - [Database: embedded and browser](DB.md)
 - [Server: durability and clustering](SERVER.md)
 - [REST API](API.md)
-- [JavaScript client](client/README.md)
+- [JavaScript client](https://github.com/objy-org/objy-client)
 - [Benchmarks](BENCHMARKS.md)
 - [Changelog](CHANGELOG.md)
 - [Security](SECURITY.md)

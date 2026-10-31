@@ -21,7 +21,6 @@ check("db", "@objy/db", [
 check("server", "@objy/server", [
   "API.md",
   "bin/objy.js",
-  "client/index.js",
   "LICENSE",
   "NOTICE.md",
   "objydb.config.json",
@@ -42,9 +41,17 @@ for (const path of ["browser.js", "runtime-browser.js", "shared.js"]) {
 }
 
 for (const path of manifest.packages.server.files.map(({ path }) => path)) {
-  if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js"].includes(path) || path.startsWith("release/")) {
+  if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js"].includes(path) || path.startsWith("client/") || path.startsWith("release/")) {
     throw new Error(`server package contains local-database or release source ${path}`);
   }
+}
+
+const serverPackage = JSON.parse(await readFile(join(root, manifest.packages.server.stage, "package.json"), "utf8"));
+if (serverPackage.dependencies?.["@objy/client"] !== "^0.1.0-alpha.0") {
+  throw new Error("server package must depend on @objy/client without embedding its source");
+}
+if (serverPackage.exports?.["./client"]) {
+  throw new Error("server package must not export the standalone client");
 }
 
 if (Object.keys(manifest.packages).sort().join(",") !== "db,server") {

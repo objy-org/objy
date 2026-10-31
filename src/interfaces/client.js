@@ -1,9 +1,20 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
-const source = readFileSync(new URL('../../client/index.js', import.meta.url));
+const source = readFileSync(resolveClientModule());
 const version = createHash('sha256').update(source).digest('hex').slice(0, 16);
 export const clientPath = `/client/${version}.js`;
+
+function resolveClientModule() {
+  try {
+    return fileURLToPath(import.meta.resolve('@objy/client'));
+  } catch (cause) {
+    const sibling = new URL('../../../objy-client/index.js', import.meta.url);
+    if (existsSync(sibling)) return sibling;
+    throw new Error('@objy/client is required by the OBJY DB server', { cause });
+  }
+}
 
 export function createClientInterface() {
   return {

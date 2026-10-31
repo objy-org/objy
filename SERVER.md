@@ -46,7 +46,7 @@ The admin console is available at the node URL. On first boot, OBJY DB creates t
 
 | Layer | Responsibility |
 | --- | --- |
-| Public interface | REST, JavaScript client, admin console, files, and plugins |
+| Public interface | REST, standalone JavaScript client, admin console, files, and plugins |
 | Security | JWT sessions, database users, permissions, and cluster-route secrets |
 | Routing | Accept work on any node and forward it to object-shard owners |
 | Replication | Hinted pull for the fast path and anti-entropy for repair |
@@ -263,4 +263,4 @@ Resharding requires S3 persistence, an S3 shard-map store, temporary space for b
 - Shard-count changes require coordinated restart.
 - Configuration and APIs may still evolve before `1.0`.
 
-Pin an exact alpha version and test load, restore, failure, and upgrade behavior with representative data. Continue with the [REST API](API.md), [JavaScript client](client/README.md), and [benchmarks](BENCHMARKS.md).
+Pin an exact alpha version and test load, restore, failure, and upgrade behavior with representative data. Continue with the [REST API](API.md), [JavaScript client](https://github.com/objy-org/objy-client), and [benchmarks](BENCHMARKS.md).
