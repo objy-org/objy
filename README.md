@@ -95,19 +95,6 @@ There is no required schema and no separate document type for each runtime. Obje
 }
 ```
 
-## Bulk First
-
-Bulk operations are the internal model, not an optional fast path. A single create, update, or delete is a bulk of one. Storage, derived structures, routing, replication, persistence, hooks, and NDJSON imports all preserve that model.
-
-```js
-await assets.insertMany(objects);
-await assets.patchMany(patches);
-await assets.replaceMany(replacements);
-await assets.removeMany(ids);
-```
-
-The database also supports Mongo-style `$set` and `$unset` patches, sorting and paging, grouped aggregation, live references, client-provided vector embeddings, and full-object hydration at the API boundary.
-
 ## Memory and Speed
 
 OBJY DB combines several structures rather than forcing every workload through one representation:
@@ -173,16 +160,61 @@ const runtime = await startServer({ port: 8080 });
 
 For durable nodes, replicas, object sharding, S3 configuration, failure behavior, monitoring, and restart-based resharding, continue with [SERVER.md](SERVER.md).
 
-## Packages
+## Work with Objects
 
-Every release is built from this repository at one synchronized version:
+The direct database API works with ordinary JavaScript objects. IDs are generated when omitted.
 
-| Package | Purpose |
-| --- | --- |
-| `@objy/db` | Universal database for Node.js and browsers |
-| `@objy/server` | HTTP runtime, JavaScript client, CLI, clustering, and durability |
+```js
+// Create
+const laptop = await assets.insert({
+  name: "Laptop",
+  status: "active",
+  score: 9
+});
 
-GitHub releases contain both npm tarballs, the standalone browser ESM module, and SHA-256 checksums.
+// Read and query
+const sameLaptop = await assets.get(laptop._id);
+const active = await assets.find(
+  { status: "active", score: { $gte: 5 } },
+  { sortBy: "score", sort: "desc", limit: 50 }
+);
+
+// Update selected fields
+await assets.patch(laptop._id, {
+  $set: { status: "archived" },
+  $unset: ["temporaryNote"]
+});
+
+// Replace or delete the complete object
+await assets.replace(laptop._id, { name: "Laptop Pro", score: 12 });
+await assets.remove(laptop._id);
+```
+
+Bulk methods use the same semantics and are the native write path:
+
+```js
+await assets.insertMany(objects);
+await assets.patchMany(patches);
+await assets.replaceMany(replacements);
+await assets.removeMany(ids);
+```
+
+Queries and aggregations share one search language:
+
+```js
+const result = await assets.search({
+  status: { $in: ["active", "archived"] },
+  $aggregate: {
+    groupBy: "status",
+    fields: {
+      count: { $count: true },
+      totalScore: { $sum: "score" }
+    }
+  }
+});
+```
+
+See [DB.md](DB.md) for the complete embedded and browser API. Server clients use the same object and query model through the [REST API](API.md) or [JavaScript client](client/README.md).
 
 ## Alpha Status
 
