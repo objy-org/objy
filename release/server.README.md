@@ -18,6 +18,6 @@ console.log(runtime.port);
 
 The HTTP client is available from `@objy/server/client`, and object-hook registration is available from `@objy/server/hooks`.
 
-Read the [API reference](https://github.com/objy-org/objy/blob/main/API.md), [operations guide](https://github.com/objy-org/objy/blob/main/OPERATIONS.md), and [measured benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md) in the main repository.
+Read the [server guide](https://github.com/objy-org/objy/blob/main/SERVER.md), [API reference](https://github.com/objy-org/objy/blob/main/API.md), and [measured benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md) in the main repository.
 
 Licensed under the MIT License.

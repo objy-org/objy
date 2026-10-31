@@ -6,7 +6,7 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ### Added
 
-- Operations and benchmark documentation for production evaluation.
+- Dedicated database, server, and benchmark documentation for evaluation.
 - Structured issue and pull-request templates.
 
 ## 0.2.0-alpha.0 - 2026-10-31
@@ -27,5 +27,5 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ### Notes
 
-- This is an alpha release. See [README.md](README.md#alpha-status) and [OPERATIONS.md](OPERATIONS.md) before production evaluation.
+- This is an alpha release. See [README.md](README.md#alpha-status), [DB.md](DB.md), and [SERVER.md](SERVER.md) before production evaluation.
 - Earlier prerelease work is preserved in Git history; no older semantic-version release tags are reconstructed here.

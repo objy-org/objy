@@ -19,7 +19,7 @@ OBJY DB stores and queries dynamic JavaScript objects directly. The same databas
 
 It is one object model and one query language across those environments. The server runtime adds networking, authentication, replication, and S3 durability without changing how collections, objects, queries, indexes, or aggregations behave.
 
-[Get started](#get-started) · [Platforms](#choose-a-runtime) · [API](API.md) · [Operations](OPERATIONS.md) · [Benchmarks](BENCHMARKS.md)
+[Get started](#get-started) · [Database](DB.md) · [Server](SERVER.md) · [API](API.md) · [Benchmarks](BENCHMARKS.md)
 
 ## Get Started
 
@@ -171,7 +171,7 @@ import { startServer } from "@objy/server";
 const runtime = await startServer({ port: 8080 });
 ```
 
-For durable nodes, replicas, object sharding, S3 configuration, failure behavior, monitoring, and restart-based resharding, continue with [OPERATIONS.md](OPERATIONS.md).
+For durable nodes, replicas, object sharding, S3 configuration, failure behavior, monitoring, and restart-based resharding, continue with [SERVER.md](SERVER.md).
 
 ## Packages
 
@@ -188,7 +188,7 @@ GitHub releases contain both npm tarballs, the standalone browser ESM module, an
 
 OBJY DB is under active alpha development. Pin exact versions and expect configuration or APIs to evolve before `1.0`.
 
-Current boundaries are explicit: there are no multi-object transactions, browser persistence is not implemented yet, distributed writes converge with whole-object last-write-wins semantics, and shard-count changes use a coordinated restart. Read the [operations guide](OPERATIONS.md) before evaluating durable deployments.
+Current boundaries are explicit: there are no multi-object transactions, browser persistence is not implemented yet, distributed writes converge with whole-object last-write-wins semantics, and shard-count changes use a coordinated restart. Read the [server guide](SERVER.md) before evaluating durable deployments.
 
 ## Develop
 
@@ -205,7 +205,8 @@ Keep changes bulk-first and preserve the boundaries between the universal databa
 
 - [Public REST API](API.md)
 - [JavaScript client](client/README.md)
-- [Operations and durability](OPERATIONS.md)
+- [Embedded and browser database](DB.md)
+- [Server, durability, and clustering](SERVER.md)
 - [Benchmarks](BENCHMARKS.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
