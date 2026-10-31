@@ -26,4 +26,6 @@ Use the same `@objy/db` import in Node.js and browsers. Package-aware tools sele
 
 GitHub releases also include a standalone `objy-db-<version>.esm.js` file for browsers without npm or a bundler. Download it, serve it as a JavaScript module from your application, and import `createDatabase` from that URL.
 
+See the [database guide](https://github.com/objy-org/objy#embed-objydb) and [measured cross-runtime benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md) for more detail.
+
 Licensed under the MIT License.

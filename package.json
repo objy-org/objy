@@ -3,6 +3,17 @@
   "version": "0.2.0-alpha.0",
   "private": true,
   "description": "OBJY DB: an in-memory, sharded and replicated database for dynamic JavaScript objects.",
+  "keywords": [
+    "database",
+    "in-memory",
+    "object-database",
+    "nosql",
+    "indexes",
+    "aggregation",
+    "vector-search",
+    "browser",
+    "embedded"
+  ],
   "type": "module",
   "main": "src/core.js",
   "exports": {

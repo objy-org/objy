@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a focused capability or improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete user or operational problem should OBJY DB solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior and its public surface.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain current workarounds or simpler options you considered.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Runtime impact
+      description: Note expected effects on bulk paths, memory, durability, sharding, browser support, or compatibility.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and discussions for this request.
+          required: true
+        - label: This request is general OBJY DB functionality rather than application-specific behavior.
+          required: true

@@ -136,6 +136,12 @@ async function buildServer(sourcePackage) {
   const manifest = packageManifest(sourcePackage, {
     name: "@objy/server",
     description: sourcePackage.description,
+    keywords: [
+      ...(sourcePackage.keywords || []),
+      "sharding",
+      "replication",
+      "s3",
+    ],
     main: "./src/api.js",
     exports: {
       ".": "./src/api.js",
@@ -253,6 +259,7 @@ function packageManifest(sourcePackage, fields) {
     repository: sourcePackage.repository,
     bugs: sourcePackage.bugs,
     homepage: sourcePackage.homepage,
+    keywords: fields.keywords || sourcePackage.keywords,
     license: sourcePackage.license,
   };
 }
