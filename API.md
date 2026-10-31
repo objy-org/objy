@@ -34,8 +34,6 @@ Objects are dynamic JSON-style records. Collections require no schema, and objec
 
 `PUT` replaces a complete object, `PATCH` applies Mongo-like `$set` and `$unset`, and `DELETE` creates a replicated delete. Query, search, and aggregation responses are plain arrays rather than envelopes.
 
-`GET /client.js` serves the installed `@objy/client` module without authentication. It supports `HEAD`, ETag revalidation, and a `Link` header pointing to the current content-addressed module.
-
 ## Endpoint Map
 
 | Area | Routes |

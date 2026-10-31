@@ -7,6 +7,7 @@ Use this before publishing an OBJY DB release to GitHub, npm, or a container reg
 - [ ] Use the `package.json` version consistently in the Git tag, release notes, both npm packages, and container tag.
 - [ ] Use an explicit npm distribution tag such as `alpha` for prereleases.
 - [ ] Confirm that `@objy/db` and `@objy/server` are available at the intended version; no separate browser package is published.
+- [ ] Confirm that the pinned `@objy/client` version imported by the admin console is already available from npm.
 - [ ] Confirm the working tree is clean and the release commit is on the intended branch.
 
 ## Legal and security
@@ -26,7 +27,6 @@ Use this before publishing an OBJY DB release to GitHub, npm, or a container reg
 - [ ] Build and smoke-test the Docker image.
 - [ ] Start a multi-node cluster and verify routing, replication, persistence, queries, aggregations, references, and vector search.
 - [ ] Verify the README, database, server, API, benchmarks, changelog, links, and images.
-- [ ] Verify that the compatible `@objy/client` version is published before `@objy/server`.
 
 ## Publish
 

@@ -1,9 +1,18 @@
 import { test, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 
-const clientModule = await import('@objy/client').catch(() => import('../../objy-client/index.js'));
+const browserClientUrl = 'https://cdn.jsdelivr.net/npm/@objy/client@0.1.0-alpha.0/index.js';
+let clientImportUrl;
+try {
+  clientImportUrl = import.meta.resolve('@objy/client');
+} catch {
+  clientImportUrl = new URL('../../objy-client/index.js', import.meta.url).href;
+}
+const clientModule = await import(clientImportUrl);
+const clientSourcePath = fileURLToPath(clientImportUrl);
 const { createClient } = clientModule;
 
 const { sign } = createRequire(import.meta.url)('../src/lib/jwt.cjs');
@@ -12,7 +21,11 @@ const auth = { jwtSecret: secret, users: [{ _id: 'admin', username: 'admin', pas
 const expired = token => sign({ ...JSON.parse(Buffer.from(token.split('.')[1], 'base64url')), exp: 1 }, secret);
 let server, base, admin, renewals;
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
+  await page.route(browserClientUrl, route => route.fulfill({
+    path: clientSourcePath,
+    contentType: 'text/javascript; charset=utf-8',
+  }));
   renewals = 0;
   server = await startServer({ auth, files: createFileService({ mode: 'memory' }), cors: { origins: ['*'] } });
   server.server.on('request', req => { if (req.method === 'POST' && req.url.endsWith('/renew')) renewals++; });
@@ -25,7 +38,7 @@ test.afterEach(async () => {
 });
 
 async function login(page) {
-  const module = page.waitForResponse(response => response.url() === base + '/client.js');
+  const module = page.waitForResponse(response => response.url() === browserClientUrl);
   await page.goto(base + '/ui');
   expect((await module).status()).toBe(200);
   await page.locator('#password').fill('123');
@@ -33,6 +46,11 @@ async function login(page) {
   await expect(page.locator('#login-panel')).toBeHidden();
   await expect(page.locator('#tree')).toContainText('_global');
 }
+
+test('the server does not publish the standalone client', async ({ request }) => {
+  const response = await request.get(`${base}/client.js`);
+  expect(response.status()).toBe(404);
+});
 
 async function savedSession(page, session) {
   await page.goto(base + '/ui');

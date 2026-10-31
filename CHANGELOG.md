@@ -9,6 +9,10 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 - Dedicated database, server, and benchmark documentation for evaluation.
 - Structured issue and pull-request templates.
 
+### Changed
+
+- The server no longer packages or serves the standalone JavaScript client; applications and the admin console consume `@objy/client` independently.
+
 ## 0.2.0-alpha.0 - 2026-10-31
 
 ### Added

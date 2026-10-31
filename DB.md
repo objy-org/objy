@@ -163,9 +163,3 @@ Node.js deployments can choose an explicit V8 heap limit. Browser limits are con
 | Persistence | None | None |
 
 That is the full distinction. Browser and embedded use the same database model and public methods.
-
-## Boundaries
-
-`@objy/db` intentionally has no HTTP server, authentication, shared persistence, files, replication, or sharding. Data is local and disappears with its process, page, or worker.
-
-When data must be shared, durable, or distributed, use [`@objy/server`](SERVER.md). For measured Node.js and browser workloads, see [BENCHMARKS.md](BENCHMARKS.md).

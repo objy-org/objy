@@ -5,8 +5,6 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-ARG OBJY_CLIENT_VERSION=0.1.0-alpha.0
-RUN npm install --no-save --omit=dev "@objy/client@$OBJY_CLIENT_VERSION" && npm cache clean --force
 
 COPY --chown=node:node src ./src
 COPY --chown=node:node bin ./bin

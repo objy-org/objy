@@ -148,10 +148,7 @@ async function buildServer(sourcePackage) {
     },
     bin: sourcePackage.bin,
     engines: sourcePackage.engines,
-    dependencies: {
-      ...without(sourcePackage.dependencies, "fflate"),
-      "@objy/client": "^0.1.0-alpha.0",
-    },
+    dependencies: without(sourcePackage.dependencies, "fflate"),
     publishConfig: { access: "public" },
   });
   await writeJson(join(stage, "package.json"), manifest);

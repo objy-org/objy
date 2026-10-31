@@ -7,7 +7,6 @@ import { createAuthInterface } from "./interfaces/auth.js";
 import { createClusterInterface, httpPeer, shardMapFromHttp } from "./interfaces/cluster.js";
 import { createPublicObjectInterface } from "./interfaces/public-object.js";
 import { createUiInterface } from "./interfaces/ui.js";
-import { createClientInterface } from "./interfaces/client.js";
 import { createCorsHandler } from "./http-cors.js";
 import { normalizeClusterSecret } from "./cluster-secret.js";
 import { createMemoryGuard } from "./memory-guard.js";
@@ -164,7 +163,6 @@ export function defaultInterfaces() {
     createAuthInterface(),
     createPublicObjectInterface(),
     createUiInterface(),
-    createClientInterface(),
   ];
 }
 

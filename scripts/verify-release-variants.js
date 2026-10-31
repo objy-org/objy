@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,8 +8,6 @@ import { buildReleaseVariants } from "./build-release-variants.js";
 
 const run = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const installedClient = resolve(root, "node_modules/@objy/client");
-const clientRoot = existsSync(installedClient) ? installedClient : resolve(root, "../objy-client");
 
 const manifest = await buildReleaseVariants();
 
@@ -43,12 +40,10 @@ await verifyPackage("db", async (workspace) => {
 await verifyPackage("server", async (workspace) => {
   await node(workspace, `
     import assert from "node:assert/strict";
-    import { createClient } from "@objy/client";
     import * as server from "@objy/server";
     import { createObjectHookRegistry } from "@objy/server/hooks";
 
     const { startServer } = server;
-    assert.equal(typeof createClient, "function");
     assert.equal("createClient" in server, false);
     assert.equal(typeof createObjectHookRegistry, "function");
     const runtime = await startServer({ port: 0, bootstrapLogger: () => {} });
@@ -56,8 +51,7 @@ await verifyPackage("server", async (workspace) => {
       const response = await fetch(\`http://127.0.0.1:\${runtime.port}/health\`);
       assert.equal(response.status, 200);
       const clientModule = await fetch(\`http://127.0.0.1:\${runtime.port}/client.js\`);
-      assert.equal(clientModule.status, 200);
-      assert.match(await clientModule.text(), /export function createClient/);
+      assert.equal(clientModule.status, 404);
     } finally {
       await new Promise((resolve) => runtime.server.close(resolve));
       runtime.node.db.dispose();
@@ -78,19 +72,12 @@ async function verifyPackage(id, verify) {
   const artifact = join(root, ".release/artifacts", manifest.packages[id].artifact);
   try {
     await writeFile(join(workspace, "package.json"), JSON.stringify({ private: true, type: "module" }));
-    const artifacts = [];
-    if (id === "server") {
-      const { stdout } = await command(clientRoot, "npm", ["pack", "--json", "--pack-destination", workspace]);
-      const [{ filename }] = JSON.parse(stdout);
-      artifacts.push(join(workspace, filename));
-    }
-    artifacts.push(artifact);
     await command(workspace, "npm", [
       "install",
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
-      ...artifacts,
+      artifact,
     ]);
     await verify(workspace);
   } finally {

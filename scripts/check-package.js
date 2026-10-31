@@ -47,8 +47,8 @@ for (const path of manifest.packages.server.files.map(({ path }) => path)) {
 }
 
 const serverPackage = JSON.parse(await readFile(join(root, manifest.packages.server.stage, "package.json"), "utf8"));
-if (serverPackage.dependencies?.["@objy/client"] !== "^0.1.0-alpha.0") {
-  throw new Error("server package must depend on @objy/client without embedding its source");
+if (serverPackage.dependencies?.["@objy/client"]) {
+  throw new Error("server package must not depend on the standalone client");
 }
 if (serverPackage.exports?.["./client"]) {
   throw new Error("server package must not export the standalone client");
