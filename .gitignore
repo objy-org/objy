@@ -43,6 +43,7 @@ build/Release
 
 # Dependency directories
 node_modules/
+.performance-results/
 test-results/
 playwright-report/
 jspm_packages/

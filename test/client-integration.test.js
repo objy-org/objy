@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
-import { createClient } from 'objydb/client';
+import { createClient } from '@objy/db/client';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 

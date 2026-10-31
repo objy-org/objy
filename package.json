@@ -1,5 +1,5 @@
 {
-  "name": "objydb",
+  "name": "@objy/db",
   "version": "0.2.0-alpha.0",
   "private": true,
   "description": "OBJY DB: an in-memory, sharded and replicated database for dynamic JavaScript objects.",
@@ -8,22 +8,19 @@
   "exports": {
     ".": {
       "types": "./src/core.d.ts",
-      "default": "./src/core.js"
+      "node": "./src/core.js",
+      "browser": "./src/browser.js",
+      "default": "./src/browser.js"
     },
     "./client": {
       "types": "./client/index.d.ts",
       "default": "./client/index.js"
     },
     "./hooks": "./src/object-hooks.js",
-    "./browser": {
-      "types": "./src/browser.d.ts",
-      "default": "./src/browser.js"
-    },
     "./server": "./src/api.js"
   },
   "bin": {
-    "objy": "bin/objy.js",
-    "objydb": "bin/objy.js"
+    "objy": "bin/objy.js"
   },
   "files": [
     "bin/",
@@ -43,6 +40,8 @@
     "test:client": "node --test test/client*.test.js",
     "test:browser": "npm run package:variants && playwright test",
     "test:packages": "node scripts/verify-release-variants.js",
+    "test:universal": "node scripts/run-universal-tests.js",
+    "test:universal:million": "node scripts/run-universal-tests.js --objects=1000000",
     "test:stress:million": "node stress/million.js",
     "test:stress:persistence": "node stress/persistence-million.js",
     "test:stress:reshard": "node stress/reshard-restart-million.js",
@@ -58,12 +57,12 @@
   "author": "SPOO Technologies",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objy-org/objy.db.git"
+    "url": "git+https://github.com/objy-org/objy.git"
   },
   "bugs": {
-    "url": "https://github.com/objy-org/objy.db/issues"
+    "url": "https://github.com/objy-org/objy/issues"
   },
-  "homepage": "https://github.com/objy-org/objy.db#readme",
+  "homepage": "https://github.com/objy-org/objy#readme",
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0",

@@ -6,8 +6,18 @@ import { buildReleaseVariants } from "./build-release-variants.js";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifest = await buildReleaseVariants();
 
-check("core", ["index.js", "index.d.ts", "browser.d.ts", "LICENSE", "NOTICE.md", "package.json", "README.md"]);
-check("browser", ["index.js", "index.d.ts", "LICENSE", "NOTICE.md", "package.json", "README.md"]);
+check("core", [
+  "browser.js",
+  "index.d.ts",
+  "LICENSE",
+  "node.js",
+  "NOTICE.md",
+  "package.json",
+  "README.md",
+  "runtime-browser.js",
+  "runtime-node.js",
+  "shared.js",
+]);
 check("server", [
   "API.md",
   "bin/objy.js",
@@ -21,21 +31,24 @@ check("server", [
   "src/index.js",
 ]);
 
-const portable = ["core", "browser"];
-for (const id of portable) {
-  const source = await readFile(join(root, manifest.packages[id].stage, "index.js"), "utf8");
+for (const path of ["browser.js", "runtime-browser.js", "shared.js"]) {
+  const source = await readFile(join(root, manifest.packages.core.stage, path), "utf8");
   if (/["']node:[^"']+["']/.test(source)) {
-    throw new Error(`${id} package contains a Node.js runtime import`);
+    throw new Error(`core browser path ${path} contains a Node.js runtime import`);
   }
   for (const forbidden of ["@aws-sdk/", "src/server.js", "src/persistence.js"]) {
-    if (source.includes(forbidden)) throw new Error(`${id} package contains forbidden runtime reference ${forbidden}`);
+    if (source.includes(forbidden)) throw new Error(`core browser path ${path} contains forbidden runtime reference ${forbidden}`);
   }
 }
 
 for (const path of manifest.packages.server.files.map(({ path }) => path)) {
-  if (path === "src/browser.js" || path === "src/browser.d.ts" || path.startsWith("release/")) {
-    throw new Error(`server package contains browser or release source ${path}`);
+  if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js"].includes(path) || path.startsWith("release/")) {
+    throw new Error(`server package contains local-database or release source ${path}`);
   }
+}
+
+if (Object.keys(manifest.packages).sort().join(",") !== "core,server") {
+  throw new Error("release must contain exactly the core and server npm packages");
 }
 
 function check(id, required) {

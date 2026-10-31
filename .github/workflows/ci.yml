@@ -34,6 +34,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps
       - run: npm run test:browser
+      - run: npm run test:universal -- --objects=10000
 
   package:
     runs-on: ubuntu-latest

@@ -1,23 +1,26 @@
 import { getHeapStatistics } from "node:v8";
 import { constants, deflateSync, inflateSync } from "node:zlib";
 
-export const nodeCompression = Object.freeze({
-  encodeUtf8(value) {
-    return Buffer.from(String(value));
-  },
-  decodeUtf8(value) {
-    return Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("utf8");
-  },
-  compress(value) {
-    const compressed = deflateSync(value, { level: constants.Z_BEST_SPEED });
-    const compact = new Uint8Array(compressed.byteLength);
-    compact.set(compressed);
-    return compact;
-  },
-  decompress(value) {
-    return inflateSync(value);
-  },
-});
+export function encodeUtf8(value) {
+  return Buffer.from(String(value));
+}
+
+export function decodeUtf8(value) {
+  return Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("utf8");
+}
+
+export function compress(value) {
+  const compressed = deflateSync(value, { level: constants.Z_BEST_SPEED });
+  const compact = new Uint8Array(compressed.byteLength);
+  compact.set(compressed);
+  return compact;
+}
+
+export function decompress(value) {
+  return inflateSync(value);
+}
+
+export const nodeCompression = Object.freeze({ encodeUtf8, decodeUtf8, compress, decompress });
 
 export function readHeapUsageRatio() {
   const stats = getHeapStatistics();

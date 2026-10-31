@@ -14,33 +14,25 @@ const manifest = await buildReleaseVariants();
 await verifyPackage("core", async (workspace) => {
   await node(workspace, `
     import assert from "node:assert/strict";
-    import { createDatabase } from "objydb";
+    import { createDatabase } from "@objy/db";
 
+    assert.ok(import.meta.resolve("@objy/db").endsWith("/node.js"));
     const database = createDatabase({ storage: { engine: "object" } });
     await database.createDatabase("package_test");
     await database.database("package_test").createCollection("assets", {
       indexes: ["status"],
       columns: ["score"],
+      tiering: { mode: "compressedMemory", keep: ["status", "score"], minBytes: 1 },
     });
     const assets = database.database("package_test").collection("assets");
     await assets.insertMany([
-      { _id: "one", status: "active", score: 12 },
-      { _id: "two", status: "archived", score: 8 },
+      { _id: "one", status: "active", score: 12, payload: "compress ".repeat(100) },
+      { _id: "two", status: "archived", score: 8, payload: "compress ".repeat(100) },
     ]);
     await assets.ready();
     assert.deepEqual((await assets.find({ status: "active" })).map(({ _id }) => _id), ["one"]);
     assert.equal((await assets.search({ $aggregate: { fields: { total: { $sum: "score" } } } }))[0].total, 20);
-    database.close();
-  `);
-});
-
-await verifyPackage("browser", async (workspace) => {
-  await node(workspace, `
-    import assert from "node:assert/strict";
-    import { createDatabase } from "@objydb/browser";
-    const database = createDatabase();
-    await database.createDatabase("browser_package");
-    assert.deepEqual(await database.listDatabases(), { databases: ["browser_package"] });
+    assert.equal(assets.stats().compression.compressedObjects, 2);
     database.close();
   `);
 });
@@ -48,8 +40,8 @@ await verifyPackage("browser", async (workspace) => {
 await verifyPackage("server", async (workspace) => {
   await node(workspace, `
     import assert from "node:assert/strict";
-    import { createClient, startServer } from "@objydb/server";
-    import { createObjectHookRegistry } from "@objydb/server/hooks";
+    import { createClient, startServer } from "@objy/server";
+    import { createObjectHookRegistry } from "@objy/server/hooks";
 
     assert.equal(typeof createClient, "function");
     assert.equal(typeof createObjectHookRegistry, "function");
@@ -63,7 +55,7 @@ await verifyPackage("server", async (workspace) => {
     }
   `);
 
-  const cli = join(workspace, "node_modules/@objydb/server/bin/objy.js");
+  const cli = join(workspace, "node_modules/@objy/server/bin/objy.js");
   const { stdout } = await command(workspace, process.execPath, [cli, "--version"]);
   if (stdout.trim() !== manifest.version) {
     throw new Error(`server CLI version mismatch: ${stdout.trim()} != ${manifest.version}`);

@@ -19,4 +19,4 @@ USER node
 WORKDIR /var/lib/objydb
 EXPOSE 8080
 
-CMD ["node", "/app/bin/objydb.js", "--config", "/app/objydb.config.json"]
+CMD ["node", "/app/bin/objy.js", "run", "--config", "/app/objydb.config.json"]

@@ -1,0 +1,47 @@
+name: Universal Scale Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      objects:
+        description: Objects per runtime variant
+        required: true
+        default: "1000000"
+        type: string
+      browsers:
+        description: Browser engines
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - chromium
+          - firefox
+          - webkit
+
+permissions:
+  contents: read
+
+jobs:
+  universal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps
+      - name: Run universal consistency and performance suite
+        env:
+          TEST_OBJECTS: ${{ inputs.objects }}
+          TEST_BROWSERS: ${{ inputs.browsers }}
+        run: npm run test:universal -- "--objects=$TEST_OBJECTS" "--browsers=$TEST_BROWSERS"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: universal-performance-${{ inputs.objects }}
+          path: .performance-results/
+          if-no-files-found: warn

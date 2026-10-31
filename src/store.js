@@ -15,7 +15,6 @@ import { normalizeObjectHooksMeta } from "./object-hooks.js";
 import { compareSortValues, getPathValue, matchesQuery, stableKey, stripQueryControls } from "./query.js";
 import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from "./query-planner.js";
 import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
-import * as portableCompression from "./compression.js";
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
 const FIELD_BUILD_BATCH_SIZE = 4096;
@@ -30,7 +29,7 @@ class Collection {
   constructor(name, options = {}) {
     this.name = name;
     this.disposed = false;
-    this.compression = options.compression || portableCompression;
+    this.compression = options.compression || null;
     this.vectorConfig = normalizeVectorConfig(options.vector);
     this.vectorField = this.vectorConfig.enabled ? this.vectorConfig.field : null;
     this.store = createPhysicalStore(options);
@@ -264,6 +263,7 @@ class Collection {
 
   _hydrateColumns(value = {}, rid, id) {
     let out = { ...(value || {}), _id: id };
+    if (this.indexDirtyRids.has(rid)) return out;
     for (const [path, column] of this.columns) {
       if (!column.hasValue(rid)) continue;
       out = setPath(out, path, column.valueFor(rid));
@@ -559,7 +559,9 @@ class Collection {
 
   setMeta(meta = {}, options = {}) {
     const previousTiering = stableKey(this.collectionMeta.tiering || null);
-    this.collectionMeta = normalizeCollectionMeta(meta);
+    const next = normalizeCollectionMeta(meta);
+    if (next.tiering) assertCompressionAdapter(this.compression);
+    this.collectionMeta = next;
     if (options.deferIndexes) this._deferMetaIndexes();
     else {
       this._applyMetaIndexes();
@@ -2670,6 +2672,12 @@ function normalizeTieringMeta(tiering) {
     ...(offload.length ? { offload } : {}),
     minBytes,
   };
+}
+
+function assertCompressionAdapter(compression) {
+  const methods = ["encodeUtf8", "decodeUtf8", "compress", "decompress"];
+  if (compression && methods.every((method) => typeof compression[method] === "function")) return;
+  throw new Error("compressed memory tiering requires a compression adapter");
 }
 
 function normalizeIndexList(indexes = [], label = "indexes") {

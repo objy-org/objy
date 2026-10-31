@@ -11,7 +11,7 @@ The OBJY DB client is a small ES module over the public HTTP API. It handles URL
 ### Node and Bundlers
 
 ```js
-import { createClient } from '@objydb/server/client';
+import { createClient } from '@objy/server/client';
 
 const client = createClient({ url: 'http://127.0.0.1:8080' });
 await client.login({ username: 'admin', password: 'your-password' });
@@ -22,7 +22,7 @@ await items.insert({ _id: 'hello', title: 'Hello' });
 console.log(await items.get('hello'));
 ```
 
-The `@objydb/server/client` subpath imports only the client. It never starts the database server or loads its server dependencies.
+The `@objy/server/client` subpath imports only the client. It never starts the database server or loads its server dependencies.
 
 ### Browser
 
@@ -256,7 +256,7 @@ Older servers without the explicit expiration marker still work, but cannot safe
 ## Errors and Cancellation
 
 ```js
-import { ObjyDBError } from '@objydb/server/client';
+import { ObjyDBError } from '@objy/server/client';
 
 try {
   await items.patch(

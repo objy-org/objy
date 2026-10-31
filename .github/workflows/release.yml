@@ -22,7 +22,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: objydb-release
+  group: objy-release
   cancel-in-progress: false
 
 jobs:
@@ -67,6 +67,7 @@ jobs:
       - run: npx playwright install --with-deps
       - run: npm run test:browser
       - run: npm run test:packages
+      - run: npm run test:universal -- --objects=20000
       - name: Verify release artifacts
         working-directory: .release/artifacts
         run: shasum -a 256 -c SHA256SUMS
@@ -104,9 +105,8 @@ jobs:
             npm publish "$artifact" --tag "$NPM_TAG" --provenance "$@"
           }
 
-          publish_if_missing "objydb" ".release/artifacts/objydb-core-$RELEASE_VERSION.tgz"
-          publish_if_missing "@objydb/browser" ".release/artifacts/objydb-browser-$RELEASE_VERSION.tgz" --access public
-          publish_if_missing "@objydb/server" ".release/artifacts/objydb-server-$RELEASE_VERSION.tgz" --access public
+          publish_if_missing "@objy/db" ".release/artifacts/objy-db-$RELEASE_VERSION.tgz" --access public
+          publish_if_missing "@objy/server" ".release/artifacts/objy-server-$RELEASE_VERSION.tgz" --access public
       - name: Create GitHub release
         run: |
           TAG="v$RELEASE_VERSION"

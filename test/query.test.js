@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CRDTNode } from "../src/crdt.js";
+import { nodeCompression } from "../src/node-runtime.js";
 import { AGGREGATE_PATH, READ_PATH } from "../src/query-planner.js";
 
 function seedUsers(n) {
@@ -571,7 +572,7 @@ test("columns release typed buffers and string dictionaries when emptied", async
 });
 
 test("compressed memory tiering keeps hot paths queryable and hydrates full objects", async () => {
-  const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
+  const n = new CRDTNode({ id: "a", storage: { engine: "object", compression: nodeCompression } });
   n.createCollection("db", "assets", {
     indexes: ["status", "applications"],
     columns: ["score"],
@@ -628,7 +629,7 @@ test("compressed memory tiering keeps hot paths queryable and hydrates full obje
   assert.equal(snapshot.value.history.notes, coldNotes);
   assert.equal(snapshot.value.score, 42);
 
-  const fresh = new CRDTNode({ id: "fresh", storage: { engine: "object" } });
+  const fresh = new CRDTNode({ id: "fresh", storage: { engine: "object", compression: nodeCompression } });
   fresh.createCollection("db", "assets", collection.getMeta());
   fresh.applySnapshot("a", { collections: [{ db: "db", coll: "assets", objects: [snapshot] }] });
   assert.deepEqual(fresh.get("db", "assets", "a1"), n.get("db", "assets", "a1"));
@@ -639,7 +640,7 @@ test("compressed memory tiering keeps hot paths queryable and hydrates full obje
 });
 
 test("compressed memory tiering preserves forced hot index and column paths", async () => {
-  const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
+  const n = new CRDTNode({ id: "a", storage: { engine: "object", compression: nodeCompression } });
   n.createCollection("db", "events", {
     indexes: ["details.kind"],
     columns: ["details.score"],
@@ -674,7 +675,7 @@ test("compressed memory tiering preserves forced hot index and column paths", as
 });
 
 test("compressed memory tiering maintains constant-time collection statistics", () => {
-  const n = new CRDTNode({ id: "a", storage: { engine: "object" } });
+  const n = new CRDTNode({ id: "a", storage: { engine: "object", compression: nodeCompression } });
   n.createCollection("db", "docs", {
     tiering: {
       mode: "compressedMemory",
@@ -1206,4 +1207,40 @@ test("large indexed bulk writes defer index catch-up without stale query results
   }), [
     { total: 18096998, n: 5999 },
   ]);
+});
+
+test("deferred updates do not overlay fresh values with stale columns", async () => {
+  const n = new CRDTNode({ id: "a" });
+  n.createCollection("db", "events", {
+    indexes: ["status"],
+    columns: ["score"],
+  });
+
+  const initial = Array.from({ length: 5000 }, (_, i) => ({
+    _id: `e${i}`,
+    status: "before",
+    score: i,
+  }));
+  n.insertManyCount("db", "events", initial);
+  await n.awaitIndexes("db", "events");
+
+  const updated = initial.map((row, i) => ({ ...row, status: "after", score: 10_000 + i }));
+  n.replaceManyCount("db", "events", updated);
+
+  assert.equal(n.get("db", "events", "e42").score, 10_042);
+  assert.deepEqual(n.aggregate("db", "events", { status: "after" }, {
+    fields: {
+      total: { $sum: "score" },
+      n: { $count: true },
+    },
+  }), [{ total: 62_497_500, n: 5000 }]);
+
+  await n.awaitIndexes("db", "events");
+  assert.equal(n.get("db", "events", "e42").score, 10_042);
+  assert.deepEqual(n.aggregate("db", "events", { status: "after" }, {
+    fields: {
+      total: { $sum: "score" },
+      n: { $count: true },
+    },
+  }), [{ total: 62_497_500, n: 5000 }]);
 });

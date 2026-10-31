@@ -27,17 +27,21 @@ export async function buildReleaseVariants() {
   await mkdir(artifactsRoot, { recursive: true });
 
   const core = await buildCore(sourcePackage);
-  const browser = await buildBrowser(sourcePackage);
   const server = await buildServer(sourcePackage);
   const packages = {};
 
-  for (const variant of [core, browser, server]) {
+  for (const variant of [core, server]) {
     const packed = await packVariant(variant);
     packages[variant.id] = packed;
   }
 
-  const browserModule = `objydb-browser-${sourcePackage.version}.esm.js`;
-  await copyFile(join(browser.stage, "index.js"), join(artifactsRoot, browserModule));
+  const browserModule = `objy-db-${sourcePackage.version}.esm.js`;
+  const standalone = await bundle({
+    entry: join(root, "src/browser.js"),
+    outfile: join(artifactsRoot, browserModule),
+    platform: "browser",
+  });
+  assertPortableInputs("standalone browser", standalone.metafile.inputs);
 
   const checksumFiles = [
     ...Object.values(packages).map(({ artifact }) => artifact),
@@ -68,54 +72,47 @@ export async function buildReleaseVariants() {
 async function buildCore(sourcePackage) {
   const stage = join(stagingRoot, "core");
   await mkdir(stage, { recursive: true });
-  const result = await bundle({
-    entry: join(root, "src/core.js"),
-    outfile: join(stage, "index.js"),
+
+  const shared = await bundle({
+    entry: join(root, "src/database.js"),
+    outfile: join(stage, "shared.js"),
     platform: "neutral",
   });
-  assertPortableInputs("core", result.metafile.inputs);
-  await copyFile(join(root, "src/core.d.ts"), join(stage, "index.d.ts"));
-  await copyFile(join(root, "src/browser.d.ts"), join(stage, "browser.d.ts"));
-  await copyReleaseFiles(stage, "core.README.md");
-  const manifest = packageManifest(sourcePackage, {
-    name: "objydb",
-    description: "The portable in-memory OBJY DB engine.",
-    main: "./index.js",
-    types: "./index.d.ts",
-    exports: {
-      ".": { types: "./index.d.ts", default: "./index.js" },
-    },
-    sideEffects: false,
-    engines: sourcePackage.engines,
-  });
-  await writeJson(join(stage, "package.json"), manifest);
-  return { id: "core", stage, expectedArtifact: `objydb-core-${sourcePackage.version}.tgz` };
-}
-
-async function buildBrowser(sourcePackage) {
-  const stage = join(stagingRoot, "browser");
-  await mkdir(stage, { recursive: true });
-  const result = await bundle({
-    entry: join(root, "src/browser.js"),
-    outfile: join(stage, "index.js"),
+  assertPortableInputs("database", shared.metafile.inputs);
+  const browserRuntime = await bundle({
+    entry: join(root, "src/compression.js"),
+    outfile: join(stage, "runtime-browser.js"),
     platform: "browser",
   });
-  assertPortableInputs("browser", result.metafile.inputs);
-  await copyFile(join(root, "src/browser.d.ts"), join(stage, "index.d.ts"));
-  await copyReleaseFiles(stage, "browser.README.md");
+  assertPortableInputs("browser runtime", browserRuntime.metafile.inputs);
+  await bundle({
+    entry: join(root, "src/node-runtime.js"),
+    outfile: join(stage, "runtime-node.js"),
+    platform: "node",
+  });
+  await writeFile(join(stage, "node.js"), nodeDatabaseEntry());
+  await writeFile(join(stage, "browser.js"), browserDatabaseEntry());
+  await copyFile(join(root, "src/core.d.ts"), join(stage, "index.d.ts"));
+  await copyReleaseFiles(stage, "core.README.md");
   const manifest = packageManifest(sourcePackage, {
-    name: "@objydb/browser",
-    description: "OBJY DB packaged for local in-browser use.",
-    main: "./index.js",
+    name: "@objy/db",
+    description: "The universal in-memory OBJY DB for Node.js and browsers.",
+    main: "./node.js",
+    browser: "./browser.js",
     types: "./index.d.ts",
     exports: {
-      ".": { types: "./index.d.ts", default: "./index.js" },
+      ".": {
+        types: "./index.d.ts",
+        node: "./node.js",
+        browser: "./browser.js",
+        default: "./browser.js",
+      },
     },
     sideEffects: false,
     publishConfig: { access: "public" },
   });
   await writeJson(join(stage, "package.json"), manifest);
-  return { id: "browser", stage };
+  return { id: "core", stage };
 }
 
 async function buildServer(sourcePackage) {
@@ -125,9 +122,10 @@ async function buildServer(sourcePackage) {
   await cp(join(root, "client"), join(stage, "client"), { recursive: true });
   await cp(join(root, "src"), join(stage, "src"), { recursive: true });
   await rm(join(stage, "src/browser.js"));
-  await rm(join(stage, "src/browser.d.ts"));
   await rm(join(stage, "src/core.js"));
   await rm(join(stage, "src/core.d.ts"));
+  await rm(join(stage, "src/compression.js"));
+  await rm(join(stage, "src/database.js"));
   await mkdir(join(stage, "public"), { recursive: true });
   await copyFile(join(root, "public/index.html"), join(stage, "public/index.html"));
   await copyFile(join(root, "public/objy-db-logo.png"), join(stage, "public/objy-db-logo.png"));
@@ -136,7 +134,7 @@ async function buildServer(sourcePackage) {
   await copyReleaseFiles(stage, "server.README.md");
 
   const manifest = packageManifest(sourcePackage, {
-    name: "@objydb/server",
+    name: "@objy/server",
     description: sourcePackage.description,
     main: "./src/api.js",
     exports: {
@@ -149,7 +147,7 @@ async function buildServer(sourcePackage) {
     },
     bin: sourcePackage.bin,
     engines: sourcePackage.engines,
-    dependencies: sourcePackage.dependencies,
+    dependencies: without(sourcePackage.dependencies, "fflate"),
     publishConfig: { access: "public" },
   });
   await writeJson(join(stage, "package.json"), manifest);
@@ -191,6 +189,35 @@ function assertPortableInputs(variant, inputs) {
   const paths = Object.keys(inputs).map((path) => path.replaceAll("\\", "/"));
   const bad = paths.find((path) => forbidden.some((fragment) => path.includes(fragment)));
   if (bad) throw new Error(`${variant} package includes server module ${bad}`);
+}
+
+function nodeDatabaseEntry() {
+  return `import { createDatabaseWithRuntime } from "./shared.js";
+import { nodeCompression, readHeapUsageRatio } from "./runtime-node.js";
+
+const runtime = Object.freeze({ compression: nodeCompression, readHeapUsageRatio });
+
+export function createDatabase(options = {}) {
+  return createDatabaseWithRuntime(options, runtime);
+}
+`;
+}
+
+function browserDatabaseEntry() {
+  return `import { createDatabaseWithRuntime } from "./shared.js";
+import * as compression from "./runtime-browser.js";
+
+const runtime = Object.freeze({ compression });
+
+export function createDatabase(options = {}) {
+  return createDatabaseWithRuntime(options, runtime);
+}
+`;
+}
+
+function without(object = {}, ...keys) {
+  const excluded = new Set(keys);
+  return Object.fromEntries(Object.entries(object).filter(([key]) => !excluded.has(key)));
 }
 
 async function packVariant(variant) {

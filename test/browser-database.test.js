@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDatabase } from "objydb/browser";
+import { createDatabase } from "../src/browser.js";
 import { CRDTNode } from "../src/crdt.js";
 
 test("local database mode does not retain replication operations", () => {

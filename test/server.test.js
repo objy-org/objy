@@ -14,6 +14,7 @@ import { PersistenceManager } from "../src/persistence.js";
 import { ShardRequestRouter } from "../src/shard-router.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
 import { createRestoreStatus } from "../src/restore-status.js";
+import { nodeCompression } from "../src/node-runtime.js";
 
 const TEST_AUTH = {
   jwtSecret: "test-jwt-secret",
@@ -226,7 +227,11 @@ async function startReplicatedTwoShardCluster() {
   };
   const servers = await Promise.all(urls.map((url, index) => startTestServer({
     port: ports[index],
-    node: new CRDTNode({ id: `replica-${index}`, url }),
+    node: new CRDTNode({
+      id: `replica-${index}`,
+      url,
+      storage: { compression: nodeCompression },
+    }),
     shardMap,
   })));
   return { servers, urlA: urls[0] };

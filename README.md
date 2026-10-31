@@ -1,4 +1,4 @@
-![OBJY DB](https://raw.githubusercontent.com/spoo-technologies/objy-db/main/public/branding/objy-db-header-deep-field.png)
+![OBJY DB](https://raw.githubusercontent.com/objy-org/objy/main/public/branding/objy-db-header-deep-field.png)
 
 # OBJY DB
 
@@ -13,7 +13,7 @@ OBJY DB is a bulk-first database for large, dynamic JavaScript object sets. It c
 Install the OBJY DB CLI:
 
 ```sh
-npm install --global @objydb/server
+npm install --global @objy/server
 ```
 
 Create `objydb.config.json`:
@@ -75,7 +75,7 @@ Managed process state and logs stay under `.objydb/`; infrastructure provisionin
 OBJY DB can live inside an existing Node.js application while retaining its HTTP interface, authentication, permissions, hooks, and admin console.
 
 ```js
-import { startServer } from "@objydb/server";
+import { startServer } from "@objy/server";
 
 const database = await startServer({ port: 8080 });
 
@@ -94,11 +94,11 @@ async function closeDatabase() {
 Use the portable core when an application needs the local database without HTTP, authentication, replication, or S3:
 
 ```sh
-npm install objydb
+npm install @objy/db
 ```
 
 ```js
-import { createDatabase } from "objydb";
+import { createDatabase } from "@objy/db";
 
 const objy = createDatabase();
 await objy.createDatabase("app");
@@ -113,7 +113,7 @@ await assets.insert({ name: "Laptop", status: "active" });
 The same in-memory store, query engine, field indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering can run directly in a browser. This mode has no server, authentication, replication, sharding, or persistence; its data lives only for the lifetime of the page.
 
 ```js
-import { createDatabase } from "@objydb/browser";
+import { createDatabase } from "@objy/db";
 
 const objy = createDatabase({ storage: { engine: "object" } });
 await objy.createDatabase("app");
@@ -139,11 +139,10 @@ Every release is built from this repository at one synchronized version:
 
 | Package | Purpose |
 | --- | --- |
-| `objydb` | Portable in-memory core for embedding. |
-| `@objydb/server` | Server runtime, CLI, HTTP API, clustering, durability, and JavaScript client. |
-| `@objydb/browser` | Self-contained browser build of the local database. |
+| `@objy/db` | Universal in-memory database for Node.js and browsers. |
+| `@objy/server` | Server runtime, CLI, HTTP API, clustering, durability, and JavaScript client. |
 
-GitHub releases contain the same three npm tarballs, a standalone browser ESM file, and SHA-256 checksums.
+GitHub releases contain the same two npm tarballs, a standalone browser ESM file, and SHA-256 checksums.
 
 ## What You Get
 
@@ -346,8 +345,8 @@ Custom storage engines must preserve bulk CRUD, reads, scans, metadata, and deri
 Hooks are named middleware for create, read, update, and delete. They run once on the accepting node, never during replication or restore. Bulk requests invoke a hook once for the full bulk; NDJSON streams invoke it once per bounded batch.
 
 ```js
-import { createObjectHookRegistry } from "@objydb/server/hooks";
-import { startServer } from "@objydb/server";
+import { createObjectHookRegistry } from "@objy/server/hooks";
+import { startServer } from "@objy/server";
 
 const hooks = createObjectHookRegistry();
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClient, ObjyDBError } from 'objydb/client';
+import { createClient, ObjyDBError } from '@objy/db/client';
 
 const session = { database: 'auth', collection: 'users', accessToken: 'old', refreshToken: 'refresh', user: { _id: 'alice' } };
 const tokens = { accessToken: 'new', refreshToken: 'next' };

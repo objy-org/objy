@@ -1,13 +1,13 @@
-# OBJY DB Core
+# OBJY DB
 
-The portable, in-memory OBJY DB engine. It provides dynamic objects, bulk-first writes, queries, aggregation, indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering without a server or persistence layer.
+The universal, in-memory OBJY DB for Node.js and modern browsers. It provides dynamic objects, bulk-first writes, queries, aggregation, indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering without a server or persistence layer.
 
 ```sh
-npm install objydb
+npm install @objy/db
 ```
 
 ```js
-import { createDatabase } from "objydb";
+import { createDatabase } from "@objy/db";
 
 const objy = createDatabase();
 await objy.createDatabase("app");
@@ -22,6 +22,6 @@ await assets.insertMany([
 console.log(await assets.find({ status: "active" }));
 ```
 
-Use `@objydb/server` for HTTP, authentication, clustering, S3 durability, and the CLI. Use `@objydb/browser` for a browser-ready standalone module.
+The same import selects native Node compression in Node.js and portable compression in browsers. Use `@objy/server` for HTTP, authentication, clustering, S3 durability, and the CLI.
 
 Licensed under the MIT License.
