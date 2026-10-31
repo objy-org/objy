@@ -24,23 +24,12 @@ OBJY DB stores and queries dynamic JavaScript objects directly. Its in-memory co
 - **Server:** install `@objy/server` for HTTP, authentication, persistence, sharding, and replication. The included `objy` CLI runs and manages database nodes. Start with the [server guide](SERVER.md).
 - **Embedded or browser:** install `@objy/db` to use the same database core directly inside a Node.js or web application, without a server. Start with the [database guide](DB.md).
 
-The server CLI keeps local node operation small. With a local npm installation, run it through `npx`:
-
-```sh
-npx objy run       # run one node in the foreground
-npx objy start     # start managed node processes
-npx objy status    # inspect running nodes
-npx objy logs      # read node logs
-npx objy restart   # restart managed nodes
-npx objy stop      # stop nodes gracefully
-```
-
 ## Start the Server
 
 Install the server package:
 
 ```sh
-npm install @objy/server
+npm install --global @objy/server
 ```
 
 Create `objydb.config.json`:
@@ -57,15 +46,24 @@ Create `objydb.config.json`:
 }
 ```
 
-Run it:
+Start the server:
 
 ```sh
-npx objy run
+objy start
 ```
 
 Open [http://localhost:8080](http://localhost:8080) for the admin console. On first boot, OBJY DB creates a global administrator and prints its generated password once.
 
 That is a complete local database server. Add S3 and a shard map when it needs durability or multiple nodes; the [server guide](SERVER.md) covers that path.
+
+The CLI manages the server lifecycle:
+
+```sh
+objy status
+objy logs
+objy restart
+objy stop
+```
 
 ## Work with Objects
 
