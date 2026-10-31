@@ -11,7 +11,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 const manifest = await buildReleaseVariants();
 
-await verifyPackage("core", async (workspace) => {
+await verifyPackage("db", async (workspace) => {
   await node(workspace, `
     import assert from "node:assert/strict";
     import { createDatabase } from "@objy/db";

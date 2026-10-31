@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import * as core from "@objy/db";
+import * as database from "@objy/db";
 
-test("package root exposes the portable core", () => {
-  assert.deepEqual(Object.keys(core), ["createDatabase"]);
-  assert.equal(typeof core.createDatabase, "function");
+test("package root exposes the universal database", () => {
+  assert.deepEqual(Object.keys(database), ["createDatabase"]);
+  assert.equal(typeof database.createDatabase, "function");
 });
 
-test("server APIs are isolated behind the server entry", async () => {
-  const server = await import("@objy/db/server");
-  assert.equal(typeof server.createClient, "function");
-  assert.equal(typeof server.createObjectHookRegistry, "function");
-  assert.equal(typeof server.startServer, "function");
+test("server and client APIs are not exported by the database package", async () => {
+  for (const path of ["@objy/db/server", "@objy/db/client", "@objy/db/hooks"]) {
+    await assert.rejects(import(path), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+  }
 });
 
 test("package internals are not exported", async () => {

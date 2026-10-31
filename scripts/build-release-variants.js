@@ -26,11 +26,11 @@ export async function buildReleaseVariants() {
   await mkdir(stagingRoot, { recursive: true });
   await mkdir(artifactsRoot, { recursive: true });
 
-  const core = await buildCore(sourcePackage);
+  const database = await buildDatabase(sourcePackage);
   const server = await buildServer(sourcePackage);
   const packages = {};
 
-  for (const variant of [core, server]) {
+  for (const variant of [database, server]) {
     const packed = await packVariant(variant);
     packages[variant.id] = packed;
   }
@@ -69,8 +69,8 @@ export async function buildReleaseVariants() {
   return manifest;
 }
 
-async function buildCore(sourcePackage) {
-  const stage = join(stagingRoot, "core");
+async function buildDatabase(sourcePackage) {
+  const stage = join(stagingRoot, "db");
   await mkdir(stage, { recursive: true });
 
   const shared = await bundle({
@@ -93,7 +93,7 @@ async function buildCore(sourcePackage) {
   await writeFile(join(stage, "node.js"), nodeDatabaseEntry());
   await writeFile(join(stage, "browser.js"), browserDatabaseEntry());
   await copyFile(join(root, "src/core.d.ts"), join(stage, "index.d.ts"));
-  await copyReleaseFiles(stage, "core.README.md");
+  await copyReleaseFiles(stage, "db.README.md");
   const manifest = packageManifest(sourcePackage, {
     name: "@objy/db",
     description: "The universal in-memory OBJY DB for Node.js and browsers.",
@@ -112,7 +112,7 @@ async function buildCore(sourcePackage) {
     publishConfig: { access: "public" },
   });
   await writeJson(join(stage, "package.json"), manifest);
-  return { id: "core", stage };
+  return { id: "db", stage };
 }
 
 async function buildServer(sourcePackage) {

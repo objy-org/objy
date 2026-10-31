@@ -8,6 +8,9 @@
   "server": {
     "port": 8080
   },
+  "storage": {
+    "engine": "object"
+  },
   "runtime": {
     "maxOldSpaceSizeMb": 15360
   },

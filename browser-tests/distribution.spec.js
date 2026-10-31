@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
-const coreRoot = new URL("../.release/staging/core/", import.meta.url);
+const databaseRoot = new URL("../.release/staging/db/", import.meta.url);
 const manifestPath = new URL("../.release/manifest.json", import.meta.url);
 let server;
 let base;
@@ -12,7 +12,7 @@ test.beforeAll(async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const files = new Map();
   for (const file of ["browser.js", "runtime-browser.js", "shared.js"]) {
-    files.set(`/core/${file}`, await readFile(new URL(file, coreRoot)));
+    files.set(`/db/${file}`, await readFile(new URL(file, databaseRoot)));
   }
   const standaloneUrl = new URL(`../.release/artifacts/${manifest.standalone}`, import.meta.url);
   files.set(`/${basename(manifest.standalone)}`, await readFile(standaloneUrl));
@@ -43,7 +43,7 @@ test.afterAll(async () => {
 test("the @objy/db browser export runs with portable compression", async ({ page }) => {
   await page.goto(base);
   const result = await page.evaluate(async () => {
-    const { createDatabase } = await import("/core/browser.js");
+    const { createDatabase } = await import("/db/browser.js");
     const database = createDatabase({ storage: { engine: "object" } });
     await database.createDatabase("release");
     await database.database("release").createCollection("assets", {

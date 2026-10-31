@@ -63,11 +63,12 @@ jobs:
       - name: Apply release version
         run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm test
-      - run: npm run check:package
       - run: npx playwright install --with-deps
       - run: npm run test:browser
       - run: npm run test:packages
       - run: npm run test:universal -- --objects=20000
+      - name: Build and verify final release packages
+        run: npm run check:package
       - name: Verify release artifacts
         working-directory: .release/artifacts
         run: shasum -a 256 -c SHA256SUMS

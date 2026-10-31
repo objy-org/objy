@@ -6,7 +6,7 @@ import { buildReleaseVariants } from "./build-release-variants.js";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifest = await buildReleaseVariants();
 
-check("core", [
+check("db", "@objy/db", [
   "browser.js",
   "index.d.ts",
   "LICENSE",
@@ -18,7 +18,7 @@ check("core", [
   "runtime-node.js",
   "shared.js",
 ]);
-check("server", [
+check("server", "@objy/server", [
   "API.md",
   "bin/objy.js",
   "client/index.js",
@@ -32,12 +32,12 @@ check("server", [
 ]);
 
 for (const path of ["browser.js", "runtime-browser.js", "shared.js"]) {
-  const source = await readFile(join(root, manifest.packages.core.stage, path), "utf8");
+  const source = await readFile(join(root, manifest.packages.db.stage, path), "utf8");
   if (/["']node:[^"']+["']/.test(source)) {
-    throw new Error(`core browser path ${path} contains a Node.js runtime import`);
+    throw new Error(`database browser path ${path} contains a Node.js runtime import`);
   }
   for (const forbidden of ["@aws-sdk/", "src/server.js", "src/persistence.js"]) {
-    if (source.includes(forbidden)) throw new Error(`core browser path ${path} contains forbidden runtime reference ${forbidden}`);
+    if (source.includes(forbidden)) throw new Error(`database browser path ${path} contains forbidden runtime reference ${forbidden}`);
   }
 }
 
@@ -47,12 +47,13 @@ for (const path of manifest.packages.server.files.map(({ path }) => path)) {
   }
 }
 
-if (Object.keys(manifest.packages).sort().join(",") !== "core,server") {
-  throw new Error("release must contain exactly the core and server npm packages");
+if (Object.keys(manifest.packages).sort().join(",") !== "db,server") {
+  throw new Error("release must contain exactly the database and server npm packages");
 }
 
-function check(id, required) {
+function check(id, expectedName, required) {
   const item = manifest.packages[id];
+  if (item.name !== expectedName) throw new Error(`${id} package must be named ${expectedName}, received ${item.name}`);
   const paths = new Set(item.files.map(({ path }) => path));
   for (const path of required) {
     if (!paths.has(path)) throw new Error(`${id} package is missing ${path}`);

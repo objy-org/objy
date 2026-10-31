@@ -89,9 +89,9 @@ async function closeDatabase() {
 
 `startServer()` is the lightweight embedded path: it creates an in-memory node and its interfaces without loading the CLI configuration or S3 lifecycle. The returned runtime owns the server, node, replication scheduler, router, and authentication service. Use `objy run` for durable or clustered nodes. Direct access to database internals is intentionally not part of the public package API.
 
-## Embed the Core
+## Embed `@objy/db`
 
-Use the portable core when an application needs the local database without HTTP, authentication, replication, or S3:
+Use the universal database package when an application needs the local database without HTTP, authentication, replication, or S3:
 
 ```sh
 npm install @objy/db
@@ -110,12 +110,18 @@ await assets.insert({ name: "Laptop", status: "active" });
 
 ## Run in a Browser
 
-The same in-memory store, query engine, field indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering can run directly in a browser. This mode has no server, authentication, replication, sharding, or persistence; its data lives only for the lifetime of the page.
+Install the same database package used for Node.js:
+
+```sh
+npm install @objy/db
+```
+
+The same in-memory store, query engine, field indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering can run directly in a browser. Package-aware bundlers select the browser runtime from `@objy/db` automatically; there is no separate browser npm package. This mode has no server, authentication, replication, sharding, or persistence, so its data lives only for the lifetime of the page.
 
 ```js
 import { createDatabase } from "@objy/db";
 
-const objy = createDatabase({ storage: { engine: "object" } });
+const objy = createDatabase();
 await objy.createDatabase("app");
 await objy.database("app").createCollection("assets", {
   indexes: ["status"],
@@ -133,6 +139,16 @@ const active = await assets.find({ status: "active" });
 
 Single writes use the same bulk path as `insertMany()`, `replaceMany()`, `patchMany()`, and `removeMany()`. Call `await assets.ready()` before benchmarking newly configured indexes or vector search.
 
+For browsers without npm or a bundler, each GitHub release includes `objy-db-<version>.esm.js`. Download that file, serve it as a JavaScript module from your application, and import it directly:
+
+```html
+<script type="module">
+  import { createDatabase } from "/vendor/objy-db-VERSION.esm.js";
+
+  const objy = createDatabase();
+</script>
+```
+
 ## Packages
 
 Every release is built from this repository at one synchronized version:
@@ -142,7 +158,7 @@ Every release is built from this repository at one synchronized version:
 | `@objy/db` | Universal in-memory database for Node.js and browsers. |
 | `@objy/server` | Server runtime, CLI, HTTP API, clustering, durability, and JavaScript client. |
 
-GitHub releases contain the same two npm tarballs, a standalone browser ESM file, and SHA-256 checksums.
+GitHub releases contain the same two npm tarballs, a standalone browser ESM build of `@objy/db`, and SHA-256 checksums.
 
 ## What You Get
 
@@ -219,7 +235,7 @@ Sharding is global, not configured per database or collection. The tuple `{ data
 
 | Layer | Responsibility |
 | --- | --- |
-| Store | Keeps objects in memory. `object` is the recommended high-throughput engine; `shape` remains available. |
+| Store | Keeps objects in memory. `object` is the default high-throughput engine; `shape` remains available. |
 | CRDT node | Applies whole-object writes, clocks, tombstones, and convergence rules. |
 | Shard router | Locates object owners and fans operations across shards. |
 | Replication scheduler | Coordinates hinted pull and periodic anti-entropy. |
@@ -332,7 +348,7 @@ The `x-objydb-query-path` response header shows which path served a query or agg
 
 ## Extend OBJY DB
 
-The database keeps core ownership clear:
+The database keeps ownership boundaries clear:
 
 - **Storage engines** decide how objects live in memory.
 - **Interfaces** translate transports into database operations.
@@ -457,7 +473,7 @@ The repository follows the runtime layers:
 | --- | --- |
 | `src/` | Storage, queries, routing, replication, persistence, auth, and interfaces. |
 | `client/` | The browser and Node JavaScript client. |
-| `scripts/` | Cluster, shard-map, migration, and operational utilities. |
+| `scripts/` | Release packaging, shard-map, and operational utilities. |
 | `release/` | README sources for the generated package variants. |
 | `test/` | Unit, integration, sharding, persistence, and failure coverage. |
 | `public/` | Admin console and branding assets. |
@@ -466,7 +482,7 @@ Keep changes bulk-first and preserve the layer boundaries above. Public HTTP beh
 
 ## Operating Principles
 
-- Prefer `storage.engine: "object"` for the current high-throughput path.
+- Use the default `storage.engine: "object"` for the current high-throughput path.
 - Use local-WAL acknowledgements when process-failure durability matters.
 - Keep forwarding timeouts realistic for heavily loaded shard owners.
 - Let hints handle normal replication and anti-entropy handle recovery.

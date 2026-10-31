@@ -89,7 +89,7 @@ function normalizeFilesConfig(config = {}, persistenceConfig = {}) {
 }
 
 function normalizeStorageConfig(config = {}) {
-  const engine = config.engine || "shape";
+  const engine = config.engine || "object";
   if (!["shape", "object"].includes(engine)) {
     throw new Error("storage.engine must be one of: shape, object");
   }

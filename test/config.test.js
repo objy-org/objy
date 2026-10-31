@@ -28,7 +28,7 @@ test("normalizes a single-node config with runtime defaults", () => {
   assert.equal(config.node.id, "node-a");
   assert.equal(config.node.url, "http://localhost:8080");
   assert.equal(config.server.port, 8080);
-  assert.equal(config.storage.engine, "shape");
+  assert.equal(config.storage.engine, "object");
   assert.deepEqual(config.files, {
     mode: "off",
     prefix: "objydb/files",

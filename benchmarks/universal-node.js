@@ -92,7 +92,7 @@ async function openVariant(variant) {
   if (variant === "source-node" || variant === "package-node") {
     const entry = variant === "source-node"
       ? new URL("../src/core.js", import.meta.url)
-      : new URL("../.release/staging/core/node.js", import.meta.url);
+      : new URL("../.release/staging/db/node.js", import.meta.url);
     const { createDatabase } = await import(entry);
     const database = createDatabase({ storage: { engine: "object" } });
     return {

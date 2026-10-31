@@ -11,13 +11,7 @@
       "node": "./src/core.js",
       "browser": "./src/browser.js",
       "default": "./src/browser.js"
-    },
-    "./client": {
-      "types": "./client/index.d.ts",
-      "default": "./client/index.js"
-    },
-    "./hooks": "./src/object-hooks.js",
-    "./server": "./src/api.js"
+    }
   },
   "bin": {
     "objy": "bin/objy.js"

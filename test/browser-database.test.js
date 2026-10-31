@@ -10,6 +10,16 @@ test("local database mode does not retain replication operations", () => {
   assert.equal(node.count("app", "items"), 2);
 });
 
+test("embedded databases use object storage by default", async () => {
+  const database = createDatabase();
+  await database.createDatabase("app");
+  await database.database("app").createCollection("items");
+  const items = database.database("app").collection("items");
+  await items.insert({ _id: "one", value: 1 });
+  assert.equal(items.stats().storage[0].engine, "object");
+  database.close();
+});
+
 test("browser database reuses bulk CRUD, indexes, columns, tiering and references", async () => {
   const database = createDatabase({ storage: { engine: "object" } });
   await database.createDatabase("app");

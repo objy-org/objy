@@ -1765,7 +1765,7 @@ class Collection {
 }
 
 function createPhysicalStore(options = {}) {
-  const engine = options.engine || "shape";
+  const engine = options.engine || "object";
   if (engine === "shape") return new ShapeStore();
   if (engine === "object") return new ObjectRowStore(options.object);
   throw new TypeError(`unsupported storage engine: ${engine}`);

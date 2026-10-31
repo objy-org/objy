@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { createClient, ObjyDBError } from '@objy/db/client';
+import { createClient, ObjyDBError } from '../client/index.js';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 import { clientPath } from '../src/interfaces/client.js';

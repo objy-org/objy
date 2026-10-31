@@ -135,7 +135,7 @@ function filePath(pathname) {
   if (pathname === `/${standalone}`) return join(repository, ".release/artifacts", standalone);
   if (pathname.startsWith("/src/")) return inside(repository, pathname);
   if (pathname.startsWith("/package/")) {
-    return inside(join(repository, ".release/staging/core"), pathname.slice("/package".length));
+    return inside(join(repository, ".release/staging/db"), pathname.slice("/package".length));
   }
   return null;
 }

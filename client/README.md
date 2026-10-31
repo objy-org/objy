@@ -26,6 +26,8 @@ The `@objy/server/client` subpath imports only the client. It never starts the d
 
 ### Browser
 
+This is the HTTP client for a running OBJY DB server. For a local database running entirely in the browser, install and import `@objy/db` instead.
+
 Every OBJY DB node serves the client at `/client.js` without authentication:
 
 ```html
