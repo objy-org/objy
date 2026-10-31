@@ -4,130 +4,43 @@
 
 <p align="center">
   <strong>Fast, bulk-first object database, anywhere JavaScript runs.</strong><br>
-  From in-browser memory and embedded applications to sharded, S3-backed clusters.
+  Start a server, embed it in Node.js, or run it directly in the browser.
 </p>
 
 <p align="center">
   <a href="https://github.com/objy-org/objy/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/objy-org/objy/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://www.npmjs.com/package/@objy/db"><img alt="npm @objy/db" src="https://img.shields.io/npm/v/%40objy%2Fdb?label=%40objy%2Fdb"></a>
+  <a href="https://www.npmjs.com/package/@objy/server"><img alt="npm @objy/server" src="https://img.shields.io/npm/v/%40objy%2Fserver?label=%40objy%2Fserver"></a>
   <img alt="Node.js 20 or newer" src="https://img.shields.io/badge/node-%3E%3D20-339933">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2f81f7"></a>
   <img alt="Alpha" src="https://img.shields.io/badge/status-alpha-f0a020">
 </p>
 
-OBJY DB stores and queries dynamic JavaScript objects directly. The same database core runs in modern browsers, inside Node.js applications, or behind a durable, sharded server cluster.
+OBJY DB stores and queries dynamic JavaScript objects directly. Its in-memory core handles bulk CRUD, queries, aggregations, indexes, references, vectors, and compressed data. The server adds authentication, HTTP, S3 durability, sharding, and replication.
 
-It is one object model and one query language across those environments. The server runtime adds networking, authentication, replication, and S3 durability without changing how collections, objects, queries, indexes, or aggregations behave.
+[Start the server](#start-the-server) · [Database guide](DB.md) · [Server guide](SERVER.md) · [REST API](API.md) · [Benchmarks](BENCHMARKS.md)
 
-[Get started](#get-started) · [Database](DB.md) · [Server](SERVER.md) · [API](API.md) · [Benchmarks](BENCHMARKS.md)
+## Choose How to Run
 
-## Get Started
+- **Server:** install `@objy/server` for HTTP, authentication, persistence, sharding, and replication. The included `objy` CLI runs and manages database nodes. Start with the [server guide](SERVER.md).
+- **Embedded or browser:** install `@objy/db` to use the same database core directly inside a Node.js or web application, without a server. Start with the [database guide](DB.md).
 
-Install the universal database:
-
-```sh
-npm install @objy/db
-```
-
-```js
-import { createDatabase } from "@objy/db";
-
-const objy = createDatabase();
-await objy.createDatabase("app");
-await objy.database("app").createCollection("assets", {
-  indexes: ["status"],
-  columns: ["score"]
-});
-
-const assets = objy.database("app").collection("assets");
-
-await assets.insertMany([
-  { name: "Laptop", status: "active", score: 9 },
-  { name: "Phone", status: "archived", score: 4 }
-]);
-
-const active = await assets.find({ status: "active" });
-const totals = await assets.search({
-  $aggregate: { fields: { totalScore: { $sum: "score" } } }
-});
-```
-
-This code works in Node.js and browser projects. Package-aware bundlers automatically select the appropriate platform runtime.
-
-## Choose a Runtime
-
-| Runtime | Package | Role |
-| --- | --- | --- |
-| Browser | `@objy/db` | The complete local in-memory database inside a web application |
-| Embedded | `@objy/db` | The same direct database API inside a Node.js application or service |
-| Server | `@objy/server` | HTTP, authentication, administration, durability, sharding, and replication |
-
-The database core is not a reduced browser companion to the server. It owns storage, bulk CRUD, querying, aggregation, field indexes, RID columns, vector search, references, value dictionaries, and compressed-memory tiering in every supported runtime.
-
-Browser and embedded deployments use that core directly. The server wraps it with shared access, security, files, persistence, routing, and optional cluster operation.
-
-## Built Around Objects
-
-```text
-database
-  collection
-    metadata
-    object _id=...
-    object _id=...
-```
-
-- **Databases** are independent top-level namespaces.
-- **Collections** contain dynamic objects and a small metadata document.
-- **Objects** may have different shapes and value types and are identified by `_id`.
-- **Metadata** declares derived behavior such as indexes, columns, and compression.
-
-There is no required schema and no separate document type for each runtime. Objects are returned as ordinary JavaScript values.
-
-```json
-{
-  "indexes": ["status", "ownerId"],
-  "columns": ["score"],
-  "tiering": {
-    "mode": "compressedMemory",
-    "keep": ["name", "status", "ownerId"],
-    "minBytes": 4096
-  }
-}
-```
-
-## Memory and Speed
-
-OBJY DB combines several structures rather than forcing every workload through one representation:
-
-| Structure | Purpose |
-| --- | --- |
-| Object store | Fast access to complete dynamic objects |
-| Value dictionaries | Share repeated values without a static schema |
-| Field indexes | Narrow equality, containment, grouping, and sorting work |
-| RID columns | Store declared scalar fields compactly and accelerate numeric aggregation |
-| Vector index | Search client-provided `_vec` embeddings through HNSW |
-| Compressed tiering | Keep selected fields hot while compressing the remaining object body in memory |
-
-Derived structures remain implementation details. Reads still return normal complete objects, and query semantics remain the same when an index is absent or warming.
-
-See [BENCHMARKS.md](BENCHMARKS.md) for reproducible Node.js, browser, HTTP, persistence, replication, and reshard measurements.
-
-## Browser
-
-Use `@objy/db` directly with a bundler:
-
-```js
-import { createDatabase } from "@objy/db";
-```
-
-GitHub releases also contain a standalone `objy-db-<version>.esm.js` module for applications without npm. Browser databases are currently memory-only: they have the complete local database engine but no server, authentication, S3, sharding, or replication.
-
-## Server and Cluster
-
-Install the server runtime when the database needs a network boundary:
+The server CLI keeps local node operation small. With a local npm installation, run it through `npx`:
 
 ```sh
-npm install --global @objy/server
+npx objy run       # run one node in the foreground
+npx objy start     # start managed node processes
+npx objy status    # inspect running nodes
+npx objy logs      # read node logs
+npx objy restart   # restart managed nodes
+npx objy stop      # stop nodes gracefully
+```
+
+## Start the Server
+
+Install the server package:
+
+```sh
+npm install @objy/server
 ```
 
 Create `objydb.config.json`:
@@ -144,66 +57,51 @@ Create `objydb.config.json`:
 }
 ```
 
+Run it:
+
 ```sh
-objy run
+npx objy run
 ```
 
-Open `http://localhost:8080/` for the admin console. The first boot generates a global administrator and prints its password once.
+Open [http://localhost:8080](http://localhost:8080) for the admin console. On first boot, OBJY DB creates a global administrator and prints its generated password once.
 
-An HTTP runtime can also be embedded in another Node.js application:
-
-```js
-import { startServer } from "@objy/server";
-
-const runtime = await startServer({ port: 8080 });
-```
-
-For durable nodes, replicas, object sharding, S3 configuration, failure behavior, monitoring, and restart-based resharding, continue with [SERVER.md](SERVER.md).
+That is a complete local database server. Add S3 and a shard map when it needs durability or multiple nodes; the [server guide](SERVER.md) covers that path.
 
 ## Work with Objects
 
-The direct database API works with ordinary JavaScript objects. IDs are generated when omitted.
+The server ships a small JavaScript client for Node.js and browsers:
 
 ```js
-// Create
-const laptop = await assets.insert({
-  name: "Laptop",
-  status: "active",
-  score: 9
+import { createClient } from "@objy/server/client";
+
+const client = createClient({ url: "http://localhost:8080" });
+await client.login({ username: "admin", password: "<printed-password>" });
+
+await client.createDatabase("app");
+const app = client.database("app");
+await app.createCollection("assets", {
+  indexes: ["status"],
+  columns: ["score"]
 });
 
-// Read and query
-const sameLaptop = await assets.get(laptop._id);
+const assets = app.collection("assets");
+
+await assets.insertMany([
+  { _id: "laptop-1", name: "Laptop", status: "active", score: 9 },
+  { _id: "phone-1", name: "Phone", status: "archived", score: 4 }
+]);
+
 const active = await assets.find(
   { status: "active", score: { $gte: 5 } },
   { sortBy: "score", sort: "desc", limit: 50 }
 );
 
-// Update selected fields
-await assets.patch(laptop._id, {
+await assets.patch("laptop-1", {
   $set: { status: "archived" },
   $unset: ["temporaryNote"]
 });
 
-// Replace or delete the complete object
-await assets.replace(laptop._id, { name: "Laptop Pro", score: 12 });
-await assets.remove(laptop._id);
-```
-
-Bulk methods use the same semantics and are the native write path:
-
-```js
-await assets.insertMany(objects);
-await assets.patchMany(patches);
-await assets.replaceMany(replacements);
-await assets.removeMany(ids);
-```
-
-Queries and aggregations share one search language:
-
-```js
-const result = await assets.search({
-  status: { $in: ["active", "archived"] },
+const totals = await assets.search({
   $aggregate: {
     groupBy: "status",
     fields: {
@@ -214,13 +112,44 @@ const result = await assets.search({
 });
 ```
 
-See [DB.md](DB.md) for the complete embedded and browser API. Server clients use the same object and query model through the [REST API](API.md) or [JavaScript client](client/README.md).
+Single writes and their bulk equivalents share the same behavior: `insert` / `insertMany`, `patch` / `patchMany`, `replace` / `replaceMany`, and `remove` / `removeMany`. IDs are generated when omitted.
+
+Use the [JavaScript client guide](client/README.md) for the complete client API or [API.md](API.md) for direct HTTP requests.
+
+## The Object Model
+
+```text
+database
+  collection
+    metadata
+    object
+    object
+```
+
+- A **database** is an independent namespace.
+- A **collection** holds dynamic objects and a small metadata document.
+- An **object** is an ordinary JavaScript value identified by `_id`.
+- **Metadata** declares behavior such as indexes, columns, vectors, and compressed-memory tiering.
+
+Objects in one collection may have different fields and value types. Reads return complete objects; indexes and storage structures remain implementation details.
+
+The query language supports nested fields, logical and comparison operators, sorting, paging, aggregation, live references, and client-provided vector embeddings. Bulk operations are the native write path, including streamed NDJSON imports.
+
+## Why OBJY DB
+
+- **Object native:** store dynamic objects without a required schema or ORM.
+- **Bulk first:** single and bulk operations use one internal model.
+- **In-memory speed:** indexes, RID columns, value dictionaries, vectors, and compression work together behind normal object reads.
+- **One query language:** use the same filters and aggregations in the browser, embedded, or over HTTP.
+- **Scale when needed:** the server adds durable WAL acknowledgements, S3 snapshots and journals, object sharding, and replication.
+
+See [BENCHMARKS.md](BENCHMARKS.md) for reproducible measurements across the direct database, browser, HTTP, persistence, replication, and resharding paths.
 
 ## Alpha Status
 
-OBJY DB is under active alpha development. Pin exact versions and expect configuration or APIs to evolve before `1.0`.
+OBJY DB is under active alpha development. Pin exact versions and expect APIs or configuration to evolve before `1.0`.
 
-Current boundaries are explicit: there are no multi-object transactions, browser persistence is not implemented yet, distributed writes converge with whole-object last-write-wins semantics, and shard-count changes use a coordinated restart. Read the [server guide](SERVER.md) before evaluating durable deployments.
+There are currently no multi-object transactions, browser persistence is not implemented, distributed writes converge with whole-object last-write-wins semantics, and shard-count changes use a coordinated restart. Read [SERVER.md](SERVER.md) before evaluating durable deployments.
 
 ## Develop
 
@@ -231,18 +160,17 @@ npm run test:browser
 npm run test:universal
 ```
 
-Keep changes bulk-first and preserve the boundaries between the universal database, platform adapters, and server services. See [CONTRIBUTING.md](CONTRIBUTING.md) for the test matrix and pull-request expectations.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the test matrix and contribution workflow.
 
 ## Documentation
 
-- [Public REST API](API.md)
+- [Database: embedded and browser](DB.md)
+- [Server: durability and clustering](SERVER.md)
+- [REST API](API.md)
 - [JavaScript client](client/README.md)
-- [Embedded and browser database](DB.md)
-- [Server, durability, and clustering](SERVER.md)
 - [Benchmarks](BENCHMARKS.md)
 - [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
+- [Security](SECURITY.md)
 
 ## License
 
