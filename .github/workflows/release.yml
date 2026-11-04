@@ -28,6 +28,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     environment: npm
     env:
       RELEASE_VERSION: ${{ inputs.version }}
@@ -41,7 +42,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: npm
           registry-url: https://registry.npmjs.org
       - name: Validate release request
@@ -55,7 +56,9 @@ jobs:
             exit 1
           fi
       - name: Use trusted-publishing npm CLI
-        run: npm install --global npm@12.2.1
+        run: |
+          npm config delete always-auth --location=user
+          npm install --global npm@12.2.1
       - run: npm ci
       - name: Apply release version
         run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts

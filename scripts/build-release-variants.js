@@ -228,7 +228,7 @@ async function packVariant(variant) {
     "--ignore-scripts",
     "--json",
   ], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  const [pack] = JSON.parse(stdout);
+  const pack = parsePackResult(stdout);
   const source = join(artifactsRoot, basename(pack.filename));
   const artifact = variant.expectedArtifact || basename(pack.filename);
   if (basename(source) !== artifact) await rename(source, join(artifactsRoot, artifact));
@@ -241,6 +241,18 @@ async function packVariant(variant) {
     unpackedSize: pack.unpackedSize,
     files: pack.files.map(({ path, size }) => ({ path, size })),
   };
+}
+
+function parsePackResult(stdout) {
+  const result = JSON.parse(stdout);
+  const packs = Array.isArray(result)
+    ? result
+    : result?.filename
+      ? [result]
+      : Object.values(result || {});
+  const matches = packs.filter(pack => pack && typeof pack === "object" && pack.filename);
+  if (matches.length !== 1) throw new Error(`npm pack returned ${matches.length} package results`);
+  return matches[0];
 }
 
 function packageManifest(sourcePackage, fields) {

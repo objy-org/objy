@@ -12,7 +12,7 @@ jobs:
   test:
     strategy:
       matrix:
-        node: [20, 22]
+        node: [20, 22, 24.22.1]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -29,8 +29,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 24.22.1
           cache: npm
+      - name: Use release npm CLI
+        run: |
+          npm config delete always-auth --location=user
+          npm install --global npm@12.2.1
       - run: npm ci
       - run: npx playwright install --with-deps
       - run: npm run test:browser
@@ -42,8 +46,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 24.22.1
           cache: npm
+      - name: Use release npm CLI
+        run: |
+          npm config delete always-auth --location=user
+          npm install --global npm@12.2.1
       - run: npm ci
       - run: npm run check:package
       - run: npm run test:packages
