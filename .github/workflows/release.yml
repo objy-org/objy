@@ -57,7 +57,6 @@ jobs:
       - name: Use trusted-publishing npm CLI
         run: npm install --global npm@12.2.1
       - run: npm ci
-      - run: npm install --no-save --package-lock=false @objy/client@0.1.0-alpha.0
       - name: Apply release version
         run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm test
@@ -72,12 +71,21 @@ jobs:
         run: shasum -a 256 -c SHA256SUMS
       - name: Commit and tag the release
         run: |
+          push_with_retry() {
+            local refspec="$1"
+            for attempt in 1 2 3 4; do
+              if git push origin "$refspec"; then return 0; fi
+              if [[ "$attempt" == 4 ]]; then return 1; fi
+              sleep $((attempt * 5))
+            done
+          }
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
           if ! git diff --cached --quiet; then
             git commit -m "Release $RELEASE_VERSION"
-            git push origin "HEAD:$DEFAULT_BRANCH"
+            push_with_retry "HEAD:$DEFAULT_BRANCH"
           fi
 
           TAG="v$RELEASE_VERSION"
@@ -88,20 +96,36 @@ jobs:
             fi
           else
             git tag -a "$TAG" -m "OBJY DB $RELEASE_VERSION"
-            git push origin "refs/tags/$TAG"
+            push_with_retry "refs/tags/$TAG"
           fi
       - name: Publish npm packages
         run: |
+          package_visible() {
+            local package_name="$1"
+            [[ "$(npm view "$package_name@$RELEASE_VERSION" version 2>/dev/null || true)" == "$RELEASE_VERSION" ]]
+          }
+          wait_until_visible() {
+            local package_name="$1"
+            for attempt in $(seq 1 30); do
+              if package_visible "$package_name"; then return 0; fi
+              echo "Waiting for $package_name@$RELEASE_VERSION to become visible ($attempt/30)"
+              sleep 10
+            done
+            return 1
+          }
           publish_if_missing() {
             local package_name="$1"
             local artifact="$2"
             shift 2
-            if npm view "$package_name@$RELEASE_VERSION" version >/dev/null 2>&1; then
+            if package_visible "$package_name"; then
               echo "$package_name@$RELEASE_VERSION is already published"
-              npm dist-tag add "$package_name@$RELEASE_VERSION" "$NPM_TAG"
-              return
+            elif ! npm publish "$artifact" --tag "$NPM_TAG" --provenance "$@"; then
+              echo "Publish did not complete cleanly; checking for an already accepted release"
+              wait_until_visible "$package_name"
+            else
+              wait_until_visible "$package_name"
             fi
-            npm publish "$artifact" --tag "$NPM_TAG" --provenance "$@"
+            npm dist-tag add "$package_name@$RELEASE_VERSION" "$NPM_TAG"
           }
 
           publish_if_missing "@objy/db" ".release/artifacts/objy-db-$RELEASE_VERSION.tgz" --access public

@@ -106,8 +106,7 @@ async function openVariant(variant) {
       ? new URL("../src/api.js", import.meta.url)
       : new URL("../.release/staging/server/src/api.js", import.meta.url);
     const { startServer } = await import(entry);
-    const clientModule = await import("@objy/client")
-      .catch(() => import(new URL("../../objy-client/index.js", import.meta.url)));
+    const clientModule = await import("@objy/client");
     const { createClient } = clientModule;
     const runtime = await startServer({
       port: 0,

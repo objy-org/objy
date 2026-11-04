@@ -66,6 +66,7 @@
     "fflate": "^0.8.3"
   },
   "devDependencies": {
+    "@objy/client": "0.1.0",
     "@playwright/test": "^1.63.0",
     "esbuild": "^0.28.2"
   }

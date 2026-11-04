@@ -1,16 +1,14 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../src/server.js';
 import { createFileService } from '../src/files.js';
 
-const browserClientUrl = 'https://cdn.jsdelivr.net/npm/@objy/client@0.1.0-alpha.0/index.js';
-let clientImportUrl;
-try {
-  clientImportUrl = import.meta.resolve('@objy/client');
-} catch {
-  clientImportUrl = new URL('../../objy-client/index.js', import.meta.url).href;
-}
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const clientVersion = packageJson.devDependencies['@objy/client'];
+const browserClientUrl = `https://cdn.jsdelivr.net/npm/@objy/client@${clientVersion}/index.js`;
+const clientImportUrl = import.meta.resolve('@objy/client');
 const clientModule = await import(clientImportUrl);
 const clientSourcePath = fileURLToPath(clientImportUrl);
 const { createClient } = clientModule;

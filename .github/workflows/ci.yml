@@ -32,7 +32,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm install --no-save --package-lock=false @objy/client@0.1.0-alpha.0
       - run: npx playwright install --with-deps
       - run: npm run test:browser
       - run: npm run test:universal -- --objects=10000
