@@ -15,7 +15,20 @@ const runtime = await startServer({ port: 8080 });
 console.log(runtime.port);
 ```
 
-Install the standalone HTTP client from `@objy/client`. Deployments and process management belong to `@objy/cli`. Object-hook registration remains available from `@objy/server/hooks`.
+For a managed deployment, install the separate CLI:
+
+```sh
+npm install --global @objy/cli
+objy deploy local --name dev --size tiny
+```
+
+Applications connect to a running server through the standalone client:
+
+```sh
+npm install @objy/client
+```
+
+The server package intentionally contains no executable. Object-hook registration remains available from `@objy/server/hooks`.
 
 Read the [server guide](https://github.com/objy-org/objy/blob/main/SERVER.md), [API reference](https://github.com/objy-org/objy/blob/main/API.md), [JavaScript client](https://github.com/objy-org/objy-client), and [measured benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md).
 
