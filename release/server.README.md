@@ -22,6 +22,8 @@ npm install --global @objy/cli
 objy deploy local --name dev --size tiny
 ```
 
+The CLI automatically downloads and verifies the latest published OBJY server release, then pins that exact release to the deployment. Restarts reuse the pinned version and never upgrade it implicitly.
+
 Applications connect to a running server through the standalone client:
 
 ```sh

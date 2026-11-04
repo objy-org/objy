@@ -11,7 +11,7 @@ npm install --global @objy/cli
 objy deploy local --name dev --size tiny
 ```
 
-The CLI selects and verifies an OBJY server release, provisions its runtime, and prints the server URL and initial administrator credentials. It also owns deployment lifecycle commands:
+The CLI automatically downloads and verifies the latest published OBJY server release. Stable releases are preferred; while only prereleases exist, it selects the newest prerelease. The selected release is cached and pinned to that deployment, so later starts and restarts keep using the same version instead of upgrading silently. The CLI then provisions the runtime and prints the server URL and initial administrator credentials. It also owns deployment lifecycle commands:
 
 ```sh
 objy status dev
