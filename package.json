@@ -1,6 +1,6 @@
 {
   "name": "@objy/db",
-  "version": "0.2.0-alpha.0",
+  "version": "0.1.0",
   "private": true,
   "description": "OBJY DB: an in-memory, sharded and replicated database for dynamic JavaScript objects.",
   "keywords": [
