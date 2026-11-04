@@ -18,7 +18,7 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 ### Added
 
 - Universal `@objy/db` package for Node.js and browsers.
-- `@objy/server` package with the HTTP runtime, clustering, S3 durability, hooks, admin console, and `objy` CLI.
+- `@objy/server` package with the HTTP runtime, clustering, S3 durability, hooks, and admin console. Deployment tooling lives in the separate `@objy/cli` package.
 - Standalone, dependency-free `@objy/client` package for Node.js and browsers.
 - Standalone browser ESM artifact in GitHub releases.
 - Cross-runtime correctness and performance suite covering source, packed packages, HTTP, and Chromium.

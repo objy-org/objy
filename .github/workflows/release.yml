@@ -28,6 +28,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: npm
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       NPM_TAG: ${{ inputs.npm_tag }}
@@ -40,7 +41,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
       - name: Validate release request
@@ -53,14 +54,10 @@ jobs:
             echo "Version must be an explicit semantic version without a v prefix" >&2
             exit 1
           fi
-          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
-            echo "Repository secret NPM_TOKEN is required" >&2
-            exit 1
-          fi
+      - name: Use trusted-publishing npm CLI
+        run: npm install --global npm@12.2.1
       - run: npm ci
       - run: npm install --no-save --package-lock=false @objy/client@0.1.0-alpha.0
-      - name: Verify npm credentials
-        run: npm whoami
       - name: Apply release version
         run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm test

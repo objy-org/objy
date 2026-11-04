@@ -4,43 +4,38 @@
 
 `@objy/server` wraps `@objy/db` with HTTP, authentication, files, persistence, routing, replicas, and administration. The object model and query language stay the same; the server adds the infrastructure boundary.
 
-## Start One Node
+## Deploy a Server
 
 ```sh
-npm install --global @objy/server
+npm install --global @objy/cli
+objy deploy local --name dev --size tiny
 ```
 
-Create `objydb.config.json`:
-
-```json
-{
-  "node": {
-    "id": "node-8080",
-    "url": "http://localhost:8080"
-  },
-  "server": {
-    "port": 8080
-  }
-}
-```
-
-Start it in the foreground:
+The CLI selects and verifies an OBJY server release, provisions its runtime, and prints the server URL and initial administrator credentials. It also owns deployment lifecycle commands:
 
 ```sh
-objy run
+objy status dev
+objy logs dev --follow
+objy restart dev
+objy stop dev
 ```
 
-Or let the CLI manage the process:
+## Embed the Server Runtime
+
+Install the server package when another Node.js application owns the process:
 
 ```sh
-objy start
-objy status
-objy logs --follow
-objy restart
-objy stop
+npm install @objy/server
 ```
 
-The admin console is available at the node URL. On first boot, OBJY DB creates the global `admin` user and prints a generated password once. Set `OBJYDB_ADMIN_PASSWORD` only when unattended provisioning needs a predetermined initial password.
+```js
+import { startServer } from "@objy/server";
+
+const runtime = await startServer({ port: 8080 });
+console.log(`OBJY DB listening on http://127.0.0.1:${runtime.port}`);
+```
+
+The server package intentionally contains no command-line executable. Process management and infrastructure provisioning belong to `@objy/cli`.
 
 ## What the Server Adds
 
@@ -179,7 +174,7 @@ Packaged deployments may publish the same map through their provisioning tooling
 Peers may share one config while overriding their local identity:
 
 ```sh
-objy run --node node-a --url http://node-a:8080 --port 8080
+node src/index.js --config objydb.config.json --node node-a --url http://node-a:8080 --port 8080
 ```
 
 ## Route and Replicate
@@ -238,7 +233,7 @@ One transient pull error does not prove data loss. Persistent lag or an unavaila
 
 ## Stop and Upgrade
 
-`objy stop`, `SIGINT`, and `SIGTERM` trigger graceful shutdown: stop replication, close HTTP intake, flush the local WAL and pending S3 journals, then exit. Avoid `SIGKILL` during normal operation or topology changes.
+`objy stop` asks managed deployments to terminate with `SIGTERM`. `SIGINT` and `SIGTERM` trigger graceful shutdown: stop replication, close HTTP intake, flush the local WAL and pending S3 journals, then exit. Avoid `SIGKILL` during normal operation or topology changes.
 
 Upgrade redundant clusters one replica at a time. Verify health, object counts, catch-up, and representative queries before continuing.
 

@@ -57,12 +57,6 @@ await verifyPackage("server", async (workspace) => {
       runtime.node.db.dispose();
     }
   `);
-
-  const cli = join(workspace, "node_modules/@objy/server/bin/objy.js");
-  const { stdout } = await command(workspace, process.execPath, [cli, "--version"]);
-  if (stdout.trim() !== manifest.version) {
-    throw new Error(`server CLI version mismatch: ${stdout.trim()} != ${manifest.version}`);
-  }
 });
 
 console.log(`release packages passed isolated install and runtime smoke tests (${manifest.version})`);

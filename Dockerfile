@@ -7,7 +7,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=node:node src ./src
-COPY --chown=node:node bin ./bin
 COPY --chown=node:node public/index.html public/objy-db-logo.png ./public/
 COPY --chown=node:node API.md README.md LICENSE NOTICE.md ./
 COPY --chown=node:node objydb.config.json ./objydb.config.json
@@ -18,4 +17,4 @@ USER node
 WORKDIR /var/lib/objydb
 EXPOSE 8080
 
-CMD ["node", "/app/bin/objy.js", "run", "--config", "/app/objydb.config.json"]
+CMD ["node", "/app/src/index.js", "--config", "/app/objydb.config.json"]

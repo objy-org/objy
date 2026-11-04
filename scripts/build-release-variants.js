@@ -118,7 +118,6 @@ async function buildDatabase(sourcePackage) {
 async function buildServer(sourcePackage) {
   const stage = join(stagingRoot, "server");
   await mkdir(stage, { recursive: true });
-  await cp(join(root, "bin"), join(stage, "bin"), { recursive: true });
   await cp(join(root, "src"), join(stage, "src"), { recursive: true });
   await rm(join(stage, "src/browser.js"));
   await rm(join(stage, "src/core.js"));
@@ -146,7 +145,6 @@ async function buildServer(sourcePackage) {
       ".": "./src/api.js",
       "./hooks": "./src/object-hooks.js",
     },
-    bin: sourcePackage.bin,
     engines: sourcePackage.engines,
     dependencies: without(sourcePackage.dependencies, "fflate"),
     publishConfig: { access: "public" },

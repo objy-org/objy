@@ -21,48 +21,34 @@ OBJY DB stores and queries dynamic JavaScript objects directly. Its in-memory co
 
 ## Choose How to Run
 
-- **Server:** install `@objy/server` for HTTP, authentication, persistence, sharding, and replication. The included `objy` CLI runs and manages database nodes. Start with the [server guide](SERVER.md).
+- **Server:** use `@objy/cli` to deploy and manage the `@objy/server` runtime with HTTP, authentication, persistence, sharding, and replication. Start with the [server guide](SERVER.md).
 - **Embedded or browser:** install `@objy/db` to use the same database core directly inside a Node.js or web application, without a server. Start with the [database guide](DB.md).
 
 ## Start the Server
 
-Install the server package:
+Install the deployment CLI:
 
 ```sh
-npm install --global @objy/server
+npm install --global @objy/cli
 ```
 
-Create `objydb.config.json`:
-
-```json
-{
-  "node": {
-    "id": "node-8080",
-    "url": "http://localhost:8080"
-  },
-  "server": {
-    "port": 8080
-  }
-}
-```
-
-Start the server:
+Deploy a local server:
 
 ```sh
-objy start
+objy deploy local --name dev --size tiny
 ```
 
-Open [http://localhost:8080](http://localhost:8080) for the admin console. On first boot, OBJY DB creates a global administrator and prints its generated password once.
+The CLI prints the server URL and first administrator credentials. Open that URL for the admin console.
 
-That is a complete local database server. Add S3 and a shard map when it needs durability or multiple nodes; the [server guide](SERVER.md) covers that path.
+That is a complete local database server. The [server guide](SERVER.md) covers direct embedding, durability, and cluster configuration.
 
 The CLI manages the server lifecycle:
 
 ```sh
-objy status
-objy logs
-objy restart
-objy stop
+objy status dev
+objy logs dev
+objy restart dev
+objy stop dev
 ```
 
 ## Work with Objects

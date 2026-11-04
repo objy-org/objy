@@ -24,11 +24,7 @@
       "default": "./src/browser.js"
     }
   },
-  "bin": {
-    "objy": "bin/objy.js"
-  },
   "files": [
-    "bin/",
     "public/index.html",
     "public/objy-db-logo.png",
     "src/",
@@ -38,8 +34,6 @@
     "objydb.config.json"
   ],
   "scripts": {
-    "start": "node bin/objy.js run",
-    "cluster:local": "node bin/objy.js start --instances 4",
     "test": "node --test",
     "test:browser": "npm run package:variants && playwright test",
     "test:packages": "node scripts/verify-release-variants.js",
