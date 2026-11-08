@@ -1,4 +1,4 @@
-# Later
+# Internal Backlog
 
 - Internal cluster transport: use streamed NDJSON for every shard-forwarded bulk write, including operations that return hydrated objects. Keep request transport independent from response policy: minimal requests return counts, while hydrated requests may return full JSON objects. Queries, aggregations, and small cluster-control messages can remain JSON unless streaming provides a measurable benefit.
 

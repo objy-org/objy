@@ -2,9 +2,15 @@
 
 OBJY DB publishes reproducible measurements, not cross-product claims. Results here describe one machine, one commit, and one workload. Use the same commands on the hardware and data shapes that matter to your deployment.
 
+In short:
+
+- The same correctness workload passes in embedded Node.js, Chromium, and the HTTP server.
+- These numbers compare OBJY DB runtimes with each other; they are not claims against other databases.
+- Persistence tests use deterministic local adapters, so production S3 and network latency must be measured separately.
+
 ## Current Baseline
 
-Measured on 2026-10-31 from commit `7aef7487d4b5` for `0.2.0-alpha.0` (plus documentation-only working-tree changes).
+Measured on 2026-10-31 from commit `7aef7487d4b5` while preparing the public `0.1.0` release (plus documentation-only working-tree changes).
 
 | System | Value |
 | --- | --- |

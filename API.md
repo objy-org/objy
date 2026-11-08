@@ -1,10 +1,10 @@
 # OBJY DB HTTP API
 
-<p align="center"><strong>Plain objects. Bulk-first operations. One public API.</strong></p>
+<p align="center"><strong>Dynamic objects. One public API.</strong></p>
 
 This is the public HTTP contract for OBJY DB. The standalone [JavaScript client](https://github.com/objy-org/objy-client) exposes the same operations for browsers and Node.
 
-[Start here](#start-here) | [JavaScript client](https://github.com/objy-org/objy-client) | [Database README](README.md)
+[Start here](#start-here) | [JavaScript client](https://github.com/objy-org/objy-client) | [OBJY DB](README.md)
 
 ## Start Here
 
@@ -30,6 +30,16 @@ Authorization: Bearer <accessToken>
 Content-Type: application/json
 ```
 
+The shortest path through the API is:
+
+```text
+POST /api/_global/users/auth       -> access token
+POST /api/{db}/{collection}/object -> stored object
+POST /api/{db}/{collection}/search -> result array
+```
+
+Every endpoint below includes an explicit request and response.
+
 Objects are dynamic JSON-style records. Collections require no schema, and objects in one collection may have different shapes and value types. Every object has an `_id`; inserts generate a compact URL-safe id when it is omitted.
 
 `PUT` replaces a complete object, `PATCH` applies Mongo-like `$set` and `$unset`, and `DELETE` creates a replicated delete. Query, search, and aggregation responses are plain arrays rather than envelopes.
@@ -38,24 +48,23 @@ Objects are dynamic JSON-style records. Collections require no schema, and objec
 
 | Area | Routes |
 | --- | --- |
-| [Authentication](#authentication-and-permissions) | Login and renew against any auth-enabled collection. |
+| [Authentication](#authentication) | Login and renew against any auth-enabled collection. |
 | [Databases](#databases) | List, create, bootstrap an administrator, and delete. |
 | [Collections](#collections) | List, create, delete, and manage collection metadata. |
 | [Objects](#objects) | Single and bulk create, read, replace, patch, and delete. |
 | [Imports](#streamed-bulk-writes) | Bounded NDJSON insert, replace, patch, and delete. |
-| [Search](#query) | Filters, sorting, paging, aggregation, vectors, and references. |
+| [Permissions](#permissions) | Collection grants and object-level authorization rules. |
 | [Files](#file-handling) | Object-backed multipart upload, replacement, download, and deletion. |
+| [Search](#query) | Filters, sorting, paging, aggregation, vectors, and references. |
 | [Operations](#health-and-cluster-status) | Health and authenticated public cluster status. |
 
-## Authentication and Permissions
+## Authentication
 
 Authentication is collection-based: any collection may contain user objects. On first boot, OBJY DB creates `admin` in `_global/users` and prints its generated password once. `OBJYDB_ADMIN_PASSWORD` may supply that initial password for unattended startup.
 
 Passwords are hashed on write and redacted from responses. Tokens are scoped to the database and collection used for authentication.
 
 ### Login
-
-`POST /api/{db}/{collection}/auth`
 
 **Request**
 
@@ -82,8 +91,6 @@ Content-Type: application/json
 ```
 
 ### Renew Token
-
-`POST /api/{db}/{collection}/renew`
 
 **Request**
 
@@ -119,52 +126,9 @@ These markers do not authorize replay when `operationStarted` is true or `writeM
 
 </details>
 
-### Permission Model
-
-Database users can access only the database where they authenticated. A global user can address other databases, but database and collection administration requires `admin: true` or `role: "admin"`. Creating or deleting databases and reading `/api/config` specifically require a global admin token.
-
-The built-in `_global` database is read-only through the public API after bootstrap. Object writes, metadata changes, collection changes, and database deletion are rejected even for a global administrator.
-
-Collection grants provide broad read or write access by collection name:
-
-```json
-{
-  "_id": "editor",
-  "username": "editor",
-  "password": "secret",
-  "collectionPermissions": {
-    "read": ["articles", "media"],
-    "write": ["articles"]
-  }
-}
-```
-
-`read` allows object reads and queries. `write` allows create, update, and delete, but does not imply read access. Create users through `POST /api/{db}/users/object`; permission changes apply after login or renewal issues a new token.
-
-Object-level rules combine a query with `c`, `r`, `u`, and `d` permissions:
-
-```json
-{
-  "_id": "editor",
-  "username": "editor",
-  "password": "secret",
-  "permissions": [
-    {
-      "name": "own articles",
-      "query": { "ownerId": "editor" },
-      "perm": "crud"
-    }
-  ]
-}
-```
-
-Read rules are merged into the requested query. Updates must permit both the stored object and its resulting value. A non-admin user without a matching rule or collection grant is denied by default.
-
 ## Databases
 
 ### List Databases
-
-`GET /api/databases`
 
 **Request**
 
@@ -182,8 +146,6 @@ Authorization: Bearer <accessToken>
 ```
 
 ### Create Database
-
-`POST /api/databases`
 
 **Request**
 
@@ -209,8 +171,6 @@ Content-Type: application/json
 ```
 
 ### Create Database With First Admin User
-
-`POST /api/databases`
 
 **Request**
 
@@ -307,8 +267,6 @@ Changing indexes, columns, or tiering rebuilds derived in-memory state through c
 
 ### List Collections
 
-`GET /api/{db}/collections`
-
 **Request**
 
 ```http
@@ -326,8 +284,6 @@ Authorization: Bearer <accessToken>
 ```
 
 ### Create Collection
-
-`POST /api/{db}/collections`
 
 **Request**
 
@@ -378,8 +334,6 @@ You may also send `{ "name": "{collection}", "meta": { ... } }`.
 
 ### Read Collection Meta
 
-`GET /api/{db}/{collection}/meta`
-
 **Request**
 
 ```http
@@ -406,8 +360,6 @@ Authorization: Bearer <accessToken>
 ```
 
 ### Replace Collection Meta
-
-`PUT /api/{db}/{collection}/meta`
 
 **Request**
 
@@ -451,8 +403,6 @@ Content-Type: application/json
 
 ### Delete Collection
 
-`DELETE /api/{db}/collections/{collection}`
-
 **Request**
 
 ```http
@@ -473,8 +423,6 @@ Objects are plain dynamic JSON-style records. Strings, numbers, booleans, arrays
 Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact 16-character URL-safe id. Single and bulk operations use the same base route. Special fields such as `_vec` are handled by storage features and hidden from ordinary read responses.
 
 ### Insert One
-
-`POST /api/{db}/{collection}/object`
 
 **Request**
 
@@ -503,8 +451,6 @@ Content-Type: application/json
 ```
 
 ### Get One
-
-`GET /api/{db}/{collection}/object/{_id}`
 
 **Request**
 
@@ -589,8 +535,6 @@ Content-Type: application/json
 
 ### Delete One
 
-`DELETE /api/{db}/{collection}/object/{_id}`
-
 **Request**
 
 ```http
@@ -603,6 +547,290 @@ Authorization: Bearer <accessToken>
 ```http
 HTTP/1.1 204 No Content
 ```
+
+## Bulk Objects
+
+Batches are split by object shard internally. Duplicate ids inside one bulk request are rejected.
+
+### Insert Many
+
+**Request**
+
+```http
+POST {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+[
+  { "_id": "object-1", "status": "active", "score": 42 },
+  { "_id": "object-2", "status": "archived", "score": 10 }
+]
+```
+
+**Response**
+
+```json
+{
+  "inserted": 2,
+  "items": [
+    { "_id": "object-1", "status": "active", "score": 42 },
+    { "_id": "object-2", "status": "archived", "score": 10 }
+  ]
+}
+```
+
+### Insert Many With Minimal Response
+
+**Request**
+
+```http
+POST {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+Prefer: return=minimal
+
+[
+  { "_id": "object-1", "status": "active" },
+  { "_id": "object-2", "status": "archived" }
+]
+```
+
+**Response**
+
+```json
+{
+  "inserted": 2
+}
+```
+
+### Replace Many
+
+**Request**
+
+```http
+PUT {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+[
+  { "_id": "object-1", "status": "active", "score": 50 },
+  { "_id": "object-2", "status": "archived", "score": 12 }
+]
+```
+
+**Response**
+
+```json
+{
+  "replaced": 2,
+  "items": [
+    { "_id": "object-1", "status": "active", "score": 50 },
+    { "_id": "object-2", "status": "archived", "score": 12 }
+  ]
+}
+```
+
+### Patch Many
+
+**Request**
+
+```http
+PATCH {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+[
+  { "_id": "object-1", "$set": { "score": 51 }, "$unset": ["legacyFlag"] },
+  { "_id": "object-2", "$set": { "score": 13 } }
+]
+```
+
+**Response**
+
+```json
+{
+  "updated": 2,
+  "skipped": [],
+  "items": [
+    { "_id": "object-1", "status": "active", "score": 51 },
+    { "_id": "object-2", "status": "archived", "score": 13 }
+  ]
+}
+```
+
+### Delete Many
+
+**Request**
+
+```http
+DELETE {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{
+  "ids": ["object-1", "object-2"]
+}
+```
+
+**Response**
+
+```json
+{
+  "deleted": 2,
+  "ids": ["object-1", "object-2"],
+  "skipped": []
+}
+```
+
+The delete body may also be a plain array of ids.
+
+### Streamed Bulk Writes
+
+Large imports can use NDJSON so the server does not need to hold one giant JSON array in memory. Each line is one JSON value. Internally, OBJY DB buffers lines into bounded chunks and then uses the same bulk storage, routing, replication, durability, permission, and index paths as normal bulk writes.
+
+Streamed writes require minimal responses:
+
+```http
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+```
+
+If a streamed request fails after earlier chunks were written, those earlier chunks stay committed. Use stable `_id` values when clients retry large streams. Omitted `_id` values are allowed on insert, but generated ids are not returned by minimal streamed responses.
+
+#### Stream Insert
+
+**Request**
+
+```http
+POST {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1","status":"active","score":42}
+{"_id":"object-2","status":"archived","score":10}
+{"_id":"object-3","status":"generated","score":3}
+```
+
+**Response**
+
+```json
+{
+  "inserted": 3
+}
+```
+
+#### Stream Replace
+
+**Request**
+
+```http
+PUT {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1","status":"active","score":50}
+{"_id":"object-2","status":"archived","score":12}
+```
+
+**Response**
+
+```json
+{
+  "replaced": 2
+}
+```
+
+#### Stream Patch
+
+**Request**
+
+```http
+PATCH {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1","$set":{"score":51},"$unset":["legacyFlag"]}
+{"_id":"object-2","$set":{"score":13}}
+{"_id":"missing","$set":{"score":99}}
+```
+
+**Response**
+
+```json
+{
+  "updated": 2,
+  "skipped": 1
+}
+```
+
+#### Stream Delete
+
+**Request**
+
+```http
+DELETE {URL}/api/{db}/{collection}/object
+Authorization: Bearer <accessToken>
+Content-Type: application/x-ndjson
+Prefer: return=minimal
+
+{"_id":"object-1"}
+{"_id":"object-2"}
+{"_id":"missing"}
+```
+
+**Response**
+
+```json
+{
+  "deleted": 2,
+  "skipped": 1
+}
+```
+
+
+## Permissions
+
+Database users can access only the database where they authenticated. A global user can address other databases, but database and collection administration requires `admin: true` or `role: "admin"`. Creating or deleting databases and reading `/api/config` specifically require a global admin token.
+
+The built-in `_global` database is read-only through the public API after bootstrap. Object writes, metadata changes, collection changes, and database deletion are rejected even for a global administrator.
+
+Collection grants provide broad read or write access by collection name:
+
+```json
+{
+  "_id": "editor",
+  "username": "editor",
+  "password": "secret",
+  "collectionPermissions": {
+    "read": ["articles", "media"],
+    "write": ["articles"]
+  }
+}
+```
+
+`read` allows object reads and queries. `write` allows create, update, and delete, but does not imply read access. Create users through `POST /api/{db}/users/object`; permission changes apply after login or renewal issues a new token.
+
+Object-level rules combine a query with `c`, `r`, `u`, and `d` permissions:
+
+```json
+{
+  "_id": "editor",
+  "username": "editor",
+  "password": "secret",
+  "permissions": [
+    {
+      "name": "own articles",
+      "query": { "ownerId": "editor" },
+      "perm": "crud"
+    }
+  ]
+}
+```
+
+Read rules are merged into the requested query. Updates must permit both the stored object and its resulting value. A non-admin user without a matching rule or collection grant is denied by default.
 
 ## File Handling
 
@@ -621,8 +849,6 @@ File handling is object-backed. One object can wrap one S3-backed blob, while th
 `_file.key` is derived by the server from `{db}`, `{collection}`, `_id`, and a generated file id. Clients should not invent or change it. Replacing a file writes a new blob key, commits the object pointer, then removes the old blob best-effort. Bulk file uploads are not supported; use one multipart request per file object.
 
 ### Create Object With File
-
-`POST /api/{db}/{collection}/object`
 
 **Request**
 
@@ -658,8 +884,6 @@ part "file":
 ```
 
 ### Read File Blob
-
-`GET /api/{db}/{collection}/object/{_id}/blob`
 
 **Request**
 
@@ -734,266 +958,6 @@ Authorization: Bearer <accessToken>
 HTTP/1.1 204 No Content
 ```
 
-## Bulk Objects
-
-Batches are split by object shard internally. Duplicate ids inside one bulk request are rejected.
-
-### Insert Many
-
-`POST /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-POST {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-
-[
-  { "_id": "object-1", "status": "active", "score": 42 },
-  { "_id": "object-2", "status": "archived", "score": 10 }
-]
-```
-
-**Response**
-
-```json
-{
-  "inserted": 2,
-  "items": [
-    { "_id": "object-1", "status": "active", "score": 42 },
-    { "_id": "object-2", "status": "archived", "score": 10 }
-  ]
-}
-```
-
-### Insert Many With Minimal Response
-
-`POST /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-POST {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-Prefer: return=minimal
-
-[
-  { "_id": "object-1", "status": "active" },
-  { "_id": "object-2", "status": "archived" }
-]
-```
-
-**Response**
-
-```json
-{
-  "inserted": 2
-}
-```
-
-### Replace Many
-
-`PUT /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-PUT {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-
-[
-  { "_id": "object-1", "status": "active", "score": 50 },
-  { "_id": "object-2", "status": "archived", "score": 12 }
-]
-```
-
-**Response**
-
-```json
-{
-  "replaced": 2,
-  "items": [
-    { "_id": "object-1", "status": "active", "score": 50 },
-    { "_id": "object-2", "status": "archived", "score": 12 }
-  ]
-}
-```
-
-### Patch Many
-
-`PATCH /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-PATCH {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-
-[
-  { "_id": "object-1", "$set": { "score": 51 }, "$unset": ["legacyFlag"] },
-  { "_id": "object-2", "$set": { "score": 13 } }
-]
-```
-
-**Response**
-
-```json
-{
-  "updated": 2,
-  "skipped": [],
-  "items": [
-    { "_id": "object-1", "status": "active", "score": 51 },
-    { "_id": "object-2", "status": "archived", "score": 13 }
-  ]
-}
-```
-
-### Delete Many
-
-`DELETE /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-DELETE {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-
-{
-  "ids": ["object-1", "object-2"]
-}
-```
-
-**Response**
-
-```json
-{
-  "deleted": 2,
-  "ids": ["object-1", "object-2"],
-  "skipped": []
-}
-```
-
-The delete body may also be a plain array of ids.
-
-### Streamed Bulk Writes
-
-Large imports can use NDJSON so the server does not need to hold one giant JSON array in memory. Each line is one JSON value. Internally, OBJY DB buffers lines into bounded chunks and then uses the same bulk storage, routing, replication, durability, permission, and index paths as normal bulk writes.
-
-Streamed writes require minimal responses:
-
-```http
-Content-Type: application/x-ndjson
-Prefer: return=minimal
-```
-
-If a streamed request fails after earlier chunks were written, those earlier chunks stay committed. Use stable `_id` values when clients retry large streams. Omitted `_id` values are allowed on insert, but generated ids are not returned by minimal streamed responses.
-
-#### Stream Insert
-
-`POST /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-POST {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/x-ndjson
-Prefer: return=minimal
-
-{"_id":"object-1","status":"active","score":42}
-{"_id":"object-2","status":"archived","score":10}
-{"_id":"object-3","status":"generated","score":3}
-```
-
-**Response**
-
-```json
-{
-  "inserted": 3
-}
-```
-
-#### Stream Replace
-
-`PUT /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-PUT {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/x-ndjson
-Prefer: return=minimal
-
-{"_id":"object-1","status":"active","score":50}
-{"_id":"object-2","status":"archived","score":12}
-```
-
-**Response**
-
-```json
-{
-  "replaced": 2
-}
-```
-
-#### Stream Patch
-
-`PATCH /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-PATCH {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/x-ndjson
-Prefer: return=minimal
-
-{"_id":"object-1","$set":{"score":51},"$unset":["legacyFlag"]}
-{"_id":"object-2","$set":{"score":13}}
-{"_id":"missing","$set":{"score":99}}
-```
-
-**Response**
-
-```json
-{
-  "updated": 2,
-  "skipped": 1
-}
-```
-
-#### Stream Delete
-
-`DELETE /api/{db}/{collection}/object`
-
-**Request**
-
-```http
-DELETE {URL}/api/{db}/{collection}/object
-Authorization: Bearer <accessToken>
-Content-Type: application/x-ndjson
-Prefer: return=minimal
-
-{"_id":"object-1"}
-{"_id":"object-2"}
-{"_id":"missing"}
-```
-
-**Response**
-
-```json
-{
-  "deleted": 2,
-  "skipped": 1
-}
-```
-
 ## Query
 
 Query responses are plain arrays. Use GET for small URL-safe queries and POST `/search` for larger payloads. Normal object queries default to `250` rows and cap each page at `250`; use `offset` / `$skip` or `$page` to read more.
@@ -1022,8 +986,6 @@ Authorization: Bearer <accessToken>
 
 ### POST Search
 
-`POST /api/{db}/{collection}/search`
-
 **Request**
 
 ```http
@@ -1051,8 +1013,6 @@ You may also use `$limit` and `$skip` in the POST body. URL `limit` / `offset` p
 ```
 
 ### Operator Query
-
-`POST /api/{db}/{collection}/search`
 
 **Request**
 
@@ -1103,8 +1063,6 @@ Permission-denied reads report `permission-denied`; reference queries add `refer
 
 Aggregation is supplied as `$aggregate` inside the query object. Supported operators are `$sum`, `$avg`, `$min`, `$max`, and `$count`.
 
-`POST /api/{db}/{collection}/search`
-
 **Request**
 
 ```http
@@ -1142,8 +1100,6 @@ Store embeddings on `_vec`. The vector is indexed separately and hidden from nor
 
 ### Insert Vector Object
 
-`POST /api/{db}/{collection}/object`
-
 **Request**
 
 ```http
@@ -1168,8 +1124,6 @@ Content-Type: application/json
 ```
 
 ### Search Vectors
-
-`POST /api/{db}/{collection}/search`
 
 **Request**
 
@@ -1210,8 +1164,6 @@ If the needed vector index is still warming:
 Reference descriptors point to another object without embedding a stored copy. `database` is optional; if omitted, the current database is used. Reads expand references by default with depth `1`; use `$refDepth: 0` to retain the descriptor only.
 
 ### Store Reference
-
-`POST /api/{db}/{collection}/object`
 
 **Request**
 
@@ -1275,8 +1227,6 @@ Authorization: Bearer <accessToken>
 
 ### Read Unexpanded Reference
 
-`GET /api/{db}/{collection}/object/{_id}`
-
 **Request**
 
 ```http
@@ -1299,8 +1249,6 @@ Authorization: Bearer <accessToken>
 ```
 
 ### Query Reference Path
-
-`POST /api/{db}/{collection}/search`
 
 **Request**
 
@@ -1339,8 +1287,6 @@ Vector search cannot currently be combined with reference object paths.
 
 The health route does not require authentication. During restore it remains available while data routes return `503` with `Retry-After: 5`.
 
-`GET /health`
-
 **Request**
 
 ```http
@@ -1362,8 +1308,6 @@ While restoring, the response also has `"restoring": true` and `restore` contain
 ### Public Cluster Status
 
 `/api/config` is the compact public status endpoint for the UI and operators. It requires a global admin token. Cluster collection is cached for one second so concurrent status requests reuse the same peer fan-out.
-
-`GET /api/config`
 
 **Request**
 

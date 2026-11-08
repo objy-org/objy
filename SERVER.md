@@ -2,16 +2,20 @@
 
 **Turn the same in-memory object database into a shared, durable, distributed service.**
 
-`@objy/server` wraps `@objy/db` with HTTP, authentication, files, persistence, routing, replicas, and administration. The object model and query language stay the same; the server adds the infrastructure boundary.
+`@objy/server` wraps `@objy/db` with HTTP, authentication, files, persistence, routing, replicas, and administration. The object model and query language stay the same.
 
-## Deploy a Server
+[Overview](README.md) · [Database guide](DB.md) · [HTTP API](API.md) · [JavaScript client](https://github.com/objy-org/objy-client)
+
+## Deploy
+
+The recommended path is the deployment CLI:
 
 ```sh
 npm install --global @objy/cli
 objy deploy local --name dev --size tiny
 ```
 
-The CLI automatically downloads and verifies the latest published OBJY server release. Stable releases are preferred; while only prereleases exist, it selects the newest prerelease. The selected release is cached and pinned to that deployment, so later starts and restarts keep using the same version instead of upgrading silently. The CLI then provisions the runtime and prints the server URL and initial administrator credentials. It also owns deployment lifecycle commands:
+The CLI downloads and verifies the latest published server release, provisions the runtime, and prints the server URL and initial administrator credentials. It pins that release to the deployment, so later starts do not upgrade silently.
 
 ```sh
 objy status dev
@@ -20,9 +24,10 @@ objy restart dev
 objy stop dev
 ```
 
-## Embed the Server Runtime
+Applications connect through [`@objy/client`](https://github.com/objy-org/objy-client) or the [HTTP API](API.md).
 
-Install the server package when another Node.js application owns the process:
+<details>
+<summary><strong>Embed the server in another Node.js process</strong></summary>
 
 ```sh
 npm install @objy/server
@@ -37,6 +42,8 @@ console.log(`OBJY DB listening on http://127.0.0.1:${runtime.port}`);
 
 The server package intentionally contains no command-line executable. Process management and infrastructure provisioning belong to `@objy/cli`.
 
+</details>
+
 ## What the Server Adds
 
 | Layer | Responsibility |
@@ -44,14 +51,14 @@ The server package intentionally contains no command-line executable. Process ma
 | Public interface | REST, admin console, files, and plugins |
 | Security | JWT sessions, database users, permissions, and cluster-route secrets |
 | Routing | Accept work on any node and forward it to object-shard owners |
-| Replication | Hinted pull for the fast path and anti-entropy for repair |
+| Replication | Hinted pull for fast delivery and anti-entropy for repair |
 | Durability | Local WAL acknowledgements, S3 journals, snapshots, and restore |
 
-Public object writes still enter the same bulk-first storage path. Hooks run once on the accepting node and never during replication or restore.
+Single and multi-object writes enter the same storage path. Hooks run once on the accepting node and never during replication or restore.
 
-## Make It Durable
+## Durability
 
-Memory serves reads and writes. The local WAL protects acknowledgement. S3 remembers the cluster.
+Memory serves reads and writes. The local WAL protects acknowledged operations, while S3 stores journals and complete-object snapshots for cluster recovery.
 
 ```text
 client -> auth and routing -> owner memory -> local WAL
@@ -61,7 +68,7 @@ client -> auth and routing -> owner memory -> local WAL
                                   +-- S3 journal -> snapshot
 ```
 
-A compact durable configuration looks like this:
+A compact durable configuration:
 
 ```json
 {
@@ -79,9 +86,6 @@ A compact durable configuration looks like this:
     "mode": "s3",
     "prefix": "objydb-production",
     "ack": "localWal",
-    "snapshotRetention": {
-      "keepLatest": 5
-    },
     "localWal": {
       "mode": "on",
       "dir": "/var/lib/objydb/wal",
@@ -98,42 +102,51 @@ A compact durable configuration looks like this:
 }
 ```
 
-Use a unique S3 prefix for every independent installation and place the WAL on durable node-local storage.
+Use a unique S3 prefix for every installation and place the WAL on durable node-local storage.
 
-### Choose the Acknowledgement
+### Acknowledgement Modes
 
 | Mode | A successful response means |
 | --- | --- |
 | `ack: "memory"` | The owner accepted the write in memory. A process or host failure can lose an unflushed write. |
 | `ack: "localWal"` | The owner appended and flushed the operation to its local WAL. |
 
-With `fsync` enabled, `localWal` acknowledgement pays local storage latency in exchange for process-failure protection. It does not wait for every replica or for S3.
+With `fsync` enabled, `localWal` pays local storage latency for process-failure protection. It does not wait for every replica or for S3.
 
-### Let S3 Compact the History
+<details>
+<summary><strong>Journals, snapshots, and retention</strong></summary>
 
-- Journals receive bounded operation batches asynchronously, every 5 seconds by default.
+- Journals receive bounded operation batches asynchronously, every five seconds by default.
 - Dirty primary scopes produce full-object snapshots every 60 seconds by default.
 - A successful snapshot removes journals already covered by its cursors.
-- Snapshot retention is opt-in through `keepLatest` or `keepForMs`.
+- Snapshot retention is opt-in through `snapshotRetention.keepLatest` or `keepForMs`.
 - `restoreSnapshotId` is only for an intentional restore to a retained snapshot.
+- Indexes, columns, and vector indexes are derived in memory and are not stored in snapshots.
 
-Indexes, columns, and vector indexes are derived in memory and are not stored in snapshots.
+</details>
 
-## Become Ready
+## Readiness
 
-A durable node opens in two phases:
+A durable node starts in phases:
 
 1. Load configuration, shared secrets, and the active shard map.
 2. Expose `/health` while restoring owned metadata, snapshot segments, newer journals, and the local WAL.
 3. Open the public API after all owned objects are readable.
 4. Start replication and persistence schedules.
-5. Warm field indexes, columns, and vectors in bounded same-thread tasks.
+5. Warm field indexes, columns, and vectors in bounded cooperative tasks.
 
-Data routes return `503` during object restore. Once the API opens, ordinary queries use correct scan fallbacks while indexes and columns warm. Vector search returns `503` until its index is ready.
+Data routes return `503` during object restore. After the API opens, ordinary queries use correct scan fallbacks while derived structures warm. Vector search returns `503` until its index is ready.
 
-## Form a Cluster
+## Clustering
 
-Sharding is global. The tuple `{ database, collection, _id }` selects an object shard, and the shard map assigns peers to it.
+Sharding is global. The tuple `{ database, collection, _id }` selects an object shard, and the shard map assigns peers to it. Every peer holds the same map and stores only the shards it owns.
+
+Replicas improve availability and failure tolerance. They do not increase logical capacity because every replica stores another physical copy of its shard.
+
+Managed deployments create and distribute the topology through `@objy/cli`.
+
+<details>
+<summary><strong>Configure a cluster manually</strong></summary>
 
 ```json
 {
@@ -161,25 +174,25 @@ Sharding is global. The tuple `{ database, collection, _id }` selects an object 
 }
 ```
 
-This topology has two logical shards and two physical replicas per shard. Every peer loads the same map and stores only the shards it owns.
+This topology has two logical shards and two physical replicas per shard.
 
-For a durable cluster, store the shard map in the same S3 service and publish it before starting peers. From a source checkout, use the repository utility:
+For a durable cluster, store the shard map in the same S3 service and publish it before starting peers. From a source checkout:
 
 ```sh
 node scripts/put-shard-map.js --config objydb.config.json --map shard-map.json
 ```
 
-Packaged deployments may publish the same map through their provisioning tooling; every peer reads the configured S3 shard-map key at startup.
-
-Peers may share one config while overriding their local identity:
+Packaged deployments can publish the same map through their provisioning tooling. Peers may share one config while overriding local identity:
 
 ```sh
 node src/index.js --config objydb.config.json --node node-a --url http://node-a:8080 --port 8080
 ```
 
-## Route and Replicate
+</details>
 
-Any public node can receive a request. The router handles owned objects locally, forwards other object work to an owner, and fans queries or aggregations across required shards in parallel.
+### Routing and Replication
+
+Any public node can receive a request. It handles owned objects locally, forwards other object work to an owner, and fans queries or aggregations across required shards in parallel.
 
 Replication is asynchronous and pull-based:
 
@@ -188,11 +201,11 @@ Replication is asynchronous and pull-based:
 3. Periodic anti-entropy closes gaps after lost hints or temporary outages.
 4. Whole-object last-write-wins ordering resolves concurrent versions.
 
-Replicas improve availability and failure tolerance. They do not increase logical capacity because every replica stores another physical copy of the shard.
-
 OBJY DB has no multi-object transactions or linearizable cross-shard read snapshots. A local-WAL acknowledgement protects the handling node's operation; replication converges afterward.
 
-## Handle Pressure and Failure
+## Operations
+
+### Pressure and Failure
 
 | Situation | Server behavior |
 | --- | --- |
@@ -203,15 +216,15 @@ OBJY DB has no multi-object transactions or linearizable cross-shard read snapsh
 | Index is warming | Correct scan paths remain available; vector search waits with `503`. |
 | Process exits after WAL acknowledgement | The WAL is replayed before the node becomes ready. |
 
-Long replica outages should be treated as durable restore events rather than relying only on the short retained in-memory operation log.
+Treat long replica outages as durable restore events rather than relying only on the short retained in-memory operation log.
 
-## Plan Memory
+### Memory
 
-One copy of every shard represents logical capacity. Each replica adds another physical copy, including its indexes, columns, vectors, and temporary build state.
+One copy of every shard represents logical capacity. Each replica adds another physical copy, including indexes, columns, vectors, and temporary build state.
 
-Set the Node.js heap below the VM or container memory limit and leave room for native allocations and V8 reserve outside the heap. Enable the memory guard in bounded environments. Use NDJSON and bounded client batches for large HTTP imports.
+Set the Node.js heap below the VM or container limit, leave room for native allocations and V8 reserve, and enable the memory guard in bounded environments. Use NDJSON and bounded client batches for large HTTP imports.
 
-## Observe the Cluster
+### Observe
 
 ```text
 GET /health
@@ -221,25 +234,17 @@ GET /api/config?details=1
 
 `/health` is lightweight and unauthenticated. `/api/config` requires a global administrator and returns compact topology, memory, restore, replication, and readiness information. Load `?details=1` for diagnosis rather than high-frequency polling.
 
-Watch for:
+Watch for missing shard owners, memory near the guard threshold, derived structures that never become ready, growing persistence or replication lag, and repeated pull or S3 failures. A transient pull error alone does not prove data loss.
 
-- Missing shard owners or replicas.
-- Heap or RSS approaching the memory-guard threshold.
-- Restore or derived structures that never become ready.
-- Persistence backlog or replication lag that keeps growing.
-- Repeated pull, journal, snapshot, or S3 failures.
+### Stop and Upgrade
 
-One transient pull error does not prove data loss. Persistent lag or an unavailable replica requires investigation.
-
-## Stop and Upgrade
-
-`objy stop` asks managed deployments to terminate with `SIGTERM`. `SIGINT` and `SIGTERM` trigger graceful shutdown: stop replication, close HTTP intake, flush the local WAL and pending S3 journals, then exit. Avoid `SIGKILL` during normal operation or topology changes.
+`objy stop` sends `SIGTERM`. `SIGINT` and `SIGTERM` trigger graceful shutdown: stop replication, close HTTP intake, flush the local WAL and pending S3 journals, then exit. Avoid `SIGKILL` during normal operation or topology changes.
 
 Upgrade redundant clusters one replica at a time. Verify health, object counts, catch-up, and representative queries before continuing.
 
-## Change the Topology
+### Change the Topology
 
-Replica membership changes keep the existing partition topology. A shard-count change performs a coordinated restart-based reshard:
+Replica membership changes retain the partition topology. A shard-count change performs a coordinated restart-based reshard:
 
 1. Gracefully stop every peer and flush durable writes.
 2. Publish the desired shard map.

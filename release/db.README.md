@@ -1,6 +1,6 @@
 # OBJY DB
 
-The universal, in-memory OBJY DB for Node.js and modern browsers. It provides dynamic objects, bulk-first writes, queries, aggregation, indexes, RID columns, references, vector search, value dictionaries, and compressed-memory tiering without a server or persistence layer.
+The universal in-memory OBJY DB for Node.js and modern browsers. Store dynamic objects and use high-throughput writes, queries, aggregation, indexes, references, vector search, and compressed-memory tiering without a server or persistence layer.
 
 ```sh
 npm install @objy/db

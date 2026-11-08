@@ -4,16 +4,9 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ## Unreleased
 
-### Added
+No user-facing changes recorded yet.
 
-- Dedicated database, server, and benchmark documentation for evaluation.
-- Structured issue and pull-request templates.
-
-### Changed
-
-- The server no longer packages or serves the standalone JavaScript client; applications and the admin console consume `@objy/client` independently.
-
-## 0.2.0-alpha.0 - 2026-10-31
+## 0.1.0 - 2026-11-04
 
 ### Added
 
@@ -23,12 +16,15 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 - Standalone browser ESM artifact in GitHub releases.
 - Cross-runtime correctness and performance suite covering source, packed packages, HTTP, and Chromium.
 - Restart-based reshard generations backed by shared S3 state.
+- Dedicated database, server, and benchmark documentation for evaluation.
+- Structured issue and pull-request templates.
 
 ### Changed
 
 - Object storage is the default engine; shape storage remains selectable.
 - Release packaging now produces synchronized database and server packages from one repository version.
 - Browser and Node.js runtimes share the same database API and select platform implementations through package exports.
+- The server no longer packages or serves the standalone JavaScript client; applications and the admin console consume `@objy/client` independently.
 
 ### Notes
 

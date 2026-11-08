@@ -2,23 +2,13 @@
 
 **The complete in-memory object database, directly inside your code.**
 
-`@objy/db` runs in Node.js and modern browsers. Both use the same storage, bulk CRUD, query engine, aggregation, indexes, columns, references, vectors, and compression. The package only changes its low-level platform adapters.
+Use `@objy/db` when an application should own the database itself. Node.js and modern browsers share the same storage, CRUD, query, aggregation, index, column, reference, vector, and compression behavior; only their low-level platform adapters differ.
 
-## Install in Node.js
+[Overview](README.md) · [Server guide](SERVER.md) · [Benchmarks](BENCHMARKS.md)
 
-```sh
-npm install @objy/db
-```
+## Install
 
-```js
-import { createDatabase } from "@objy/db";
-```
-
-Node.js automatically uses its native compression and runtime adapters.
-
-## Install in a Browser
-
-With npm and a package-aware bundler, the installation and import are identical:
+The npm package and import are identical in Node.js and browser projects:
 
 ```sh
 npm install @objy/db
@@ -28,9 +18,9 @@ npm install @objy/db
 import { createDatabase } from "@objy/db";
 ```
 
-The package export selects portable browser adapters automatically. No browser-specific application code is required.
+Node.js selects native runtime adapters. Package-aware browser tools select portable browser adapters automatically.
 
-Without npm, download `objy-db-<version>.esm.js` from a GitHub release, serve it with your application, and import it as a module:
+For a browser without npm or a bundler, download `objy-db-<version>.esm.js` from a GitHub release, serve it with the application, and import it as a module:
 
 ```html
 <script type="module">
@@ -40,9 +30,7 @@ Without npm, download `objy-db-<version>.esm.js` from a GitHub release, serve it
 </script>
 ```
 
-## Use the Same Database API
-
-Everything after installation is shared:
+## Create and Query Objects
 
 ```js
 const objy = createDatabase();
@@ -60,21 +48,22 @@ await assets.insertMany([
   { name: "Phone", status: "archived", score: 4 }
 ]);
 
-const active = await assets.find({ status: "active" });
-const totals = await assets.search({
+console.log(await assets.find({ status: "active" }));
+
+console.log(await assets.search({
   $aggregate: {
     fields: {
       totalScore: { $sum: "score" }
     }
   }
-});
+}));
 ```
 
 Objects are ordinary JavaScript values. Collections accept different shapes and value types without a required schema.
 
-## Bulk Is the Native Path
+## Write One or Many
 
-OBJY DB treats a single write as a bulk of one. Large and small operations therefore share the same validation, storage, and derived-state behavior.
+Single and multi-object methods share the same validation and storage behavior:
 
 ```js
 await assets.insert(object);
@@ -90,9 +79,9 @@ await assets.replaceMany(replacements);
 await assets.removeMany(ids);
 ```
 
-Use `minimal: true` on bulk writes when only counts are needed and object readback would be wasted work.
+Use `minimal: true` on a large write when the caller needs only counts and object readback would be wasted work.
 
-## Shape the Workload with Metadata
+## Configure Collections
 
 Collection metadata enables structures that match the workload:
 
@@ -116,50 +105,43 @@ Collection metadata enables structures that match the workload:
 | Value dictionary | Sharing repeated values across dynamic objects |
 | Compressed tiering | Keeping selected fields hot while compressing the rest |
 
-These structures remain internal. Reads still hydrate and return complete objects, and queries retain correct scan paths when a structure is absent or still warming.
+These structures remain internal. Reads still return complete objects, and queries retain correct scan paths when a structure is absent or still warming.
 
-## Readiness and Lifecycle
+## Readiness and Memory
 
-Writes are visible immediately. Some derived work may continue cooperatively after large imports or metadata changes:
+Writes are visible immediately. Derived structures may continue building cooperatively after a large import or metadata change:
 
 ```js
 await assets.ready();
 ```
 
-Call `ready()` before a benchmark or before requiring vector search from a newly populated collection. Ordinary queries can fall back to scans while field indexes or columns catch up.
+Call `ready()` before benchmarking or requiring vector search from a newly populated collection. Ordinary queries can use correct scan fallbacks while field indexes or columns catch up.
 
-Inspect local state without starting a server:
+Inspect local state and release the database without starting a server:
 
 ```js
 console.log(objy.stats());
-```
-
-Release the database when its owning application context is finished:
-
-```js
 objy.close();
 ```
 
-## Memory Is the Database
+The live database and its derived structures occupy the JavaScript heap:
 
-The object store and its derived structures live in the JavaScript heap. This produces direct, low-latency access, but the application owns capacity:
-
-- Import in bounded bulks rather than constructing one enormous array.
-- Configure indexes and columns for fields that justify their memory cost.
+- Import in bounded batches instead of constructing one enormous array.
+- Configure only indexes and columns that justify their memory cost.
 - Use compressed tiering when large object bodies contain colder fields.
-- Measure complete workload memory, including indexes, vectors, and temporary build state.
-- Release unused databases instead of relying on eventual garbage collection.
+- Measure objects, indexes, vectors, and temporary build state together.
+- Close unused databases instead of relying on eventual garbage collection.
 
-Node.js deployments can choose an explicit V8 heap limit. Browser limits are controlled by the browser and device, so representative mobile and desktop testing matters.
+Node.js can set an explicit V8 heap limit. Browser limits depend on the browser and device, so test representative environments.
 
-## Platform Differences
+## Runtime Notes
 
 | Detail | Embedded Node.js | Browser |
 | --- | --- | --- |
-| Database API | `@objy/db` | `@objy/db` |
+| Package and API | `@objy/db` | `@objy/db` |
 | Storage and queries | Shared implementation | Shared implementation |
-| Compression adapter | Native Node.js runtime | Portable browser runtime |
+| Compression | Native Node.js adapter | Portable browser adapter |
 | Lifetime | Owning process | Page or worker context |
 | Persistence | None | None |
 
-That is the full distinction. Browser and embedded use the same database model and public methods.
+Use [`@objy/server`](SERVER.md) when the database needs HTTP access, authentication, S3 durability, sharding, or replication.

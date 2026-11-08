@@ -1,4 +1,4 @@
-# Publishing checklist
+# Publishing Checklist
 
 Use this before publishing an OBJY DB release to GitHub, npm, or a container registry.
 
