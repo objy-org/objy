@@ -101,7 +101,7 @@ jobs:
             git tag -a "$TAG" -m "OBJY DB $RELEASE_VERSION"
             push_with_retry "refs/tags/$TAG"
           fi
-      - name: Publish npm packages
+      - name: Publish npm package
         run: |
           package_visible() {
             local package_name="$1"
@@ -135,10 +135,14 @@ jobs:
       - name: Create GitHub release
         run: |
           TAG="v$RELEASE_VERSION"
+          ARTIFACTS=(
+            ".release/artifacts/objy-server-$RELEASE_VERSION.tgz"
+            ".release/artifacts/SHA256SUMS"
+          )
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" .release/artifacts/* --clobber
+            gh release upload "$TAG" "${ARTIFACTS[@]}" --clobber
           elif [[ "$RELEASE_VERSION" == *-* ]]; then
-            gh release create "$TAG" .release/artifacts/* --generate-notes --verify-tag --prerelease
+            gh release create "$TAG" "${ARTIFACTS[@]}" --generate-notes --verify-tag --prerelease
           else
-            gh release create "$TAG" .release/artifacts/* --generate-notes --verify-tag
+            gh release create "$TAG" "${ARTIFACTS[@]}" --generate-notes --verify-tag
           fi
