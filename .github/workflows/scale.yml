@@ -1,29 +1,19 @@
-name: Universal Scale Test
+name: Server Scale Test
 
 on:
   workflow_dispatch:
     inputs:
       objects:
-        description: Objects per runtime variant
+        description: Objects in the server workload
         required: true
         default: "1000000"
         type: string
-      browsers:
-        description: Browser engines
-        required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - chromium
-          - firefox
-          - webkit
 
 permissions:
   contents: read
 
 jobs:
-  universal:
+  scale:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -33,15 +23,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps
-      - name: Run universal consistency and performance suite
+      - name: Run server consistency and performance workload
         env:
           TEST_OBJECTS: ${{ inputs.objects }}
-          TEST_BROWSERS: ${{ inputs.browsers }}
-        run: npm run test:universal -- "--objects=$TEST_OBJECTS" "--browsers=$TEST_BROWSERS"
+        run: npm run test:scale -- "--objects=$TEST_OBJECTS"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: universal-performance-${{ inputs.objects }}
+          name: server-performance-${{ inputs.objects }}
           path: .performance-results/
           if-no-files-found: warn

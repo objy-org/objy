@@ -2,7 +2,7 @@ const GROUP_COUNT = 16;
 const OWNER_COUNT = 16;
 const DELETE_STRIDE = 10;
 
-export const UNIVERSAL_DEFAULTS = Object.freeze({
+export const SERVER_DEFAULTS = Object.freeze({
   objects: 10_000,
   batchSize: 2_000,
   payloadBytes: 192,
@@ -10,14 +10,14 @@ export const UNIVERSAL_DEFAULTS = Object.freeze({
   vectorObjects: 1_000,
 });
 
-export async function runUniversalWorkload({
+export async function runServerWorkload({
   root,
   label,
-  objects = UNIVERSAL_DEFAULTS.objects,
-  batchSize = UNIVERSAL_DEFAULTS.batchSize,
-  payloadBytes = UNIVERSAL_DEFAULTS.payloadBytes,
-  pointReads = UNIVERSAL_DEFAULTS.pointReads,
-  vectorObjects = UNIVERSAL_DEFAULTS.vectorObjects,
+  objects = SERVER_DEFAULTS.objects,
+  batchSize = SERVER_DEFAULTS.batchSize,
+  payloadBytes = SERVER_DEFAULTS.payloadBytes,
+  pointReads = SERVER_DEFAULTS.pointReads,
+  vectorObjects = SERVER_DEFAULTS.vectorObjects,
   mutationCount = Math.max(1, Math.min(objects, Math.floor(objects * 0.05))),
   memory = () => null,
   ready,
@@ -147,7 +147,7 @@ export async function runUniversalWorkload({
   };
 }
 
-export function assertUniversalPerformance(report, {
+export function assertServerPerformance(report, {
   minInsertOpsPerSecond,
   minPatchOpsPerSecond,
   minDeleteOpsPerSecond,

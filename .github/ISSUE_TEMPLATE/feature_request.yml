@@ -27,7 +27,7 @@ body:
     id: impact
     attributes:
       label: Runtime impact
-      description: Note expected effects on bulk paths, memory, durability, sharding, browser support, or compatibility.
+      description: Note expected effects on bulk paths, memory, durability, sharding, or compatibility.
   - type: checkboxes
     id: checks
     attributes:

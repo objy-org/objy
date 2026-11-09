@@ -19,10 +19,9 @@ body:
     attributes:
       label: Runtime
       options:
-        - "@objy/db in Node.js"
-        - "@objy/db in a browser"
         - "@objy/server single node"
         - "@objy/server cluster"
+        - "Admin console"
         - "Other"
     validations:
       required: true
@@ -44,7 +43,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include operating system, Node.js or browser version, object count, shard/replica count, and storage provider when relevant.
+      description: Include operating system, Node.js version, object count, shard/replica count, and storage provider when relevant.
     validations:
       required: true
   - type: textarea

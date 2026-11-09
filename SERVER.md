@@ -1,10 +1,10 @@
 # OBJY DB Server
 
-**Turn the same in-memory object database into a shared, durable, distributed service.**
+**Run the in-memory object database as a shared, durable, distributed service.**
 
-`@objy/server` wraps `@objy/db` with HTTP, authentication, files, persistence, routing, replicas, and administration. The object model and query language stay the same.
+`@objy/server` contains the complete database engine plus HTTP, authentication, files, persistence, routing, replicas, and administration.
 
-[Overview](README.md) · [Database guide](DB.md) · [HTTP API](API.md) · [JavaScript client](https://github.com/objy-org/objy-client)
+[Overview](README.md) · [HTTP API](API.md) · [JavaScript client](https://github.com/objy-org/objy-client)
 
 ## Deploy
 
@@ -27,7 +27,7 @@ objy stop dev
 Applications connect through [`@objy/client`](https://github.com/objy-org/objy-client) or the [HTTP API](API.md).
 
 <details>
-<summary><strong>Embed the server in another Node.js process</strong></summary>
+<summary><strong>Start the server from another Node.js process</strong></summary>
 
 ```sh
 npm install @objy/server

@@ -24,9 +24,9 @@ Add focused tests beside the behavior being changed. The broader suites are sele
 | Change | Required command |
 | --- | --- |
 | Any runtime behavior | `npm test` |
-| Browser runtime, client, or console | `npm run test:browser` |
-| Storage, queries, aggregation, indexes, columns, or compression | `npm run test:universal` |
-| Exports, package files, release scripts, or metadata | `npm run check:package` |
+| Admin console | `npm run test:ui` |
+| Storage, queries, aggregation, indexes, columns, or compression | `npm run test:scale` |
+| Exports, package files, release scripts, or metadata | `npm run check:package && npm run test:package` |
 | Replication, restore, or resharding | Relevant `test:stress:*` command from `package.json` |
 
 Performance changes should include a before/after command and workload. Do not present a single warm run as a general benchmark; see [BENCHMARKS.md](BENCHMARKS.md) for the repository format.

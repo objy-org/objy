@@ -12,7 +12,7 @@ Describe the problem and the focused change that solves it.
 
 - [ ] Focused tests added or updated
 - [ ] `npm test`
-- [ ] Browser or universal tests run when relevant
+- [ ] UI or scale tests run when relevant
 - [ ] Package checks run when exports or release files changed
 - [ ] Failure and recovery paths tested when relevant
 - [ ] Documentation updated when public behavior changed

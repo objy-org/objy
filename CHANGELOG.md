@@ -4,7 +4,9 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ## Unreleased
 
-No user-facing changes recorded yet.
+### Removed
+
+- Embedded Node.js and browser database distributions. OBJY DB now ships as the `@objy/server` runtime; applications connect through HTTP or `@objy/client`.
 
 ## 0.1.0 - 2026-11-04
 
@@ -28,5 +30,5 @@ No user-facing changes recorded yet.
 
 ### Notes
 
-- This is an alpha release. See [README.md](README.md#alpha-status), [DB.md](DB.md), and [SERVER.md](SERVER.md) before production evaluation.
+- This is an alpha release. See [README.md](README.md#alpha-status) and [SERVER.md](SERVER.md) before production evaluation.
 - Earlier prerelease work is preserved in Git history; no older semantic-version release tags are reconstructed here.

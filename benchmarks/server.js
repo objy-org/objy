@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assertUniversalPerformance,
+  assertServerPerformance,
   comparableSignature,
-  runUniversalWorkload,
-  UNIVERSAL_DEFAULTS,
-} from "./universal-workload.js";
+  runServerWorkload,
+  SERVER_DEFAULTS,
+} from "./server-workload.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const options = parseOptions(process.argv.slice(2), process.env);
@@ -39,24 +39,22 @@ async function runParent(settings) {
       process.stderr.write(child.stderr || "");
       process.exit(child.status || 1);
     }
-    const line = child.stdout.split("\n").find((entry) => entry.startsWith("UNIVERSAL_RESULT "));
-    if (!line) throw new Error(`${variant} did not produce a universal test result`);
-    const result = JSON.parse(line.slice("UNIVERSAL_RESULT ".length));
+    const line = child.stdout.split("\n").find((entry) => entry.startsWith("SERVER_RESULT "));
+    if (!line) throw new Error(`${variant} did not produce a server benchmark result`);
+    const result = JSON.parse(line.slice("SERVER_RESULT ".length));
     results.push(result);
     console.log(formatResult(result));
   }
 
   assertSignatures(results);
-  assertRelativePerformance(results, "source-node", "package-node");
   assertRelativePerformance(results, "source-server", "package-server");
-  await writeReport(settings.reportDir, "node.json", { options: settings, results });
+  await writeReport(settings.reportDir, "server.json", { options: settings, results });
 }
 
 async function runChild(settings) {
   const runtime = await openVariant(settings.variant);
-  let report;
   try {
-    report = await runUniversalWorkload({
+    const report = await runServerWorkload({
       root: runtime.root,
       label: settings.variant,
       objects: settings.objects,
@@ -67,79 +65,58 @@ async function runChild(settings) {
       memory: nodeMemory,
       ready: runtime.ready,
     });
-    assertUniversalPerformance(report, settings.variant.includes("server") ? {
+    assertServerPerformance(report, {
       minInsertOpsPerSecond: 100,
       minPatchOpsPerSecond: 50,
       minDeleteOpsPerSecond: 50,
       maxBatchMs: 15_000,
       maxPointReadP95Ms: 1_000,
       maxQueryMs: 60_000,
-    } : {
-      minInsertOpsPerSecond: 250,
-      minPatchOpsPerSecond: 100,
-      minDeleteOpsPerSecond: 100,
-      maxBatchMs: 10_000,
-      maxPointReadP95Ms: 500,
-      maxQueryMs: 60_000,
     });
-    console.log(`UNIVERSAL_RESULT ${JSON.stringify(report)}`);
+    console.log(`SERVER_RESULT ${JSON.stringify(report)}`);
   } finally {
     await runtime.close();
   }
 }
 
 async function openVariant(variant) {
-  if (variant === "source-node" || variant === "package-node") {
-    const entry = variant === "source-node"
-      ? new URL("../src/core.js", import.meta.url)
-      : new URL("../.release/staging/db/node.js", import.meta.url);
-    const { createDatabase } = await import(entry);
-    const database = createDatabase({ storage: { engine: "object" } });
-    return {
-      root: database,
-      close: async () => database.close(),
-    };
+  if (variant !== "source-server" && variant !== "package-server") {
+    throw new Error(`unknown server variant: ${variant}`);
   }
-
-  if (variant === "source-server" || variant === "package-server") {
-    const entry = variant === "source-server"
-      ? new URL("../src/api.js", import.meta.url)
-      : new URL("../.release/staging/server/src/api.js", import.meta.url);
-    const { startServer } = await import(entry);
-    const clientModule = await import("@objy/client");
-    const { createClient } = clientModule;
-    const runtime = await startServer({
-      port: 0,
-      auth: {
-        jwtSecret: "universal-test-secret",
-        users: [{
-          _id: "universal-admin",
-          username: "admin",
-          password: "universal-password",
-          role: "admin",
-          admin: true,
-        }],
-      },
-      bootstrapLogger: () => {},
-      maxJsonBytes: 64 * 1024 * 1024,
-    });
-    const client = createClient({
-      url: `http://127.0.0.1:${runtime.port}`,
-      timeoutMs: 10 * 60_000,
-    });
-    await client.login({ username: "admin", password: "universal-password" });
-    return {
-      root: client,
-      ready: (database, collection) => runtime.node.awaitIndexes(database, collection),
-      close: async () => {
-        runtime.replication?.stop?.();
-        await new Promise((resolvePromise) => runtime.server.close(resolvePromise));
-        runtime.node.db.dispose();
-      },
-    };
-  }
-
-  throw new Error(`unknown universal Node variant: ${variant}`);
+  const entry = variant === "source-server"
+    ? new URL("../src/api.js", import.meta.url)
+    : new URL("../.release/staging/server/src/api.js", import.meta.url);
+  const { startServer } = await import(entry);
+  const { createClient } = await import("@objy/client");
+  const server = await startServer({
+    port: 0,
+    auth: {
+      jwtSecret: "server-benchmark-secret",
+      users: [{
+        _id: "server-benchmark-admin",
+        username: "admin",
+        password: "server-benchmark-password",
+        role: "admin",
+        admin: true,
+      }],
+    },
+    bootstrapLogger: () => {},
+    maxJsonBytes: 64 * 1024 * 1024,
+  });
+  const client = createClient({
+    url: `http://127.0.0.1:${server.port}`,
+    timeoutMs: 10 * 60_000,
+  });
+  await client.login({ username: "admin", password: "server-benchmark-password" });
+  return {
+    root: client,
+    ready: (database, collection) => server.node.awaitIndexes(database, collection),
+    close: async () => {
+      server.replication?.stop?.();
+      await new Promise((resolvePromise) => server.server.close(resolvePromise));
+      server.node.db.dispose();
+    },
+  };
 }
 
 function parseOptions(argv, environment) {
@@ -150,13 +127,13 @@ function parseOptions(argv, environment) {
   }
   return {
     variant: values.get("variant") || null,
-    variants: values.get("variants") || environment.UNIVERSAL_NODE_VARIANTS || "source-node,package-node,source-server,package-server",
-    objects: numberOption(values.get("objects") || environment.UNIVERSAL_OBJECTS, UNIVERSAL_DEFAULTS.objects),
-    batchSize: numberOption(values.get("batch-size") || environment.UNIVERSAL_BATCH_SIZE, UNIVERSAL_DEFAULTS.batchSize),
-    payloadBytes: numberOption(values.get("payload-bytes") || environment.UNIVERSAL_PAYLOAD_BYTES, UNIVERSAL_DEFAULTS.payloadBytes),
-    pointReads: numberOption(values.get("point-reads") || environment.UNIVERSAL_POINT_READS, UNIVERSAL_DEFAULTS.pointReads),
-    vectorObjects: numberOption(values.get("vector-objects") || environment.UNIVERSAL_VECTOR_OBJECTS, UNIVERSAL_DEFAULTS.vectorObjects),
-    reportDir: resolve(root, environment.UNIVERSAL_REPORT_DIR || ".performance-results"),
+    variants: values.get("variants") || environment.SERVER_VARIANTS || "source-server,package-server",
+    objects: numberOption(values.get("objects") || environment.SERVER_OBJECTS, SERVER_DEFAULTS.objects),
+    batchSize: numberOption(values.get("batch-size") || environment.SERVER_BATCH_SIZE, SERVER_DEFAULTS.batchSize),
+    payloadBytes: numberOption(values.get("payload-bytes") || environment.SERVER_PAYLOAD_BYTES, SERVER_DEFAULTS.payloadBytes),
+    pointReads: numberOption(values.get("point-reads") || environment.SERVER_POINT_READS, SERVER_DEFAULTS.pointReads),
+    vectorObjects: numberOption(values.get("vector-objects") || environment.SERVER_VECTOR_OBJECTS, SERVER_DEFAULTS.vectorObjects),
+    reportDir: resolve(root, environment.SERVER_REPORT_DIR || ".performance-results"),
   };
 }
 

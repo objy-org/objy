@@ -6,7 +6,7 @@ The complete OBJY DB server runtime: HTTP API, authentication, permissions, hook
 npm install @objy/server
 ```
 
-Embed it in Node.js:
+Start it from Node.js:
 
 ```js
 import { startServer } from "@objy/server";
