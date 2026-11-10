@@ -78,20 +78,25 @@ Every collection has a small metadata object that configures its derived behavio
     "mode": "compressedMemory",
     "keep": ["name", "status", "tenantId"],
     "minBytes": 4096
-  },
-  "hooks": {
-    "enabled": true,
-    "use": ["timestamps", "audit"]
   }
 }
 ```
 
-| Field | Purpose |
-| --- | --- |
-| `indexes` | Field indexes narrow filters, support indexed grouping, and accelerate sorting. |
-| `columns` | RID-addressed typed values accelerate numeric aggregation and reduce duplicate object storage. |
-| `tiering` | Keeps selected fields hot and compresses the remaining object data in memory. Use either `keep` or `offload`. |
-| `hooks` | Enables server-registered create, read, update, and delete hooks for the collection. |
+### Indexes
+
+Indexes maintain an in-memory lookup from field values to matching objects. A query on an indexed field can start with a small candidate set instead of scanning the entire collection. Nested field paths are supported too.
+
+```js
+await assets.find({ status: "active", tenantId: "acme" });
+```
+
+### Columns
+
+Columns keep selected values in RID-addressed typed storage. They are useful for numeric aggregation such as `$sum`, `$avg`, `$min`, and `$max` without changing the returned object shape.
+
+### Compressed Memory
+
+Compressed memory keeps the fields in `keep` directly available and compresses the rest of each object when its compressible payload reaches `minBytes`. Indexed and column fields remain hot automatically. Reads transparently hydrate the original full JSON object, so applications do not need a different query or response format. Use `offload` instead of `keep` when naming the fields to compress is simpler.
 
 Changing meta rebuilds the affected in-memory structures cooperatively. Full objects remain the persistence format and the API result shape.
 
