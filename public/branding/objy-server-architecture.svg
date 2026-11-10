@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title description">
+  <title id="title">OBJY DB two-node architecture</title>
+  <desc id="description">An application connects to either of two database nodes. Both nodes hold replicas of two shards and share S3 persistence.</desc>
+  <defs>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#39d98a"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#66aaff"/>
+    </marker>
+    <marker id="arrow-gold" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4c95d"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="520" rx="18" fill="#0b100f"/>
+  <text x="48" y="52" fill="#f5f7f6" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="700">Two shards · two replicas</text>
+  <text x="48" y="80" fill="#8e9a96" font-family="Inter, Arial, sans-serif" font-size="15">Requests can enter either node. Durable state is shared through S3.</text>
+
+  <rect x="48" y="205" width="176" height="110" rx="8" fill="#151c1a" stroke="#34413d" stroke-width="2"/>
+  <text x="136" y="250" text-anchor="middle" fill="#f5f7f6" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700">Application</text>
+  <text x="136" y="280" text-anchor="middle" fill="#9eaaa6" font-family="Inter, Arial, sans-serif" font-size="14">REST or JS client</text>
+
+  <path d="M 232 250 C 270 250, 278 166, 322 166" fill="none" stroke="#39d98a" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <path d="M 232 270 C 270 270, 278 382, 322 382" fill="none" stroke="#39d98a" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <text x="270" y="240" fill="#7f8d88" font-family="Inter, Arial, sans-serif" font-size="13">any node</text>
+
+  <rect x="336" y="104" width="340" height="168" rx="8" fill="#151c1a" stroke="#34413d" stroke-width="2"/>
+  <circle cx="368" cy="137" r="7" fill="#39d98a"/>
+  <text x="388" y="144" fill="#f5f7f6" font-family="Inter, Arial, sans-serif" font-size="19" font-weight="700">Node A</text>
+  <text x="648" y="143" text-anchor="end" fill="#7f8d88" font-family="Inter, Arial, sans-serif" font-size="13">memory + WAL</text>
+  <rect x="364" y="166" width="132" height="58" rx="6" fill="#123528" stroke="#2d8f64"/>
+  <text x="430" y="191" text-anchor="middle" fill="#baf4d7" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">shard-0</text>
+  <text x="430" y="211" text-anchor="middle" fill="#77bd9a" font-family="Inter, Arial, sans-serif" font-size="12">copy 1</text>
+  <rect x="516" y="166" width="132" height="58" rx="6" fill="#172c42" stroke="#467db7"/>
+  <text x="582" y="191" text-anchor="middle" fill="#cbe3ff" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">shard-1</text>
+  <text x="582" y="211" text-anchor="middle" fill="#8fb8e4" font-family="Inter, Arial, sans-serif" font-size="12">copy 2</text>
+
+  <rect x="336" y="320" width="340" height="168" rx="8" fill="#151c1a" stroke="#34413d" stroke-width="2"/>
+  <circle cx="368" cy="353" r="7" fill="#39d98a"/>
+  <text x="388" y="360" fill="#f5f7f6" font-family="Inter, Arial, sans-serif" font-size="19" font-weight="700">Node B</text>
+  <text x="648" y="359" text-anchor="end" fill="#7f8d88" font-family="Inter, Arial, sans-serif" font-size="13">memory + WAL</text>
+  <rect x="364" y="382" width="132" height="58" rx="6" fill="#123528" stroke="#2d8f64"/>
+  <text x="430" y="407" text-anchor="middle" fill="#baf4d7" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">shard-0</text>
+  <text x="430" y="427" text-anchor="middle" fill="#77bd9a" font-family="Inter, Arial, sans-serif" font-size="12">copy 2</text>
+  <rect x="516" y="382" width="132" height="58" rx="6" fill="#172c42" stroke="#467db7"/>
+  <text x="582" y="407" text-anchor="middle" fill="#cbe3ff" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">shard-1</text>
+  <text x="582" y="427" text-anchor="middle" fill="#8fb8e4" font-family="Inter, Arial, sans-serif" font-size="12">copy 1</text>
+
+  <path d="M 486 282 L 486 308" fill="none" stroke="#66aaff" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <path d="M 516 308 L 516 282" fill="none" stroke="#66aaff" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <text x="536" y="300" fill="#8fb8e4" font-family="Inter, Arial, sans-serif" font-size="13">replication</text>
+
+  <path d="M 688 188 C 756 188, 758 224, 824 224" fill="none" stroke="#f4c95d" stroke-width="4" marker-end="url(#arrow-gold)"/>
+  <path d="M 688 404 C 756 404, 758 300, 824 300" fill="none" stroke="#f4c95d" stroke-width="4" marker-end="url(#arrow-gold)"/>
+
+  <rect x="840" y="154" width="312" height="212" rx="8" fill="#1d1b14" stroke="#806f38" stroke-width="2"/>
+  <text x="996" y="203" text-anchor="middle" fill="#fff4c7" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">S3</text>
+  <text x="996" y="229" text-anchor="middle" fill="#b9aa72" font-family="Inter, Arial, sans-serif" font-size="13">shared source of durable state</text>
+  <rect x="880" y="258" width="104" height="42" rx="6" fill="#302b1c"/>
+  <text x="932" y="284" text-anchor="middle" fill="#e9d99a" font-family="Inter, Arial, sans-serif" font-size="13">shard map</text>
+  <rect x="1000" y="258" width="112" height="42" rx="6" fill="#302b1c"/>
+  <text x="1056" y="284" text-anchor="middle" fill="#e9d99a" font-family="Inter, Arial, sans-serif" font-size="13">journals</text>
+  <rect x="936" y="312" width="120" height="34" rx="6" fill="#302b1c"/>
+  <text x="996" y="334" text-anchor="middle" fill="#e9d99a" font-family="Inter, Arial, sans-serif" font-size="13">snapshots</text>
+</svg>

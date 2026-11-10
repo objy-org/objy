@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Fast in-memory object database for large-scale JavaScript workloads.</strong><br>
-  Serve dynamic objects through one durable, distributed runtime.
+  Dynamic objects, low-latency queries, durable distributed storage.
 </p>
 
 <p align="center">
@@ -15,22 +15,53 @@
   <img alt="Alpha" src="https://img.shields.io/badge/status-alpha-f0a020">
 </p>
 
-OBJY DB stores and queries dynamic objects in memory. The server combines CRUD, queries, aggregation, indexes, references, vectors, columns, and compressed-memory tiering with authentication, HTTP, S3 durability, sharding, and replication.
+OBJY DB keeps dynamic objects and their indexes in memory while local WAL and S3 protect durable state. It scales across shards and replicas without exposing that machinery to application code.
 
 [Server guide](SERVER.md) · [REST API](API.md) · [JavaScript client](https://github.com/objy-org/objy-client) · [Benchmarks](BENCHMARKS.md)
 
-## Start in Two Minutes
+## Server and Client
 
-Install the deployment CLI and start a local server:
+**`@objy/server` is the database.** It owns memory, storage, queries, authentication, persistence, sharding, and replication.
+
+**`@objy/client` connects applications to it.** It is a small dependency-free HTTP client for browsers and Node.js. It does not contain or start the database.
+
+You can also use the [REST API](API.md) directly.
+
+## Object Model
+
+```text
+database
+  collection
+    object
+```
+
+- A **database** is an independent namespace.
+- A **collection** holds dynamic objects and a small metadata document.
+- An **object** is a schema-free JSON record identified by `_id`.
+
+Objects in one collection may have completely different fields and value types. Collection metadata enables indexes, columns, vectors, hooks, and compressed-memory tiering without changing returned objects.
+
+## Run the Server
+
+The deployment CLI installs and starts `@objy/server` locally:
 
 ```sh
 npm install --global @objy/cli
 objy deploy local --name dev --size tiny
 ```
 
-The CLI requires Node.js 22 or newer. The server supports Node.js 20 or newer.
+It prints the server URL and initial administrator password. Open the URL for the admin console.
 
-The CLI prints the server URL and initial administrator password. Open the URL for the admin console, or connect from an application:
+```sh
+objy status dev
+objy logs dev
+objy restart dev
+objy stop dev
+```
+
+For native configuration, persistence, and clusters, see the [server guide](SERVER.md).
+
+## Use the Client
 
 ```sh
 npm install @objy/client
@@ -47,83 +78,47 @@ const app = client.database("app");
 await app.createCollection("assets", { indexes: ["status"] });
 
 const assets = app.collection("assets");
-await assets.insertMany([
-  { name: "Laptop", status: "active", score: 9 },
-  { name: "Phone", status: "archived", score: 4 }
-]);
-
-console.log(await assets.find({ status: "active" }));
 ```
 
-The client also exposes replacements, patches, deletes, aggregation, files, vectors, and streaming imports. See the [client guide](https://github.com/objy-org/objy-client) or use the [HTTP API](API.md) directly.
+### Object Operations
 
-Manage the deployment with the same CLI:
+The complete object surface stays on one collection handle:
 
-```sh
-objy status dev
-objy logs dev
-objy restart dev
-objy stop dev
+```js
+// One object
+await assets.insert({ _id: "a1", name: "Laptop", status: "new" });
+await assets.get("a1");
+await assets.replace("a1", { name: "Laptop Pro", status: "active" });
+await assets.patch("a1", { $set: { score: 9 }, $unset: ["status"] });
+await assets.remove("a1");
+
+// Read many
+await assets.find({ score: { $gte: 5 } }, { limit: 20, sortBy: "score" });
+await assets.search({ status: "active" });
+await assets.count({ status: "active" });
+for await (const asset of assets.iterate({ status: "active" })) console.log(asset);
+
+// Write many
+await assets.insertMany([{ _id: "a2" }, { _id: "a3" }]);
+await assets.replaceMany([{ _id: "a2", status: "active" }]);
+await assets.patchMany([{ _id: "a2", $set: { score: 10 } }]);
+await assets.removeMany(["a2", "a3"]);
+
+// Stream insert, replace, patch, or remove sources as NDJSON
+await assets.import(source, { operation: "insert" });
 ```
 
-## One Object Model
+`replace` is a full-object upsert. `patch` supports Mongo-like `$set` and `$unset`. Aggregation, vectors, references, and files use the same collection context and are covered by the [client guide](https://github.com/objy-org/objy-client) and [REST API](API.md).
 
-```text
-database
-  collection
-    metadata
-    object
-    object
-```
+## What It Includes
 
-- A **database** is an independent namespace.
-- A **collection** holds dynamic objects and a small metadata document.
-- An **object** is a dynamic JSON document identified by `_id`.
-- **Metadata** enables structures such as field indexes, RID columns, vectors, and compressed-memory tiering.
+- Dynamic, schema-free objects with complete-object reads.
+- Queries, aggregation, field indexes, RID columns, vectors, and live references.
+- Single, bulk, and streamed NDJSON writes through one storage model.
+- Authentication, permissions, hooks, and an administration console.
+- Local WAL acknowledgements, S3 snapshots and journals, sharding, and replication.
 
-Objects in one collection may have different fields and value types. Reads return complete objects; indexes, columns, dictionaries, and compression remain internal.
-
-## Why OBJY DB
-
-- **In-memory:** data and derived structures stay close to execution for low-latency access.
-- **Object native:** store dynamic objects without a required schema or ORM.
-- **Large-scale operations:** single writes, bounded batches, and streamed NDJSON imports share one consistent model.
-- **One database API:** use the same filters, aggregation, references, vectors, and metadata through HTTP or `@objy/client`.
-- **Durable and distributed:** combine local WAL acknowledgements, S3 snapshots and journals, object sharding, and replication without changing the object model.
-
-See [BENCHMARKS.md](BENCHMARKS.md) for reproducible server, persistence, replication, and resharding measurements.
-
-## Alpha Status
-
-OBJY DB is under active alpha development. Pin exact versions and expect APIs or configuration to evolve before `1.0`.
-
-Current limits:
-
-- No multi-object transactions.
-- Distributed writes converge with whole-object last-write-wins semantics.
-- Shard-count changes use a coordinated restart.
-
-Read the [server guide](SERVER.md) before evaluating durable deployments.
-
-## Develop
-
-```sh
-npm ci
-npm test
-npm run test:ui
-npm run test:scale
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the test matrix and contribution workflow.
-
-## Documentation
-
-- [Server: durability and clustering](SERVER.md)
-- [REST API](API.md)
-- [JavaScript client](https://github.com/objy-org/objy-client)
-- [Benchmarks](BENCHMARKS.md)
-- [Changelog](CHANGELOG.md)
-- [Security](SECURITY.md)
+See [BENCHMARKS.md](BENCHMARKS.md) for reproducible performance results.
 
 ## License
 
