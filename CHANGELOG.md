@@ -30,5 +30,5 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ### Notes
 
-- This is an alpha release. See [README.md](README.md#alpha-status) and [SERVER.md](SERVER.md) before production evaluation.
+- This is an alpha release. See [README.md](README.md) and [API.md](API.md) before production evaluation.
 - Earlier prerelease work is preserved in Git history; no older semantic-version release tags are reconstructed here.

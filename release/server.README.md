@@ -32,6 +32,6 @@ npm install @objy/client
 
 The server package intentionally contains no executable. Object-hook registration remains available from `@objy/server/hooks`.
 
-Read the [server guide](https://github.com/objy-org/objy/blob/main/SERVER.md), [API reference](https://github.com/objy-org/objy/blob/main/API.md), [JavaScript client](https://github.com/objy-org/objy-client), and [measured benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md).
+Read the [OBJY DB guide](https://github.com/objy-org/objy#readme), [API reference](https://github.com/objy-org/objy/blob/main/API.md), [JavaScript client](https://github.com/objy-org/objy-client), and [measured benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md).
 
 Licensed under the MIT License.
