@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>OBJY browser regression tests</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font: 14px system-ui;
+      background: #161819;
+      color: #e5e9e1;
+    }
+    body {
+      margin: 24px;
+    }
+    h1 {
+      font-size: 20px;
+    }
+    button {
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+    #results {
+      line-height: 1.8;
+    }
+    .pass {
+      color: #b7cda2;
+    }
+    .fail {
+      color: #e4ad9c;
+    }
+    iframe {
+      width: 100%;
+      height: 640px;
+      border: 1px solid #303631;
+      margin-top: 16px;
+    }
+  </style>
+  <h1>OBJY browser regression tests</h1>
+  <p>Actual UI and official client, backed by an isolated in-memory server.</p>
+  <button id="run">Run checks</button>
+  <p id="status" role="status">Ready</p>
+  <ol id="results"></ol>
+  <iframe id="app" title="OBJY Studio under test"></iframe>
+  <script type="module" src="/__qa/browser-tests.js"></script>
+</html>

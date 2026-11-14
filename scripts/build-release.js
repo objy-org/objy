@@ -5,6 +5,8 @@ import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { buildSite } from "../ui/scripts/build.mjs";
+
 const run = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const releaseRoot = join(root, ".release");
@@ -12,6 +14,7 @@ const stage = join(releaseRoot, "staging", "server");
 const artifactsRoot = join(releaseRoot, "artifacts");
 
 export async function buildRelease() {
+  await buildSite({ serverOutput: true });
   const sourcePackage = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   await rm(releaseRoot, { recursive: true, force: true });
   await mkdir(stage, { recursive: true });
@@ -19,7 +22,7 @@ export async function buildRelease() {
 
   await cp(join(root, "src"), join(stage, "src"), { recursive: true });
   await mkdir(join(stage, "public"), { recursive: true });
-  await copyFile(join(root, "public", "index.html"), join(stage, "public", "index.html"));
+  await cp(join(root, "public", "ui"), join(stage, "public", "ui"), { recursive: true });
   await copyFile(join(root, "public", "objy-db-logo.png"), join(stage, "public", "objy-db-logo.png"));
   await copyFile(join(root, "API.md"), join(stage, "API.md"));
   await copyFile(join(root, "objydb.config.json"), join(stage, "objydb.config.json"));

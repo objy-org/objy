@@ -55,7 +55,7 @@ export function planRead(criteria = {}, options = {}, adapter) {
   const hasCriteria = hasObjectCriteria(criteria);
   const idPlan = hasCriteria ? planIndexedIds(criteria, adapter) : allIdsPlan();
 
-  if (options.sortBy && adapter.hasOrderedIndex(options.sortBy)) {
+  if (options.sortBy && adapter.hasOrderedIndex(options.sortBy, idPlan, options)) {
     return {
       path: READ_PATH.ORDERED_INDEX,
       idPlan,

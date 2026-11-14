@@ -4,11 +4,11 @@
 .release
 .spread-db
 .npm-cache
-node_modules
+**/node_modules
 test
 test-results
 browser-tests
-scripts
+/scripts
 examples
 coverage
 *.log
@@ -16,3 +16,7 @@ coverage
 !objydb.config.json
 docker-compose.yml
 playwright.config.js
+
+ui/tests
+ui/dist
+public/ui

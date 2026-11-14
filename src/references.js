@@ -1,4 +1,4 @@
-import { compareSortValues, getPathValue } from "./query.js";
+import { objectOrder } from "./order.js";
 
 const MAX_REF_DEPTH = 8;
 
@@ -119,13 +119,8 @@ export function referenceReadPlan(criteria = {}, options = {}) {
 
 export function sortReferencePairs(pairs, options = {}) {
   if (!options.sortBy) return pairs;
-  const direction = options.sort === "desc" ? -1 : 1;
-  return [...pairs].sort((left, right) => {
-    return compareSortValues(
-      getPathValue(left.matchObject, options.sortBy),
-      getPathValue(right.matchObject, options.sortBy),
-    ) * direction;
-  });
+  const compare = objectOrder(options);
+  return [...pairs].sort((left, right) => compare(left.matchObject, right.matchObject));
 }
 
 export function paginateReferencePairs(pairs, options = {}) {

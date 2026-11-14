@@ -2,6 +2,8 @@
 
 Thanks for helping improve OBJY DB. Focused fixes, tests, documentation, and carefully scoped performance work are welcome.
 
+Start with the [engineering goals](AGENTS.md): correctness, predictable latency, sustained bulk throughput, and bounded memory guide design decisions.
+
 ## Before You Start
 
 - Search existing issues before opening a new one.
@@ -18,6 +20,15 @@ OBJY DB requires Node.js 20 or newer.
 npm ci
 npm test
 ```
+
+The database UI lives in `ui/` as an npm workspace in this same Git repository. Root `npm ci` installs its build dependencies; `npm test` builds it and runs both server and UI integration tests. There is no submodule or separate UI repository.
+
+- `npm run build:ui` generates `ui/dist/` for standalone development and `public/ui/` for the server, which serves the UI at `/`, `/ui`, and `/ui/`.
+- `npm run dev:ui` runs the UI alone at `http://127.0.0.1:4317/` with rebuild-on-change. Connect it to a local server allowed by that server's CORS configuration.
+- `npm run test:ui:manual` prints a disposable localhost browser-test page; open it and click **Run checks**. It tests the actual server UI routes and API without modifying an existing database.
+- `npm run test:ui` runs the same browser regression suite in Chromium, Firefox, and WebKit through Playwright. Install those browsers first with `npx playwright install --with-deps`.
+
+Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` for compatibility with the CLI’s server-package extraction.
 
 Add focused tests beside the behavior being changed. The broader suites are selected by impact:
 

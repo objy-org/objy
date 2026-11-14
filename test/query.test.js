@@ -342,7 +342,7 @@ for (const { name, storage } of storageEngines) {
     collection.readForQuery = originalReadForQuery;
     assert.deepEqual(rows.map((row) => row._id), ["a"]);
     assert.equal(safeReads, 1);
-    assert.equal(queryReads, 1);
+    assert.equal(queryReads, 0, "field matching does not hydrate a query object");
 
     rows[0].nested.flag = false;
     rows[0].tags.push("mutated");

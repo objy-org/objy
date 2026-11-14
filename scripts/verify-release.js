@@ -26,13 +26,28 @@ try {
     import { createObjectHookRegistry } from "@objy/server/hooks";
 
     assert.equal(typeof createObjectHookRegistry, "function");
-    const runtime = await startServer({ port: 0, bootstrapLogger: () => {} });
+    const runtime = await startServer({ port: { port: 0, host: "127.0.0.1" }, auth: false, environment: {}, bootstrapLogger: () => {} });
     try {
       const health = await fetch(\`http://127.0.0.1:\${runtime.port}/health\`);
       assert.equal(health.status, 200);
       const client = await fetch(\`http://127.0.0.1:\${runtime.port}/client.js\`);
       assert.equal(client.status, 404);
+      const base = "http://127.0.0.1:" + runtime.port;
+      for (const route of ["/", "/ui", "/ui/"]) {
+        const ui = await fetch(base + route);
+        assert.equal(ui.status, 200);
+        const html = await ui.text();
+        assert.match(html, /OBJY/);
+        assert.ok(html.includes("components/data-explorer"));
+        for (const path of ["/app.js", "/styles.css", "/theme.css", "/components/data-explorer.js", "/licenses/objy-client.txt", "/pdf/pdf.worker.js", "/pdf/wasm/openjpeg.wasm", "/licenses/pdfjs.txt"]) {
+          const asset = await fetch(base + path);
+          assert.equal(asset.status, 200, path);
+          assert.ok((await asset.arrayBuffer()).byteLength > 0);
+        }
+      }
     } finally {
+      await runtime.replication.stop();
+      runtime.server.closeAllConnections();
       await new Promise((resolve) => runtime.server.close(resolve));
       runtime.node.db.dispose();
     }

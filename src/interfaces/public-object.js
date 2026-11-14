@@ -22,6 +22,7 @@ import {
 import { DEFAULT_IMPORT_CONFIG } from "../config.js";
 import {
   firstQueryInteger,
+  MAX_QUERY_PAGE_SIZE,
   matchesQuery,
   parseQuerySort,
   queryPageOffset,
@@ -44,8 +45,6 @@ import {
 import { objectPath, ok } from "../shard-router.js";
 import { isValidVector } from "../vector.js";
 
-const DEFAULT_PUBLIC_QUERY_LIMIT = 250;
-const MAX_PUBLIC_QUERY_LIMIT = 250;
 const READ_ONLY_DATABASES = new Set([GLOBAL_DATABASE]);
 const NDJSON_MINIMAL_REQUIRED = "NDJSON write streams require Prefer: return=minimal";
 
@@ -353,12 +352,14 @@ export function createPublicObjectInterface() {
                 { method: "GET", query: refDepthQuery(0), retryStatuses: [404, 409, 503] },
               );
               if (!ok(remote.status)) return { status: remote.status, body: remote.body, headers: remote.headers };
+              const physical = stripReferenceObjects(remote.body);
+              assertReadAllowed(req, physical);
               const object = await expandObjectForRead({
                 req,
                 node,
                 routing,
                 database: req.params.database,
-                object: stripReferenceObjects(remote.body),
+                object: physical,
                 refDepth,
               });
               return { status: 200, body: object };
@@ -380,7 +381,6 @@ export function createPublicObjectInterface() {
             };
           });
           if (result.status !== 200) return json(res, result.status, result.body, result.headers || {});
-          assertReadAllowed(req, result.body);
           json(res, 200, auth.redactObject(req.params.database, req.params.collection, result.body));
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
@@ -819,14 +819,14 @@ function createHookLookup(req, node, routing, auth) {
       refDepth: 0,
     });
     const readable = (result.objects || []).filter((object) => canRead(permissionUser(req), object, collection));
-    return auth.redactObjects(database, collection, readable);
+    return auth.redactObjects(database, collection, node.materializeReads(database, collection, readable));
   };
   return Object.freeze({
     find,
     async get(collection, id) {
       if (typeof collection !== "string" || !collection) throw httpError(400, "lookup collection is required");
       const object = await resolveReferencedObject({
-        req, node, routing, database, collection, id: String(id),
+        req, node, routing, database, collection, id: String(id), effective: true,
       });
       return object ? auth.redactObject(database, collection, object) : null;
     },
@@ -835,8 +835,7 @@ function createHookLookup(req, node, routing, auth) {
 
 function publicQueryResult(req, auth, database, collection, result) {
   if (!result.objectRows) return result.body;
-  const readable = (result.body || []).filter((object) => canRead(permissionUser(req), object, collection));
-  return auth.redactObjects(database, collection, readable);
+  return auth.redactObjects(database, collection, result.body || []);
 }
 
 function validateAndNormalizeObjects(files, database, collection, objects) {
@@ -1759,57 +1758,46 @@ async function findReferenceAwarePairs({ req, node, routing, database, collectio
 
 async function expandObjectForRead({ req, node, routing, database, object, refDepth }) {
   if (!object) return object;
+  const collection = req.params.collection;
+  const effective = routing.isForwarded(req)
+    ? object
+    : node.materializeRead(database, collection, object);
   const depth = normalizeRefDepth(refDepth, 1);
-  const prepared = prepareReferenceValue(object);
+  const prepared = prepareReferenceValue(effective);
   if (depth <= 0 || !prepared.hasReference) return prepared.value;
   return expandReferences(prepared.value, {
     database,
     depth,
-    getObject: createReferenceResolver({ req, node, routing }),
+    getObject: createReferenceResolver({ req, node, routing, effective: !routing.isForwarded(req) }),
   });
 }
 
 async function expandObjectsForRead({ req, node, routing, database, collection, objects, refDepth }) {
   const out = [];
   for (const object of objects || []) {
-    let row = object;
-    if (collection && object?._id !== undefined) {
-      const shard = routing.shardForObject(database, collection, object._id);
-      if (routing.ownsShard(shard)) {
-        row = mergeResponseOnlyFields(node.get(database, collection, object._id, { refDepth: 0 }) || object, object);
-      }
-    }
-    out.push(await expandObjectForRead({ req, node, routing, database, object: row, refDepth }));
+    if (collection && !canRead(permissionUser(req), object, collection)) continue;
+    out.push(await expandObjectForRead({ req, node, routing, database, object, refDepth }));
   }
   return out;
 }
 
-function mergeResponseOnlyFields(base = {}, source = {}) {
-  const out = { ...(base || {}) };
-  for (const [key, value] of Object.entries(source || {})) {
-    if (key === "_id" || key === "_vec") continue;
-    if (key.startsWith("_") && out[key] === undefined) out[key] = value;
-  }
-  return out;
-}
-
-function createReferenceResolver({ req, node, routing }) {
+function createReferenceResolver({ req, node, routing, effective = false }) {
   const cache = new Map();
   return async (database, collection, id) => {
     const key = `${database}\0${collection}\0${id}`;
     if (!cache.has(key)) {
-      cache.set(key, resolveReferencedObject({ req, node, routing, database, collection, id }));
+      cache.set(key, resolveReferencedObject({ req, node, routing, database, collection, id, effective }));
     }
     return cache.get(key);
   };
 }
 
-async function resolveReferencedObject({ req, node, routing, database, collection, id }) {
+async function resolveReferencedObject({ req, node, routing, database, collection, id, effective = false }) {
   const shard = routing.shardForObject(database, collection, id);
   if (routing.ownsShard(shard)) {
     const object = node.get(database, collection, id, { refDepth: 0 }) || null;
     if (object) assertReadAllowed(req, object, collection);
-    return object;
+    return object && effective ? node.materializeRead(database, collection, object) : object;
   }
 
   const remote = await routing.forwardToObject(req, database, collection, id, objectPath(database, collection, id), {
@@ -1819,7 +1807,9 @@ async function resolveReferencedObject({ req, node, routing, database, collectio
   });
   if (remote.status === 404) return null;
   if (!ok(remote.status)) throw remoteHttpError(remote, `reference lookup failed for ${database}/${collection}/${id}`);
-  return remote.body ? stripReferenceObjects(remote.body) : null;
+  const object = remote.body ? stripReferenceObjects(remote.body) : null;
+  if (object) assertReadAllowed(req, object, collection);
+  return object && effective ? node.materializeRead(database, collection, object) : object;
 }
 
 function permissionUser(req) {
@@ -2354,7 +2344,7 @@ function queryOptions(req, controls = {}) {
     queryPageOffset(controls.$page, limit),
   );
   return {
-    sortBy: req.query.get("sortBy") || parsedSort.sortBy || undefined,
+    sortBy: req.query.get("sortBy") || parsedSort.sortBy || (controls.$aggregate === undefined && controls.$vector === undefined ? "_id" : undefined),
     sort: req.query.get("sort") || parsedSort.sort || undefined,
     limit,
     offset,
@@ -2395,8 +2385,8 @@ function positiveInt(value, fallback) {
 }
 
 function publicQueryLimit(value) {
-  const limit = value === undefined ? DEFAULT_PUBLIC_QUERY_LIMIT : value;
-  return Math.min(limit, MAX_PUBLIC_QUERY_LIMIT);
+  const limit = value === undefined ? MAX_QUERY_PAGE_SIZE : value;
+  return Math.min(limit, MAX_QUERY_PAGE_SIZE);
 }
 
 function validatePlainObjects(items, { requireId = false } = {}) {

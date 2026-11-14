@@ -239,6 +239,7 @@ These built-in keys change runtime behavior:
 | `indexes` | Field indexes for equality filters, candidate narrowing, grouped values, and sorting. |
 | `columns` | RID-addressed typed values for compact storage and numeric aggregation. |
 | `tiering` | Compressed-memory offloading for selected cold object fields. |
+| `structure` | Conditional virtual values applied only to returned objects. |
 | `hooks` | Names and activation settings for server-registered object middleware. |
 
 ```json
@@ -250,6 +251,12 @@ These built-in keys change runtime behavior:
     "keep": ["name", "status", "tenantId"],
     "minBytes": 4096
   },
+  "structure": [
+    {
+      "condition": { "type": "asset" },
+      "apply": { "status": "managed" }
+    }
+  ],
   "hooks": {
     "enabled": true,
     "use": ["timestamps", "audit"]
@@ -260,6 +267,10 @@ These built-in keys change runtime behavior:
 Field indexes accelerate supported filter and sort paths. Columns use typed arrays for numbers and booleans, dictionary codes for strings, and an overflow map for unsupported values. They support `$sum`, `$avg`, `$min`, `$max`, `$count`, and grouped aggregation without changing hydrated API objects.
 
 Tiering accepts either `keep` or `offload`, never both. For example, `"offload": ["history", "rawPayload"]` compresses only those paths. Indexed and column fields remain hot automatically. Queries over non-indexed compressed fields remain correct but require scan-time hydration.
+
+Structure conditions inspect physical object fields. Matching entries are applied in order, later virtual values take precedence, and explicit physical values always win. `condition: {}` applies to every object. Identity, file, vector, and authentication fields cannot be virtual.
+
+Virtual structure values are returned by object reads but are not currently considered by filters, sorting, paging membership, aggregation, indexes, or columns. They are never written to the WAL, replication stream, journals, or snapshots. Unsetting a physical value makes its virtual fallback visible again. Structure changes take effect on the next read without rewriting objects or rebuilding derived state.
 
 Hooks store configuration only; executable code is registered on the server. `use` enables hooks for their registered operations, operation-specific arrays may target `create`, `read`, `update`, or `delete`, and `enabled: false` bypasses the chain.
 
@@ -296,6 +307,12 @@ Content-Type: application/json
   "name": "{collection}",
   "indexes": ["status", "tenantId"],
   "columns": ["score"],
+  "structure": [
+    {
+      "condition": { "type": "asset" },
+      "apply": { "status": "managed" }
+    }
+  ],
   "hooks": {
     "enabled": true,
     "use": ["timestamps", "audit"]
@@ -961,6 +978,10 @@ HTTP/1.1 204 No Content
 ## Query
 
 Query responses are plain arrays. Use GET for small URL-safe queries and POST `/search` for larger payloads. Normal object queries default to `250` rows and cap each page at `250`; use `offset` / `$skip` or `$page` to read more.
+
+Object pages default to `_id` ascending. An explicit sort uses the selected field and breaks ties by `_id` ascending. Ascending value order is numbers, strings, booleans, arrays, objects, `null`, then missing fields; strings use case-sensitive UTF-16 order, independent of server locale. Arrays compare element by element, and objects compare their sorted property names and values. Descending sorting reverses the field order while retaining the ascending ID tie-breaker.
+
+Indexes and scans use the same ordering, including across shards. Offset pages read live data: concurrent changes or replica lag can shift page boundaries. Pagination does not retain a snapshot.
 
 ### GET Query
 

@@ -11,9 +11,12 @@ import {
   mergeAggregatePartials,
 } from "./aggregate.js";
 import { HNSWIndex } from "./hnsw.js";
+import { IdOrder } from "./id-order.js";
+import { compareOrderKeys, selectOrdered } from "./order.js";
 import { normalizeObjectHooksMeta } from "./object-hooks.js";
-import { compareSortValues, getPathValue, matchesQuery, stableKey, stripQueryControls } from "./query.js";
+import { compareSortValues, getPathValue, matchesConstraint, matchesQuery, stableKey, stripQueryControls } from "./query.js";
 import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from "./query-planner.js";
+import { compileStructure, materializeStructure, normalizeStructure } from "./structure.js";
 import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
 
 const COLUMN_BUILD_BATCH_SIZE = 4096;
@@ -38,6 +41,7 @@ class Collection {
     this.vectorBuilds = new Set();
     this.meta = new Map();
     this.idByRid = [];
+    this.idOrder = null;
     this.indexes = new Map();
     this.fieldBuilds = new Map();
     this.columns = new Map();
@@ -52,6 +56,7 @@ class Collection {
     this.compressedCold = [];
     this.compressionTotals = emptyCompressionTotals();
     this.collectionMeta = normalizeCollectionMeta();
+    this.structurePlan = null;
     this.liveCount = 0;
   }
 
@@ -100,6 +105,7 @@ class Collection {
       if (this._putObject(row.id, row.value, row.ts, row.shard, writeOptions, indexDeltas)) applied.push(row);
     }
     this._applyIndexDeltas(indexDeltas);
+    this.idOrder?.request();
     return applied;
   }
 
@@ -279,6 +285,28 @@ class Collection {
     this._writeBaseValue(id, rid, baseValue, { trusted: true });
   }
 
+  _stripBaseValueForColumns(rid, paths) {
+    if (!paths.length) return;
+    const id = this._idForRid(rid);
+    const base = this.store.readForQuery?.(id) || this.store.read(id) || {};
+    const next = this._baseValueForStorage(base, paths);
+    // Hot scalars and arrays replace cold values; plain objects can have cold fragments.
+    const mayBeCold = this.compressedCold[rid] && paths.some((path) => {
+      if (this.columns.get(path)?.coldStripped) return false;
+      const value = getPathValue(base, path);
+      return value === undefined || isPlainObject(value);
+    });
+    if (mayBeCold) {
+      const cold = this._hydrateCompressedCold({}, rid);
+      const remaining = this._baseValueForStorage(cold, paths);
+      if (remaining !== cold) {
+        this._writeBaseValue(id, rid, mergePlainObjects(remaining, next), { trusted: true });
+        return;
+      }
+    }
+    if (next !== base) this.store.rebuild(id, Object.entries(next), { trusted: true });
+  }
+
   deleteObject(id, ts, shard = null) {
     return this.deleteObjects([{ id, ts, shard }]).length === 1;
   }
@@ -344,6 +372,15 @@ class Collection {
     return id === undefined ? undefined : this.readForQuery(id);
   }
 
+  materializeRead(object) {
+    return materializeStructure(object, this.structurePlan);
+  }
+
+  materializeReads(objects) {
+    for (const object of objects || []) this.materializeRead(object);
+    return objects || [];
+  }
+
   dispose() {
     this.disposed = true;
     this.derivedStateScheduler.cancel(this.derivedStateOwner);
@@ -357,6 +394,8 @@ class Collection {
     this.clearVectorIndexes();
     this.vectors.clear();
     this.meta.clear();
+    this.idOrder?.dispose();
+    this.idOrder = null;
     this.idByRid = [];
     this.compressedCold = [];
     this.compressionTotals = emptyCompressionTotals();
@@ -364,6 +403,7 @@ class Collection {
     this.unshardedLiveCount = 0;
     this.liveCount = 0;
     this.collectionMeta = normalizeCollectionMeta();
+    this.structurePlan = null;
     this.store.clear?.();
   }
 
@@ -381,49 +421,7 @@ class Collection {
   }
 
   find(query = {}, options = {}) {
-    const criteria = stripQueryControls(query);
-    const offset = options.offset || 0;
-    const limit = options.limit ?? Infinity;
-    const includeId = typeof options.includeId === "function" ? options.includeId : null;
-    const plan = this._planRead(criteria, options);
-
-    if (!options.sortBy) {
-      if (limit <= 0) return [];
-      const results = [];
-      let skipped = 0;
-      const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
-      for (const rid of this._ridsForPlan(plan.idPlan, criteria)) {
-        const id = includeId ? this._idForRid(rid) : null;
-        if (includeId && !includeId(id)) continue;
-        if (verifyScan) {
-          const obj = this.readRidForQuery(rid);
-          if (!obj || !matchesQuery(obj, criteria)) continue;
-        }
-        if (skipped < offset) {
-          skipped++;
-          continue;
-        }
-        const safe = this.readRid(rid);
-        if (safe) results.push(safe);
-        if (results.length >= limit) break;
-      }
-      return results;
-    }
-
-    const indexed = plan.path === READ_PATH.ORDERED_INDEX ? this._findWithOrderedIndex(criteria, options, plan) : null;
-    if (indexed) return indexed;
-
-    const matched = [];
-    for (const rid of this._ridsForPlan(plan.idPlan, criteria)) {
-      const id = includeId ? this._idForRid(rid) : null;
-      if (includeId && !includeId(id)) continue;
-      const obj = this.readRidForQuery(rid);
-      if (obj && matchesQuery(obj, criteria)) matched.push(obj);
-    }
-    return sortObjects(matched, options)
-      .slice(offset, offset + limit)
-      .map((obj) => this.read(obj._id))
-      .filter(Boolean);
+    return this._selectRids(stripQueryControls(query), options).map((rid) => this.readRid(rid));
   }
 
   all(options = {}) {
@@ -431,44 +429,125 @@ class Collection {
   }
 
   findForQuery(query = {}, options = {}) {
-    const criteria = stripQueryControls(query);
+    return this._selectRids(stripQueryControls(query), options).map((rid) => this.readRidForQuery(rid));
+  }
+
+  _selectRids(criteria = {}, options = {}) {
     const offset = options.offset || 0;
     const limit = options.limit ?? Infinity;
-    const includeId = typeof options.includeId === "function" ? options.includeId : null;
-    const includeIds = options.includeIds instanceof Set ? options.includeIds : null;
+    if (limit <= 0) return [];
     const plan = this._planRead(criteria, options);
+    const readValue = this._fieldValueReader();
+    const proven = isEmptyCriteria(criteria) || Boolean(plan.idPlan?.exact && !plan.idPlan.verify && plan.path !== READ_PATH.SCAN);
+    const wholeObject = queryNeedsWholeObject(criteria);
+    const includeIds = options.includeIds instanceof Set ? options.includeIds : null;
+    const includeId = typeof options.includeId === "function" ? options.includeId : null;
+    const accepts = (rid) => {
+      const id = this._idForRid(rid);
+      const meta = this.meta.get(id);
+      if (!meta?.ts || meta.deleted) return false;
+      if (includeIds && !includeIds.has(rid)) return false;
+      if (plan.idPlan?.scopeIds && !plan.idPlan.scopeIds.has(rid)) return false;
+      if (includeId && !includeId(id)) return false;
+      return proven || (wholeObject
+        ? matchesQuery(this.readRidForQuery(rid), criteria)
+        : matchesQuery(rid, criteria, readValue));
+    };
+    const candidates = function* (rids) {
+      for (const rid of rids) if (accepts(rid)) yield rid;
+    };
 
-    if (!options.sortBy) {
-      if (limit <= 0) return [];
-      const results = [];
-      let skipped = 0;
-      const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
-      for (const rid of this._ridsForPlan(plan.idPlan, criteria)) {
-        if (includeIds && !includeIds.has(rid)) continue;
-        const id = includeId ? this._idForRid(rid) : null;
-        if (includeId && !includeId(id)) continue;
-        const object = this.readRidForQuery(rid);
-        if (!object) continue;
-        if (verifyScan && !matchesQuery(object, criteria)) continue;
-        if (skipped < offset) {
-          skipped++;
-          continue;
+    if (options.sortBy === "_id" && this._canReadIdOrder(plan.idPlan, options)) {
+      this.idOrder ||= new IdOrder(this.idByRid, this.derivedStateScheduler, this.derivedStateOwner, this.name);
+      const ids = plan.idPlan?.ids;
+      return this.idOrder.page(ids ? (rid) => ids.has(rid) && accepts(rid) : accepts, options);
+    }
+
+    if (plan.path === READ_PATH.ORDERED_INDEX) {
+      const index = this.indexes.get(String(options.sortBy));
+      if (index) {
+        const result = [];
+        let skip = offset;
+        const compareIds = (left, right) => compareSortValues(this._idForRid(left), this._idForRid(right));
+        for (const bucket of index.orderedGroups(options.sort === "desc")) {
+          let matched = 0;
+          const rids = (function* () {
+            for (const rid of bucket.ids) {
+              if (plan.idPlan?.ids && !plan.idPlan.ids.has(rid)) continue;
+              if (accepts(rid)) { matched++; yield rid; }
+            }
+          })();
+          const selected = selectOrdered(rids, compareIds, { offset: skip, limit: limit - result.length });
+          skip = Math.max(0, skip - matched);
+          for (const rid of selected) result.push(rid);
+          if (result.length >= limit) break;
         }
-        results.push(object);
-        if (results.length >= limit) break;
+        return result;
       }
-      return results;
     }
 
-    const matched = [];
-    for (const rid of this._ridsForPlan(plan.idPlan, criteria)) {
-      if (includeIds && !includeIds.has(rid)) continue;
-      const id = includeId ? this._idForRid(rid) : null;
-      if (includeId && !includeId(id)) continue;
-      const object = this.readRidForQuery(rid);
-      if (object && matchesQuery(object, criteria)) matched.push(object);
+    const rids = candidates(plan.idPlan?.ids ?? this._liveRidIterator());
+    if (!options.sortBy) {
+      const result = [];
+      let skipped = 0;
+      for (const rid of rids) {
+        if (skipped++ < offset) continue;
+        result.push(rid);
+        if (result.length >= limit) break;
+      }
+      return result;
     }
-    return sortObjects(matched, options).slice(offset, offset + limit);
+
+    const direction = options.sort === "desc" ? -1 : 1;
+    const compare = (left, right) => compareOrderKeys(left.value, left.id, right.value, right.id, direction);
+    const keys = (function* (collection) {
+      for (const rid of rids) yield { rid, id: collection._idForRid(rid), value: readValue(rid, options.sortBy) };
+    })(this);
+    return selectOrdered(keys, compare, { offset, limit }).map(({ rid }) => rid);
+  }
+
+  _canReadIdOrder(idPlan, options) {
+    if (!idPlan?.ids) return true;
+    if (!this.idOrder?.complete || !idPlan.ids.size) return false;
+    const wanted = (options.offset || 0) + (options.limit ?? Infinity);
+    // Compare the expected ordered prefix with scanning the candidate set.
+    return Math.min(this.idByRid.length, wanted * this.idByRid.length / idPlan.ids.size) < idPlan.ids.size;
+  }
+
+  _fieldValueReader({ indexes = true } = {}) {
+    let currentRid, id, base, full;
+    const relatedColumns = new Map();
+    const readValue = (rid, path) => {
+      if (rid !== currentRid) {
+        currentRid = rid;
+        id = this._idForRid(rid);
+        base = full = undefined;
+      }
+      if (path === "_id") return id;
+      const dirty = this.indexDirtyRids.has(rid);
+      if (!dirty) {
+        const index = indexes && this.indexes.get(path);
+        if (index) return index.valueForRid(rid);
+        const column = this.columns.get(path);
+        if (column && (column.ready || column.hasValue(rid) || column.pending?.has(rid))) return column.valueFor(rid);
+      }
+      base ??= this.store.readForQuery?.(id) || this.store.read(id) || {};
+      if (!relatedColumns.has(path)) {
+        relatedColumns.set(path, [...this.columns.keys()].filter((column) => column !== path && pathsOverlap(path, column)));
+      }
+      const needsColumns = !dirty && relatedColumns.get(path).some((column) => this.columns.get(column)?.hasValue(rid));
+      const value = getPathValue(base, path);
+      // A present scalar or array in the hot body overrides cold data. Missing values and
+      // containers may require merging cold fields or nested column values.
+      if (!needsColumns && (!this.compressedCold[rid] || (value !== undefined && !isPlainObject(value)))) return value;
+      full ??= this._hydrateStoredValue(base, rid, id);
+      return getPathValue(full, path);
+    };
+    readValue.reset = () => {
+      currentRid = base = full = undefined;
+      relatedColumns.clear();
+    };
+    return readValue;
   }
 
   count(query = {}, options = {}) {
@@ -562,6 +641,7 @@ class Collection {
     const next = normalizeCollectionMeta(meta);
     if (next.tiering) assertCompressionAdapter(this.compression);
     this.collectionMeta = next;
+    this.structurePlan = compileStructure(next.structure);
     if (options.deferIndexes) this._deferMetaIndexes();
     else {
       this._applyMetaIndexes();
@@ -629,6 +709,7 @@ class Collection {
     this.indexes = fieldIndexes;
     this.fieldBuilds.clear();
     this.columns = columnData;
+    for (const column of columnData.values()) column.coldStripped = true;
     this.columnBuilds.clear();
     this.indexDirtyRids.clear();
     this.indexDirtyBuild = null;
@@ -945,7 +1026,10 @@ class Collection {
     return {
       idsForCriteria: (criteria) => this._ridsForCriteria(criteria),
       partialIdsForCriteria: (criteria) => this._partialRidsForCriteria(criteria),
-      hasOrderedIndex: (path) => !this._hasDirtyIndexes() && this.indexes.has(String(path)),
+      hasOrderedIndex: (path, idPlan, options) => Boolean(
+        (path === "_id" && this.idOrder?.complete && this._canReadIdOrder(idPlan, options)) ||
+        (!this._hasDirtyIndexes() && this.indexes.has(String(path))),
+      ),
       hasGroupIndex: (path) => !this._hasDirtyIndexes() && this.indexes.has(String(path)),
       hasGroupForwardIndex: (path) => !this._hasDirtyIndexes() && this.indexes.get(String(path))?.canReadValuesById === true,
       fieldIndex: (path) => this.indexes.get(String(path)) || null,
@@ -1099,9 +1183,9 @@ class Collection {
     for (const rid of indexed) {
       if (!this.indexDirtyRids.has(rid)) out.add(rid);
     }
+    const readValue = this._fieldValueReader({ indexes: false });
     for (const rid of this.indexDirtyRids) {
-      const object = this.readRidForQuery(rid);
-      if (object && matchesQuery(object, { [path]: expected })) out.add(rid);
+      if (this.has(this._idForRid(rid)) && matchesConstraint(readValue(rid, path), expected, path)) out.add(rid);
     }
     return out;
   }
@@ -1235,6 +1319,7 @@ class Collection {
 
   async _runDirtyIndexCatchup(job) {
     if (this.disposed) return;
+    const readValue = this._fieldValueReader({ indexes: false });
     while (this.indexDirtyRids.size) {
       if (this.disposed) return;
       const batch = this.indexDirtyRids.take(INDEX_DIRTY_BUILD_BATCH_SIZE);
@@ -1243,26 +1328,30 @@ class Collection {
         break;
       }
 
+      const columnPaths = [...this.columns.keys()].filter((path) => this.columns.get(path).ready);
       for (const rid of batch) {
-        this._refreshReadyIndexesForRid(rid);
+        this._refreshReadyIndexesForRid(rid, readValue, columnPaths);
         this.indexDirtyRids.delete(rid);
       }
 
-      if (this.indexDirtyRids.size) await job.checkpoint(INDEX_DIRTY_BUILD_BATCH_SIZE);
+      if (this.indexDirtyRids.size) {
+        await job.checkpoint(INDEX_DIRTY_BUILD_BATCH_SIZE);
+        readValue.reset();
+      }
     }
   }
 
-  _refreshReadyIndexesForRid(rid) {
-    const object = this.readRidForQuery(rid);
+  _refreshReadyIndexesForRid(rid, readValue, columnPaths) {
+    const live = this.has(this._idForRid(rid));
     for (const index of this.indexes.values()) {
       index.removeRid(rid);
-      if (object) index.addValue(rid, getPathValue(object, index.path));
+      if (live) index.addValue(rid, readValue(rid, index.path));
     }
     for (const column of this.columns.values()) {
-      if (object) column.updateScalarState(rid, columnScalarState(getPathValue(object, column.path)));
+      if (live) column.updateScalarState(rid, columnScalarState(readValue(rid, column.path)));
       else column.remove(rid);
     }
-    if (object) this._rewriteBaseValueForColumns(rid, object);
+    if (live) this._stripBaseValueForColumns(rid, columnPaths);
   }
 
   _addShardRid(rid, shard) {
@@ -1314,9 +1403,9 @@ class Collection {
   _createIndexFromMeta(path) {
     this.fieldBuilds.delete(path);
     const index = new FieldIndex(path);
+    const readValue = this._fieldValueReader({ indexes: false });
     for (const rid of this._liveRidIterator()) {
-      const object = this.readRidForQuery(rid);
-      if (object) index.addValue(rid, getPathValue(object, path));
+      index.addValue(rid, readValue(rid, path));
     }
     this.indexes.set(path, index);
   }
@@ -1368,20 +1457,21 @@ class Collection {
   async _runFieldIndexBuild(targets, job) {
     if (this.disposed) return;
     const built = new Map(targets.map((target) => [target.path, new FieldIndex(target.path)]));
+    const readValue = this._fieldValueReader({ indexes: false });
     try {
       let scanned = 0;
       for (const rid of this._liveRidIterator()) {
         if (this.disposed) return;
-        const object = this.readRidForQuery(rid);
-        if (object) {
-          for (const target of targets) {
-            if (this.fieldBuilds.get(target.path) === target) {
-              built.get(target.path)?.addValue(rid, getPathValue(object, target.path));
-            }
+        for (const target of targets) {
+          if (this.fieldBuilds.get(target.path) === target) {
+            built.get(target.path)?.addValue(rid, readValue(rid, target.path));
           }
         }
         scanned++;
-        if (scanned % FIELD_BUILD_BATCH_SIZE === 0) await job.checkpoint(scanned);
+        if (scanned % FIELD_BUILD_BATCH_SIZE === 0) {
+          await job.checkpoint(scanned);
+          readValue.reset();
+        }
       }
 
       for (const target of targets) {
@@ -1436,6 +1526,7 @@ class Collection {
       if (this.liveCount === 0) {
         const buildId = column.startBuild();
         column.install(new TypedRidColumn(path), buildId);
+        column.coldStripped = true;
       }
       else if (created || rebuild || column.status === "error") toBuild.push(path);
     }
@@ -1450,6 +1541,7 @@ class Collection {
       for (const column of this.columns.values()) {
         const buildId = column.startBuild();
         column.install(new TypedRidColumn(column.path), buildId);
+        column.coldStripped = true;
       }
       return;
     }
@@ -1483,20 +1575,19 @@ class Collection {
     if (this.disposed) return;
     const paths = targets.map((target) => target.path);
     const built = new Map(paths.map((path) => [path, new TypedRidColumn(path)]));
+    const readValue = this._fieldValueReader({ indexes: false });
     try {
       let scanned = 0;
       for (const rid of this._liveRidIterator()) {
         if (this.disposed) return;
-        const object = this.readRidForQuery(rid);
-        if (object) {
-          for (const path of paths) {
-            const column = built.get(path);
-            if (!column) continue;
-            column.updateScalarState(rid, columnScalarState(getPathValue(object, path)));
-          }
+        for (const path of paths) {
+          built.get(path).updateScalarState(rid, columnScalarState(readValue(rid, path)));
         }
         scanned++;
-        if (scanned % COLUMN_BUILD_BATCH_SIZE === 0) await job.checkpoint(scanned);
+        if (scanned % COLUMN_BUILD_BATCH_SIZE === 0) {
+          await job.checkpoint(scanned);
+          readValue.reset();
+        }
       }
 
       const installedPaths = [];
@@ -1517,13 +1608,19 @@ class Collection {
   async _stripBaseValuesForColumns(paths = [], job = null) {
     if (!paths.length) return;
     let scanned = 0;
+    const targets = new Map(paths.map((path) => [path, this.columns.get(path)]));
+    const activePaths = () => paths.filter((path) => this.columns.get(path)?.ready && this.columns.get(path) === targets.get(path));
+    let active = activePaths();
     for (const rid of this._liveRidIterator()) {
       if (this.disposed) return;
-      const object = this.readRidForQuery(rid);
-      if (object) this._rewriteBaseValueForColumns(rid, object, paths);
+      if (!this.indexDirtyRids.has(rid)) this._stripBaseValueForColumns(rid, active);
       scanned++;
-      if (scanned % COLUMN_BUILD_BATCH_SIZE === 0 && job) await job.checkpoint(scanned);
+      if (scanned % COLUMN_BUILD_BATCH_SIZE === 0 && job) {
+        await job.checkpoint(scanned);
+        active = activePaths();
+      }
     }
+    for (const path of activePaths()) this.columns.get(path).coldStripped = true;
   }
 
   _executeAggregatePlan(plan, criteria, spec) {
@@ -1615,22 +1712,6 @@ class Collection {
       plan.columns,
     );
     return finishGroupedColumnAggregate(grouped, spec, plan.normalized);
-  }
-
-  _findWithOrderedIndex(criteria, options, plan = this._planRead(criteria, options)) {
-    const index = this.indexes.get(String(options.sortBy));
-    if (!index) return null;
-    const filterProven = Boolean(plan.idPlan && !plan.idPlan.verify && plan.path !== READ_PATH.SCAN);
-    const includeId = typeof options.includeId === "function" ? options.includeId : null;
-    return index.find({
-      candidateIds: plan.idPlan?.ids || null,
-      includeRid: includeId ? (rid) => includeId(this._idForRid(rid)) : null,
-      desc: options.sort === "desc",
-      offset: options.offset || 0,
-      limit: options.limit ?? Infinity,
-      read: (rid) => this.readRidForQuery(rid),
-      matches: (object) => filterProven ? true : matchesQuery(object, criteria),
-    }).map((object) => this.read(object._id)).filter(Boolean);
   }
 
   _prepareStoredValue(value = {}) {
@@ -1940,26 +2021,7 @@ class FieldIndex {
     }
   }
 
-  find({ candidateIds, includeRid, desc = false, offset = 0, limit = Infinity, read, matches }) {
-    if (limit <= 0) return [];
-    const results = [];
-    let skipped = 0;
-    for (const rid of this.orderedIds(desc)) {
-      if (candidateIds && !candidateIds.has(rid)) continue;
-      if (includeRid && !includeRid(rid)) continue;
-      const object = read(rid);
-      if (!object || !matches(object)) continue;
-      if (skipped < offset) {
-        skipped++;
-        continue;
-      }
-      results.push(object);
-      if (results.length >= limit) break;
-    }
-    return results;
-  }
-
-  *orderedIds(desc = false) {
+  *orderedGroups(desc = false) {
     const keys = this._sortedOrderedKeys();
     const start = desc ? keys.length - 1 : 0;
     const end = desc ? -1 : keys.length;
@@ -1967,7 +2029,7 @@ class FieldIndex {
     for (let i = start; i !== end; i += step) {
       const bucket = this.ordered.get(keys[i]);
       if (!bucket) continue;
-      yield* bucket.ids;
+      yield bucket;
     }
   }
 
@@ -2007,10 +2069,7 @@ class FieldIndex {
   _sortedOrderedKeys() {
     if (!this.sortedOrderedKeys) {
       this.sortedOrderedKeys = [...this.ordered.entries()]
-        .sort((left, right) => {
-          const compared = compareSortValues(left[1].value, right[1].value);
-          return compared || String(left[0]).localeCompare(String(right[0]));
-        })
+        .sort((left, right) => compareSortValues(left[1].value, right[1].value))
         .map(([key]) => key);
     }
     return this.sortedOrderedKeys;
@@ -2035,6 +2094,8 @@ class TypedRidColumn {
     this.status = "ready";
     this.error = null;
     this.buildId = 0;
+    // Writes force this path hot; once migrated it stays absent from cold blobs.
+    this.coldStripped = false;
     this.numberSum = 0;
     this.numberCount = 0;
     this.scalarCount = 0;
@@ -2095,6 +2156,7 @@ class TypedRidColumn {
 
   fail(error, buildId) {
     if (buildId !== this.buildId) return;
+    for (const [rid, state] of this.pending || []) this._applyState(rid, state);
     this.status = "error";
     this.error = error?.message || String(error);
     this.pending = null;
@@ -2125,10 +2187,14 @@ class TypedRidColumn {
   }
 
   hasValue(rid) {
+    const pending = this.pending?.get(rid);
+    if (pending) return pending.kind !== "absent";
     return this.hasScalar(rid) || this.hasNonScalar(rid) || this.nulls[rid] === 1;
   }
 
   valueFor(rid) {
+    const pending = this.pending?.get(rid);
+    if (pending) return pending.kind === "nonScalar" ? clone(pending.value) : pending.value;
     if (this.numberPresent[rid]) return this.numberValues[rid];
     if (this.booleanPresent[rid]) return this.booleanValues[rid] === 1;
     const code = this.stringCodes[rid] || 0;
@@ -2476,11 +2542,13 @@ function sameAggregateTypeLessThan(left, right) {
   return compareSortValues(left, right) < 0;
 }
 
-function sortObjects(objects, options = {}) {
-  const direction = options.sort === "desc" ? -1 : 1;
-  return [...objects].sort((left, right) => {
-    return compareSortValues(getPathValue(left, options.sortBy), getPathValue(right, options.sortBy)) * direction;
-  });
+function queryNeedsWholeObject(query) {
+  if (!query || typeof query !== "object") return false;
+  return Object.entries(query).some(([key, value]) => key === "$where" || queryNeedsWholeObject(value));
+}
+
+function pathsOverlap(left, right) {
+  return left === right || left.startsWith(`${right}.`) || right.startsWith(`${left}.`);
 }
 
 function indexableConstraintValues(constraint) {
@@ -2640,10 +2708,12 @@ function normalizeCollectionMeta(meta = {}) {
   delete next.columnIndexes;
   delete next.tiering;
   delete next.hooks;
+  delete next.structure;
   const indexes = normalizeIndexList(meta.indexes, "indexes");
   const columns = normalizeIndexList(meta.columns, "columns");
   const tiering = normalizeTieringMeta(meta.tiering);
   const hooks = normalizeObjectHooksMeta(meta.hooks);
+  const structure = normalizeStructure(meta.structure);
   const out = {
     ...next,
     indexes,
@@ -2651,6 +2721,7 @@ function normalizeCollectionMeta(meta = {}) {
   };
   if (tiering) out.tiering = tiering;
   if (hooks) out.hooks = hooks;
+  if (structure.length) out.structure = structure;
   return out;
 }
 
@@ -3158,6 +3229,14 @@ export class Store {
 
   readObjects(dbName, collName, ids) {
     return this.getCollection(dbName, collName)?.readObjects(ids) || [];
+  }
+
+  materializeRead(dbName, collName, object) {
+    return this.getCollection(dbName, collName)?.materializeRead(object) || object;
+  }
+
+  materializeReads(dbName, collName, objects) {
+    return this.getCollection(dbName, collName)?.materializeReads(objects) || objects || [];
   }
 
   queryPath(dbName, collName, criteria = {}, options = {}) {

@@ -327,6 +327,26 @@ test("sharded aggregates start remote work before local shard aggregation", asyn
   ]);
 });
 
+test("multi-page shard reads remain ordered when live sort values change between requests", async () => {
+  const router = new ShardRequestRouter({ node: {} });
+  const chunks = [
+    Array.from({ length: 250 }, (_, i) => ({ _id: `first-${i}`, score: i })),
+    Array.from({ length: 20 }, (_, i) => ({ _id: `second-${i}`, score: i - 20 })),
+  ];
+  const expected = chunks.flat().sort((a, b) => a.score - b.score);
+  let requests = 0;
+  router.forwardToShard = async (_req, _shard, _path, options) => {
+    const query = new URLSearchParams(options.query);
+    assert.ok(Number(query.get("limit")) <= 250);
+    assert.equal(query.get("$refDepth"), "0");
+    assert.equal(Number(query.get("offset")), requests ? 250 : 0);
+    return { status: 200, headers: {}, body: chunks[requests++] };
+  };
+  const result = await router._findRemoteShard({ headers: {} }, "shard", "db", "items", {}, { sortBy: "score", limit: 270 });
+  assert.equal(requests, 2);
+  assert.deepEqual(result.body, expected);
+});
+
 test("all-peer fan-out runs in parallel", async () => {
   const router = new ShardRequestRouter({
     node: {
@@ -2156,6 +2176,72 @@ test("collection metadata fan-out builds indexes on shard peers", async () => {
   }
 });
 
+test("sharded sorted pages beyond the public cap agree across nodes and index paths", async () => {
+  const { servers } = await startReplicatedTwoShardCluster();
+  const rows = Array.from({ length: 1103 }, (_, i) => ({
+    _id: `page-${String((i * 73) % 1103).padStart(5, "0")}`,
+    score: i % 5,
+    active: i % 3 !== 0,
+    owner: { type: "reference", collection: "owners", value: "shared-owner" },
+  }));
+  try {
+    for (const [index, server] of servers.entries()) {
+      server.node.createCollection("paging", "items", {});
+      const owned = rows.filter((row) => server.node.ownsShard(server.node.shardForObject("paging", "items", row._id)));
+      server.node.insertMany("paging", "items", index % 2 ? [...owned].reverse() : owned);
+      if (server.node.ownsShard(server.node.shardForObject("paging", "owners", "shared-owner"))) {
+        server.node.insert("paging", "owners", { _id: "shared-owner", label: "team" });
+      }
+    }
+    const token = (await login(`http://localhost:${servers[0].port}`)).accessToken;
+    for (const indexed of [false, true]) {
+      if (indexed) {
+        for (const server of servers) server.node.db.collection("paging", "items").createIndex("score");
+        for (const server of servers) await server.node.db.awaitIndexes("paging", "items");
+      }
+      for (const sort of [1, -1]) {
+        const expected = rows.filter((row) => row.active).sort((a, b) => (a.score - b.score) * sort || (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
+        for (const server of servers) {
+          const client = api(`http://localhost:${server.port}`, token);
+          for (const offset of [0, 249, 251, 501, 700]) {
+            const result = await client.post("/api/paging/items/search", { active: true, $sort: { score: sort }, $skip: offset, $limit: 37, $refDepth: 0 });
+            assert.equal(result.status, 200, JSON.stringify(result.body));
+            assert.deepEqual(result.body.map((row) => row._id), expected.slice(offset, offset + 37).map((row) => row._id));
+          }
+        }
+      }
+    }
+    const response = await api(`http://localhost:${servers[0].port}`, token).get("/api/paging/items/object?limit=500");
+    assert.equal(response.body.length, 250);
+    const expected = [...rows].sort((a, b) => a._id < b._id ? -1 : 1);
+    assert.deepEqual(response.body.map((row) => row._id), expected.slice(0, 250).map((row) => row._id));
+    const referenced = await api(`http://localhost:${servers[0].port}`, token).post("/api/paging/items/search", {
+      "owner.object.label": "team", $sort: { _id: "asc" }, $skip: 501, $limit: 37, $refDepth: 0,
+    });
+    assert.equal(referenced.status, 200, JSON.stringify(referenced.body));
+    assert.deepEqual(referenced.body.map((row) => row._id), expected.slice(501, 538).map((row) => row._id));
+    for (const server of servers) {
+      const result = await api(`http://localhost:${server.port}`, token).post("/api/paging/items/search", {
+        $aggregate: { fields: { total: { $sum: "score" }, count: { $count: true } } }, $refDepth: 0,
+      });
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.deepEqual(result.body, [{ total: rows.reduce((sum, row) => sum + row.score, 0), count: rows.length }]);
+    }
+    await servers[2].replication.stop();
+    await new Promise((resolve) => servers[2].server.close(resolve));
+    const failover = await api(`http://localhost:${servers[0].port}`, token).post("/api/paging/items/search", {
+      $sort: { _id: "asc" }, $skip: 501, $limit: 37, $refDepth: 0,
+    });
+    assert.equal(failover.status, 200, JSON.stringify(failover.body));
+    assert.deepEqual(failover.body.map((row) => row._id), expected.slice(501, 538).map((row) => row._id));
+  } finally {
+    for (const server of servers) {
+      server.node.db.dispose();
+      await new Promise((resolve) => server.server.close(resolve));
+    }
+  }
+});
+
 test("schema writes tolerate unavailable peers except for destructive collection drops", async () => {
   const port = await freePort();
   const url = `http://localhost:${port}`;
@@ -2750,17 +2836,40 @@ test("retention uses durable catch-up instead of HTTP snapshots", async () => {
   }
 });
 
-test("serves the console UI at /", async () => {
+test("serves the integrated Data Explorer and its local assets", async () => {
   const s = await startTestServer({ port: 0 });
   try {
     const r = await fetch(`http://localhost:${s.port}/`);
     assert.equal(r.status, 200);
     assert.match(r.headers.get("content-type"), /text\/html/);
     const html = await r.text();
-    assert.match(html, /OBJY DB/);
-    assert.match(html, /objy-db-logo\.png/);
-    assert.match(html, /id="object-file"/);
-    assert.match(html, /id="download-file-btn"/);
+    assert.match(html, /OBJY/);
+    assert.match(html, /components\/data-explorer/);
+    assert.doesNotMatch(html, /id="object-file"|cdn\.jsdelivr/);
+    for (const route of ["/ui", "/ui/", "/index.html"]) {
+      assert.equal(await (await fetch(`http://localhost:${s.port}${route}`)).text(), html);
+    }
+    for (const match of html.matchAll(/(?:href|src)="(\/[^" ]+)"/g)) {
+      const asset = await fetch(`http://localhost:${s.port}${match[1]}`);
+      assert.equal(asset.status, 200, match[1]);
+      assert.match(asset.headers.get("content-type"), /text\/(javascript|css)/);
+      assert.ok((await asset.arrayBuffer()).byteLength > 0);
+    }
+    for (const route of ["/ui/src/ui/app.js", "/ui/package.json", "/.git/config", "/client.js", "/ai/agent.js", "/missing.js"]) {
+      assert.equal((await fetch(`http://localhost:${s.port}${route}`)).status, 404, route);
+    }
+    for (const [path, type] of [
+      ["/pdf/pdf.worker.js", "text/javascript"],
+      ["/pdf/wasm/openjpeg.wasm", "application/wasm"],
+      ["/pdf/standard_fonts/LiberationSans-Regular.ttf", "font/ttf"],
+      ["/pdf/cmaps/Adobe-Japan1-UCS2.bcmap", "application/octet-stream"],
+      ["/licenses/pdfjs.txt", "text/plain"],
+    ]) {
+      const asset = await fetch(`http://localhost:${s.port}${path}`);
+      assert.equal(asset.status, 200, path);
+      assert.ok(asset.headers.get("content-type").startsWith(type));
+      assert.ok((await asset.arrayBuffer()).byteLength > 0);
+    }
 
     const logo = await fetch(`http://localhost:${s.port}/objy-db-logo.png`);
     assert.equal(logo.status, 200);

@@ -214,6 +214,14 @@ export class CRDTNode {
     return depth > 0 ? objects.map((object) => this.expandReferences(db, object, depth)) : objects;
   }
 
+  materializeRead(db, coll, object) {
+    return this.db.materializeRead(db, coll, object);
+  }
+
+  materializeReads(db, coll, objects) {
+    return this.db.materializeReads(db, coll, objects);
+  }
+
   list(db, coll) {
     return this.db.getCollection(db, coll)?.list() || [];
   }

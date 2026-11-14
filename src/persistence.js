@@ -960,7 +960,10 @@ export class PersistenceManager {
   }
 
   async _restoreSnapshotSegment(scope, manifest, segment = {}, progress = null) {
-    if (!String(segment.key || "").endsWith(".jsonl")) {
+    const key = String(segment.key || "");
+    const jsonl = segment.format === "jsonl" || key.endsWith(".jsonl");
+    const legacyJson = segment.format === "json" || key.endsWith(".json");
+    if (!jsonl && !legacyJson) {
       throw new Error(`unsupported snapshot segment format: ${segment.key || "missing key"}`);
     }
     const sourceNode = manifest.node || "persistence";
@@ -982,8 +985,11 @@ export class PersistenceManager {
       await yieldToEventLoop();
     };
 
+    const source = jsonl
+      ? jsonlObjectsFromStorage(this.storage, key, `${scopeKey(scope)} snapshot`)
+      : jsonArrayObjectsFromStorage(this.storage, key, `${scopeKey(scope)} legacy snapshot`);
     let batch = [];
-    for await (const object of jsonlObjectsFromStorage(this.storage, segment.key, `${scopeKey(scope)} snapshot`)) {
+    for await (const object of source) {
       const row = this._filterRestoreObject(scope, object);
       if (!row) continue;
       batch.push(row);
@@ -996,8 +1002,9 @@ export class PersistenceManager {
   }
 
   async _restoreJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
-    if (!key.endsWith(".jsonl")) throw new Error(`unsupported journal segment format: ${key}`);
-    return this._restoreJsonlJournalSegment(scope, key, snapshotCursors, progress);
+    if (key.endsWith(".jsonl")) return this._restoreJsonlJournalSegment(scope, key, snapshotCursors, progress);
+    if (key.endsWith(".json")) return this._restoreLegacyJsonJournalSegment(scope, key, snapshotCursors, progress);
+    throw new Error(`unsupported journal segment format: ${key}`);
   }
 
   async _restoreJsonlJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
@@ -1031,6 +1038,36 @@ export class PersistenceManager {
     else if (segmentOps > 0) {
       stats.skippedJournals = 1;
       stats.skippedOps = segmentOps;
+    }
+    return stats;
+  }
+
+  async _restoreLegacyJsonJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
+    const raw = await this.storage.get(key);
+    if (!raw) return emptyJournalRestoreStats(this.node.seq);
+    const segment = JSON.parse(raw);
+    const sourceNode = segment.node || parseJournalKey(key, this.prefix)?.node || "persistence";
+    const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
+    const segmentOps = Array.isArray(segment.ops) ? segment.ops : [];
+    const stats = emptyJournalRestoreStats(this.node.seq);
+
+    for (let offset = 0; offset < segmentOps.length; offset += this.opBatchSize) {
+      const batch = segmentOps.slice(offset, offset + this.opBatchSize).filter((op) => {
+        const seq = Number(op?.seq);
+        return !Number.isFinite(seq) || seq > coveredSeq;
+      });
+      if (!batch.length) continue;
+      const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
+      stats.ops += applied;
+      progress?.add?.("journalOps", applied);
+      stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
+      await yieldToEventLoop();
+    }
+
+    if (stats.ops > 0) stats.journals = 1;
+    else if (segmentOps.length) {
+      stats.skippedJournals = 1;
+      stats.skippedOps = segmentOps.length;
     }
     return stats;
   }
@@ -1221,7 +1258,8 @@ export class PersistenceManager {
       progress?.scope?.(scope, scopeIndex, scopes.length);
       const snapshotCursors = restoredByScope.get(scopeKey(scope))?.cursors || {};
       const journalKeys = keys.filter((key) =>
-        key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`) && key.endsWith(".jsonl"));
+        key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`)
+          && (key.endsWith(".jsonl") || key.endsWith(".json")));
       for (const key of journalKeys.sort()) {
         const journalInfo = parseJournalKey(key, this.prefix);
         const sourceFromKey = journalInfo?.node;
@@ -1389,6 +1427,19 @@ async function* jsonlObjectsFromStorage(storage, key, label) {
   yield* parseJsonlText(body, label);
 }
 
+async function* jsonArrayObjectsFromStorage(storage, key, label) {
+  if (typeof storage.getStream === "function") {
+    const stream = await storage.getStream(key);
+    if (stream === null) throw new Error(`segment missing: ${key}`);
+    yield* parseJsonArrayStream(stream, label);
+    return;
+  }
+
+  const body = await storage.get(key);
+  if (body === null) throw new Error(`segment missing: ${key}`);
+  yield* parseJsonArrayText(body, label);
+}
+
 async function* parseJsonlStream(stream, label) {
   let buffer = "";
   let line = 0;
@@ -1416,6 +1467,95 @@ function* parseJsonlText(body, label) {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (trimmed) yield parseJsonLine(trimmed, label, i + 1);
+  }
+}
+
+async function* parseJsonArrayStream(stream, label) {
+  const parser = createJsonArrayParser(label);
+  for await (const chunk of stream) {
+    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    yield* parser.push(text);
+  }
+  yield* parser.finish();
+}
+
+function* parseJsonArrayText(body, label) {
+  const parser = createJsonArrayParser(label);
+  yield* parser.push(String(body || ""));
+  yield* parser.finish();
+}
+
+function createJsonArrayParser(label) {
+  let started = false;
+  let finished = false;
+  let itemStarted = false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let item = "";
+  let index = 0;
+
+  function* push(text) {
+    for (const ch of text) {
+      if (finished) {
+        if (!/\s/.test(ch)) throw new Error(`invalid JSON array in ${label}: trailing content`);
+        continue;
+      }
+
+      if (!started) {
+        if (/\s/.test(ch)) continue;
+        if (ch !== "[") throw new Error(`invalid JSON array in ${label}: expected [`);
+        started = true;
+        continue;
+      }
+
+      if (!itemStarted) {
+        if (/\s/.test(ch) || ch === ",") continue;
+        if (ch === "]") {
+          finished = true;
+          continue;
+        }
+        itemStarted = true;
+        item = "";
+        depth = 0;
+        inString = false;
+        escaped = false;
+      }
+
+      item += ch;
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === "\"") inString = false;
+        continue;
+      }
+
+      if (ch === "\"") inString = true;
+      else if (ch === "{" || ch === "[") depth++;
+      else if (ch === "}" || ch === "]") depth--;
+
+      if (depth === 0 && !inString) {
+        yield parseJsonArrayItem(item, label, index++);
+        itemStarted = false;
+        item = "";
+      }
+    }
+  }
+
+  function* finish() {
+    if (!started) return;
+    if (itemStarted) throw new Error(`invalid JSON array in ${label}: unfinished item ${index}`);
+    if (!finished) throw new Error(`invalid JSON array in ${label}: missing closing ]`);
+  }
+
+  return { push, finish };
+}
+
+function parseJsonArrayItem(item, label, index) {
+  try {
+    return JSON.parse(item);
+  } catch (err) {
+    throw new Error(`invalid JSON array item in ${label} at index ${index}: ${err.message}`);
   }
 }
 
@@ -1688,7 +1828,7 @@ function parseJournalKey(key, prefix) {
   const parts = key.slice(expected.length).split("/");
   if (parts[6] !== "journal" || !parts[7] || !parts[8]) return null;
   const file = parts[8];
-  const match = file.match(/^(\d+)-(\d+)-(\d+)-.+\.jsonl$/);
+  const match = file.match(/^(\d+)-(\d+)-(\d+)-.+\.jsonl?$/);
   const createdAtMs = match ? Number(match[1]) : 0;
   const firstSeq = match ? Number(match[2]) : 0;
   const lastSeq = match ? Number(match[3]) : 0;

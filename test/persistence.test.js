@@ -39,6 +39,21 @@ class HookedMemoryObjectStorage extends MemoryObjectStorage {
   }
 }
 
+async function convertLatestSnapshotToLegacy(storage, scopePrefix) {
+  const latestKey = `${scopePrefix}/latest.json`;
+  const manifest = JSON.parse(await storage.get(latestKey));
+  manifest.segments = await Promise.all(manifest.segments.map(async (segment) => {
+    const rows = String(await storage.get(segment.key))
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const key = segment.key.replace(/\.jsonl$/, ".json");
+    await storage.put(key, JSON.stringify(rows));
+    return { ...segment, key, format: "json" };
+  }));
+  await storage.put(latestKey, JSON.stringify(manifest));
+}
+
 test("local WAL restores acknowledged writes before S3 journal flush", async () => {
   const dir = mkdtempSync(join(tmpdir(), "objydb-wal-"));
   const storage = new MemoryObjectStorage();
@@ -197,6 +212,124 @@ test("snapshots restore full objects and tombstones", async () => {
   assert.equal(restored.snapshots, 1);
   assert.equal(fresh.get("app", "users", "u1"), undefined);
   assert.deepEqual(fresh.get("app", "users", "u2"), { _id: "u2", name: "Grace" });
+});
+
+test("restore streams legacy JSON snapshots and replays legacy JSON journals", async () => {
+  const storage = new MemoryObjectStorage();
+  const writer = new CRDTNode({ id: "legacy-writer" });
+  writer.insert("app", "users", { _id: "u1", name: "Ada" });
+  const scopePrefix = "objydb/db/app/collection/users/shard/default";
+  await new PersistenceManager({ node: writer, storage }).checkpoint();
+  await convertLatestSnapshotToLegacy(storage, scopePrefix);
+  const legacyManifest = JSON.parse(await storage.get(`${scopePrefix}/latest.json`));
+  const segmentKey = legacyManifest.segments[0].key;
+
+  writer.update("app", "users", "u1", { active: true });
+  await storage.put(
+    `${scopePrefix}/journal/${writer.id}/1723852800000-0000000000000002-0000000000000002-legacy.json`,
+    JSON.stringify({ version: 1, node: writer.id, ops: [writer.log.at(-1)] }),
+  );
+
+  const streamingStorage = {
+    get: async (key) => {
+      if (key === segmentKey) throw new Error("legacy snapshot segment must be streamed");
+      return storage.get(key);
+    },
+    getStream: (key) => storage.getStream(key),
+    list: (prefix) => storage.list(prefix),
+  };
+  const fresh = new CRDTNode({ id: "fresh" });
+  const restored = await new PersistenceManager({ node: fresh, storage: streamingStorage }).restore();
+
+  assert.equal(restored.snapshots, 1);
+  assert.equal(restored.journalOps, 1);
+  assert.deepEqual(fresh.get("app", "users", "u1"), { _id: "u1", name: "Ada", active: true });
+});
+
+test("restore accepts mixed JSON and JSONL snapshot segments but writes only JSONL", async () => {
+  const storage = new MemoryObjectStorage();
+  const writer = new CRDTNode({ id: "mixed-writer" });
+  writer.insertMany("app", "events", Array.from({ length: 6 }, (_, i) => ({
+    _id: `e${i}`,
+    nested: { text: `row ${i}: braces { } and an escaped quote \"` },
+    values: [i, i + 1, { ok: true }],
+    payload: "x".repeat(700),
+  })));
+  const scopePrefix = "objydb/db/app/collection/events/shard/default";
+  await new PersistenceManager({ node: writer, storage, segmentBytes: 1024 }).checkpoint();
+  const manifest = JSON.parse(await storage.get(`${scopePrefix}/latest.json`));
+  assert.ok(manifest.segments.length > 1);
+  const first = manifest.segments[0];
+  const rows = String(await storage.get(first.key)).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  const legacyKey = first.key.replace(/\.jsonl$/, ".json");
+  await storage.put(legacyKey, JSON.stringify(rows));
+  manifest.segments[0] = { ...first, key: legacyKey, format: "json" };
+  await storage.put(`${scopePrefix}/latest.json`, JSON.stringify(manifest));
+
+  const fresh = new CRDTNode({ id: "fresh" });
+  const persistence = new PersistenceManager({ node: fresh, storage });
+  const restored = await persistence.restore();
+  assert.equal(restored.snapshotObjects, 6);
+  for (let i = 0; i < 6; i++) assert.deepEqual(fresh.get("app", "events", `e${i}`), writer.get("app", "events", `e${i}`));
+
+  await persistence.checkpoint();
+  const latest = JSON.parse(await storage.get(`${scopePrefix}/latest.json`));
+  assert.ok(latest.segments.length > 0);
+  assert.ok(latest.segments.every((segment) => segment.format === "jsonl" && segment.key.endsWith(".jsonl")));
+});
+
+test("legacy JSON snapshot restore still obeys explicit shard scope", async () => {
+  const storage = new MemoryObjectStorage();
+  const writer = new CRDTNode({ id: "writer" });
+  writer.replaceShardMap(shardMapFor(["events-0", "events-1"]));
+  writer.insertMany("app", "events", Array.from({ length: 200 }, (_, i) => ({ _id: `event-${i}`, value: i })));
+  await new PersistenceManager({ node: writer, storage, segmentBytes: 2048 }).checkpoint();
+  await convertLatestSnapshotToLegacy(storage, "objydb/db/app/collection/events/shard/events-0");
+  await convertLatestSnapshotToLegacy(storage, "objydb/db/app/collection/events/shard/events-1");
+
+  const scoped = new CRDTNode({ id: "scoped" });
+  scoped.replaceShardMap(shardMapFor(["events-0", "events-1"]));
+  const restored = await new PersistenceManager({
+    node: scoped,
+    storage,
+    restoreScopes: [{ database: "app", collection: "events", shard: "events-0" }],
+  }).restore();
+  const expected = writer.list("app", "events")
+    .filter((object) => writer.shardForObject("app", "events", object._id) === "events-0");
+
+  assert.equal(restored.snapshots, 1);
+  assert.equal(scoped.count("app", "events"), expected.length);
+  for (const object of expected) assert.deepEqual(scoped.get("app", "events", object._id), object);
+});
+
+test("legacy restore rejects unknown and malformed snapshot formats", async () => {
+  const manifest = (key) => JSON.stringify({
+    version: 1,
+    id: "legacy-invalid",
+    node: "writer",
+    seq: 1,
+    database: "app",
+    collection: "events",
+    shard: "default",
+    segments: [{ key, count: 1 }],
+  });
+
+  const unknown = new MemoryObjectStorage();
+  const unknownPrefix = "objydb/db/app/collection/events/shard/default";
+  await unknown.put(`${unknownPrefix}/latest.json`, manifest(`${unknownPrefix}/snapshot.bin`));
+  await assert.rejects(
+    () => new PersistenceManager({ node: new CRDTNode({ id: "fresh" }), storage: unknown }).restore(),
+    /unsupported snapshot segment format/,
+  );
+
+  const malformed = new MemoryObjectStorage();
+  const malformedKey = `${unknownPrefix}/segment.json`;
+  await malformed.put(malformedKey, '[{"id":"e1"}');
+  await malformed.put(`${unknownPrefix}/latest.json`, manifest(malformedKey));
+  await assert.rejects(
+    () => new PersistenceManager({ node: new CRDTNode({ id: "fresh" }), storage: malformed }).restore(),
+    /missing closing \]/,
+  );
 });
 
 test("restore seeds replication cursors from persisted source nodes", async () => {
@@ -770,6 +903,9 @@ test("topology reshard preserves source snapshots, checkpoints targets, and fina
     oldWriter.insert("app", "events", { _id: `event-${i}`, value: i, version: 0 });
   }
   await persistence.checkpoint();
+  for (const shard of oldShardNames) {
+    await convertLatestSnapshotToLegacy(storage, `objydb/db/app/collection/events/shard/${shard}`);
+  }
 
   for (let i = 0; i < 30; i++) {
     oldWriter.update("app", "events", `event-${i * 7}`, { value: 1000 + i, version: 1 });

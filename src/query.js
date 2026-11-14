@@ -1,3 +1,5 @@
+export const MAX_QUERY_PAGE_SIZE = 250;
+
 const rhsOperators = new Set([
   "$cb",
   "$deepEquals",
@@ -62,29 +64,29 @@ export function stableKey(value) {
   return JSON.stringify(sortForKey(value));
 }
 
-export function matchesQuery(object, query = {}) {
+export function matchesQuery(object, query = {}, readValue = getPathValue) {
   const criteria = stripQueryControls(query);
   if (!isPlainObject(criteria)) return false;
 
   for (const [path, expected] of Object.entries(criteria)) {
     if (path === "$and") {
-      if (!logicalConstraints(expected).every((constraint) => matchesQuery(object, constraint))) return false;
+      if (!logicalConstraints(expected).every((constraint) => matchesQuery(object, constraint, readValue))) return false;
       continue;
     }
     if (path === "$or") {
-      if (!logicalConstraints(expected).some((constraint) => matchesQuery(object, constraint))) return false;
+      if (!logicalConstraints(expected).some((constraint) => matchesQuery(object, constraint, readValue))) return false;
       continue;
     }
     if (path === "$nor") {
-      if (logicalConstraints(expected).some((constraint) => matchesQuery(object, constraint))) return false;
+      if (logicalConstraints(expected).some((constraint) => matchesQuery(object, constraint, readValue))) return false;
       continue;
     }
     if (path === "$not") {
-      if (matchesQuery(object, expected)) return false;
+      if (matchesQuery(object, expected, readValue)) return false;
       continue;
     }
     if (path === "$count") {
-      if (!matchesCount(object, expected)) return false;
+      if (!matchesCount(object, expected, readValue)) return false;
       continue;
     }
     if (path === "$where") {
@@ -92,7 +94,7 @@ export function matchesQuery(object, query = {}) {
       continue;
     }
 
-    const actual = getPathValue(object, path);
+    const actual = readValue(object, path);
     if (!matchesConstraint(actual, expected, path)) return false;
   }
 
@@ -161,10 +163,40 @@ export function queryPageOffset(page, pageSize) {
 
 export function compareSortValues(left, right) {
   if (Object.is(left, right)) return 0;
-  if (left === undefined || left === null) return 1;
-  if (right === undefined || right === null) return -1;
-  if (typeof left === "number" && typeof right === "number") return left - right;
-  return String(left).localeCompare(String(right));
+  const rank = sortValueRank(left) - sortValueRank(right);
+  if (rank) return rank;
+  if (typeof left === "number") {
+    if (Number.isNaN(left)) return Number.isNaN(right) ? 0 : 1;
+    if (Number.isNaN(right)) return -1;
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+  if (Array.isArray(left)) {
+    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+      const compared = compareSortValues(left[i], right[i]);
+      if (compared) return compared;
+    }
+    return left.length - right.length;
+  }
+  if (left && typeof left === "object") {
+    const a = Object.keys(left).sort();
+    const b = Object.keys(right).sort();
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const compared = compareSortValues(a[i], b[i]) || compareSortValues(left[a[i]], right[b[i]]);
+      if (compared) return compared;
+    }
+    return a.length - b.length;
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function sortValueRank(value) {
+  if (value === undefined) return 7;
+  if (value === null) return 6;
+  if (typeof value === "number") return 0;
+  if (typeof value === "string") return 1;
+  if (typeof value === "boolean") return 2;
+  if (Array.isArray(value)) return 3;
+  return typeof value === "object" ? 4 : 5;
 }
 
 export function matchesConstraint(actual, expected, parentKey) {
@@ -258,9 +290,9 @@ function matchesOperator(operator, actual, operand, parentKey) {
   }
 }
 
-function matchesCount(object, condition) {
+function matchesCount(object, condition, readValue) {
   if (!isPlainObject(condition) || !Array.isArray(condition.$constraints)) return false;
-  const count = condition.$constraints.filter((constraint) => matchesQuery(object, constraint)).length;
+  const count = condition.$constraints.filter((constraint) => matchesQuery(object, constraint, readValue)).length;
   return matchesConstraint(count, condition.$constraint);
 }
 

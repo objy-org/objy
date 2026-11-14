@@ -3,7 +3,8 @@ import { aggregateObjects, aggregatePartialObjects, isObjectDbAggregateSpec, mer
 import { accessTokenFromRequest } from "./auth.js";
 import { CLUSTER_SECRET_HEADER, clusterSecretFromRequest, clusterSecretMatches, normalizeClusterSecret } from "./cluster-secret.js";
 import { NDJSON_CONTENT_TYPE, ndjsonReadable } from "./ndjson.js";
-import { compareSortValues, getPathValue } from "./query.js";
+import { MAX_QUERY_PAGE_SIZE } from "./query.js";
+import { mergeOrdered, objectOrder } from "./order.js";
 import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEADER } from "./query-planner.js";
 
 export const FORWARDED_HEADER = "x-objydb-forwarded";
@@ -88,22 +89,18 @@ export class ShardRequestRouter {
       return this.findLocalShards(database, collection, criteria, options, targets.map((target) => target.shard).filter(Boolean));
     }
 
-    const all = [];
+    const streams = [];
     const paths = [];
     let count = options.includeCount ? 0 : undefined;
     const shardOptions = shardFetchOptions(options);
     const localShards = targets.filter((target) => target.local).map((target) => target.shard).filter(Boolean);
     const remoteResults = await remoteAfterLocalWork(this.forwardRemoteTargets(targets, (target) => (
-      this.forwardToShard(req, target.shard, objectPath(database, collection), {
-        method: "GET",
-        query: queryForFind(criteria, shardOptions),
-        retryStatuses: [409, 503, 504],
-      })
+      this._findRemoteShard(req, target.shard, database, collection, criteria, shardOptions)
     )), () => {
       if (localShards.length) {
         const local = this.findLocalShards(database, collection, criteria, shardOptions, localShards);
         if (options.includeCount) count += local.count;
-        all.push(...local.objects);
+        streams.push(local.objects);
         if (local.path) paths.push(local.path);
       }
     });
@@ -111,15 +108,41 @@ export class ShardRequestRouter {
       if (!ok(remote.status)) throw httpError(remote.status, remote.body?.error || "remote query failed", remote.body);
       const objects = responseObjects(remote.body);
       if (options.includeCount) count += responseCount(remote.body, objects.length);
-      all.push(...objects);
+      streams.push(objects);
       const remotePath = responseQueryPath(remote);
       if (remotePath) paths.push(remotePath);
     }
 
     return {
       count,
-      objects: paginate(sortObjects(all, options), options),
+      objects: paginate(options.sortBy ? mergeOrdered(streams, objectOrder(options)) : streams.flat(), options),
       path: combineQueryPaths(paths),
+    };
+  }
+
+  async _findRemoteShard(req, shard, database, collection, criteria, options) {
+    const limit = options.limit ?? Infinity;
+    const objects = [];
+    const paths = [];
+    let remote;
+    do {
+      const batchLimit = Math.min(MAX_QUERY_PAGE_SIZE, limit - objects.length);
+      remote = await this.forwardToShard(req, shard, objectPath(database, collection), {
+        method: "GET",
+        query: queryForFind(criteria, { ...options, refDepth: 0, limit: batchLimit, offset: (options.offset || 0) + objects.length }),
+        retryStatuses: [409, 503, 504],
+      });
+      if (!ok(remote.status)) return remote;
+      const rows = responseObjects(remote.body);
+      for (const row of rows) objects.push(row);
+      paths.push(responseQueryPath(remote));
+      if (rows.length < batchLimit) break;
+    } while (objects.length < limit);
+    if (options.sortBy && objects.length > MAX_QUERY_PAGE_SIZE) objects.sort(objectOrder(options));
+    return {
+      ...remote,
+      body: Array.isArray(remote.body) ? objects : { ...remote.body, objects },
+      headers: { ...remote.headers, [QUERY_PATH_HEADER]: combineQueryPaths(paths) },
     };
   }
 
@@ -695,17 +718,21 @@ function preferMinimal(value) {
 
 function sortObjects(objects, options = {}) {
   if (!options.sortBy) return [...objects];
-  const direction = options.sort === "desc" ? -1 : 1;
-  return [...objects].sort((left, right) => {
-    return compareSortValues(getPathValue(left, options.sortBy), getPathValue(right, options.sortBy)) * direction;
-  });
+  return [...objects].sort(objectOrder(options));
 }
 
 function paginate(objects, options = {}) {
   const offset = options.offset || 0;
   const limit = options.limit ?? Infinity;
   if (limit <= 0) return [];
-  return objects.slice(offset, offset + limit);
+  const result = [];
+  let skipped = 0;
+  for (const object of objects) {
+    if (skipped++ < offset) continue;
+    result.push(object);
+    if (result.length >= limit) break;
+  }
+  return result;
 }
 
 function finalizeVectorRows(rows, vector = {}, options = {}) {

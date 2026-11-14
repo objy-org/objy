@@ -154,7 +154,7 @@ function compilePattern(pattern) {
       return escapeRegex(segment);
     })
     .join("/");
-  return { re: new RegExp(`^/${source}$`), names };
+  return { re: new RegExp(`^/${source}${pattern.endsWith("/") ? "/" : ""}$`), names };
 }
 
 function escapeRegex(value) {

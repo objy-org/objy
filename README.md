@@ -27,6 +27,12 @@ OBJY DB keeps dynamic objects and their indexes in memory while local WAL and S3
 
 You can also use the [REST API](API.md) directly.
 
+## Database UI
+
+The server includes the Data Explorer at `/` and `/ui`: browse databases and collections, run native JSON queries, edit objects and metadata, and inspect cluster nodes. Connections and tokens can be saved in the browser; database objects stay on the server. The connection form defaults to the server hosting the UI. Other compatible servers can still be selected.
+
+UI source lives in [`ui/`](ui/) inside this repository. Run `npm ci` and `npm run build:ui` before starting from source, or `npm run dev:ui` for the standalone local development view. Packaged releases and Docker images include the compiled UI. See [Contributing](CONTRIBUTING.md) for development and tests.
+
 ## Object Model
 
 ```text
@@ -78,7 +84,13 @@ Every collection has a small metadata object that configures its derived behavio
     "mode": "compressedMemory",
     "keep": ["name", "status", "tenantId"],
     "minBytes": 4096
-  }
+  },
+  "structure": [
+    {
+      "condition": { "type": "asset" },
+      "apply": { "lifecycle": { "managed": true } }
+    }
+  ]
 }
 ```
 
@@ -97,6 +109,23 @@ Columns keep selected values in RID-addressed typed storage. They are useful for
 ### Compressed Memory
 
 Compressed memory keeps the fields in `keep` directly available and compresses the rest of each object when its compressible payload reaches `minBytes`. Indexed and column fields remain hot automatically. Reads transparently hydrate the original full JSON object, so applications do not need a different query or response format. Use `offload` instead of `keep` when naming the fields to compress is simpler.
+
+### Structure
+
+Structure adds conditional virtual values to returned objects without storing a copy on every object. `condition: {}` applies to every object, later matching entries override earlier virtual values, and explicit object values always win.
+
+```json
+{
+  "structure": [
+    {
+      "condition": { "type": "asset" },
+      "apply": { "status": "managed" }
+    }
+  ]
+}
+```
+
+Virtual values are currently read-only defaults. Filters, sorting, paging membership, aggregation, indexes, columns, persistence, and replication use physical object fields only. Unsetting a physical override reveals its virtual fallback on the next read. Changing structure takes effect on the next read without rewriting objects or rebuilding indexes.
 
 Changing meta rebuilds the affected in-memory structures cooperatively. Full objects remain the persistence format and the API result shape.
 

@@ -1,0 +1,28 @@
+/* Shared by the standalone explorer and dialogs. */
+:root {
+  color-scheme: dark;
+  --canvas: #181818;
+  --surface: #222222;
+  --surface-hover: #2d2d2d;
+  --ink: #e7e7e7;
+  --secondary: #b8b8b8;
+  --muted: #929292;
+  --line: #343434;
+  --accent: #c4c4c4;
+  --accent-hover: #d6d6d6;
+  --accent-fill: #c4c4c42b;
+  --selection: #474747;
+  --scrollbar: #484848;
+  --accent-ink: #202020;
+  --wash: #333333;
+  background: var(--canvas);
+  color: var(--ink);
+  scrollbar-color: var(--scrollbar) transparent;
+}
+body {
+  background: var(--canvas);
+}
+::selection {
+  background: var(--selection);
+  color: #f2f2f2;
+}

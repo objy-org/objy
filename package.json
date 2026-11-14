@@ -23,16 +23,16 @@
     "./hooks": "./src/object-hooks.js"
   },
   "files": [
-    "public/index.html",
     "public/objy-db-logo.png",
     "src/",
     "API.md",
     "LICENSE",
     "NOTICE.md",
-    "objydb.config.json"
+    "objydb.config.json",
+    "public/ui/"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js ui/tests/*.test.mjs",
     "test:ui": "playwright test browser-tests/ui.spec.js",
     "test:package": "node scripts/verify-release.js",
     "test:scale": "node scripts/run-server-benchmark.js",
@@ -44,7 +44,13 @@
     "benchmark:storage": "node --expose-gc benchmarks/storage-engines.js",
     "benchmark:tiering": "node --expose-gc benchmarks/compressed-tiering.js",
     "package:release": "node scripts/build-release.js",
-    "check:package": "node scripts/check-package.js"
+    "check:package": "node scripts/check-package.js",
+    "build:ui": "npm run build --workspace=ui -- --server",
+    "dev:ui": "npm run dev --workspace=ui",
+    "pretest": "npm run build:ui",
+    "pretest:ui": "npm run build:ui",
+    "test:ui:manual": "npm run test:browser --workspace=ui",
+    "pretest:scale": "npm run build:ui"
   },
   "engines": {
     "node": ">=20"
@@ -65,5 +71,8 @@
   "devDependencies": {
     "@objy/client": "0.1.0",
     "@playwright/test": "^1.63.0"
-  }
+  },
+  "workspaces": [
+    "ui"
+  ]
 }
