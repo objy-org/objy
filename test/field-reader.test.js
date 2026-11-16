@@ -73,9 +73,11 @@ for (const engine of ["object", "shape"]) {
       assert.deepEqual(node.get("db", "items", row._id), row);
 
       node.createIndex("db", "items", "group");
+      await node.awaitFieldIndexes("db", "items");
       collection.indexes.get("group").forward.set(rid, 999);
       assert.equal(collection._fieldValueReader({ indexes: false })(rid, "group"), row.group);
       node.createIndex("db", "items", "group");
+      await node.awaitFieldIndexes("db", "items");
       assert.equal(collection.indexes.get("group").valueForRid(rid), row.group);
       const result = node.get("db", "items", row._id);
       result.details.rank = 999;

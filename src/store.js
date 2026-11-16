@@ -20,13 +20,9 @@ import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from ".
 import { compileStructure, materializeStructure, normalizeStructure } from "./structure.js";
 import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
 
-const COLUMN_BUILD_BATCH_SIZE = 4096;
-const FIELD_BUILD_BATCH_SIZE = 4096;
 const INDEX_DEFER_MIN_ROWS = 5000;
-const INDEX_DIRTY_BUILD_BATCH_SIZE = 4096;
 const INDEX_WARMUP_MAX_HEAP_RATIO = 0.9;
 const INDEX_WARMUP_RETRY_MS = 30_000;
-const VECTOR_BUILD_BATCH_SIZE = 4096;
 const DEFAULT_TIERING_MIN_BYTES = 4096;
 
 class Collection {
@@ -47,6 +43,9 @@ class Collection {
     this.fieldBuilds = new Map();
     this.columns = new Map();
     this.columnBuilds = new Set();
+    this.storageBuild = null;
+    this.storageRevision = 0;
+    this.retiering = false;
     this.indexDirtyRids = new RidBitmapQueue();
     this.indexDirtyBuild = null;
     this.indexBuildPending = false;
@@ -399,6 +398,8 @@ class Collection {
     this.fieldBuilds.clear();
     this.columns.clear();
     this.columnBuilds.clear();
+    this.storageRevision++;
+    this.storageBuild = null;
     this.indexDirtyRids.clear();
     this.indexDirtyBuild = null;
     this.indexBuildPending = false;
@@ -630,11 +631,12 @@ class Collection {
 
   createIndex(path) {
     const key = String(path);
-    this._createIndexFromMeta(key);
     this.collectionMeta = normalizeCollectionMeta({
       ...this.collectionMeta,
       indexes: unique([...this.collectionMeta.indexes, key]),
     });
+    if (this.liveCount) this._startFieldIndexBuild([key]);
+    else this._applyMetaIndexes();
   }
 
   dropIndex(path) {
@@ -656,7 +658,7 @@ class Collection {
     const previousTiering = stableKey(this.collectionMeta.tiering || null);
     const next = normalizeCollectionMeta(meta);
     if (next.tiering) assertCompressionAdapter(this.compression);
-    this._releaseColumns(next.columns);
+    this._retireColumns(next.columns);
     this.collectionMeta = next;
     this.structurePlan = compileStructure(next.structure);
     if (options.deferIndexes) this._deferMetaIndexes();
@@ -664,30 +666,18 @@ class Collection {
       this._applyMetaIndexes();
       this._applyMetaColumns();
     }
-    if (previousTiering !== stableKey(this.collectionMeta.tiering || null)) this._retierBaseValues();
+    if (previousTiering !== stableKey(this.collectionMeta.tiering || null)) this.retiering = true;
+    if (this.storageBuild || this.retiering || [...this.columns.values()].some((column) => column.retiring)) this._scheduleStorageMigration();
     return this.getMeta();
   }
 
-  _releaseColumns(wanted) {
-    const removed = [...this.columns.keys()].filter((path) => !wanted.includes(path));
-    if (!removed.length) return;
-    const readValue = this._fieldValueReader({ indexes: false });
-    const retained = [...this.columns.keys()].filter((path) => wanted.includes(path) && this.columns.get(path).ready);
-    for (const rid of this._liveRidIterator()) {
-      if (this.indexDirtyRids.has(rid)) continue;
-      const id = this._idForRid(rid);
-      const base = this.store.readForQuery?.(id) || this.store.read(id) || {};
-      let next = base;
-      for (const path of removed) {
-        const column = this.columns.get(path);
-        if (!column.ready && !column.hasValue(rid) && !column.pending?.has(rid)) continue;
-        const value = readValue(rid, path);
-        next = value === undefined ? unsetPath(next, path) : setPath(next, path, value);
-      }
-      next = this._baseValueForStorage(next, retained);
-      if (next !== base) this.store.rebuild(id, Object.entries(next), { trusted: true });
+  _retireColumns(wanted) {
+    for (const [path, column] of this.columns) {
+      if (wanted.includes(path) || column.retiring) continue;
+      column.retiring = true;
+      column.status = "retiring";
+      column.buildId++;
     }
-    for (const path of removed) this.columns.delete(path);
   }
 
   indexStats() {
@@ -766,7 +756,7 @@ class Collection {
   }
 
   scheduleIndexBuildsFromMeta() {
-    this._applyMetaIndexes({ background: true, rebuild: true });
+    this._applyMetaIndexes({ rebuild: true });
     this._applyMetaColumns({ rebuild: true });
     this.indexBuildPending = false;
   }
@@ -839,11 +829,52 @@ class Collection {
     };
   }
 
-  _retierBaseValues() {
-    for (const rid of this._liveRidIterator()) {
-      const object = this.readRidForQuery(rid);
-      if (object) this._rewriteBaseValueForColumns(rid, object);
+  _scheduleStorageMigration() {
+    this.storageRevision++;
+    if (!this.liveCount) {
+      for (const [path, column] of this.columns) if (column.retiring) this.columns.delete(path);
+      this.retiering = false;
+      return;
     }
+    if (this.storageBuild) return;
+    const build = this.derivedStateScheduler.schedule(`storage:${this.name}`, async (job) => {
+      for (;;) {
+        const revision = this.storageRevision;
+        const removed = [...this.columns].filter(([, column]) => column.retiring);
+        const retained = [...this.columns].filter(([, column]) => column.ready).map(([path]) => path);
+        const readValue = this._fieldValueReader({ indexes: false });
+        const complete = await job.forEach(this._liveRidIterator(), (rid) => {
+          if (this.disposed || revision !== this.storageRevision) return false;
+          if (this.retiering) {
+            const object = this.readRidForQuery(rid);
+            if (object) this._rewriteBaseValueForColumns(rid, object);
+          } else if (!this.indexDirtyRids.has(rid)) {
+            const id = this._idForRid(rid);
+            const base = this.store.readForQuery?.(id) || this.store.read(id) || {};
+            let next = base;
+            for (const [path, column] of removed) {
+              if (!column.hasValue(rid)) continue;
+              const value = readValue(rid, path);
+              next = value === undefined ? unsetPath(next, path) : setPath(next, path, value);
+            }
+            next = this._baseValueForStorage(next, retained);
+            if (next !== base) this.store.rebuild(id, Object.entries(next), { trusted: true });
+          }
+          for (const [, column] of removed) column.remove(rid);
+        }, { beforeBatch: readValue.reset });
+        if (this.disposed || job.cancelled) return;
+        if (!complete || revision !== this.storageRevision) continue;
+        for (const [path, column] of removed) if (this.columns.get(path) === column && column.retiring) this.columns.delete(path);
+        this.retiering = false;
+        return;
+      }
+    }, { owner: this.derivedStateOwner });
+    this.storageBuild = build;
+    build.finally(() => { if (this.storageBuild === build) this.storageBuild = null; }).catch(() => {});
+  }
+
+  async awaitStorage() {
+    while (this.storageBuild) await this.storageBuild;
   }
 
   *snapshotObjects({ includeId } = {}) {
@@ -1040,7 +1071,9 @@ class Collection {
   }
 
   *_liveRidIterator() {
+    const end = this.idByRid.length;
     for (const m of this.meta.values()) {
+      if (m.rid >= end) break;
       if (!m.deleted) yield m.rid;
     }
   }
@@ -1375,22 +1408,18 @@ class Collection {
     const readValue = this._fieldValueReader({ indexes: false });
     while (this.indexDirtyRids.size) {
       if (this.disposed) return;
-      const batch = this.indexDirtyRids.take(INDEX_DIRTY_BUILD_BATCH_SIZE);
+      const batch = this.indexDirtyRids.take(job.batchSize);
       if (!batch.length) {
         this.indexDirtyRids.clear();
         break;
       }
 
       const columnPaths = [...this.columns.keys()].filter((path) => this.columns.get(path).ready);
-      for (const rid of batch) {
+      if (!await job.forEach(batch, (rid) => {
+        if (this.disposed) return false;
         this._refreshReadyIndexesForRid(rid, readValue, columnPaths);
         this.indexDirtyRids.delete(rid);
-      }
-
-      if (this.indexDirtyRids.size) {
-        await job.checkpoint(INDEX_DIRTY_BUILD_BATCH_SIZE);
-        readValue.reset();
-      }
+      }, { beforeBatch: readValue.reset })) return;
     }
   }
 
@@ -1429,7 +1458,6 @@ class Collection {
   }
 
   _applyMetaIndexes(options = {}) {
-    const background = options.background === true;
     const rebuild = options.rebuild === true;
     const wanted = new Set(this.collectionMeta.indexes);
     for (const path of [...this.indexes.keys()]) {
@@ -1447,20 +1475,9 @@ class Collection {
         this.indexes.set(path, new FieldIndex(path));
         continue;
       }
-      if (background) toBuild.push(path);
-      else this._createIndexFromMeta(path);
+      toBuild.push(path);
     }
     if (toBuild.length) this._startFieldIndexBuild(toBuild);
-  }
-
-  _createIndexFromMeta(path) {
-    this.fieldBuilds.delete(path);
-    const index = new FieldIndex(path);
-    const readValue = this._fieldValueReader({ indexes: false });
-    for (const rid of this._liveRidIterator()) {
-      index.addValue(rid, readValue(rid, path));
-    }
-    this.indexes.set(path, index);
   }
 
   _deferMetaIndexes() {
@@ -1507,31 +1524,30 @@ class Collection {
     if (this.disposed) return;
     const built = new Map(targets.map((target) => [target.path, new FieldIndex(target.path)]));
     const readValue = this._fieldValueReader({ indexes: false });
+    let active = targets;
     try {
-      let scanned = 0;
-      for (const rid of this._liveRidIterator()) {
-        if (this.disposed) return;
-        for (const target of targets) {
-          if (this.fieldBuilds.get(target.path) === target) {
-            built.get(target.path)?.addValue(rid, readValue(rid, target.path));
-          }
-        }
-        scanned++;
-        if (scanned % FIELD_BUILD_BATCH_SIZE === 0) {
-          await job.checkpoint(scanned);
-          readValue.reset();
-        }
-      }
+      if (!await job.forEach(this._liveRidIterator(), (rid) => {
+        if (this.disposed || !active.length) return false;
+        for (const target of active) built.get(target.path).addValue(rid, readValue(rid, target.path));
+      }, { beforeBatch: () => {
+        readValue.reset();
+        active = targets.filter((target) => this.fieldBuilds.get(target.path) === target);
+      } })) return;
 
       for (const target of targets) {
         if (this.fieldBuilds.get(target.path) !== target) continue;
         const index = built.get(target.path);
         if (!index) continue;
-        readValue.reset();
-        for (const rid of target.pending) {
-          index.removeRid(rid);
-          if (this.has(this._idForRid(rid))) index.addValue(rid, readValue(rid, target.path));
+        // Remove a RID only after its latest state is installed; later writes requeue it.
+        while (target.pending.size) {
+          if (!await job.forEach(target.pending, (rid) => {
+            if (this.disposed || this.fieldBuilds.get(target.path) !== target) return false;
+            index.removeRid(rid);
+            if (this.has(this._idForRid(rid))) index.addValue(rid, readValue(rid, target.path));
+            target.pending.delete(rid);
+          }, { beforeBatch: readValue.reset })) break;
         }
+        if (job.cancelled || target.pending.size || this.fieldBuilds.get(target.path) !== target) continue;
         this.indexes.set(target.path, index);
         this.fieldBuilds.delete(target.path);
       }
@@ -1567,11 +1583,12 @@ class Collection {
         this.columns.set(path, column);
       }
       if (this.liveCount === 0) {
+        column.pending = null;
         const buildId = column.startBuild();
         column.install(new TypedRidColumn(path), buildId);
         column.coldStripped = true;
       }
-      else if (created || rebuild || column.status === "error") toBuild.push(path);
+      else if (created || rebuild || column.retiring || column.status === "error") toBuild.push(path);
     }
 
     if (toBuild.length) this._startColumnBuild(toBuild);
@@ -1582,6 +1599,7 @@ class Collection {
     if (!paths.length) return;
     if (this.liveCount === 0) {
       for (const column of this.columns.values()) {
+        column.pending = null;
         const buildId = column.startBuild();
         column.install(new TypedRidColumn(column.path), buildId);
         column.coldStripped = true;
@@ -1619,25 +1637,23 @@ class Collection {
     const paths = targets.map((target) => target.path);
     const built = new Map(paths.map((path) => [path, new TypedRidColumn(path)]));
     const readValue = this._fieldValueReader({ indexes: false });
+    let active = targets;
     try {
-      let scanned = 0;
-      for (const rid of this._liveRidIterator()) {
-        if (this.disposed) return;
-        for (const path of paths) {
+      if (!await job.forEach(this._liveRidIterator(), (rid) => {
+        if (this.disposed || !active.length) return false;
+        for (const { path } of active) {
           built.get(path).updateScalarState(rid, columnScalarState(readValue(rid, path)));
         }
-        scanned++;
-        if (scanned % COLUMN_BUILD_BATCH_SIZE === 0) {
-          await job.checkpoint(scanned);
-          readValue.reset();
-        }
-      }
+      }, { beforeBatch: () => {
+        readValue.reset();
+        active = targets.filter(({ path, buildId, column }) => this.columns.get(path) === column && column.buildId === buildId);
+      } })) return;
 
       const installedPaths = [];
       for (const { path, buildId, column: expected } of targets) {
         const target = this.columns.get(path);
         const column = built.get(path);
-        if (target === expected && column && target.install(column, buildId)) installedPaths.push(path);
+        if (target === expected && column && await target.install(column, buildId, job)) installedPaths.push(path);
       }
       await this._stripBaseValuesForColumns(installedPaths, job);
     } catch (error) {
@@ -1648,21 +1664,15 @@ class Collection {
     }
   }
 
-  async _stripBaseValuesForColumns(paths = [], job = null) {
+  async _stripBaseValuesForColumns(paths, job) {
     if (!paths.length) return;
-    let scanned = 0;
     const targets = new Map(paths.map((path) => [path, this.columns.get(path)]));
     const activePaths = () => paths.filter((path) => this.columns.get(path)?.ready && this.columns.get(path) === targets.get(path));
     let active = activePaths();
-    for (const rid of this._liveRidIterator()) {
-      if (this.disposed) return;
+    await job.forEach(this._liveRidIterator(), (rid) => {
+      if (this.disposed) return false;
       if (!this.indexDirtyRids.has(rid)) this._stripBaseValueForColumns(rid, active);
-      scanned++;
-      if (scanned % COLUMN_BUILD_BATCH_SIZE === 0 && job) {
-        await job.checkpoint(scanned);
-        active = activePaths();
-      }
-    }
+    }, { beforeBatch: () => { active = activePaths(); } });
     for (const path of activePaths()) this.columns.get(path).coldStripped = true;
   }
 
@@ -1852,15 +1862,14 @@ class Collection {
   async _runVectorIndexBuild(indexKey, entry, job) {
     if (this.disposed) return;
     try {
-      for (const [id, vector] of this.vectors) {
-        if (this.disposed) return;
+      if (!await job.forEach(this.vectors, ([id, vector]) => {
+        if (this.disposed || this.vectorIndexes.get(indexKey) !== entry) return false;
         entry.scanned++;
         if (!entry.includeId || entry.includeId(id)) {
           entry.index.insert(id, vector);
           entry.inserted++;
         }
-        if (entry.scanned % VECTOR_BUILD_BATCH_SIZE === 0) await job.checkpoint(entry.scanned);
-      }
+      }, { limit: this.vectors.size })) return;
       if (this.vectorIndexes.get(indexKey) === entry) {
         entry.status = "ready";
         entry.readyAt = new Date().toISOString();
@@ -2199,14 +2208,14 @@ class TypedRidColumn {
   }
 
   startBuild() {
-    for (const [rid, state] of this.pending || []) this._applyState(rid, state);
     this.status = "building";
+    this.retiring = false;
     this.error = null;
-    this.pending = new Map();
+    this.pending ||= new Map();
     return ++this.buildId;
   }
 
-  install(source, buildId) {
+  async install(source, buildId, job) {
     if (buildId !== this.buildId) return false;
     this.numberValues = source.numberValues;
     this.numberPresent = source.numberPresent;
@@ -2223,8 +2232,14 @@ class TypedRidColumn {
     this.numberCount = source.numberCount;
     this.scalarCount = source.scalarCount;
     this.nullCount = source.nullCount;
-    const pending = this.pending || new Map();
-    for (const [rid, state] of pending) this._applyState(rid, state);
+    while (this.pending?.size) {
+      if (!await job.forEach(this.pending, ([rid, state]) => {
+        if (buildId !== this.buildId) return false;
+        this._applyState(rid, state);
+        this.pending.delete(rid);
+      })) return false;
+    }
+    if (buildId !== this.buildId) return false;
     this.pending = null;
     this.status = "ready";
     this.error = null;
@@ -2233,18 +2248,21 @@ class TypedRidColumn {
 
   fail(error, buildId) {
     if (buildId !== this.buildId) return;
-    for (const [rid, state] of this.pending || []) this._applyState(rid, state);
     this.status = "error";
     this.error = error?.message || String(error);
-    this.pending = null;
   }
 
   updateScalarState(rid, state) {
+    if (this.status === "ready") {
+      this._applyState(rid, state);
+      return;
+    }
     if (this.status === "building") {
       this.pending.set(rid, state);
       return;
     }
-    this._applyState(rid, state);
+    this.pending?.delete(rid);
+    this._applyState(rid, this.retiring ? { kind: "absent" } : state);
   }
 
   remove(rid) {
@@ -3140,6 +3158,7 @@ export class Store {
   async awaitIndexes(dbName, collName) {
     const collection = this.collection(dbName, collName);
     if (collection.indexBuildPending) collection.scheduleIndexBuildsFromMeta();
+    await collection.awaitStorage();
     await Promise.all([
       collection.awaitFieldIndexes(),
       collection.awaitColumns(),

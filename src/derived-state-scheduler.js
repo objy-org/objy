@@ -104,21 +104,46 @@ class DerivedStateJobContext {
   }
 
   get cancelled() {
-    return this.job.cancelled;
+    return this.scheduler.closed || this.job.cancelled;
   }
 
-  async checkpoint(processed = 0) {
+  get batchSize() {
+    return Math.min(64, this.scheduler.batchSize);
+  }
+
+  async forEach(values, visit, { beforeBatch, limit = Infinity } = {}) {
+    let processed = 0;
+    if (limit <= 0) return !this.cancelled;
+    beforeBatch?.();
+    for (const value of values) {
+      if (this.cancelled || visit(value) === false) return false;
+      if (++processed % this.batchSize === 0 || processed % this.scheduler.batchSize === 0) {
+        const pause = this.checkpoint(processed);
+        if (pause) {
+          await pause;
+          beforeBatch?.();
+        }
+      }
+      if (processed >= limit) break;
+    }
+    if (processed % this.batchSize) {
+      const pause = this.checkpoint(processed);
+      if (pause) await pause;
+    }
+    return !this.cancelled;
+  }
+
+  checkpoint(processed = 0) {
     const count = Math.max(0, Math.floor(Number(processed) || 0));
     const shouldYieldByBatch = count > 0 && count % this.scheduler.batchSize === 0;
     const shouldYieldByTime = Date.now() - this.lastYieldAt >= this.scheduler.maxSliceMs;
     if (!shouldYieldByBatch && !shouldYieldByTime) return;
-    this.lastYieldAt = Date.now();
-    await yieldToEventLoop();
+    return this.yield();
   }
 
   async yield() {
-    this.lastYieldAt = Date.now();
     await yieldToEventLoop();
+    this.lastYieldAt = Date.now();
   }
 }
 

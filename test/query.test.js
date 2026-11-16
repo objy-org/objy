@@ -195,10 +195,11 @@ test("equality indexes are maintained across updates and deletes", () => {
   assert.deepEqual(n.find("db", "users", { "profile.city": "Arlington" }), []);
 });
 
-test("field indexes also drive sorted paging and stay fresh", () => {
+test("field indexes also drive sorted paging and stay fresh", async () => {
   const n = new CRDTNode({ id: "a" });
   seedUsers(n);
   n.createIndex("db", "users", "score");
+  await n.awaitFieldIndexes("db", "users");
 
   assert.deepEqual(
     n.find("db", "users", {}, { sortBy: "score", sort: "desc", limit: 2 }).map((o) => o._id),
@@ -234,11 +235,12 @@ test("ordered index verifies filters it cannot prove", () => {
   );
 });
 
-test("reverse indexes narrow old equality, in, logical, array, and _id queries", () => {
+test("reverse indexes narrow old equality, in, logical, array, and _id queries", async () => {
   const n = new CRDTNode({ id: "a" });
   seedUsers(n);
   n.createIndex("db", "users", "status");
   n.createIndex("db", "users", "tags");
+  await n.awaitFieldIndexes("db", "users");
 
   assert.equal(n.count("db", "users", { status: "active" }), 2);
   assert.deepEqual(
@@ -635,6 +637,7 @@ test("compressed memory tiering keeps hot paths queryable and hydrates full obje
   assert.deepEqual(fresh.get("db", "assets", "a1"), n.get("db", "assets", "a1"));
 
   n.setCollectionMeta("db", "assets", { indexes: ["status"], columns: ["score"], tiering: { mode: "off" } });
+  await n.awaitIndexes("db", "assets");
   assert.equal(collection.shapeStats()[0].tiering.objects, 0);
   assert.equal(collection.store.readForQuery("a1").history.notes, coldNotes);
 });

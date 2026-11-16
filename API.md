@@ -274,9 +274,9 @@ Virtual structure values are returned by object reads but are not currently cons
 
 Hooks store configuration only; executable code is registered on the server. `use` enables hooks for their registered operations, operation-specific arrays may target `create`, `read`, `update`, or `delete`, and `enabled: false` bypasses the chain.
 
-Changing indexes, columns, or tiering rebuilds derived in-memory state through cooperative bounded tasks. Changing hooks only invalidates the cached hook plan.
+Changing indexes, columns, or tiering schedules bounded background work. The response acknowledges the new configuration, not completion of index building or physical conversion. Reads and writes remain available while that work finishes. Changing hooks only invalidates the cached hook plan.
 
-Column values are object data, not disposable indexes: removing a column moves its values back into object bodies before releasing it. On large collections this metadata change takes time and can increase memory use. Compression keeps arrays intact even when a nested array path is configured.
+Column values are object data, not disposable indexes: removing a column moves its values back into object bodies before releasing it. Values remain readable during migration. On large collections conversion takes time and can increase memory use. Compression keeps arrays intact even when a nested array path is configured.
 
 ### List Collections
 
