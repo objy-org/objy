@@ -14,7 +14,8 @@ import { HNSWIndex } from "./hnsw.js";
 import { IdOrder } from "./id-order.js";
 import { compareOrderKeys, selectOrdered } from "./order.js";
 import { normalizeObjectHooksMeta } from "./object-hooks.js";
-import { compareSortValues, getPathValue, matchesConstraint, matchesQuery, stableKey, stripQueryControls } from "./query.js";
+import { compareSortValues, equalityIndexKeys, getPathValue, isConstraintOperator, matchesConstraint, matchesQuery, queryNeedsWholeObject, stableKey, stripQueryControls } from "./query.js";
+import { containerStoragePath, setValuePath as setPath, unsetValuePath as unsetPath, valuePathParts } from "./value-path.js";
 import { AGGREGATE_PATH, planAggregate, planCount, planRead, READ_PATH } from "./query-planner.js";
 import { compileStructure, materializeStructure, normalizeStructure } from "./structure.js";
 import { cloneVector, isValidVector, normalizeVectorConfig, rankBySimilarity, VectorIndexWarmingError } from "./vector.js";
@@ -155,10 +156,9 @@ class Collection {
     const m = this._ensureMeta(key);
     const rid = m.rid;
     if (m.deleted && !gt(ts, m.deleted)) return false;
+    if (m.ts && !gt(ts, m.ts)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
     const previousShard = wasLive ? m.shard : null;
-    const before = wasLive ? this.readForQuery(key) : undefined;
-    if (m.ts && !gt(ts, m.ts)) return false;
     const nextShard = normalizeShard(shard) || m.shard || null;
     const prepared = this._prepareStoredValue(value);
     const baseValue = options.keepColumnFields || this._hasDirtyIndexes()
@@ -170,7 +170,7 @@ class Collection {
     this._writeBaseValue(key, rid, baseValue, { trusted: options.trustedValues === true });
     this._applyVectorUpdate(key, prepared.vector);
     const after = queryObjectFromStoredValue(key, prepared.value);
-    this._recordIndexDelta({ rid, before, after }, indexDeltas);
+    this._recordIndexDelta({ rid, after }, indexDeltas);
     if (!wasLive) {
       this.liveCount++;
       this._addShardRid(rid, nextShard);
@@ -281,7 +281,7 @@ class Collection {
     const id = this._idForRid(rid);
     if (id === undefined) return;
     const { _id, ...value } = object || {};
-    const baseValue = this._baseValueForStorage(value, paths);
+    const baseValue = paths === null && this.indexDirtyRids.has(rid) ? value : this._baseValueForStorage(value, paths);
     this._writeBaseValue(id, rid, baseValue, { trusted: true });
   }
 
@@ -330,13 +330,12 @@ class Collection {
     if (last && !gt(ts, last)) return false;
     const wasLive = Boolean(m.ts && !m.deleted);
     const previousShard = wasLive ? m.shard : null;
-    const before = wasLive ? this.readForQuery(key) : undefined;
     m.deleted = ts;
     if (shard) m.shard = normalizeShard(shard);
     this.store.removeObject(key);
     this._clearCompressedCold(rid);
     this._removeVector(key);
-    this._recordIndexDelta({ rid, before, after: undefined }, indexDeltas);
+    this._recordIndexDelta({ rid, after: undefined }, indexDeltas);
     if (wasLive) {
       this.liveCount--;
       this._removeShardRid(rid, previousShard);
@@ -370,6 +369,18 @@ class Collection {
   readRidForQuery(rid) {
     const id = this._idForRid(rid);
     return id === undefined ? undefined : this.readForQuery(id);
+  }
+
+  readField(id, path) {
+    return this.fieldValueReader()(id, path);
+  }
+
+  fieldValueReader() {
+    const read = this._fieldValueReader();
+    return (id, path) => {
+      const m = this.meta.get(String(id));
+      return m && !m.deleted ? read(m.rid, path) : undefined;
+    };
   }
 
   materializeRead(object) {
@@ -432,6 +443,10 @@ class Collection {
     return this._selectRids(stripQueryControls(query), options).map((rid) => this.readRidForQuery(rid));
   }
 
+  findIds(query = {}, options = {}) {
+    return this._selectRids(stripQueryControls(query), options).map((rid) => this._idForRid(rid));
+  }
+
   _selectRids(criteria = {}, options = {}) {
     const offset = options.offset || 0;
     const limit = options.limit ?? Infinity;
@@ -439,7 +454,7 @@ class Collection {
     const plan = this._planRead(criteria, options);
     const readValue = this._fieldValueReader();
     const proven = isEmptyCriteria(criteria) || Boolean(plan.idPlan?.exact && !plan.idPlan.verify && plan.path !== READ_PATH.SCAN);
-    const wholeObject = queryNeedsWholeObject(criteria);
+    const matches = this._ridMatcher(criteria, readValue);
     const includeIds = options.includeIds instanceof Set ? options.includeIds : null;
     const includeId = typeof options.includeId === "function" ? options.includeId : null;
     const accepts = (rid) => {
@@ -449,9 +464,7 @@ class Collection {
       if (includeIds && !includeIds.has(rid)) return false;
       if (plan.idPlan?.scopeIds && !plan.idPlan.scopeIds.has(rid)) return false;
       if (includeId && !includeId(id)) return false;
-      return proven || (wholeObject
-        ? matchesQuery(this.readRidForQuery(rid), criteria)
-        : matchesQuery(rid, criteria, readValue));
+      return proven || matches(rid);
     };
     const candidates = function* (rids) {
       for (const rid of rids) if (accepts(rid)) yield rid;
@@ -550,6 +563,14 @@ class Collection {
     return readValue;
   }
 
+  _ridMatcher(criteria, readValue = this._fieldValueReader()) {
+    if (!queryNeedsWholeObject(criteria)) return (rid) => matchesQuery(rid, criteria, readValue);
+    return (rid) => {
+      const object = this.readRidForQuery(rid);
+      return Boolean(object && matchesQuery(object, criteria));
+    };
+  }
+
   count(query = {}, options = {}) {
     const criteria = stripQueryControls(query);
     const includeId = typeof options.includeId === "function" ? options.includeId : null;
@@ -586,30 +607,25 @@ class Collection {
 
     let n = 0;
     const verifyScan = plan.path === READ_PATH.SCAN && !isEmptyCriteria(criteria);
-    for (const rid of this._ridsForPlan(plan.idPlan, criteria)) {
+    for (const rid of this._ridsForPlan(plan.idPlan, criteria, verifyScan)) {
       if (includeIds && !includeIds.has(rid)) continue;
       const id = includeId ? this._idForRid(rid) : null;
       if (includeId && !includeId(id)) continue;
-      if (verifyScan) {
-        const obj = this.readRidForQuery(rid);
-        if (!obj || !matchesQuery(obj, criteria)) continue;
-      }
       n++;
     }
     return n;
   }
 
   aggregate(query = {}, spec = {}, options = {}) {
+    const criteria = stripQueryControls(query);
     if (isObjectDbAggregateSpec(spec)) {
-      const criteria = stripQueryControls(query);
       const indexed = this._executeAggregatePlan(this._planAggregate(criteria, spec, options), criteria, spec, options);
       if (indexed) return indexed;
-
-      const rows = this.findForQuery(criteria, options);
-      return spec?.$partial === true ? aggregatePartialObjects(rows, spec) : aggregateObjects(rows, spec);
     }
-
-    return aggregateLegacyObjects(this.findForQuery(query, options), spec);
+    const rids = this._selectRids(criteria, options);
+    const readValue = this._fieldValueReader();
+    if (!isObjectDbAggregateSpec(spec)) return aggregateLegacyObjects(rids, spec, readValue);
+    return spec?.$partial === true ? aggregatePartialObjects(rids, spec, readValue) : aggregateObjects(rids, spec, readValue);
   }
 
   createIndex(path) {
@@ -640,6 +656,7 @@ class Collection {
     const previousTiering = stableKey(this.collectionMeta.tiering || null);
     const next = normalizeCollectionMeta(meta);
     if (next.tiering) assertCompressionAdapter(this.compression);
+    this._releaseColumns(next.columns);
     this.collectionMeta = next;
     this.structurePlan = compileStructure(next.structure);
     if (options.deferIndexes) this._deferMetaIndexes();
@@ -649,6 +666,28 @@ class Collection {
     }
     if (previousTiering !== stableKey(this.collectionMeta.tiering || null)) this._retierBaseValues();
     return this.getMeta();
+  }
+
+  _releaseColumns(wanted) {
+    const removed = [...this.columns.keys()].filter((path) => !wanted.includes(path));
+    if (!removed.length) return;
+    const readValue = this._fieldValueReader({ indexes: false });
+    const retained = [...this.columns.keys()].filter((path) => wanted.includes(path) && this.columns.get(path).ready);
+    for (const rid of this._liveRidIterator()) {
+      if (this.indexDirtyRids.has(rid)) continue;
+      const id = this._idForRid(rid);
+      const base = this.store.readForQuery?.(id) || this.store.read(id) || {};
+      let next = base;
+      for (const path of removed) {
+        const column = this.columns.get(path);
+        if (!column.ready && !column.hasValue(rid) && !column.pending?.has(rid)) continue;
+        const value = readValue(rid, path);
+        next = value === undefined ? unsetPath(next, path) : setPath(next, path, value);
+      }
+      next = this._baseValueForStorage(next, retained);
+      if (next !== base) this.store.rebuild(id, Object.entries(next), { trusted: true });
+    }
+    for (const path of removed) this.columns.delete(path);
   }
 
   indexStats() {
@@ -694,16 +733,15 @@ class Collection {
     this.unshardedLiveCount = 0;
     const fieldIndexes = new Map(fieldPaths.map((path) => [path, new FieldIndex(path)]));
     const columnData = new Map(columnPaths.map((path) => [path, new TypedRidColumn(path)]));
+    const readValue = this._fieldValueReader({ indexes: false });
 
     for (const [id, m] of this.meta) {
       if (m.deleted) continue;
       this.liveCount++;
       this._addShardRid(m.rid, m.shard || null);
-      const object = this.readForQuery(id);
-      if (!object) continue;
-      for (const [path, index] of fieldIndexes) index.addValue(m.rid, getPathValue(object, path));
-      for (const [path, column] of columnData) column.updateScalarState(m.rid, columnScalarState(getPathValue(object, path)));
-      this._rewriteBaseValueForColumns(m.rid, object, columnPaths);
+      for (const [path, index] of fieldIndexes) index.addValue(m.rid, readValue(m.rid, path));
+      for (const [path, column] of columnData) column.updateScalarState(m.rid, columnScalarState(readValue(m.rid, path)));
+      this._stripBaseValueForColumns(m.rid, columnPaths);
     }
 
     this.indexes = fieldIndexes;
@@ -857,6 +895,12 @@ class Collection {
       limit,
       getVec: (id) => this.getVector(id),
       idOf: (row) => row?._id,
+    });
+  }
+
+  rankVectorIds(ids, queryVec, limit = 20) {
+    return rankBySimilarity(ids, queryVec, {
+      limit, getVec: (id) => this.getVector(id), idOf: (id) => id, mapRow: (_id) => ({ _id }),
     });
   }
 
@@ -1068,18 +1112,14 @@ class Collection {
     return rids;
   }
 
-  *_ridsForPlan(idPlan, criteria = {}) {
+  *_ridsForPlan(idPlan, criteria = {}, verify = false) {
     const rids = idPlan?.ids === null || idPlan?.ids === undefined
       ? this._liveRidIterator()
       : idPlan.ids;
+    const matches = idPlan?.verify || verify ? this._ridMatcher(criteria) : null;
     for (const rid of rids) {
       if (idPlan?.scopeIds && !idPlan.scopeIds.has(rid)) continue;
-      if (!idPlan?.verify) {
-        yield rid;
-        continue;
-      }
-      const object = this.readRidForQuery(rid);
-      if (object && matchesQuery(object, criteria)) yield rid;
+      if (!matches || matches(rid)) yield rid;
     }
   }
 
@@ -1154,14 +1194,23 @@ class Collection {
 
       if (path.startsWith("$")) continue;
 
-      const rids = this._ridsForFieldConstraint(path, expected);
+      const rids = this._ridsForFieldConstraint(path, expected, true);
       if (rids !== null) current = current === null ? rids : setIntersection(current, rids);
     }
 
     return current;
   }
 
-  _ridsForFieldConstraint(path, expected) {
+  _ridsForFieldConstraint(path, expected, partial = false) {
+    if (partial && isPlainObject(expected) && Object.keys(expected).length > 1 && expected.$regex === undefined &&
+        Object.keys(expected).every(isConstraintOperator)) {
+      let candidates = null;
+      for (const [operator, value] of Object.entries(expected)) {
+        const ids = this._ridsForFieldConstraint(path, { [operator]: value });
+        if (ids !== null) candidates = candidates === null ? ids : setIntersection(candidates, ids);
+      }
+      return candidates;
+    }
     if (path === "_id") return this._ridsForObjectIdConstraint(expected);
 
     const index = this.indexes.get(path);
@@ -1192,7 +1241,7 @@ class Collection {
 
   _ridsForObjectIdConstraint(expected) {
     const values = indexableConstraintValues(expected);
-    if (values === null) return null;
+    if (values === null || values.some((value) => typeof value !== "string" || !value)) return null;
 
     const rids = new Set();
     for (const value of values) {
@@ -1223,20 +1272,8 @@ class Collection {
     this._applyIndexDeltas([delta]);
   }
 
-  _refreshIndexes(rid, before, after) {
-    this._applyIndexDeltas([{ rid, before, after }]);
-  }
-
   _refreshColumns(rid, after) {
-    this._applyIndexDeltas([{ rid, before: undefined, after }]);
-  }
-
-  _addToIndexes(rid, object) {
-    this._applyIndexDeltas([{ rid, before: undefined, after: object }]);
-  }
-
-  _removeFromIndexes(rid, object) {
-    this._applyIndexDeltas([{ rid, before: object, after: undefined }]);
+    this._applyIndexDeltas([{ rid, after }]);
   }
 
   _applyIndexDeltas(deltas = []) {
@@ -1247,21 +1284,37 @@ class Collection {
       return;
     }
 
-    for (const { rid, before, after } of deltas) {
+    let base, splitContainers;
+    for (const { rid, after } of deltas) {
       if (!Number.isInteger(rid)) continue;
-      this._recordFieldBuildDelta(rid, before, after);
+      this._recordFieldBuildDelta(rid);
       this._recordColumnBuildDelta(rid, after);
       if (this.indexDirtyRids.has(rid)) continue;
-
-      for (const index of this.indexes.values()) {
-        if (before) index.removeValue(rid, getPathValue(before, index.path));
-        if (after) index.addValue(rid, getPathValue(after, index.path));
-      }
 
       for (const column of this.columns.values()) {
         if (column.status === "building") continue;
         if (after) column.updateScalarState(rid, columnScalarState(getPathValue(after, column.path)));
         else column.remove(rid);
+      }
+
+      base = undefined;
+      for (const index of this.indexes.values()) {
+        index.removeRid(rid);
+        if (!after) continue;
+        let value = getPathValue(after, index.path);
+        // Containers must reference owned storage, not mutable caller input.
+        if (value !== null && typeof value === "object") {
+          splitContainers ||= new Map();
+          if (!splitContainers.has(index.path)) {
+            splitContainers.set(index.path, [...this.columns.keys()].some((path) => pathsOverlap(path, index.path)));
+          }
+          if (splitContainers.get(index.path)) value = structuredClone(value);
+          else {
+            base ??= this.store.readForQuery?.(this._idForRid(rid)) || this.store.read(this._idForRid(rid)) || {};
+            value = getPathValue(base, index.path);
+          }
+        }
+        index.addValue(rid, value);
       }
     }
   }
@@ -1283,9 +1336,9 @@ class Collection {
     );
   }
 
-  _markIndexDirty({ rid, before, after } = {}) {
+  _markIndexDirty({ rid, after } = {}) {
     if (!Number.isInteger(rid)) return;
-    this._recordFieldBuildDelta(rid, before, after);
+    this._recordFieldBuildDelta(rid);
     this._recordColumnBuildDelta(rid, after);
     this.indexDirtyRids.add(rid);
   }
@@ -1411,13 +1464,9 @@ class Collection {
   }
 
   _deferMetaIndexes() {
-    const wantedColumns = new Set(this.collectionMeta.columns);
     this.indexes.clear();
     this.fieldBuilds.clear();
     this.indexBuildPending = true;
-    for (const path of [...this.columns.keys()]) {
-      if (!wantedColumns.has(path)) this.columns.delete(path);
-    }
   }
 
   _fieldIndexStatus(path) {
@@ -1434,7 +1483,7 @@ class Collection {
       const build = {
         path,
         status: "building",
-        pending: new Map(),
+        pending: new Set(),
         error: null,
         startedAt: new Date().toISOString(),
         promise: null,
@@ -1478,9 +1527,10 @@ class Collection {
         if (this.fieldBuilds.get(target.path) !== target) continue;
         const index = built.get(target.path);
         if (!index) continue;
-        for (const [rid, change] of target.pending) {
-          if (change.before !== NO_VALUE) index.removeValue(rid, change.before);
-          if (change.after !== NO_VALUE) index.addValue(rid, change.after);
+        readValue.reset();
+        for (const rid of target.pending) {
+          index.removeRid(rid);
+          if (this.has(this._idForRid(rid))) index.addValue(rid, readValue(rid, target.path));
         }
         this.indexes.set(target.path, index);
         this.fieldBuilds.delete(target.path);
@@ -1490,30 +1540,23 @@ class Collection {
         if (this.fieldBuilds.get(target.path) !== target) continue;
         target.status = "error";
         target.error = error?.message || String(error);
-        target.pending = new Map();
+        target.pending = new Set();
       }
       throw error;
     }
   }
 
-  _recordFieldBuildDelta(rid, before, after) {
+  _recordFieldBuildDelta(rid) {
     if (!this.fieldBuilds.size) return;
     for (const build of this.fieldBuilds.values()) {
       if (build.status !== "building") continue;
-      const current = build.pending.get(rid);
-      build.pending.set(rid, {
-        before: current ? current.before : (before ? getPathValue(before, build.path) : NO_VALUE),
-        after: after ? getPathValue(after, build.path) : NO_VALUE,
-      });
+      build.pending.add(rid);
     }
   }
 
   _applyMetaColumns(options = {}) {
     const rebuild = options.rebuild === true;
     const wanted = new Set(this.collectionMeta.columns);
-    for (const path of [...this.columns.keys()]) {
-      if (!wanted.has(path)) this.columns.delete(path);
-    }
 
     const toBuild = [];
     for (const path of wanted) {
@@ -1554,7 +1597,7 @@ class Collection {
       const column = this.columns.get(path);
       if (!column) continue;
       const buildId = column.startBuild();
-      targets.push({ path, buildId });
+      targets.push({ path, buildId, column });
     }
     if (!targets.length) return null;
 
@@ -1591,16 +1634,16 @@ class Collection {
       }
 
       const installedPaths = [];
-      for (const { path, buildId } of targets) {
+      for (const { path, buildId, column: expected } of targets) {
         const target = this.columns.get(path);
         const column = built.get(path);
-        if (target && column && target.install(column, buildId)) installedPaths.push(path);
+        if (target === expected && column && target.install(column, buildId)) installedPaths.push(path);
       }
       await this._stripBaseValuesForColumns(installedPaths, job);
     } catch (error) {
-      for (const { path, buildId } of targets) {
+      for (const { path, buildId, column: expected } of targets) {
         const column = this.columns.get(path);
-        if (column) column.fail(error, buildId);
+        if (column === expected) column.fail(error, buildId);
       }
     }
   }
@@ -1662,7 +1705,7 @@ class Collection {
           break;
         }
         case "$count": {
-          state[field.resultKey] = { count: field.operand === true ? this.liveCount : columns.get(field.operand).entries };
+          state[field.resultKey] = { count: field.operand === true ? this.liveCount : columns.get(field.operand).entries - columns.get(field.operand).nullCount };
           break;
         }
       }
@@ -1950,7 +1993,9 @@ class FieldIndex {
   }
 
   get lookupEntries() {
-    return [...this.lookup.values()].reduce((sum, ids) => sum + ids.size, 0);
+    let count = 0;
+    for (const [key, ids] of this.lookup) if (typeof key === "string") count += ids.size;
+    return count;
   }
 
   get orderedKeys() {
@@ -1964,10 +2009,21 @@ class FieldIndex {
   addValue(rid, value) {
     if (!Number.isInteger(rid)) return;
     this.forward.set(rid, value);
-    for (const key of indexedStoredValues(value).map(indexValueKey)) {
-      const rids = this.lookup.get(key) || new Set();
+    for (const entry of indexedStoredValues(value)) {
+      const [key, alias] = equalityIndexKeys(entry, true) || [];
+      if (key === undefined) continue;
+      let rids = this.lookup.get(key);
+      if (!rids) {
+        rids = new Set();
+        this.lookup.set(key, rids);
+        if (alias !== undefined) {
+          const current = this.lookup.get(alias);
+          if (current === undefined) this.lookup.set(alias, key);
+          else if (typeof current === "string") this.lookup.set(alias, new Set([current, key]));
+          else current.add(key);
+        }
+      }
       rids.add(rid);
-      this.lookup.set(key, rids);
     }
     this._addOrdered(rid, value);
     this._addContainsState(rid, value);
@@ -1975,10 +2031,19 @@ class FieldIndex {
 
   removeValue(rid, value) {
     this.forward.delete(rid);
-    for (const key of indexedStoredValues(value).map(indexValueKey)) {
+    for (const entry of indexedStoredValues(value)) {
+      const [key, alias] = equalityIndexKeys(entry, true) || [];
       const rids = this.lookup.get(key);
       rids?.delete(rid);
-      if (rids?.size === 0) this.lookup.delete(key);
+      if (rids?.size === 0) {
+        this.lookup.delete(key);
+        const current = this.lookup.get(alias);
+        if (current === key) this.lookup.delete(alias);
+        else if (current instanceof Set) {
+          current.delete(key);
+          if (current.size === 1) this.lookup.set(alias, current.values().next().value);
+        }
+      }
     }
     this._removeOrdered(rid, value);
     this._removeContainsState(rid, value);
@@ -1990,17 +2055,28 @@ class FieldIndex {
   }
 
   idsForValues(values) {
-    const unique = uniqueIndexValues(values);
-    if (unique.length === 1) return this.lookup.get(indexValueKey(unique[0])) || new Set();
-    let ids = new Set();
-    for (const value of unique) ids = setUnion(ids, this.lookup.get(indexValueKey(value)) || new Set());
-    return ids;
+    let ids = null;
+    const keys = new Set();
+    for (const value of values) {
+      const candidates = equalityIndexKeys(value);
+      if (candidates === null) return null;
+      for (const key of candidates) keys.add(key);
+    }
+    for (const key of keys) {
+      const value = this.lookup.get(key);
+      const exactKeys = typeof key === "number" ? (typeof value === "string" ? [value] : value || []) : [key];
+      for (const exact of exactKeys) {
+        const bucket = this.lookup.get(exact);
+        if (bucket) ids = ids === null ? bucket : setUnion(ids, bucket);
+      }
+    }
+    return ids || new Set();
   }
 
   idsForContains(value) {
     if (!isScalarIndexValue(value)) return null;
     if (this.containsStringRids.size || this.containsScalarRids.size || this.containsNestedArrayRids.size) return null;
-    return this.lookup.get(indexValueKey(value)) || new Set();
+    return this.idsForValues([value]);
   }
 
   valueForRid(rid) {
@@ -2123,6 +2199,7 @@ class TypedRidColumn {
   }
 
   startBuild() {
+    for (const [rid, state] of this.pending || []) this._applyState(rid, state);
     this.status = "building";
     this.error = null;
     this.pending = new Map();
@@ -2542,17 +2619,13 @@ function sameAggregateTypeLessThan(left, right) {
   return compareSortValues(left, right) < 0;
 }
 
-function queryNeedsWholeObject(query) {
-  if (!query || typeof query !== "object") return false;
-  return Object.entries(query).some(([key, value]) => key === "$where" || queryNeedsWholeObject(value));
-}
-
 function pathsOverlap(left, right) {
   return left === right || left.startsWith(`${right}.`) || right.startsWith(`${left}.`);
 }
 
 function indexableConstraintValues(constraint) {
   if (constraint && typeof constraint === "object" && !Array.isArray(constraint)) {
+    if (Object.keys(constraint).length !== 1) return null;
     if (Object.prototype.hasOwnProperty.call(constraint, "$eq")) {
       return indexableEqualityValue(constraint.$eq);
     }
@@ -2606,8 +2679,6 @@ function indexableEqualityValue(value) {
   return isScalarIndexValue(value) ? [value] : null;
 }
 
-const NO_VALUE = Symbol("no-value");
-
 function columnScalarState(value) {
   if (isScalarColumnValue(value)) return { kind: "scalar", value };
   if (value === null) return { kind: "null" };
@@ -2630,18 +2701,8 @@ function isScalarIndexValue(value) {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
-function indexValueKey(value) {
-  return `${typeof value}:${JSON.stringify(value)}`;
-}
-
 function orderedValueKey(value) {
   return `${typeof value}:${stableKey(value)}`;
-}
-
-function uniqueIndexValues(values = []) {
-  const unique = new Map();
-  for (const value of values) unique.set(indexValueKey(value), value);
-  return [...unique.values()];
 }
 
 function setIntersection(left, right) {
@@ -2758,7 +2819,10 @@ function normalizeIndexList(indexes = [], label = "indexes") {
     if (typeof entry === "string") return entry;
     if (entry && typeof entry === "object" && typeof entry.path === "string") return entry.path;
     throw new TypeError(`collection meta ${label} must contain strings or { path } objects`);
-  }).map((path) => path.trim()).filter(Boolean));
+  }).map((path) => path.trim()).filter(Boolean).map((path) => {
+    valuePathParts(path);
+    return path;
+  }));
 }
 
 function unique(values) {
@@ -2767,17 +2831,19 @@ function unique(values) {
 
 function splitTieredValue(value = {}, tiering = {}, forcedHotPaths = []) {
   if (!isPlainObject(value)) return { hot: value || {}, cold: null };
-  const forced = unique(forcedHotPaths);
+  const storagePaths = (paths) => unique(paths.map((path) => containerStoragePath(value, path)));
+  const forced = storagePaths(forcedHotPaths);
   if (Array.isArray(tiering.keep) && tiering.keep.length) {
-    const hotPaths = unique([...tiering.keep, ...forced]);
+    const hotPaths = unique([...storagePaths(tiering.keep), ...forced]);
     const hot = pickPaths(value, hotPaths);
     const cold = unsetPaths(value, hotPaths);
     return isRemovableEmptyObject(cold) ? { hot: value, cold: null } : { hot, cold };
   }
 
   if (!Array.isArray(tiering.offload) || !tiering.offload.length) return { hot: value, cold: null };
-  let hot = unsetPaths(value, tiering.offload);
-  let cold = pickPaths(value, tiering.offload);
+  const offload = storagePaths(tiering.offload);
+  let hot = unsetPaths(value, offload);
+  let cold = pickPaths(value, offload);
   for (const path of forced) {
     const current = getPathValue(value, path);
     if (current === undefined) continue;
@@ -2821,52 +2887,8 @@ function queryObjectFromStoredValue(id, value = {}) {
   return { ...rest, _id: id };
 }
 
-function setPath(object = {}, path, value) {
-  const parts = pathParts(path);
-  if (!parts.length) return object;
-  const root = isPlainObject(object) ? { ...object } : {};
-  let target = root;
-  let source = isPlainObject(object) ? object : {};
-  for (const part of parts.slice(0, -1)) {
-    const current = isPlainObject(source?.[part]) ? source[part] : {};
-    const next = { ...current };
-    target[part] = next;
-    target = next;
-    source = current;
-  }
-  target[parts[parts.length - 1]] = value;
-  return root;
-}
-
-function unsetPath(object = {}, path) {
-  const parts = pathParts(path);
-  if (!parts.length || !isPlainObject(object)) return object;
-  const [next] = unsetPathParts(object, parts, 0);
-  return next || {};
-}
-
-function unsetPathParts(value, parts, index) {
-  if (!isPlainObject(value)) return [value, false];
-  const key = parts[index];
-  if (!Object.prototype.hasOwnProperty.call(value, key)) return [value, false];
-  const next = { ...value };
-  if (index === parts.length - 1) {
-    delete next[key];
-  } else {
-    const [child, changed] = unsetPathParts(value[key], parts, index + 1);
-    if (!changed) return [value, false];
-    if (isRemovableEmptyObject(child)) delete next[key];
-    else next[key] = child;
-  }
-  return [next, true];
-}
-
 function isRemovableEmptyObject(value) {
   return isPlainObject(value) && Object.keys(value).length === 0;
-}
-
-function pathParts(path) {
-  return String(path || "").split(".").map((part) => part.trim()).filter(Boolean);
 }
 
 function isPlainObject(value) {

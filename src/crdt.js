@@ -139,7 +139,8 @@ export class CRDTNode {
   }
 
   replace(db, coll, id, obj) {
-    return this.replaceMany(db, coll, [{ ...withoutObjectId(obj), _id: id }]).items[0]?._id || id;
+    this.replaceManyCount(db, coll, [{ ...withoutObjectId(obj), _id: id }]);
+    return this.has(db, coll, id) ? String(id) : id;
   }
 
   remove(db, coll, id) {
@@ -206,6 +207,23 @@ export class CRDTNode {
     if (!object) return object;
     const depth = normalizeRefDepth(options.refDepth, 0);
     return depth > 0 ? this.expandReferences(db, object, depth) : object;
+  }
+
+  has(db, coll, id) {
+    return this.db.getCollection(db, coll)?.has(String(id)) || false;
+  }
+
+  getField(db, coll, id, path) {
+    return this.db.getCollection(db, coll)?.readField(id, path);
+  }
+
+  fieldValueReader(db, coll) {
+    return this.db.getCollection(db, coll)?.fieldValueReader() || (() => undefined);
+  }
+
+  findIds(db, coll, query = {}, options = {}) {
+    if (this._needsReferenceRead(query, options)) return this.find(db, coll, query, options).map((row) => row._id);
+    return this.db.getCollection(db, coll)?.findIds(query, options) || [];
   }
 
   getMany(db, coll, ids, options = {}) {
@@ -411,6 +429,10 @@ export class CRDTNode {
 
   rankVectorRows(db, coll, rows, queryVec, limit = 20) {
     return this.db.rankVectorRows(db, coll, rows, queryVec, limit);
+  }
+
+  rankVectorIds(db, coll, ids, queryVec, limit = 20) {
+    return this.db.getCollection(db, coll)?.rankVectorIds(ids, queryVec, limit) || [];
   }
 
   getVector(db, coll, id) {

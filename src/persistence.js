@@ -609,9 +609,10 @@ export class PersistenceManager {
   }
 
   async _truncateLocalWalIfDurable() {
-    if (!this.localWal || this.localWalPending.length || this.localWalFlushing) return;
-    if (this.pending.size || this.pendingDatabases.size || this.pendingDatabaseDrops.size || this.pendingMeta.size || this.pendingCollectionDrops.size) return;
-    await this.localWal.truncate();
+    const covered = () => !this.localWalPending.length && !this.localWalFlushing &&
+      !this.pending.size && !this.pendingDatabases.size && !this.pendingDatabaseDrops.size &&
+      !this.pendingMeta.size && !this.pendingCollectionDrops.size;
+    if (this.localWal && covered()) await this.localWal.truncate(covered);
   }
 
   _requeueBatches(batches) {

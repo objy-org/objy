@@ -69,7 +69,7 @@ export class AuthService {
     const id = "admin";
     const shard = this.node.shardForObject(GLOBAL_DATABASE, USERS_COLLECTION, id);
     if (!this.node.isPrimaryForShard(shard)) return null;
-    if (this.node.get(GLOBAL_DATABASE, USERS_COLLECTION, id)) return null;
+    if (this.node.has(GLOBAL_DATABASE, USERS_COLLECTION, id)) return null;
     if (this.findUserByUsername(GLOBAL_DATABASE, USERS_COLLECTION, "admin")) return null;
 
     const supplied = typeof adminPassword === "string" && adminPassword.length > 0;
@@ -98,7 +98,7 @@ export class AuthService {
       ...rest,
       _id: _id || user.username,
     }, { partial: false });
-    const existingById = this.node.get(GLOBAL_DATABASE, USERS_COLLECTION, prepared._id);
+    const existingById = this.node.has(GLOBAL_DATABASE, USERS_COLLECTION, prepared._id);
     const existingByUsername = this.findUserByUsername(GLOBAL_DATABASE, USERS_COLLECTION, prepared.username);
     if (existingById || existingByUsername) return null;
     return this.node.insertMany(GLOBAL_DATABASE, USERS_COLLECTION, [prepared])[0];
@@ -268,7 +268,7 @@ export class AuthService {
         object?.username !== undefined &&
         object?._id !== undefined &&
         object?._id !== null
-        ? this.node.get(database, collection, String(object._id))
+        ? { password: this.node.getField(database, collection, String(object._id), "password") }
         : null;
       return this.prepareUserObject(object, { partial, existing });
     });
@@ -318,9 +318,9 @@ export class AuthService {
       if (seen.has(object.username)) throw httpError(409, `username already exists: ${object.username}`);
       seen.set(object.username, id);
 
-      const matches = this.node.find(database, collection, { username: object.username });
-      for (const existing of matches) {
-        if (!id || existing._id !== id) throw httpError(409, `username already exists: ${object.username}`);
+      const matches = this.node.findIds(database, collection, { username: object.username });
+      for (const existingId of matches) {
+        if (!id || existingId !== id) throw httpError(409, `username already exists: ${object.username}`);
       }
     }
   }
@@ -364,8 +364,12 @@ export class AuthService {
   }
 
   canAccessDatabase(claims, database) {
-    return claims.globalUser === true || claims.database === database;
+    return canAccessDatabase(claims, database);
   }
+}
+
+export function canAccessDatabase(claims, database) {
+  return claims?.globalUser === true || claims?.database === database;
 }
 
 class DisabledAuthService {

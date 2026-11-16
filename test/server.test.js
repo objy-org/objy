@@ -1289,6 +1289,51 @@ test("permissions are enforced by remote shard owners", async () => {
   }
 });
 
+test("compound permission predicates and reference database scope agree across shard owners", async () => {
+  const { a, b, urlA, urlB } = await startRoutedTwoShardCluster();
+  try {
+    const adminSession = await login(urlA);
+    const admin = api(urlA, adminSession.accessToken);
+    const db = "predicate_scope";
+    for (const [shard, state] of [["shard-a", a], ["shard-b", b]]) {
+      state.node.createCollection(db, "docs", { indexes: ["score"], columns: ["cost"] });
+      const id = idForShard(a.node, db, "docs", shard, shard);
+      state.node.insertManyCount(db, "docs", [{ _id: id, score: 1, cost: 10 }]);
+    }
+    const userId = idForShard(a.node, db, "users", "shard-a", "reader");
+    assert.equal((await admin.post(`/api/${db}/users/object`, {
+      _id: userId, username: "reader", password: "secret",
+      permissions: [{ query: { score: { $eq: 1, $gt: 4 } }, perm: "r" }],
+    })).status, 201);
+    const readerSession = await login(urlA, "reader", "secret", db);
+    for (const url of [urlA, urlB]) {
+      const result = await api(url, readerSession.accessToken).post(`/api/${db}/docs/search`, {
+        $aggregate: { fields: { count: { $count: true }, sum: { $sum: "cost" } } }, $refDepth: 0,
+      });
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.deepEqual(result.body, []);
+    }
+    const unrestricted = a.auth.prepareWriteObjects(db, "users", [{ _id: userId, username: "reader", password: "secret", permissions: [{ query: {}, perm: "r" }] }]);
+    a.node.replaceManyCount(db, "users", unrestricted);
+    const session = await login(urlA, "reader", "secret", db);
+    for (const [shard, owner] of [["shard-a", a], ["shard-b", b]]) {
+      const target = idForShard(a.node, "private", "secrets", shard, "secret");
+      owner.node.insertManyCount("private", "secrets", [{ _id: target, secret: "private-value" }]);
+      const id = idForShard(a.node, db, "references", "shard-a", shard);
+      a.node.insertManyCount(db, "references", [{ _id: id, target: { type: "reference", database: "private", collection: "secrets", value: target } }]);
+      for (const url of [urlA, urlB]) {
+        const denied = await api(url, session.accessToken).get(`/api/${db}/references/object/${id}?$refDepth=1`);
+        assert.equal(denied.status, 403, JSON.stringify(denied.body));
+      }
+    }
+  } finally {
+    await a.replication.stop(); await b.replication.stop();
+    a.server.closeAllConnections(); b.server.closeAllConnections();
+    await Promise.all([new Promise(resolve => a.server.close(resolve)), new Promise(resolve => b.server.close(resolve))]);
+    a.node.db.dispose(); b.node.db.dispose();
+  }
+});
+
 test("REST CRUD lifecycle", async () => {
   const s = await startTestServer({ port: 0 });
   try {

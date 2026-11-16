@@ -44,6 +44,7 @@ export function rankBySimilarity(rows, queryVec, {
   limit = 20,
   getVec,
   idOf = (row) => row?.id,
+  mapRow = (row) => row,
 } = {}) {
   if (!isValidVector(queryVec) || typeof getVec !== "function") return [];
   const scored = [];
@@ -55,7 +56,7 @@ export function rankBySimilarity(rows, queryVec, {
     scored.push({ row, score: cosine(queryVec, vec) });
   }
   scored.sort((left, right) => right.score - left.score);
-  return scored.slice(0, Math.max(0, limit)).map(({ row, score }) => ({ ...row, _score: score }));
+  return scored.slice(0, Math.max(0, limit)).map(({ row, score }) => ({ ...mapRow(row), _score: score }));
 }
 
 export function normalizeVectorConfig(config = {}) {

@@ -1,4 +1,4 @@
-import { GLOBAL_DATABASE, USERS_COLLECTION } from "../auth.js";
+import { canAccessDatabase, GLOBAL_DATABASE, USERS_COLLECTION } from "../auth.js";
 import { aggregateRows } from "../aggregate.js";
 import { collectClusterStatus } from "../cluster-status.js";
 import { isNdjsonRequest, json, readJson, readNdjson, remoteHttpError } from "../http-router.js";
@@ -22,10 +22,12 @@ import {
 import { DEFAULT_IMPORT_CONFIG } from "../config.js";
 import {
   firstQueryInteger,
+  getPathValue,
   MAX_QUERY_PAGE_SIZE,
   matchesQuery,
   parseQuerySort,
   queryPageOffset,
+  queryNeedsWholeObject,
   splitQueryControls,
 } from "../query.js";
 import { QUERY_PATH_HEADER } from "../query-planner.js";
@@ -624,9 +626,9 @@ export function createPublicObjectInterface() {
             );
             const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
             assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
-            assertUpsertAllowed(req, node, req.params.database, req.params.collection, [preparedObject], { partial: false });
+            const existing = assertUpsertAllowed(req, node, req.params.database, req.params.collection, [preparedObject], { partial: false });
             assertMemoryGuardAcceptsWrites(memoryGuard);
-            const before = node.get(req.params.database, req.params.collection, req.params.id);
+            const before = files ? fileObjects(existing, [req.params.id])[0] : null;
             node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
             await afterLocalWrite(durability);
             const written = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
@@ -691,6 +693,7 @@ export function createPublicObjectInterface() {
                 }),
               };
             }
+            const existing = existingWriteState(node, req.params.database, req.params.collection);
             const patchedObject = compilePatchedObject({
               node,
               database: req.params.database,
@@ -698,6 +701,7 @@ export function createPublicObjectInterface() {
               id: req.params.id,
               patch: withoutObjectId(patch),
               files,
+              existing,
             });
             if (!patchedObject) return { status: 404, body: { error: "not found" } };
             const [prepared] = auth.prepareWriteObjects(
@@ -708,9 +712,9 @@ export function createPublicObjectInterface() {
             );
             const preparedObject = normalizeFileObject(files, req.params.database, req.params.collection, prepared);
             assertImportWriteAccepts({ req, imports: importLimits, durability, objects: [preparedObject] });
-            assertUpdateAllowed(req, node, req.params.database, req.params.collection, [preparedObject]);
+            assertUpdateAllowed(req, node, req.params.database, req.params.collection, [preparedObject], existing);
             assertMemoryGuardAcceptsWrites(memoryGuard);
-            const before = node.get(req.params.database, req.params.collection, req.params.id);
+            const before = files ? fileObjects(existing, [req.params.id])[0] : null;
             node.replace(req.params.database, req.params.collection, req.params.id, preparedObject);
             await afterLocalWrite(durability);
             const written = node.get(req.params.database, req.params.collection, req.params.id) || { _id: req.params.id };
@@ -758,13 +762,14 @@ export function createPublicObjectInterface() {
                 { method: "DELETE" },
               );
             }
-            const existing = node.get(req.params.database, req.params.collection, req.params.id);
-            if (!existing) return { status: 404, body: { error: "not found" } };
-            assertDeleteAllowed(req, [existing], req.params.database);
+            const existing = existingWriteState(node, req.params.database, req.params.collection);
+            if (!existing.has(req.params.id)) return { status: 404, body: { error: "not found" } };
+            assertDeleteAllowed(req, [req.params.id], req.params.database, existing.matches);
+            const before = files ? fileObjects(existing, [req.params.id]) : [];
             const removed = node.remove(req.params.database, req.params.collection, req.params.id);
             if (!removed) return { status: 404, body: { error: "not found" } };
             await afterLocalWrite(durability);
-            await deleteObjectFiles(files, req.params.database, req.params.collection, [existing]);
+            await deleteObjectFiles(files, req.params.database, req.params.collection, before);
             return { status: 204, body: null };
           });
           json(res, Object.hasOwn(result, "responseOverride") ? 200 : result.status,
@@ -929,7 +934,7 @@ async function multipartCreateObject({ req, res, node, auth, routing, durability
         };
       }
 
-      if (node.get(req.params.database, req.params.collection, hookedItem._id)) {
+      if (node.has(req.params.database, req.params.collection, hookedItem._id)) {
         throw httpError(409, `object already exists: ${hookedItem._id}`);
       }
       const objectWithFile = files.attach(req.params.database, req.params.collection, hookedItem, hookedFile);
@@ -1013,8 +1018,8 @@ async function multipartReplaceObject({ req, res, node, auth, routing, durabilit
       const objectWithFile = files.attach(req.params.database, req.params.collection, hookedItem, hookedFile);
       const [prepared] = auth.prepareWriteObjects(req.params.database, req.params.collection, [objectWithFile], { partial: false });
       assertImportWriteAccepts({ req, imports, durability, objects: [prepared], ignoreBodyBytes: true });
-      assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
-      const before = node.get(req.params.database, req.params.collection, req.params.id);
+      const existing = assertUpsertAllowed(req, node, req.params.database, req.params.collection, [prepared], { partial: false });
+      const before = fileObjects(existing, [req.params.id])[0];
       await files.put(req.params.database, req.params.collection, req.params.id, objectWithFile._file, hookedFile);
       node.replace(req.params.database, req.params.collection, req.params.id, prepared);
       await afterLocalWrite(durability);
@@ -1055,9 +1060,10 @@ async function readableObjectForFile({ req, node, routing }) {
     return stripReferenceObjects(remote.body);
   }
 
-  const object = node.get(req.params.database, req.params.collection, req.params.id);
-  if (object) assertReadAllowed(req, object);
-  return object || null;
+  const existing = existingWriteState(node, req.params.database, req.params.collection);
+  if (!existing.has(req.params.id)) return null;
+  if (!canRead(permissionUser(req), req.params.id, req.params.collection, existing.matches)) throw permissionError("read", req.params.id);
+  return fileObjects(existing, [req.params.id])[0];
 }
 
 async function executeCollectionQuery(req, { node, routing, query }) {
@@ -1441,18 +1447,20 @@ async function routedWriteMany({
   for (const group of groups) {
     if (!group.local) continue;
     const prepared = auth.prepareWriteObjects(database, collection, group.items, { partial });
-    assertUpsertAllowed(req, node, database, collection, prepared, { partial });
-    preparedByGroup.set(group, prepared);
+    const existing = assertUpsertAllowed(req, node, database, collection, prepared, { partial });
+    preparedByGroup.set(group, { prepared, existing: files ? existing : null });
   }
   if (preparedByGroup.size) assertMemoryGuardAcceptsWrites(memoryGuard);
 
   try {
     for (const group of groups) {
       if (group.local) {
-        const prepared = preparedByGroup.get(group);
-        const before = files ? existingObjectMap(node, database, collection, prepared.map((object) => object._id)) : null;
-        if (minimalReturn && !files && localWriteCount) {
+        const { prepared, existing } = preparedByGroup.get(group);
+        const before = files ? fileObjectMap(existing || existingWriteState(node, database, collection), prepared) : null;
+        preparedByGroup.get(group).existing = null;
+        if (minimalReturn && localWriteCount) {
           total += Number(localWriteCount(prepared)) || 0;
+          removedFileObjects.push(...removedFiles(before, prepared));
         } else {
           const localResult = localWrite(prepared);
           total += Number(localResult[resultKey]) || 0;
@@ -1463,6 +1471,7 @@ async function routedWriteMany({
         continue;
       }
 
+      for (const state of preparedByGroup.values()) state.existing = null;
       const remote = await forwardShardBulkWrite(routing, req, group.shard, objectPath(database, collection), {
         method,
         items: group.items,
@@ -1527,10 +1536,11 @@ async function routedPatchMany({
 
   for (const group of groups) {
     if (!group.local) continue;
+    const existing = existingWriteState(node, database, collection);
     const compiled = [];
     for (const item of group.items) {
       const { _id, ...patch } = item;
-      const patched = compilePatchedObject({ node, database, collection, id: _id, patch, files });
+      const patched = compilePatchedObject({ node, database, collection, id: _id, patch, existing });
       if (!patched) {
         if (minimalReturn) skippedCount += 1;
         else skipped.push(String(_id));
@@ -1545,19 +1555,21 @@ async function routedPatchMany({
       collection,
       auth.prepareWriteObjects(database, collection, compiled, { partial: true }),
     );
-    assertUpdateAllowed(req, node, database, collection, prepared);
-    preparedByGroup.set(group, prepared);
+    assertUpdateAllowed(req, node, database, collection, prepared, existing);
+    preparedByGroup.set(group, { prepared, existing: files ? existing : null });
   }
   if (preparedByGroup.size) assertMemoryGuardAcceptsWrites(memoryGuard);
 
   try {
     for (const group of groups) {
       if (group.local) {
-        const prepared = preparedByGroup.get(group) || [];
+        const { prepared = [], existing } = preparedByGroup.get(group) || {};
         if (!prepared.length) continue;
-        const before = files ? existingObjectMap(node, database, collection, prepared.map((object) => object._id)) : null;
-        if (minimalReturn && !files) {
+        const before = files ? fileObjectMap(existing || existingWriteState(node, database, collection), prepared) : null;
+        if (preparedByGroup.has(group)) preparedByGroup.get(group).existing = null;
+        if (minimalReturn) {
           updated += node.replaceManyCount(database, collection, prepared);
+          removedFileObjects.push(...removedFiles(before, prepared));
         } else {
           const localResult = node.replaceMany(database, collection, prepared);
           updated += Number(localResult.replaced) || 0;
@@ -1568,6 +1580,7 @@ async function routedPatchMany({
         continue;
       }
 
+      for (const state of preparedByGroup.values()) state.existing = null;
       const remote = await forwardShardBulkWrite(routing, req, group.shard, objectPath(database, collection), {
         method: "PATCH",
         items: group.items,
@@ -1610,9 +1623,9 @@ async function routedPatchMany({
   };
 }
 
-function compilePatchedObject({ node, database, collection, id, patch }) {
+function compilePatchedObject({ node, database, collection, id, patch, existing }) {
   const objectId = String(id);
-  const current = node.get(database, collection, objectId);
+  const current = existing ? existing.get(objectId) : node.get(database, collection, objectId);
   if (!current) return null;
   const next = applyPatchToObject(current, patch);
   const vectorField = collectionVectorField(node, database, collection);
@@ -1641,9 +1654,10 @@ async function routedRemoveMany(req, routing, node, durability, database, collec
   const groups = routing.groupByShard(req, database, collection, ids, (id) => id);
   for (const group of groups) {
     if (!group.local) continue;
-    const existing = existingObjectsForIds(node, database, collection, group.items);
-    assertDeleteAllowed(req, existing, database);
-    existingByGroup.set(group, new Map(existing.map((object) => [String(object._id), object])));
+    const existing = existingWriteState(node, database, collection);
+    const liveIds = group.items.filter((id) => existing.has(id));
+    assertDeleteAllowed(req, liveIds, database, existing.matches);
+    if (files) existingByGroup.set(group, new Map(fileObjects(existing, liveIds).map((row) => [row._id, row])));
   }
   try {
     for (const group of groups) {
@@ -1793,6 +1807,9 @@ function createReferenceResolver({ req, node, routing, effective = false }) {
 }
 
 async function resolveReferencedObject({ req, node, routing, database, collection, id, effective = false }) {
+  if (req.auth && !canAccessDatabase(req.auth.claims, database)) {
+    throw httpError(403, "token database does not match referenced database");
+  }
   const shard = routing.shardForObject(database, collection, id);
   if (routing.ownsShard(shard)) {
     const object = node.get(database, collection, id, { refDepth: 0 }) || null;
@@ -1865,30 +1882,29 @@ function assertCreateAllowed(req, objects = [], database = null) {
 function assertUpsertAllowed(req, node, database, collection, objects = [], { partial = false } = {}) {
   assertDatabaseWritable(database);
   const user = permissionUser(req);
-  const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
+  const existing = existingWriteState(node, database, collection);
   for (const object of objects || []) {
-    const before = existing.get(String(object._id));
-    const after = partial && before ? { ...before, ...object, _id: object._id } : object;
-    const allowed = before ? canUpdate(user, before, after, collection) : canCreate(user, after, collection);
-    if (!allowed) throw permissionError(before ? "update" : "create", object?._id);
+    const live = existing.has(object._id);
+    const after = partial && live ? { ...existing.get(object._id), ...object, _id: object._id } : object;
+    const allowed = live ? canUpdate(user, String(object._id), after, collection, existing.matches) : canCreate(user, after, collection);
+    if (!allowed) throw permissionError(live ? "update" : "create", object?._id);
   }
+  return existing;
 }
 
-function assertUpdateAllowed(req, node, database, collection, objects = []) {
-  assertDatabaseWritable(database);
-  const user = permissionUser(req);
-  const existing = existingObjectMap(node, database, collection, objects.map((object) => object._id));
-  for (const object of objects || []) {
-    const before = existing.get(String(object._id));
-    if (!before || !canUpdate(user, before, object, collection)) throw permissionError("update", object?._id);
-  }
-}
-
-function assertDeleteAllowed(req, objects = [], database = null) {
+function assertUpdateAllowed(req, node, database, collection, objects = [], existing = existingWriteState(node, database, collection)) {
   assertDatabaseWritable(database);
   const user = permissionUser(req);
   for (const object of objects || []) {
-    if (!canDelete(user, object, req.params?.collection)) throw permissionError("delete", object?._id);
+    if (!existing.has(object._id) || !canUpdate(user, String(object._id), object, collection, existing.matches)) throw permissionError("update", object?._id);
+  }
+}
+
+function assertDeleteAllowed(req, objects = [], database = null, matches) {
+  assertDatabaseWritable(database);
+  const user = permissionUser(req);
+  for (const object of objects || []) {
+    if (!canDelete(user, object, req.params?.collection, matches)) throw permissionError("delete", typeof object === "string" ? object : object?._id);
   }
 }
 
@@ -1896,12 +1912,32 @@ function assertDatabaseWritable(database) {
   if (isReadOnlyDatabase(database)) throw permissionError("write", database);
 }
 
-function existingObjectsForIds(node, database, collection, ids = []) {
-  return node.getMany(database, collection, ids);
+// This view is used only during synchronous write preparation, never across awaits.
+function existingWriteState(node, database, collection) {
+  const loaded = new Map();
+  const readValue = node.fieldValueReader(database, collection);
+  const get = (id) => {
+    const key = String(id);
+    if (!loaded.has(key)) loaded.set(key, node.get(database, collection, key));
+    return loaded.get(key);
+  };
+  const field = (id, path) => loaded.has(String(id)) ? getPathValue(loaded.get(String(id)), path) : readValue(id, path);
+  return {
+    has: (id) => node.has(database, collection, id),
+    get,
+    field,
+    matches: (id, criteria) => queryNeedsWholeObject(criteria)
+      ? matchesQuery(get(id), criteria)
+      : matchesQuery(String(id), criteria, field),
+  };
 }
 
-function existingObjectMap(node, database, collection, ids = []) {
-  return new Map(existingObjectsForIds(node, database, collection, ids).map((object) => [String(object._id), object]));
+function fileObjects(existing, ids) {
+  return ids.map((id) => ({ _id: String(id), _file: existing.field(id, "_file") }));
+}
+
+function fileObjectMap(existing, objects) {
+  return new Map(fileObjects(existing, objects.map((object) => object._id)).map((object) => [object._id, object]));
 }
 
 function parseDatabaseAdminUser(body = {}) {

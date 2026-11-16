@@ -350,7 +350,7 @@ for (const { name, storage } of storageEngines) {
     assert.deepEqual(n.get("db", "items", "a").tags, ["x"]);
   });
 
-  test(`fallback aggregates use fast reads and return isolated values with ${name} storage`, () => {
+  test(`fallback aggregates read fields and return isolated values with ${name} storage`, () => {
     const n = new CRDTNode({ id: `aggregate-${name}`, storage });
     n.insertMany("db", "items", [
       { _id: "a", bucket: { name: "one" }, payload: { rank: 1 }, score: 10 },
@@ -380,7 +380,7 @@ for (const { name, storage } of storageEngines) {
     collection.read = originalRead;
     collection.readForQuery = originalReadForQuery;
     assert.equal(safeReads, 0);
-    assert.ok(queryReads >= 4);
+    assert.equal(queryReads, 0);
 
     const one = grouped.find((row) => row.bucket.name === "one");
     assert.ok(one);

@@ -66,25 +66,25 @@ export function canCreate(user, object, collection = null) {
   return can(user, "create", object, collection);
 }
 
-export function canRead(user, object, collection = null) {
-  return can(user, "read", object, collection);
+export function canRead(user, object, collection = null, matches = matchesQuery) {
+  return can(user, "read", object, collection, matches);
 }
 
-export function canUpdate(user, before, after, collection = null) {
-  return can(user, "update", before, collection) && can(user, "update", after, collection);
+export function canUpdate(user, before, after, collection = null, matchesBefore = matchesQuery) {
+  return can(user, "update", before, collection, matchesBefore) && can(user, "update", after, collection);
 }
 
-export function canDelete(user, object, collection = null) {
-  return can(user, "delete", object, collection);
+export function canDelete(user, object, collection = null, matches = matchesQuery) {
+  return can(user, "delete", object, collection, matches);
 }
 
-export function can(user, operation, object, collection = null) {
+export function can(user, operation, object, collection = null, matches = matchesQuery) {
   const code = OP_CODES[operation] || operation;
   const collectionAction = code === "r" ? "read" : ["c", "u", "d"].includes(code) ? "write" : null;
   if (collectionAction && hasCollectionPermission(user, collectionAction, collection)) {
     return true;
   }
-  return rulesFor(user).some((rule) => permits(rule, code) && matchesPermissionQuery(rule, object));
+  return rulesFor(user).some((rule) => permits(rule, code) && matchesPermissionQuery(rule, object, matches));
 }
 
 export function isPermissionBypass(userOrClaims) {
@@ -153,9 +153,9 @@ function permits(rule, code) {
   return rule.perm === "*" || (typeof rule.perm === "string" && rule.perm.includes(code));
 }
 
-function matchesPermissionQuery(rule, object) {
+function matchesPermissionQuery(rule, object, matches) {
   if (isAllowAllRule(rule)) return true;
-  return Boolean(object) && matchesQuery(object, rule.query || {});
+  return Boolean(object) && matches(object, rule.query || {});
 }
 
 function isAllowAllRule(rule) {

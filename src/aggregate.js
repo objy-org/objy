@@ -6,35 +6,35 @@ export function isObjectDbAggregateSpec(spec) {
   return Boolean(spec && typeof spec === "object" && !Array.isArray(spec) && spec.fields !== undefined);
 }
 
-export function aggregateObjects(rows, spec) {
-  return mergeAggregatePartials(aggregatePartialObjects(rows, spec), spec);
+export function aggregateObjects(rows, spec, readValue = getPathValue) {
+  return mergeAggregatePartials(aggregatePartialObjects(rows, spec, readValue), spec);
 }
 
 export function aggregateRows(rows, spec = {}) {
   return isObjectDbAggregateSpec(spec) ? aggregateObjects(rows, spec) : aggregateLegacyObjects(rows, spec);
 }
 
-export function aggregateLegacyObjects(rows, spec = {}) {
+export function aggregateLegacyObjects(rows, spec = {}, readValue = getPathValue) {
   const groupBy = spec.groupBy;
   const metrics = normalizeLegacyMetrics(spec);
   const groups = new Map();
 
   for (const object of rows || []) {
-    const groupValue = groupBy ? getPathValue(object, groupBy) : undefined;
+    const groupValue = groupBy ? readValue(object, groupBy) : undefined;
     const key = groupBy ? stableKey(groupValue) : "__all__";
     let bucket = groups.get(key);
     if (!bucket) {
       bucket = makeLegacyBucket(groupValue, metrics);
       groups.set(key, bucket);
     }
-    stepLegacyBucket(bucket, object, metrics);
+    stepLegacyBucket(bucket, object, metrics, readValue);
   }
 
   if (!groupBy) return finishLegacyBucket(groups.get("__all__") || makeLegacyBucket(undefined, metrics), metrics);
   return [...groups.values()].map((bucket) => finishLegacyBucket(bucket, metrics));
 }
 
-export function aggregatePartialObjects(rows, spec) {
+export function aggregatePartialObjects(rows, spec, readValue = getPathValue) {
   const normalized = normalizeAggregateSpec(spec);
   const buckets = new Map();
   let rowsSeen = 0;
@@ -44,7 +44,7 @@ export function aggregatePartialObjects(rows, spec) {
     const groupValues = {};
     const groupKeyValues = [];
     for (const path of normalized.groupBy) {
-      const value = getPathValue(row, path);
+      const value = readValue(row, path);
       const stored = value === undefined ? null : value;
       groupValues[path] = cloneResultValue(stored);
       groupKeyValues.push(stored);
@@ -60,7 +60,7 @@ export function aggregatePartialObjects(rows, spec) {
       buckets.set(key, bucket);
     }
 
-    for (const field of normalized.fields) stepField(bucket.fields[field.resultKey], field, row);
+    for (const field of normalized.fields) stepField(bucket.fields[field.resultKey], field, row, readValue);
   }
 
   if (rowsSeen === 0) return [];
@@ -220,15 +220,15 @@ function makeFieldState(fields) {
   return state;
 }
 
-function stepField(state, field, row) {
+function stepField(state, field, row, readValue) {
   switch (field.operator) {
     case "$sum": {
-      const value = getPathValue(row, field.operand);
+      const value = readValue(row, field.operand);
       if (typeof value === "number" && Number.isFinite(value)) state.sum += value;
       return;
     }
     case "$avg": {
-      const value = getPathValue(row, field.operand);
+      const value = readValue(row, field.operand);
       if (typeof value === "number" && Number.isFinite(value)) {
         state.sum += value;
         state.count++;
@@ -236,13 +236,13 @@ function stepField(state, field, row) {
       return;
     }
     case "$min": {
-      const value = getPathValue(row, field.operand);
+      const value = readValue(row, field.operand);
       if (!isComparable(value)) return;
       if (state.value === undefined || sameTypeLessThan(value, state.value)) state.value = cloneResultValue(value);
       return;
     }
     case "$max": {
-      const value = getPathValue(row, field.operand);
+      const value = readValue(row, field.operand);
       if (!isComparable(value)) return;
       if (state.value === undefined || sameTypeLessThan(state.value, value)) state.value = cloneResultValue(value);
       return;
@@ -252,7 +252,7 @@ function stepField(state, field, row) {
         state.count++;
         return;
       }
-      const value = getPathValue(row, field.operand);
+      const value = readValue(row, field.operand);
       if (value !== undefined && value !== null) state.count++;
       return;
     }
@@ -391,27 +391,27 @@ function makeLegacyBucket(key, metrics) {
   };
 }
 
-function stepLegacyBucket(bucket, object, metrics) {
+function stepLegacyBucket(bucket, object, metrics, readValue) {
   bucket.count++;
   for (const field of metrics.sum) {
-    const value = getPathValue(object, field);
+    const value = readValue(object, field);
     if (typeof value === "number") bucket.sum[field] += value;
   }
   for (const field of metrics.avg) {
-    const value = getPathValue(object, field);
+    const value = readValue(object, field);
     if (typeof value === "number") {
       bucket.avg[field].sum += value;
       bucket.avg[field].count++;
     }
   }
   for (const field of metrics.min) {
-    const value = getPathValue(object, field);
+    const value = readValue(object, field);
     if (value !== undefined && (bucket.min[field] === undefined || compareSortValues(value, bucket.min[field]) < 0)) {
       bucket.min[field] = cloneResultValue(value);
     }
   }
   for (const field of metrics.max) {
-    const value = getPathValue(object, field);
+    const value = readValue(object, field);
     if (value !== undefined && (bucket.max[field] === undefined || compareSortValues(value, bucket.max[field]) > 0)) {
       bucket.max[field] = cloneResultValue(value);
     }

@@ -276,6 +276,8 @@ Hooks store configuration only; executable code is registered on the server. `us
 
 Changing indexes, columns, or tiering rebuilds derived in-memory state through cooperative bounded tasks. Changing hooks only invalidates the cached hook plan.
 
+Column values are object data, not disposable indexes: removing a column moves its values back into object bodies before releasing it. On large collections this metadata change takes time and can increase memory use. Compression keeps arrays intact even when a nested array path is configured.
+
 ### List Collections
 
 **Request**
@@ -520,6 +522,8 @@ Content-Type: application/json
 `PATCH /api/{db}/{collection}/object/{_id}`
 
 `PATCH` is a Mongo-like partial update. Use `$set` for dot-path writes and `$unset` for dot-path removals. `_id` cannot be changed.
+
+Numeric path segments address array elements (`items.0.score`) without replacing the array. Unsetting an entire array element leaves `null`, without shifting later elements. Prototype-related paths (`__proto__`, `prototype`, `constructor`) are rejected in updates and metadata field paths.
 
 **Request**
 

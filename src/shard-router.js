@@ -323,8 +323,12 @@ export class ShardRequestRouter {
       ? (id) => shardSet.has(this.shardForObject(database, collection, id))
       : null;
     if (criteria && Object.keys(criteria).length > 0) {
-      const rows = this.node.find(database, collection, criteria, includeId ? { includeId } : {});
-      return this.node.rankVectorRows(database, collection, rows, queryVec, limit);
+      const ids = this.node.findIds(database, collection, criteria, includeId ? { includeId } : {});
+      const hits = this.node.rankVectorIds(database, collection, ids, queryVec, limit);
+      return hits.map((hit) => {
+        const row = this.node.get(database, collection, hit._id, { refDepth: 0 });
+        return row ? { ...row, _score: hit._score } : null;
+      }).filter(Boolean);
     }
 
     const hits = includeId

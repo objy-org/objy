@@ -35,6 +35,33 @@ const rhsOperators = new Set([
   "$exists",
 ]);
 
+export function isConstraintOperator(key) {
+  return rhsOperators.has(key);
+}
+
+// Numeric aliases reference spelling-sensitive string buckets in the same index.
+export function equalityIndexKeys(value, stored = false) {
+  const type = typeof value;
+  if (type !== "number" && type !== "string" && type !== "boolean") return null;
+  if (type === "number" && !Number.isFinite(value)) return null;
+  const keys = [`${type}:${JSON.stringify(value)}`];
+  if (value === "") return stored ? keys : null;
+  const number = Number(value);
+  if (Number.isNaN(number)) return keys;
+  if (!Number.isFinite(number)) return stored ? keys : null;
+  if (stored) {
+    if (type === "string") keys.push(number);
+  } else if (type === "string") {
+    keys.push(`number:${JSON.stringify(number)}`);
+    if (number === 0 || number === 1) keys.push(`boolean:${Boolean(number)}`);
+  } else {
+    keys.push(number);
+    if (type === "boolean") keys.push(`number:${number}`);
+    else if (number === 0 || number === 1) keys.push(`boolean:${Boolean(number)}`);
+  }
+  return keys;
+}
+
 const queryControls = new Set([
   "$aggregate",
   "$cursor",
@@ -445,4 +472,9 @@ function sortForKey(value) {
 
 function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+export function queryNeedsWholeObject(query) {
+  if (!query || typeof query !== "object") return false;
+  return Object.entries(query).some(([key, value]) => key === "$where" || queryNeedsWholeObject(value));
 }
