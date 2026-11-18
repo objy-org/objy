@@ -10,12 +10,16 @@ import {
 import { LocalWalStore } from "./local-wal.js";
 import { createObjectStorage } from "./object-storage.js";
 import { DEFAULT_DATA_PREFIX, DEFAULT_LOCAL_WAL_DIR } from "./config.js";
+import { decodeUtf8Chunks } from "./ndjson.js";
+import { ContextLifecycle } from "./context-lifecycle.js";
+import { WorkBudget } from "./derived-state-scheduler.js";
 
 const DEFAULT_SEGMENT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_JOURNAL_BYTES = 4 * 1024 * 1024;
 const RESTORE_APPLY_BATCH_SIZE = 10_000;
 const RESTORE_PARSE_YIELD_LINES = 1000;
 let snapshotSequence = 0;
+const WAL_POSITION = Symbol("walPosition");
 
 export class PersistenceManager {
   constructor({
@@ -70,6 +74,8 @@ export class PersistenceManager {
     this.pendingCollectionDrops = new Set();
     this.localWalPending = [];
     this.localWalPendingBytes = 0;
+    this.localWalAccepted = 0;
+    this.localWalDurable = 0;
     this.flushTimer = null;
     this.localWalTimer = null;
     this.snapshotTimer = null;
@@ -80,6 +86,9 @@ export class PersistenceManager {
     this.flushPaused = false;
     this.lastError = null;
     this.reshardCollections = null;
+    this.contextVersions = new Map();
+    this.replayingLocalWal = false;
+    this.lifecycle = new ContextLifecycle({ node, persistence: this });
   }
 
   async restore(options = {}) {
@@ -95,8 +104,7 @@ export class PersistenceManager {
     try {
       progress?.update?.({ phase: "listing" });
       const keys = await this.storage.list(root);
-      const deletedDatabases = databaseTombstones(keys, this.prefix);
-      const tombstones = collectionTombstones(keys, this.prefix);
+      const { deletedDatabases, tombstones } = await this._contextState(keys);
       const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix))
         .filter((scope) => !deletedDatabases.has(scope.database))
         .filter((scope) => !tombstones.has(collectionKey(scope.database, scope.collection)));
@@ -148,11 +156,14 @@ export class PersistenceManager {
   }
 
   async restoreScope(scope, options = {}) {
+    return this.lifecycle.track(scope?.database && scope.database !== "*" ? scope : null, () => this._restoreScope(scope, options));
+  }
+
+  async _restoreScope(scope, options = {}) {
     const progress = options.progress || null;
     const root = this._rootPrefix();
     const keys = await this.storage.list(root);
-    const deletedDatabases = databaseTombstones(keys, this.prefix);
-    const tombstones = collectionTombstones(keys, this.prefix);
+    const { deletedDatabases, tombstones } = await this._contextState(keys);
     const scopes = this._filterCatchUpScopes(uniqueScopes(keys, this.prefix), scope)
       .filter((candidate) => !deletedDatabases.has(candidate.database))
       .filter((candidate) => !tombstones.has(collectionKey(candidate.database, candidate.collection)));
@@ -211,8 +222,9 @@ export class PersistenceManager {
     this.flushTimer = null;
     this.localWalTimer = null;
     this.snapshotTimer = null;
+    await this.checkpointing?.catch((err) => { this.lastError = err; });
     await this.flushLocal();
-    await this.flush();
+    do { await this.flush(); } while (this._hasPending());
   }
 
   async afterWrite() {
@@ -231,7 +243,9 @@ export class PersistenceManager {
   async flushLocal() {
     if (!this.localWal) return { records: 0, ops: 0 };
     const total = emptyLocalFlushStats();
-    while (this.localWalPending.length || this.localWalFlushing) {
+    const target = this.localWalAccepted;
+    // Cover the writes accepted at entry, without chasing unrelated traffic.
+    while (this.localWalDurable < target && (this.localWalPending.length || this.localWalFlushing)) {
       if (this.localWalFlushing) {
         mergeLocalFlushStats(total, await this.localWalFlushing);
         continue;
@@ -303,8 +317,7 @@ export class PersistenceManager {
   async _loadReshardCollections(shardMap) {
     const keys = await this.storage.list(this._rootPrefix());
     const sourceShards = new Set(topologySourceShards(shardMap));
-    const deletedDatabases = databaseTombstones(keys, this.prefix);
-    const tombstones = collectionTombstones(keys, this.prefix);
+    const { deletedDatabases, tombstones } = await this._contextState(keys);
     const scopes = uniqueScopes(keys, this.prefix)
       .filter((scope) => sourceShards.has(scope.shard))
       .filter((scope) => !deletedDatabases.has(scope.database))
@@ -337,6 +350,7 @@ export class PersistenceManager {
   }
 
   _onChange(change) {
+    if (this.replayingLocalWal) return;
     if (change.kind === "database") {
       this._queueDatabase(change);
       return;
@@ -361,6 +375,7 @@ export class PersistenceManager {
 
   _queueDatabase(change) {
     if (!change.database || !change.meta) return;
+    this._reviveContext(change.database);
     this.pendingDatabases.set(change.database, clone(change.meta));
     this.pendingDatabaseDrops.delete(change.database);
     this._queueLocalWal({
@@ -372,7 +387,8 @@ export class PersistenceManager {
 
   _queueDatabaseDrop(change) {
     if (!change.database) return;
-    this.pendingDatabaseDrops.add(change.database);
+    this._advanceContext(change.database);
+    if (!this.lifecycle.record(change.database)) this.pendingDatabaseDrops.add(change.database);
     this.pendingDatabases.delete(change.database);
     for (const key of [...this.pendingMeta.keys()]) {
       if (parseCollectionKey(key).database === change.database) this.pendingMeta.delete(key);
@@ -393,6 +409,7 @@ export class PersistenceManager {
 
   _queueMeta(change) {
     if (!change.database || !change.collection || !change.meta) return;
+    this._reviveContext(change.database, change.collection);
     this.pendingMeta.set(collectionKey(change.database, change.collection), clone(change.meta));
     this._queueLocalWal({
       type: "meta",
@@ -404,8 +421,9 @@ export class PersistenceManager {
 
   _queueCollectionDrop(change) {
     if (!change.database || !change.collection) return;
+    this._advanceContext(change.database, change.collection);
     const key = collectionKey(change.database, change.collection);
-    this.pendingCollectionDrops.add(key);
+    if (!this.lifecycle.record(change.database) && !this.lifecycle.record(change.database, change.collection)) this.pendingCollectionDrops.add(key);
     this.pendingMeta.delete(key);
     this._removePendingLocalWalForCollection(change.database, change.collection);
     for (const pendingKey of [...this.pending.keys()]) {
@@ -429,7 +447,7 @@ export class PersistenceManager {
       if (queued) cloned.push(queued);
     }
     if (!cloned.length) return;
-    if (!this.localWal) return;
+    if (!this.localWal || this.replayingLocalWal) return;
     const maxBytes = this.localWal?.maxRecordBytes || this.journalMaxBytes;
     const maxOps = this.localWal?.maxOpsPerRecord || this.opBatchSize;
     for (const chunk of chunkOpsForRecord(cloned, { maxBytes, maxOps, label: "local WAL ops record" })) {
@@ -444,12 +462,14 @@ export class PersistenceManager {
   }
 
   _queueLocalWal(record) {
-    if (!this.localWal) return;
+    if (!this.localWal || this.replayingLocalWal) return;
     const entry = {
+      [WAL_POSITION]: ++this.localWalAccepted,
       version: 1,
       node: this.node.id,
       createdAt: new Date().toISOString(),
       ...record,
+      ...(record.type !== "ops" ? { contextTicket: this.lifecycle.ticket(record) } : {}),
     };
     this.localWalPending.push(entry);
     this.localWalPendingBytes += jsonBytes(entry, "pending local WAL record") + 1;
@@ -457,7 +477,7 @@ export class PersistenceManager {
 
   _queueOp(op) {
     if (!op?.db || !op.coll || !op.id || !op.shard) return;
-    const cloned = clone(op);
+    const cloned = this.replayingLocalWal ? op : clone(op);
     const scope = { database: op.db, collection: op.coll, shard: op.shard };
     const key = scopeKey(scope);
     const pending = this.pending.get(key) || [];
@@ -465,7 +485,7 @@ export class PersistenceManager {
     this.pending.set(key, pending);
     this.pendingBytes += jsonBytes(cloned, "pending journal op");
     this._markDirty(key, cloned);
-    if (pending.length >= this.opBatchSize) {
+    if (!this.replayingLocalWal && pending.length >= this.opBatchSize) {
       this.flush().catch((err) => (this.lastError = err));
     }
     return cloned;
@@ -515,9 +535,30 @@ export class PersistenceManager {
     this.dirtyScopes.set(key, dirty);
   }
 
+  _advanceContext(database, collection = "") {
+    const key = collectionKey(database, collection);
+    this.contextVersions.set(key, (this.contextVersions.get(key) || 0) + 1);
+    for (const key of this.dirtyScopes.keys()) {
+      const scope = parseScopeKey(key);
+      if (scope.database === database && (!collection || scope.collection === collection)) this.dirtyScopes.delete(key);
+    }
+  }
+
+  _reviveContext(database, collection = "") {
+    if ((this.contextVersions.get(collectionKey(database, collection)) || 0) % 2) this._advanceContext(database, collection);
+  }
+
+  _contextVersion(database, collection = "") {
+    return `${this.contextVersions.get(collectionKey(database, "")) || 0}/${this.contextVersions.get(collectionKey(database, collection)) || 0}`;
+  }
+
+  _hasPending() {
+    return this.pending.size || this.pendingDatabases.size || this.pendingDatabaseDrops.size || this.pendingMeta.size || this.pendingCollectionDrops.size;
+  }
+
   async _flushOnce() {
     if (this.flushPaused) return { scopes: 0, ops: 0 };
-    if (!this.pending.size && !this.pendingDatabases.size && !this.pendingDatabaseDrops.size && !this.pendingMeta.size && !this.pendingCollectionDrops.size) {
+    if (!this._hasPending()) {
       return { scopes: 0, ops: 0, databases: 0, databaseDrops: 0, metadata: 0, collectionDrops: 0 };
     }
 
@@ -526,6 +567,12 @@ export class PersistenceManager {
     const databaseDrops = this.pendingDatabaseDrops;
     const metadata = this.pendingMeta;
     const collectionDrops = this.pendingCollectionDrops;
+    const versions = new Map();
+    const remember = ({ database, collection = "" }) => versions.set(collectionKey(database, collection), this._contextVersion(database, collection));
+    for (const key of batches.keys()) remember(parseScopeKey(key));
+    for (const database of [...databases.keys(), ...databaseDrops]) remember({ database });
+    for (const key of [...metadata.keys(), ...collectionDrops]) remember(parseCollectionKey(key));
+    const stillCurrent = ({ database, collection = "" }) => versions.get(collectionKey(database, collection)) === this._contextVersion(database, collection);
     this.pending = new Map();
     this.pendingBytes = 0;
     this.pendingDatabases = new Map();
@@ -573,11 +620,11 @@ export class PersistenceManager {
         collectionDrops: collectionDropCount,
       };
     } catch (err) {
-      this._requeueBatches(batches);
-      this._requeueDatabases(databases);
-      this._requeueDatabaseDrops(databaseDrops);
-      this._requeueMetadata(metadata);
-      this._requeueCollectionDrops(collectionDrops);
+      this._requeueBatches(batches, stillCurrent);
+      this._requeueDatabases(databases, stillCurrent);
+      this._requeueDatabaseDrops(databaseDrops, stillCurrent);
+      this._requeueMetadata(metadata, stillCurrent);
+      this._requeueCollectionDrops(collectionDrops, stillCurrent);
       this.lastError = err;
       throw err;
     }
@@ -591,6 +638,7 @@ export class PersistenceManager {
 
     try {
       const written = await this.localWal.append(records);
+      this.localWalDurable = Math.max(this.localWalDurable, records.at(-1)[WAL_POSITION]);
       return {
         records: records.length,
         ops: records.reduce((sum, record) => sum + (record.type === "ops" ? Number(record.count) || 0 : 0), 0),
@@ -609,56 +657,68 @@ export class PersistenceManager {
   }
 
   async _truncateLocalWalIfDurable() {
-    const covered = () => !this.localWalPending.length && !this.localWalFlushing &&
+    const covered = () => !this.replayingLocalWal && !this.localWalPending.length && !this.localWalFlushing &&
       !this.pending.size && !this.pendingDatabases.size && !this.pendingDatabaseDrops.size &&
       !this.pendingMeta.size && !this.pendingCollectionDrops.size;
     if (this.localWal && covered()) await this.localWal.truncate(covered);
   }
 
-  _requeueBatches(batches) {
+  _requeueBatches(batches, stillCurrent) {
     for (const [key, ops] of batches) {
+      if (!stillCurrent(parseScopeKey(key))) continue;
       const current = this.pending.get(key) || [];
       this.pending.set(key, [...ops, ...current]);
     }
     this.pendingBytes = pendingOpsJsonBytes(this.pending);
   }
 
-  _requeueDatabases(databases) {
+  _requeueDatabases(databases, stillCurrent) {
     for (const [database, meta] of databases) {
+      if (!stillCurrent({ database })) continue;
       if (!this.pendingDatabases.has(database)) this.pendingDatabases.set(database, meta);
     }
   }
 
-  _requeueDatabaseDrops(databaseDrops) {
-    for (const database of databaseDrops) this.pendingDatabaseDrops.add(database);
+  _requeueDatabaseDrops(databaseDrops, stillCurrent) {
+    for (const database of databaseDrops) if (stillCurrent({ database })) this.pendingDatabaseDrops.add(database);
   }
 
-  _requeueMetadata(metadata) {
+  _requeueMetadata(metadata, stillCurrent) {
     for (const [key, meta] of metadata) {
+      if (!stillCurrent(parseCollectionKey(key))) continue;
       if (!this.pendingMeta.has(key)) this.pendingMeta.set(key, meta);
     }
   }
 
-  _requeueCollectionDrops(collectionDrops) {
-    for (const key of collectionDrops) this.pendingCollectionDrops.add(key);
+  _requeueCollectionDrops(collectionDrops, stillCurrent) {
+    for (const key of collectionDrops) if (stillCurrent(parseCollectionKey(key))) this.pendingCollectionDrops.add(key);
   }
 
   async _writeDatabaseMeta(database, meta) {
-    await this.storage.delete([databaseTombstoneKey(this.prefix, database)]);
-    await this.storage.put(
-      `${databasePrefix(this.prefix, database)}/meta.json`,
-      JSON.stringify(meta),
-      "application/json",
-    );
+    return this._writeContextMeta({ database }, `${databasePrefix(this.prefix, database)}/meta.json`, meta);
   }
 
   async _writeCollectionMeta({ database, collection }, meta) {
-    await this.storage.delete([collectionTombstoneKey(this.prefix, database, collection)]);
-    await this.storage.put(
-      `${collectionPrefix(this.prefix, database, collection)}/meta.json`,
-      JSON.stringify(meta),
-      "application/json",
-    );
+    return this._writeContextMeta({ database, collection }, `${collectionPrefix(this.prefix, database, collection)}/meta.json`, meta);
+  }
+
+  async _writeContextMeta(context, path, meta) {
+    const version = this._contextVersion(context.database, context.collection);
+    const old = await this.storage.getVersioned(path);
+    if (version !== this._contextVersion(context.database, context.collection)) return;
+    const marker = context.collection === undefined ? databaseTombstoneKey(this.prefix, context.database)
+      : collectionTombstoneKey(this.prefix, context.database, context.collection);
+    await this.storage.delete([marker]);
+    if (version !== this._contextVersion(context.database, context.collection)) return;
+    // Fresh revisions prevent an identical recreated meta object from reusing an
+    // old ETag while a concurrent deletion's conditional cleanup is in flight.
+    const managed = this.lifecycle.record(context.database) || this.lifecycle.record(context.database, context.collection);
+    const value = managed ? { version: 1, revision: randomUUID(), meta } : meta;
+    if (!await this.storage.putConditional(path, JSON.stringify(value), old.etag)) {
+      const current = await this.storage.get(path);
+      if (current && JSON.stringify(persistedMeta(current, managed)) === JSON.stringify(meta)) return;
+      throw snapshotConflict("context metadata changed during publication");
+    }
   }
 
   async _deleteCollection({ database, collection }) {
@@ -680,12 +740,19 @@ export class PersistenceManager {
   }
 
   async _writeJournalBatch(scope, ops) {
-    for (const chunk of chunkOpsForRecord(ops, {
-      maxBytes: this.journalMaxBytes,
-      maxOps: this.opBatchSize,
-      label: `${scopeKey(scope)} journal`,
-    })) {
-      await this._writeJournalSegment(scope, chunk);
+    const byOrigin = new Map();
+    for (const op of ops) {
+      const source = op.from || this.node.id;
+      const values = byOrigin.get(source) || [];
+      values.push(op);
+      byOrigin.set(source, values);
+    }
+    for (const values of byOrigin.values()) {
+      for (const chunk of chunkOpsForRecord(values, {
+        maxBytes: this.journalMaxBytes,
+        maxOps: this.opBatchSize,
+        label: `${scopeKey(scope)} journal`,
+      })) await this._writeJournalSegment(scope, chunk);
     }
   }
 
@@ -693,7 +760,10 @@ export class PersistenceManager {
     const seqs = ops.map((op) => Number(op.seq)).filter(Number.isFinite);
     const firstSeq = seqs.length ? Math.min(...seqs) : 0;
     const lastSeq = seqs.length ? Math.max(...seqs) : 0;
-    const key = `${scopePrefix(this.prefix, scope)}/journal/${safe(this.node.id)}/${Date.now()}-${pad(firstSeq)}-${pad(lastSeq)}-${randomUUID()}.jsonl`;
+    const origin = ops[0]?.from;
+    const verified = typeof origin === "string" && origin.length > 0 && ops.every((op) => op.from === origin && Number.isSafeInteger(op.seq) && op.seq > 0);
+    const suffix = verified ? `-${ops.length}.origin` : "";
+    const key = `${scopePrefix(this.prefix, scope)}/journal/${safe(verified ? origin : this.node.id)}/${Date.now()}-${pad(firstSeq)}-${pad(lastSeq)}-${randomUUID()}${suffix}.jsonl`;
     await this.storage.put(key, jsonlBody(ops, `${scopeKey(scope)} journal`), "application/x-ndjson");
   }
 
@@ -787,17 +857,6 @@ export class PersistenceManager {
     return scopes.filter((candidate) => matchesRestoreTarget(candidate, scope));
   }
 
-  _filterRestoreObjects(scope, objects) {
-    if (this._restoreMode() !== "reshard") return objects;
-    const targets = this._restoreTargets();
-    const out = [];
-    for (const object of objects || []) {
-      const row = this._filterRestoreObject(scope, object, targets);
-      if (row) out.push(row);
-    }
-    return out;
-  }
-
   _filterRestoreObject(scope, object, targets = null) {
     if (!object) return null;
     if (this._restoreMode() !== "reshard") return object;
@@ -865,11 +924,24 @@ export class PersistenceManager {
   }
 
   async _writeSnapshot(scope, id = snapshotId(), coverage = this._snapshotCoverage()) {
+    if (typeof this.storage.getVersioned !== "function" || typeof this.storage.putConditional !== "function") {
+      throw new Error("persistence storage must support conditional snapshot publication");
+    }
+    const contextVersion = this._contextVersion(scope.database, scope.collection);
+    const headKey = `${scopePrefix(this.prefix, scope)}/latest.json`;
+    const previous = await this.storage.getVersioned(headKey);
+    const previousValue = previous.body === null ? null : JSON.parse(previous.body);
+    const previousManifest = previousValue?.deletedBy ? null : previousValue;
+    if (previousManifest) validateSnapshotManifest(previousManifest, scope);
+    const cursors = this._snapshotCursors(scope, coverage);
+    if (previousManifest && !coversCursors(cursors, normalizeSnapshotCursors(previousManifest))) {
+      throw snapshotConflict("snapshot would regress published coverage");
+    }
     const base = `${scopePrefix(this.prefix, scope)}/snapshots/${id}`;
     const segments = [];
     let objectCount = 0;
 
-    for (const chunk of chunkJsonlIterable(this.node.snapshotScopeObjects(scope), this.segmentBytes, `${scopeKey(scope)} snapshot`)) {
+    for await (const chunk of chunkJsonlIterable(this.node.snapshotScopeObjects(scope), this.segmentBytes, `${scopeKey(scope)} snapshot`)) {
       const key = `${base}/segment-${String(segments.length).padStart(6, "0")}.jsonl`;
       await this.storage.put(key, chunk.body, "application/x-ndjson");
       segments.push({ key, count: chunk.count, bytes: chunk.bytes, format: "jsonl" });
@@ -888,13 +960,18 @@ export class PersistenceManager {
       topologyId: this.node.shardMapSnapshot().topology?.id || null,
       databaseMeta: clone(this.node.getDatabaseMeta(scope.database) || {}),
       collectionMeta: clone(this.node.getCollectionMeta(scope.database, scope.collection) || {}),
-      cursors: this._snapshotCursors(scope, coverage),
+      cursors,
       format: "jsonl",
       objectCount,
       segments,
+      parentSnapshotId: previousManifest?.id || null,
     };
+    if (contextVersion !== this._contextVersion(scope.database, scope.collection)) throw snapshotConflict("context changed during checkpoint");
     await this.storage.put(`${base}/manifest.json`, JSON.stringify(manifest), "application/json");
-    await this.storage.put(`${scopePrefix(this.prefix, scope)}/latest.json`, JSON.stringify(manifest), "application/json");
+    if (contextVersion !== this._contextVersion(scope.database, scope.collection)) throw snapshotConflict("context changed during checkpoint");
+    if (!await this.storage.putConditional(headKey, JSON.stringify(manifest), previous.etag, "application/json")) {
+      throw snapshotConflict("snapshot head changed during checkpoint");
+    }
     const retainedJournalsDeleted = this.compactJournals ? await this._compactJournals(scope, manifest.cursors) : 0;
     const retainedSnapshotsDeleted = await this._applySnapshotRetention(scope, id);
     return { objects: objectCount, segments: segments.length, retainedJournalsDeleted, retainedSnapshotsDeleted };
@@ -911,11 +988,23 @@ export class PersistenceManager {
     const prefix = `${scopePrefix(this.prefix, scope)}/journal/`;
     const keys = await this.storage.list(prefix);
     if (!keys.length) return 0;
-    const covered = keys.filter((key) => {
+    const covered = [];
+    for (const key of keys) {
+      if (!key.endsWith(".jsonl") && !key.endsWith(".json")) continue;
       const info = parseJournalKey(key, this.prefix);
-      if (!info?.node || !info.lastSeq) return false;
-      return (Number(cursors[info.node]) || 0) >= info.lastSeq;
-    });
+      if (info?.originVerified) {
+        if ((Number(cursors[info.node]) || 0) >= info.lastSeq) covered.push(key);
+        continue;
+      }
+      let complete = true;
+      for await (const op of journalObjectsFromStorage(this.storage, key, scopeKey(scope))) {
+        if (!operationCovered(op, cursors)) {
+          complete = false;
+          break;
+        }
+      }
+      if (complete) covered.push(key);
+    }
     if (!covered.length) return 0;
     const removable = filterRetentionKeys(covered, this.journalRetention, (key) => {
       const info = parseJournalKey(key, this.prefix);
@@ -928,13 +1017,30 @@ export class PersistenceManager {
   async _applySnapshotRetention(scope, latestId) {
     if (!retentionEnabled(this.snapshotRetention)) return 0;
     const prefix = `${scopePrefix(this.prefix, scope)}/snapshots/`;
-    const keys = await this.storage.list(prefix);
-    const snapshots = snapshotEntries(keys, prefix);
-    const latest = snapshots.find((entry) => entry.id === latestId);
-    const removable = filterSnapshotRetention(snapshots, this.snapshotRetention, latest || { id: latestId })
-      .flatMap((entry) => entry.keys);
-    if (!removable.length) return 0;
-    return this.storage.delete(removable);
+    const keepSince = this.snapshotRetention.keepForMs > 0 ? Date.now() - this.snapshotRetention.keepForMs : null;
+    let id = latestId, position = 0, removed = 0;
+    const visited = new Set();
+    // Only published ancestors are eligible. Unpublished candidates may still
+    // be uploading and cannot be distinguished safely by creation time.
+    while (id) {
+      if (typeof id !== "string" || id.includes("/")) throw new Error("invalid snapshot ancestor id");
+      if (visited.has(id)) throw new Error("invalid snapshot ancestry");
+      visited.add(id);
+      const raw = await this.storage.get(`${prefix}${id}/manifest.json`);
+      if (raw === null) break;
+      const manifest = JSON.parse(raw);
+      validateSnapshotManifest(manifest, scope);
+      const parent = manifest.parentSnapshotId;
+      if (parent === id) throw new Error("invalid snapshot ancestry");
+      const created = Date.parse(manifest.createdAt) || snapshotCreatedAtMs(id);
+      const keep = position === 0 || position < this.snapshotRetention.keepLatest ||
+        (keepSince !== null && (!created || created >= keepSince));
+      if (!keep) removed += await this.storage.deletePrefix(`${prefix}${id}/`);
+      id = parent;
+      position++;
+      await yieldToEventLoop();
+    }
+    return removed;
   }
 
   async _restoreSnapshot(scope, progress = null) {
@@ -944,13 +1050,19 @@ export class PersistenceManager {
     const raw = await this.storage.get(manifestKey);
     if (!raw) return null;
     const manifest = JSON.parse(raw);
+    if (manifest.deletedBy) return null;
+    validateSnapshotManifest(manifest, scope);
     let objects = 0;
+    let rows = 0;
     if (this.restoreSnapshotId) this._restoreManifestMetadata(scope, manifest);
     else this._ensureRestoreManifestContext(scope, manifest);
 
     for (const segment of manifest.segments || []) {
-      objects += await this._restoreSnapshotSegment(scope, manifest, segment, progress);
+      const restored = await this._restoreSnapshotSegment(scope, manifest, segment, progress);
+      objects += restored.objects;
+      rows += restored.rows;
     }
+    if (manifest.objectCount !== undefined && rows !== manifest.objectCount) throw new Error("snapshot object count mismatch");
 
     return {
       node: manifest.node,
@@ -968,9 +1080,9 @@ export class PersistenceManager {
       throw new Error(`unsupported snapshot segment format: ${segment.key || "missing key"}`);
     }
     const sourceNode = manifest.node || "persistence";
-    const cursorKey = this.node._cursorKey ? this.node._cursorKey(sourceNode, scope) : `persistence:${scopeKey(scope)}:snapshot`;
-    const lastSeq = Number(manifest.seq) || 0;
+    const cursorKey = "persistence:snapshot-restore";
     let objects = 0;
+    let count = 0;
 
     const applyRows = async (rows) => {
       if (!rows.length) return;
@@ -978,9 +1090,10 @@ export class PersistenceManager {
         database: scope.database,
         collection: scope.collection,
         scope,
-        lastSeq,
+        lastSeq: 0,
         objects: rows,
       }, cursorKey);
+      this.node.lastSeen.delete(cursorKey);
       objects += applied;
       progress?.add?.("snapshotObjects", applied);
       await yieldToEventLoop();
@@ -991,6 +1104,8 @@ export class PersistenceManager {
       : jsonArrayObjectsFromStorage(this.storage, key, `${scopeKey(scope)} legacy snapshot`);
     let batch = [];
     for await (const object of source) {
+      validateSnapshotRow(object, scope);
+      count++;
       const row = this._filterRestoreObject(scope, object);
       if (!row) continue;
       batch.push(row);
@@ -999,7 +1114,8 @@ export class PersistenceManager {
       batch = [];
     }
     await applyRows(batch);
-    return objects;
+    if (segment.count !== undefined && count !== segment.count) throw new Error(`snapshot segment count mismatch: ${key}`);
+    return { objects, rows: count };
   }
 
   async _restoreJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
@@ -1011,14 +1127,13 @@ export class PersistenceManager {
   async _restoreJsonlJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
     const journalInfo = parseJournalKey(key, this.prefix);
     const sourceNode = journalInfo?.node || "persistence";
-    const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
     const stats = emptyJournalRestoreStats(this.node.seq);
     let batch = [];
     let segmentOps = 0;
 
     const flush = async () => {
       if (!batch.length) return;
-      const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
+      const applied = this._applyRestoredJournalOps(sourceNode, scope, batch);
       stats.ops += applied;
       progress?.add?.("journalOps", applied);
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
@@ -1028,8 +1143,9 @@ export class PersistenceManager {
 
     for await (const op of jsonlObjectsFromStorage(this.storage, key, `${scopeKey(scope)} journal`)) {
       segmentOps++;
-      const seq = Number(op?.seq);
-      if (Number.isFinite(seq) && seq <= coveredSeq) continue;
+      validateJournalOp(op, scope);
+      if ((!op.from || op.from === this.node.id) && Number.isSafeInteger(op.seq)) stats.maxLocalSeq = Math.max(stats.maxLocalSeq, op.seq);
+      if (operationCovered(op, snapshotCursors)) continue;
       batch.push(op);
       if (batch.length >= this.opBatchSize) await flush();
     }
@@ -1048,17 +1164,16 @@ export class PersistenceManager {
     if (!raw) return emptyJournalRestoreStats(this.node.seq);
     const segment = JSON.parse(raw);
     const sourceNode = segment.node || parseJournalKey(key, this.prefix)?.node || "persistence";
-    const coveredSeq = Number(snapshotCursors[sourceNode]) || 0;
     const segmentOps = Array.isArray(segment.ops) ? segment.ops : [];
     const stats = emptyJournalRestoreStats(this.node.seq);
 
     for (let offset = 0; offset < segmentOps.length; offset += this.opBatchSize) {
-      const batch = segmentOps.slice(offset, offset + this.opBatchSize).filter((op) => {
-        const seq = Number(op?.seq);
-        return !Number.isFinite(seq) || seq > coveredSeq;
-      });
+      const input = segmentOps.slice(offset, offset + this.opBatchSize);
+      for (const op of input) validateJournalOp(op, scope);
+      stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(input, this.node.id));
+      const batch = input.filter((op) => !operationCovered(op, snapshotCursors));
       if (!batch.length) continue;
-      const applied = this._applyRestoredJournalOps(sourceNode, scope, key, batch);
+      const applied = this._applyRestoredJournalOps(sourceNode, scope, batch);
       stats.ops += applied;
       progress?.add?.("journalOps", applied);
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
@@ -1073,11 +1188,12 @@ export class PersistenceManager {
     return stats;
   }
 
-  _applyRestoredJournalOps(sourceNode, scope, key, ops) {
+  _applyRestoredJournalOps(sourceNode, scope, ops) {
     const filtered = this._filterRestoreOps(scope, ops);
     if (!filtered.length) return 0;
-    this.node.applyRemote(sourceNode, filtered, `persistence:${key}`);
-    rememberRestoredCursor(this.node, sourceNode, scope, filtered);
+    this.node.applyRemote(sourceNode, filtered, "persistence:journal-restore");
+    this.node.lastSeen.delete("persistence:journal-restore");
+    rememberRestoredCursors(this.node, filtered);
     return filtered.length;
   }
 
@@ -1090,7 +1206,9 @@ export class PersistenceManager {
       if (this.node.db.isCollectionDeleted(target.database, target.collection)) continue;
       const raw = await this.storage.get(key);
       if (!raw) continue;
-      this.node.db.setCollectionMeta(target.database, target.collection, JSON.parse(raw));
+      const meta = persistedMeta(raw, this.lifecycle.record(target.database) || this.lifecycle.record(target.database, target.collection));
+      if (meta === null) continue;
+      this.node.db.setCollectionMeta(target.database, target.collection, meta);
       count++;
     }
     return count;
@@ -1099,13 +1217,13 @@ export class PersistenceManager {
   _restoreCollectionTombstones(tombstones) {
     for (const key of tombstones) {
       const target = parseCollectionKey(key);
-      this.node.db.deleteCollection(target.database, target.collection);
+      this.lifecycle.internal(() => this.node.db.deleteCollection(target.database, target.collection));
     }
     return tombstones.size;
   }
 
   _restoreDatabaseTombstones(tombstones) {
-    for (const database of tombstones) this.node.db.deleteDatabase(database);
+    for (const database of tombstones) this.lifecycle.internal(() => this.node.db.deleteDatabase(database));
     return tombstones.size;
   }
 
@@ -1117,7 +1235,9 @@ export class PersistenceManager {
       if (this.node.db.isDatabaseDeleted(target.database)) continue;
       const raw = await this.storage.get(key);
       if (!raw) continue;
-      this.node.db.setDatabaseMeta(target.database, JSON.parse(raw));
+      const meta = persistedMeta(raw, this.lifecycle.record(target.database));
+      if (meta === null) continue;
+      this.node.db.setDatabaseMeta(target.database, meta);
       count++;
     }
     return count;
@@ -1136,47 +1256,61 @@ export class PersistenceManager {
       maxLocalSeq: this.node.seq,
     };
 
-    let line = 0;
-    for (const record of records) {
-      line++;
-      if (line % RESTORE_PARSE_YIELD_LINES === 0) await yieldToEventLoop();
-      if (!record || record.version !== 1) continue;
-      if (record.type === "ops") {
-        const ops = this._filterLocalWalOps(Array.isArray(record.ops) ? record.ops : []);
-        const sourceNode = record.node || "local-wal";
-        this.node.applyRemote(sourceNode, ops, `local-wal:${line}`);
-        rememberRestoredCursors(this.node, sourceNode, ops);
-        for (const op of ops) {
-          if (op.from === this.node.id && Number.isFinite(op.seq)) {
-            stats.maxLocalSeq = Math.max(stats.maxLocalSeq, op.seq);
-          }
+    this.replayingLocalWal = true;
+    try {
+      let line = 0;
+      for (const record of records) {
+        line++;
+        if (line % RESTORE_PARSE_YIELD_LINES === 0) await yieldToEventLoop();
+        if (!record || record.version !== 1) continue;
+        if (record.type !== "ops") {
+          const ticket = this.lifecycle.ticket(record);
+          if (ticket.some(Boolean) && (record.type.startsWith("drop") || !record.contextTicket ||
+            ticket[0] !== record.contextTicket[0] || ticket[1] !== record.contextTicket[1])) continue;
+          const state = this.lifecycle.record(record.database) || this.lifecycle.record(record.database, record.collection);
+          if (state && state.status !== "active") continue;
         }
-        stats.ops += ops.length;
-        continue;
-      }
+        if (record.type === "ops") {
+          const ops = this._filterLocalWalOps(Array.isArray(record.ops) ? record.ops : []).filter((op) => !this.lifecycle.obsolete(op));
+          const sourceNode = record.node || "local-wal";
+          this.node.applyRemote(sourceNode, ops, `local-wal:${line}`);
+          this.node.lastSeen.delete(`local-wal:${line}`);
+          rememberRestoredCursors(this.node, ops);
+          this._queueOps(ops);
+          stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(ops, this.node.id));
+          stats.ops += ops.length;
+          continue;
+        }
 
-      if (record.type === "database" && record.database && record.meta && isPlainObject(record.meta)) {
-        this.node.db.setDatabaseMeta(record.database, clone(record.meta));
-        stats.databases++;
-        continue;
-      }
+        if (record.type === "database" && record.database && record.meta && isPlainObject(record.meta)) {
+          this.node.db.setDatabaseMeta(record.database, clone(record.meta));
+          this._queueDatabase(record);
+          stats.databases++;
+          continue;
+        }
 
-      if (record.type === "dropDatabase" && record.database) {
-        this.node.db.deleteDatabase(record.database);
-        stats.databaseDrops++;
-        continue;
-      }
+        if (record.type === "dropDatabase" && record.database) {
+          this.node.db.deleteDatabase(record.database);
+          this._queueDatabaseDrop(record);
+          stats.databaseDrops++;
+          continue;
+        }
 
-      if (record.type === "meta" && record.database && record.collection && record.meta && isPlainObject(record.meta)) {
-        this.node.db.setCollectionMeta(record.database, record.collection, clone(record.meta));
-        stats.metadata++;
-        continue;
-      }
+        if (record.type === "meta" && record.database && record.collection && record.meta && isPlainObject(record.meta)) {
+          this.node.db.setCollectionMeta(record.database, record.collection, clone(record.meta));
+          this._queueMeta(record);
+          stats.metadata++;
+          continue;
+        }
 
-      if (record.type === "dropCollection" && record.database && record.collection) {
-        this.node.db.deleteCollection(record.database, record.collection);
-        stats.collectionDrops++;
+        if (record.type === "dropCollection" && record.database && record.collection) {
+          this.node.db.deleteCollection(record.database, record.collection);
+          this._queueCollectionDrop(record);
+          stats.collectionDrops++;
+        }
       }
+    } finally {
+      this.replayingLocalWal = false;
     }
 
     return stats;
@@ -1201,6 +1335,20 @@ export class PersistenceManager {
     return this.prefix ? `${this.prefix}/` : "";
   }
 
+  async _contextState(keys) {
+    await this.lifecycle.load();
+    const deletedDatabases = databaseTombstones(keys, this.prefix);
+    const tombstones = collectionTombstones(keys, this.prefix);
+    for (const record of this.lifecycle.records.values()) {
+      if (this.lifecycle.record(record.database, record.collection) !== record) continue;
+      const values = record.collection === undefined ? deletedDatabases : tombstones;
+      const slot = record.collection === undefined ? record.database : collectionKey(record.database, record.collection);
+      if (record.status === "active") values.delete(slot);
+      else values.add(slot);
+    }
+    return { deletedDatabases, tombstones };
+  }
+
   _restoreManifestMetadata(scope, manifest = {}) {
     if (isPlainObject(manifest.databaseMeta)) {
       this.node.db.setDatabaseMeta(scope.database, clone(manifest.databaseMeta));
@@ -1220,13 +1368,16 @@ export class PersistenceManager {
   }
 
   _snapshotCursors(scope, coverage = this._snapshotCoverage()) {
-    const cursors = { [this.node.id]: Number(coverage.seq) || 0 };
-    const suffix = this.node._cursorKey ? `|${scope.database}/${scope.collection}/${scope.shard}` : null;
-    if (!suffix) return cursors;
+    const cursors = Object.assign(Object.create(null), { [this.node.id]: Number(coverage.seq) || 0 });
     for (const [key, seen] of coverage.lastSeen || []) {
-      if (typeof key !== "string" || !key.endsWith(suffix)) continue;
-      const sourceNode = key.slice(0, -suffix.length);
+      if (typeof key !== "string") continue;
+      const boundary = key.lastIndexOf("|");
+      const sourceNode = boundary < 0 ? key : key.slice(0, boundary);
       if (!sourceNode) continue;
+      if (boundary >= 0) {
+        const [database, collection, shard] = key.slice(boundary + 1).split("/");
+        if (!matchesRestoreTarget(scope, { database, collection, shard })) continue;
+      }
       cursors[sourceNode] = Math.max(cursors[sourceNode] || 0, Number(seen) || 0);
     }
     return cursors;
@@ -1246,7 +1397,7 @@ export class PersistenceManager {
         stats.snapshots++;
         stats.snapshotObjects += restored.objects;
         this._rememberSnapshotCursors(scope, restored.cursors);
-        if (restored.node === this.node.id) nextMaxLocalSeq = Math.max(nextMaxLocalSeq, restored.seq);
+        nextMaxLocalSeq = Math.max(nextMaxLocalSeq, Number(restored.cursors[this.node.id]) || 0);
       }
       scopeIndex++;
       progress?.scope?.(scope, scopeIndex, scopes.length);
@@ -1262,17 +1413,14 @@ export class PersistenceManager {
         key.startsWith(`${scopePrefix(this.prefix, scope)}/journal/`)
           && (key.endsWith(".jsonl") || key.endsWith(".json")));
       for (const key of journalKeys.sort()) {
-        const journalInfo = parseJournalKey(key, this.prefix);
-        const sourceFromKey = journalInfo?.node;
-        const coveredFromKey = Number(sourceFromKey ? snapshotCursors[sourceFromKey] : 0) || 0;
-        if (journalInfo?.lastSeq && coveredFromKey >= journalInfo.lastSeq) {
+        const info = parseJournalKey(key, this.prefix);
+        if (info?.originVerified && (Number(snapshotCursors[info.node]) || 0) >= info.lastSeq) {
           stats.skippedJournals++;
-          stats.skippedJournalOps += journalInfo.count || 0;
+          stats.skippedJournalOps += info.count;
           progress?.add?.("skippedJournals", 1);
-          progress?.add?.("skippedJournalOps", journalInfo.count || 0);
+          progress?.add?.("skippedJournalOps", info.count);
           continue;
         }
-
         const restored = await this._restoreJournalSegment(scope, key, snapshotCursors, progress);
         stats.journals += restored.journals;
         stats.journalOps += restored.ops;
@@ -1380,7 +1528,8 @@ export function createPersistence(node, config = {}) {
   });
 }
 
-function* chunkJsonlIterable(rows, maxBytes, label) {
+async function* chunkJsonlIterable(rows, maxBytes, label) {
+  const budget = new WorkBudget({ maxSliceMs: 4 });
   let current = [];
   let bytes = 0;
 
@@ -1401,6 +1550,8 @@ function* chunkJsonlIterable(rows, maxBytes, label) {
     }
     current.push(row);
     bytes += rowBytes + 1;
+    const pause = budget.checkpoint(i);
+    if (pause) await pause;
   }
 
   if (current.length) {
@@ -1445,8 +1596,8 @@ async function* parseJsonlStream(stream, label) {
   let buffer = "";
   let line = 0;
   let yielded = 0;
-  for await (const chunk of stream) {
-    buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+  for await (const text of decodeUtf8Chunks(stream)) {
+    buffer += text;
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
     for (const raw of lines) {
@@ -1454,8 +1605,7 @@ async function* parseJsonlStream(stream, label) {
       const trimmed = raw.trim();
       if (trimmed) {
         yield parseJsonLine(trimmed, label, line);
-        yielded++;
-        if (yielded % RESTORE_PARSE_YIELD_LINES === 0) await yieldToEventLoop();
+        if (++yielded % RESTORE_PARSE_YIELD_LINES === 0) await yieldToEventLoop();
       }
     }
   }
@@ -1473,11 +1623,74 @@ function* parseJsonlText(body, label) {
 
 async function* parseJsonArrayStream(stream, label) {
   const parser = createJsonArrayParser(label);
-  for await (const chunk of stream) {
-    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-    yield* parser.push(text);
-  }
+  for await (const text of decodeUtf8Chunks(stream)) yield* parser.push(text);
   yield* parser.finish();
+}
+
+async function* journalObjectsFromStorage(storage, key, label) {
+  if (key.endsWith(".jsonl")) {
+    yield* jsonlObjectsFromStorage(storage, key, `${label} journal`);
+    return;
+  }
+  const raw = await storage.get(key);
+  if (raw === null) throw new Error(`segment missing: ${key}`);
+  const segment = JSON.parse(raw);
+  if (!Array.isArray(segment.ops)) throw new Error(`invalid journal segment: ${key}`);
+  yield* segment.ops;
+}
+
+function operationCovered(op, cursors) {
+  const source = op?.from;
+  return typeof source === "string" && Number.isSafeInteger(op?.seq) && op.seq > 0 &&
+    op.seq <= (Number(cursors[source]) || 0);
+}
+
+function validateJournalOp(op, scope) {
+  if (op?.db !== scope.database || op?.coll !== scope.collection || (op.shard && op.shard !== scope.shard)) {
+    throw new Error("journal operation belongs to another context");
+  }
+  if (!["putObj", "delObj", "touch"].includes(op.kind) || typeof op.id !== "string" || !op.id ||
+      (op.from !== undefined && (typeof op.from !== "string" || !op.from)) ||
+      !Number.isSafeInteger(op.seq) || op.seq < 1 || !Number.isSafeInteger(op.ts?.c) || typeof op.ts.n !== "string") {
+    throw new Error("invalid journal operation");
+  }
+}
+
+function coversCursors(cursors, previous) {
+  return Object.entries(previous).every(([source, seq]) => (Number(cursors[source]) || 0) >= seq);
+}
+
+function snapshotConflict(message) {
+  return Object.assign(new Error(message), { code: "SNAPSHOT_CONFLICT" });
+}
+
+function validateSnapshotManifest(manifest, scope) {
+  for (const key of ["database", "collection", "shard"]) {
+    if (manifest?.[key] !== scope[key]) throw new Error("snapshot manifest belongs to another context");
+  }
+  if (!Array.isArray(manifest.segments)) throw new Error("invalid snapshot segments");
+  if (manifest.seq !== undefined && (!Number.isSafeInteger(manifest.seq) || manifest.seq < 0)) throw new Error("invalid snapshot sequence");
+  if (manifest.cursors !== undefined && (!isPlainObject(manifest.cursors) ||
+      Object.values(manifest.cursors).some((seq) => !Number.isSafeInteger(seq) || seq < 0))) {
+    throw new Error("invalid snapshot cursors");
+  }
+  if (manifest.objectCount !== undefined && (!Number.isSafeInteger(manifest.objectCount) || manifest.objectCount < 0)) {
+    throw new Error("invalid snapshot object count");
+  }
+  for (const segment of manifest.segments) {
+    if (typeof segment?.key !== "string" ||
+        (segment.count !== undefined && (!Number.isSafeInteger(segment.count) || segment.count < 0))) {
+      throw new Error("invalid snapshot segment count or key");
+    }
+  }
+}
+
+function validateSnapshotRow(row, scope) {
+  const ts = row?.deleted || row?.ts;
+  if (typeof row?.id !== "string" || !row.id || !Number.isSafeInteger(ts?.c) || typeof ts.n !== "string") {
+    throw new Error("invalid snapshot object");
+  }
+  if (row.shard && row.shard !== scope.shard) throw new Error("snapshot object belongs to another shard scope");
 }
 
 function* parseJsonArrayText(body, label) {
@@ -1611,9 +1824,9 @@ function restoreStats() {
 function maxLocalSeqForOps(ops, nodeId) {
   let max = 0;
   for (const op of ops || []) {
-    if (op?.from !== nodeId) continue;
+    if (op?.from && op.from !== nodeId) continue;
     const seq = Number(op.seq);
-    if (Number.isFinite(seq) && seq > max) max = seq;
+    if (Number.isSafeInteger(seq) && seq > max) max = seq;
   }
   return max;
 }
@@ -1674,6 +1887,14 @@ function uniqueScopes(keys, prefix) {
   return [...scopes.values()].sort((a, b) => scopeKey(a).localeCompare(scopeKey(b)));
 }
 
+function persistedMeta(raw, managed) {
+  const value = JSON.parse(raw);
+  if (!managed) return value;
+  if (Object.keys(value).length === 1 && value.deletedBy) return null;
+  if (value.version !== 1 || typeof value.revision !== "string" || !isPlainObject(value.meta)) throw new Error("invalid context metadata envelope");
+  return value.meta;
+}
+
 function collectionTombstones(keys, prefix) {
   const deleted = new Set();
   for (const key of keys) {
@@ -1703,17 +1924,19 @@ function rememberRestoredCursor(node, sourceNode, scope, ops) {
   if (seen) node.lastSeen.set(cursorKey, seen);
 }
 
-function rememberRestoredCursors(node, sourceNode, ops) {
+function rememberRestoredCursors(node, ops) {
   const byScope = new Map();
   for (const op of ops || []) {
     const scope = opScope(op, node);
-    const key = scopeKey(scope);
-    const scoped = byScope.get(key) || { scope, ops: [] };
+    const source = op.from;
+    if (typeof source !== "string" || !source) continue;
+    const key = `${source}\n${scopeKey(scope)}`;
+    const scoped = byScope.get(key) || { source, scope, ops: [] };
     scoped.ops.push(op);
     byScope.set(key, scoped);
   }
-  for (const { scope, ops: scopedOps } of byScope.values()) {
-    rememberRestoredCursor(node, sourceNode, scope, scopedOps);
+  for (const { source, scope, ops: scopedOps } of byScope.values()) {
+    rememberRestoredCursor(node, source, scope, scopedOps);
   }
 }
 
@@ -1833,7 +2056,9 @@ function parseJournalKey(key, prefix) {
   const createdAtMs = match ? Number(match[1]) : 0;
   const firstSeq = match ? Number(match[2]) : 0;
   const lastSeq = match ? Number(match[3]) : 0;
-  const count = lastSeq >= firstSeq && firstSeq > 0 ? lastSeq - firstSeq + 1 : 0;
+  const originCount = file.match(/-(\d+)\.origin\.jsonl$/);
+  const originVerified = Boolean(match && originCount && firstSeq > 0 && lastSeq >= firstSeq && Number(originCount[1]) > 0);
+  const count = originVerified ? Number(originCount[1]) : lastSeq >= firstSeq && firstSeq > 0 ? lastSeq - firstSeq + 1 : 0;
   return {
     ...scope,
     node: decodeURIComponent(parts[7]),
@@ -1841,6 +2066,7 @@ function parseJournalKey(key, prefix) {
     firstSeq: Number.isFinite(firstSeq) ? firstSeq : 0,
     lastSeq: Number.isFinite(lastSeq) ? lastSeq : 0,
     count,
+    originVerified,
   };
 }
 
@@ -1889,43 +2115,6 @@ function parseDatabaseTombstoneFromKey(key, prefix) {
   const parts = key.slice(expected.length).split("/");
   if (parts[0] !== "database-tombstones" || !parts[1]?.endsWith(".json")) return null;
   return decodeURIComponent(parts[1].slice(0, -5));
-}
-
-function snapshotEntries(keys, prefix) {
-  const byId = new Map();
-  for (const key of keys) {
-    if (!key.startsWith(prefix)) continue;
-    const rest = key.slice(prefix.length);
-    const id = rest.split("/")[0];
-    if (!id || rest === id) continue;
-    const entry = byId.get(id) || {
-      id,
-      createdAtMs: snapshotCreatedAtMs(id),
-      keys: [],
-    };
-    entry.keys.push(key);
-    byId.set(id, entry);
-  }
-  return [...byId.values()].sort((left, right) => {
-    const created = right.createdAtMs - left.createdAtMs;
-    return created || right.id.localeCompare(left.id);
-  });
-}
-
-function filterSnapshotRetention(snapshots, retention, latest = null) {
-  if (!retentionEnabled(retention)) return [];
-  const keep = new Set(latest?.id ? [latest.id] : []);
-  const keepLatest = Math.max(0, Number(retention.keepLatest) || 0);
-  for (const snapshot of snapshots.slice(0, keepLatest)) keep.add(snapshot.id);
-
-  const keepSince = retention.keepForMs > 0 ? Date.now() - retention.keepForMs : null;
-  if (keepSince !== null) {
-    for (const snapshot of snapshots) {
-      if (!snapshot.createdAtMs || snapshot.createdAtMs >= keepSince) keep.add(snapshot.id);
-    }
-  }
-
-  return snapshots.filter((snapshot) => !keep.has(snapshot.id));
 }
 
 function filterRetentionKeys(keys, retention, createdAtMsForKey) {
@@ -2048,7 +2237,7 @@ function normalizeSnapshotId(id) {
 }
 
 function normalizeSnapshotCursors(manifest = {}) {
-  const cursors = isPlainObject(manifest.cursors) ? { ...manifest.cursors } : {};
+  const cursors = Object.assign(Object.create(null), isPlainObject(manifest.cursors) ? manifest.cursors : {});
   if (manifest.node) cursors[manifest.node] = Math.max(Number(cursors[manifest.node]) || 0, Number(manifest.seq) || 0);
   return cursors;
 }

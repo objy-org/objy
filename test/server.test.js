@@ -176,15 +176,20 @@ async function startRoutedTwoShardCluster(options = {}) {
       "shard-b": { peers: [{ url: urlB }] },
     },
   };
+  const nodeA = new CRDTNode({ id: "route-a", url: urlA });
+  const nodeB = new CRDTNode({ id: "route-b", url: urlB });
+  const persistence = (node) => options.storage ? new PersistenceManager({ node, storage: options.storage, flushMs: 0, snapshotMs: 0 }) : undefined;
   const a = await startTestServer({
     port: portA,
-    node: new CRDTNode({ id: "route-a", url: urlA }),
+    node: nodeA,
+    persistence: persistence(nodeA),
     shardMap,
     ...(options.a || {}),
   });
   const b = await startTestServer({
     port: portB,
-    node: new CRDTNode({ id: "route-b", url: urlB }),
+    node: nodeB,
+    persistence: persistence(nodeB),
     shardMap,
     ...(options.b || {}),
   });
@@ -2192,7 +2197,7 @@ test("query router pages and aggregates correctly when one node owns multiple sh
 });
 
 test("collection metadata fan-out builds indexes on shard peers", async () => {
-  const { a, b, urlA } = await startRoutedTwoShardCluster();
+  const { a, b, urlA } = await startRoutedTwoShardCluster({ storage: new MemoryObjectStorage() });
   try {
     const session = await login(urlA);
     const c = api(urlA, session.accessToken);
@@ -2330,25 +2335,22 @@ test("schema writes tolerate unavailable peers except for destructive collection
 
     const deletedCollection = await c.del("/api/offline_schema/collections/docs");
     assert.equal(deletedCollection.status, 503, JSON.stringify(deletedCollection.body));
-    assert.equal(s.node.getCollectionMeta("offline_schema", "docs"), null);
+    assert.ok(s.node.getCollectionMeta("offline_schema", "docs"));
 
     const deletedDb = await c.del("/api/databases/offline_schema");
     assert.equal(deletedDb.status, 503, JSON.stringify(deletedDb.body));
-    assert.equal(s.node.getDatabaseMeta("offline_schema"), null);
+    assert.ok(s.node.getDatabaseMeta("offline_schema"));
   } finally {
     s.server.close();
   }
 });
 
-test("collection and database deletes keep committed state when file cleanup fails", async () => {
-  const files = {
-    deleteCollectionFiles: async () => {
-      throw new Error("fetch failed");
-    },
-    deleteDatabaseFiles: async () => {
-      throw new Error("fetch failed");
-    },
-  };
+test("collection and database deletes remain pending when file cleanup fails", async () => {
+  const storage = new MemoryObjectStorage();
+  const files = new FileService({ storage });
+  storage.delete = async () => { throw new Error("fetch failed"); };
+  await storage.putBlob(files.key("file_cleanup", "docs", "one"), Buffer.from("test"), "text/plain");
+  await storage.putBlob(files.key("file_cleanup_db", "docs", "one"), Buffer.from("test"), "text/plain");
   const s = await startTestServer({ port: 0, files });
   try {
     const base = `http://localhost:${s.port}`;
@@ -2357,13 +2359,15 @@ test("collection and database deletes keep committed state when file cleanup fai
 
     assert.equal((await c.post("/api/file_cleanup/collections", { name: "docs" })).status, 201);
     const deletedCollection = await c.del("/api/file_cleanup/collections/docs");
-    assert.equal(deletedCollection.status, 204, JSON.stringify(deletedCollection.body));
+    assert.equal(deletedCollection.status, 503, JSON.stringify(deletedCollection.body));
     assert.equal(s.node.getCollectionMeta("file_cleanup", "docs"), null);
+    assert.equal((await c.post("/api/file_cleanup/collections", { name: "docs" })).status, 409);
 
     assert.equal((await c.post("/api/databases", { name: "file_cleanup_db" })).status, 201);
     const deletedDb = await c.del("/api/databases/file_cleanup_db");
-    assert.equal(deletedDb.status, 204, JSON.stringify(deletedDb.body));
+    assert.equal(deletedDb.status, 503, JSON.stringify(deletedDb.body));
     assert.equal(s.node.getDatabaseMeta("file_cleanup_db"), null);
+    assert.equal((await c.post("/api/databases", { name: "file_cleanup_db" })).status, 409);
   } finally {
     s.server.close();
   }

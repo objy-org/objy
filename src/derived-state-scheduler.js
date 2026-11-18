@@ -28,7 +28,6 @@ export class DerivedStateScheduler {
         cancelled: false,
         resolve,
         reject,
-        enqueuedAt: Date.now(),
       });
       this._drain();
     });
@@ -96,11 +95,32 @@ export class DerivedStateScheduler {
   }
 }
 
-class DerivedStateJobContext {
+export class WorkBudget {
+  constructor(options = {}) {
+    this.batchLimit = positiveInt(options.batchSize, DEFAULT_BATCH_SIZE);
+    this.maxSliceMs = positiveInt(options.maxSliceMs, DEFAULT_MAX_SLICE_MS);
+    this.lastYieldAt = Date.now();
+  }
+
+  checkpoint(processed = 0) {
+    const count = Math.max(0, Math.floor(Number(processed) || 0));
+    const shouldYieldByBatch = count > 0 && count % this.batchLimit === 0;
+    const shouldYieldByTime = Date.now() - this.lastYieldAt >= this.maxSliceMs;
+    if (!shouldYieldByBatch && !shouldYieldByTime) return;
+    return this.yield();
+  }
+
+  async yield() {
+    await yieldToEventLoop();
+    this.lastYieldAt = Date.now();
+  }
+}
+
+class DerivedStateJobContext extends WorkBudget {
   constructor(scheduler, job) {
+    super(scheduler);
     this.scheduler = scheduler;
     this.job = job;
-    this.lastYieldAt = Date.now();
   }
 
   get cancelled() {
@@ -131,19 +151,6 @@ class DerivedStateJobContext {
       if (pause) await pause;
     }
     return !this.cancelled;
-  }
-
-  checkpoint(processed = 0) {
-    const count = Math.max(0, Math.floor(Number(processed) || 0));
-    const shouldYieldByBatch = count > 0 && count % this.scheduler.batchSize === 0;
-    const shouldYieldByTime = Date.now() - this.lastYieldAt >= this.scheduler.maxSliceMs;
-    if (!shouldYieldByBatch && !shouldYieldByTime) return;
-    return this.yield();
-  }
-
-  async yield() {
-    await yieldToEventLoop();
-    this.lastYieldAt = Date.now();
   }
 }
 

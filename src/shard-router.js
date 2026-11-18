@@ -491,6 +491,7 @@ export class ShardRequestRouter {
     const headers = forwardedOnly
       ? forwardedControlHeaders(req, body !== undefined, this.clusterSecret)
       : forwardedHeaders(req, shard, body !== undefined, this.clusterSecret);
+    Object.assign(headers, this.node.lifecycle?.requestHeader(req));
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
@@ -521,6 +522,7 @@ export class ShardRequestRouter {
   async forwardNdjson(req, peer, shard, path, { method = "POST", items = [], query, timeoutMs } = {}) {
     const suffix = query ? `?${query}` : "";
     const headers = forwardedHeaders(req, shard, true, this.clusterSecret);
+    Object.assign(headers, this.node.lifecycle?.requestHeader(req));
     headers["content-type"] = NDJSON_CONTENT_TYPE;
     headers.prefer = preferMinimal(headers.prefer);
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
@@ -554,6 +556,7 @@ export class ShardRequestRouter {
   async forwardRaw(req, peer, shard, path, { method = "GET", body, contentType, query, timeoutMs } = {}) {
     const suffix = query ? `?${query}` : "";
     const headers = forwardedHeaders(req, shard, body !== undefined, this.clusterSecret);
+    Object.assign(headers, this.node.lifecycle?.requestHeader(req));
     if (contentType) headers["content-type"] = contentType;
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();

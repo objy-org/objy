@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { CRDTNode } from "../src/crdt.js";
 import { S3ObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
@@ -56,9 +57,27 @@ test("S3 adapter creates non-us-east-1 buckets with a location constraint", asyn
   }
 });
 
+test("S3 conditional writes reject stale and competing snapshot heads", async () => {
+  const mock = createMockS3Server();
+  const port = await mock.start();
+  const storage = new S3ObjectStorage({ bucket: "test", endpoint: `http://127.0.0.1:${port}`, accessKeyId: "test", secretAccessKey: "test" });
+  try {
+    assert.deepEqual(await storage.getVersioned("head"), { body: null, etag: null });
+    assert.equal(await storage.putConditional("head", "one", null), true);
+    assert.equal(await storage.putConditional("head", "other", null), false);
+    const first = await storage.getVersioned("head");
+    const winners = await Promise.all([storage.putConditional("head", "two", first.etag), storage.putConditional("head", "three", first.etag)]);
+    assert.deepEqual(winners.sort(), [false, true]);
+    assert.equal(await storage.putConditional("head", "stale", first.etag), false);
+  } finally {
+    await mock.stop();
+  }
+});
+
 function createMockS3Server({ bucketExists = true } = {}) {
   const objects = new Map();
   const log = [];
+  const etag = (key) => objects.has(key) ? `"${createHash("sha256").update(objects.get(key)).digest("hex")}"` : null;
 
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -88,8 +107,14 @@ function createMockS3Server({ bucketExists = true } = {}) {
     if (req.method === "PUT" && key) {
       readBody().then((body) => {
         log.push({ method: req.method, path: url.pathname, search: url.search, body });
+        if ((req.headers["if-none-match"] === "*" && objects.has(key)) ||
+            (req.headers["if-match"] && req.headers["if-match"] !== etag(key))) {
+          res.writeHead(412, { "content-type": "application/xml" });
+          res.end("<Error><Code>PreconditionFailed</Code></Error>");
+          return;
+        }
         objects.set(key, body);
-        res.writeHead(200, { ETag: "\"mock\"" });
+        res.writeHead(200, { ETag: etag(key) });
         res.end();
       });
       return;
@@ -121,7 +146,7 @@ function createMockS3Server({ bucketExists = true } = {}) {
         res.end(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`);
         return;
       }
-      res.writeHead(200, { "content-type": "application/json", ETag: "\"mock\"" });
+      res.writeHead(200, { "content-type": "application/json", ETag: etag(key) });
       res.end(objects.get(key));
       return;
     }

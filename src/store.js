@@ -86,14 +86,6 @@ class Collection {
     return this.idByRid[rid];
   }
 
-  ensure(id, ts) {
-    return this.putObjects([{ id, value: {}, ts }]).length === 1;
-  }
-
-  putObject(id, value, ts, shard = null, options = {}) {
-    return this.putObjects([{ id, value, ts, shard }], options).length === 1;
-  }
-
   putObjects(rows, options = {}) {
     const applied = [];
     const indexDeltas = [];
@@ -306,10 +298,6 @@ class Collection {
     if (next !== base) this.store.rebuild(id, Object.entries(next), { trusted: true });
   }
 
-  deleteObject(id, ts, shard = null) {
-    return this.deleteObjects([{ id, ts, shard }]).length === 1;
-  }
-
   deleteObjects(rows) {
     const applied = [];
     const indexDeltas = [];
@@ -434,14 +422,6 @@ class Collection {
 
   find(query = {}, options = {}) {
     return this._selectRids(stripQueryControls(query), options).map((rid) => this.readRid(rid));
-  }
-
-  all(options = {}) {
-    return this.find({}, options);
-  }
-
-  findForQuery(query = {}, options = {}) {
-    return this._selectRids(stripQueryControls(query), options).map((rid) => this.readRidForQuery(rid));
   }
 
   findIds(query = {}, options = {}) {
@@ -3065,6 +3045,7 @@ export class Store {
   }
 
   assertCollectionWritable(dbName, collName) {
+    this.lifecycle?.assert(dbName, collName);
     if (this.isDatabaseDeleted(dbName)) {
       const error = new Error("database was deleted; create it explicitly before writing");
       error.status = 409;
@@ -3077,6 +3058,11 @@ export class Store {
   }
 
   createDatabase(dbName, meta = {}) {
+    this.lifecycle?.assert(dbName);
+    if (this.isDatabaseDeleted(dbName)) {
+      const prefix = `${String(dbName)}\0`;
+      for (const key of this.collectionTombstones) if (key.startsWith(prefix)) this.collectionTombstones.delete(key);
+    }
     this.databaseTombstones.delete(String(dbName));
     return this.db(dbName).setMeta(meta);
   }
@@ -3087,12 +3073,9 @@ export class Store {
   }
 
   setDatabaseMeta(dbName, meta = {}) {
+    this.lifecycle?.assert(dbName);
     this.databaseTombstones.delete(String(dbName));
     return this.db(dbName).setMeta(meta);
-  }
-
-  hasDatabase(dbName) {
-    return this.dbs.has(dbName);
   }
 
   deleteDatabase(dbName) {
@@ -3104,6 +3087,7 @@ export class Store {
   }
 
   createCollection(dbName, collName, meta = {}) {
+    this.lifecycle?.assert(dbName, collName);
     this.collectionTombstones.delete(storeCollectionKey(dbName, collName));
     const collection = this.collection(dbName, collName);
     const next = collection.setMeta(meta, { deferIndexes: this.bulkLoadDepth > 0 });
@@ -3140,6 +3124,7 @@ export class Store {
   }
 
   setCollectionMeta(dbName, collName, meta) {
+    this.lifecycle?.assert(dbName, collName);
     this.collectionTombstones.delete(storeCollectionKey(dbName, collName));
     const collection = this.collection(dbName, collName);
     const next = collection.setMeta(meta, { deferIndexes: this.bulkLoadDepth > 0 });
@@ -3172,16 +3157,6 @@ export class Store {
     return collection ? collection.idsForShards(shards) : null;
   }
 
-  collectionMetadata() {
-    const out = [];
-    for (const [dbName, db] of this.dbs) {
-      for (const [collName, collection] of db.collections) {
-        out.push({ database: dbName, collection: collName, meta: collection.getMeta() });
-      }
-    }
-    return out;
-  }
-
   applyOps(ops) {
     const applied = [];
     let runKey = null;
@@ -3200,7 +3175,7 @@ export class Store {
     };
 
     for (const op of ops || []) {
-      if (this.isDatabaseDeleted(op.db) || this.isCollectionDeleted(op.db, op.coll)) continue;
+      if (this.isDatabaseDeleted(op.db) || this.isCollectionDeleted(op.db, op.coll) || this.lifecycle?.obsolete(op)) continue;
       const kind = op.kind === "delObj" ? "delObj" : "putObj";
       const key = `${op.db}\0${op.coll}\0${kind}`;
       if (runKey && runKey !== key) flush();

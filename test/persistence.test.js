@@ -324,7 +324,7 @@ test("legacy restore rejects unknown and malformed snapshot formats", async () =
 
   const malformed = new MemoryObjectStorage();
   const malformedKey = `${unknownPrefix}/segment.json`;
-  await malformed.put(malformedKey, '[{"id":"e1"}');
+  await malformed.put(malformedKey, '[{"id":"e1","ts":{"c":1,"n":"writer"},"value":{}}');
   await malformed.put(`${unknownPrefix}/latest.json`, manifest(malformedKey));
   await assert.rejects(
     () => new PersistenceManager({ node: new CRDTNode({ id: "fresh" }), storage: malformed }).restore(),

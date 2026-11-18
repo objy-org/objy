@@ -117,7 +117,8 @@ export class FileService {
 
   async put(database, collection, id, metadata, file) {
     const normalized = this.normalizeMetadata(database, collection, id, metadata);
-    await this.storage.putBlob(normalized.key, file.body, normalized.mimeType);
+    const write = () => this.storage.putBlob(normalized.key, file.body, normalized.mimeType);
+    await (this.lifecycle ? this.lifecycle.track({ database, collection }, write) : write());
     return normalized;
   }
 
@@ -129,17 +130,11 @@ export class FileService {
   async deleteObjectFile(database, collection, object) {
     const key = this.fileKeyFromObject(database, collection, object);
     if (!key) return false;
-    await this.storage.delete([key]);
+    const remove = () => this.storage.delete([key]);
+    await (this.lifecycle ? this.lifecycle.track({ database, collection }, remove) : remove());
     return true;
   }
 
-  async deleteCollectionFiles(database, collection) {
-    await this.storage.deletePrefix(`${this.collectionPrefix(database, collection)}/`);
-  }
-
-  async deleteDatabaseFiles(database) {
-    await this.storage.deletePrefix(`${this.databasePrefix(database)}/`);
-  }
 }
 
 export function isMultipartRequest(req) {

@@ -1,44 +1,4 @@
-const { hmacSha256, randomUUID } = require('./crypto.cjs')
-
-function signAccessToken(user, secret, { expiresInSeconds = 3600, sessionId = null, extraClaims = {} } = {}) {
-  const data = user && user._data ? user._data : user
-  if (!data || typeof data !== 'object') throw new TypeError('JWT user payload must be an object')
-
-  const now = Math.floor(Date.now() / 1000)
-  const id = sessionId || data.sessionId || randomUUID()
-  return sign({
-    typ: 'access',
-    sub: data._id,
-    userFamily: data.role,
-    username: data.username,
-    applications: data.applications || [],
-    authorisations: data.authorisations || {},
-    sessionId: id,
-    tokenVersion: data.tokenVersion || 0,
-    ..._safeExtraClaims(extraClaims),
-    iat: now,
-    exp: now + expiresInSeconds
-  }, secret)
-}
-
-function signRefreshToken(user, secret, { expiresInSeconds = 1209600, sessionId = null, extraClaims = {} } = {}) {
-  const data = user && user._data ? user._data : user
-  if (!data || typeof data !== 'object') throw new TypeError('JWT user payload must be an object')
-
-  const now = Math.floor(Date.now() / 1000)
-  const id = sessionId || data.sessionId || randomUUID()
-  return sign({
-    typ: 'refresh',
-    sub: data._id,
-    userFamily: data.role,
-    username: data.username,
-    sessionId: id,
-    tokenVersion: data.tokenVersion || 0,
-    ..._safeExtraClaims(extraClaims),
-    iat: now,
-    exp: now + expiresInSeconds
-  }, secret)
-}
+const { hmacSha256 } = require('./crypto.cjs')
 
 function sign(payload, secret) {
   _assertSecret(secret)
@@ -118,17 +78,6 @@ function _assertSecret(secret) {
   if (typeof secret !== 'string' || secret.length === 0) {
     throw new TypeError('JWT secret must be a non-empty string')
   }
-}
-
-function _safeExtraClaims(extraClaims) {
-  if (!extraClaims || typeof extraClaims !== 'object' || Array.isArray(extraClaims)) return {}
-  const reserved = new Set([
-    'typ', 'sub', 'userFamily', 'username', 'applications', 'authorisations',
-    'sessionId', 'tokenVersion', 'iat', 'exp'
-  ])
-  return Object.fromEntries(
-    Object.entries(extraClaims).filter(([key]) => !reserved.has(key))
-  )
 }
 
 function _encodeJson(value) {
@@ -228,4 +177,4 @@ function _utf8Decode(bytes) {
   return out
 }
 
-module.exports = { signAccessToken, signRefreshToken, sign, verifyAccessToken, verifyRefreshToken, verify }
+module.exports = { sign, verifyAccessToken, verifyRefreshToken, verify }

@@ -141,7 +141,6 @@ export function planAggregate(criteria = {}, spec = {}, options = {}, adapter) {
 
   if (!idPlan) return aggregateScanPlan(normalized, "criteria cannot be narrowed by indexes");
 
-  const scopeShards = Array.isArray(options.scopeShards) ? options.scopeShards : null;
   if (normalized.groupBy.length === 1 && !isRowCountOnlyAggregate(normalized) && idPlan.exact && idPlan.ids instanceof Set &&
       adapter.hasGroupForwardIndex?.(normalized.groupBy[0])) {
     return {

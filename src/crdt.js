@@ -95,14 +95,6 @@ export class CRDTNode {
     return applied.length;
   }
 
-  _write(db, coll, id, entries) {
-    return this._writeMany(db, coll, [{ id, value: Object.fromEntries(entries) }]).ops;
-  }
-
-  _writeObject(db, coll, id, value) {
-    return this._writeMany(db, coll, [{ id, value }]).ops[0];
-  }
-
   _writeMany(db, coll, items) {
     this.db.assertCollectionWritable(db, coll);
     return this._commitLocalOps((items || []).map(({ id, value }) => ({
@@ -148,11 +140,7 @@ export class CRDTNode {
   }
 
   replaceMany(db, coll, objects) {
-    const items = normalizeObjectsWithIds(objects);
-    this._writeMany(db, coll, items.map((object) => ({
-      id: object._id,
-      value: this.db.preserveVector(db, coll, object._id, withoutObjectId(object)),
-    })));
+    const items = this._commitReplaceMany(db, coll, objects);
     return {
       replaced: items.length,
       items: this.getMany(db, coll, items.map((item) => item._id)),
@@ -160,12 +148,16 @@ export class CRDTNode {
   }
 
   replaceManyCount(db, coll, objects) {
+    return this._commitReplaceMany(db, coll, objects).length;
+  }
+
+  _commitReplaceMany(db, coll, objects) {
     const items = normalizeObjectsWithIds(objects);
     this._writeMany(db, coll, items.map((object) => ({
       id: object._id,
       value: this.db.preserveVector(db, coll, object._id, withoutObjectId(object)),
     })));
-    return items.length;
+    return items;
   }
 
   updateMany(db, coll, objects) {
@@ -420,13 +412,6 @@ export class CRDTNode {
     return this.db.assertVectorIndexReady(db, coll, options);
   }
 
-  assertVectorIndexReadyShards(db, coll, shards = []) {
-    const includeId = this._includeShardId(db, coll, shards);
-    return this.assertVectorIndexReady(db, coll, includeId
-      ? { includeId, indexKey: vectorShardIndexKey(shards) }
-      : {});
-  }
-
   rankVectorRows(db, coll, rows, queryVec, limit = 20) {
     return this.db.rankVectorRows(db, coll, rows, queryVec, limit);
   }
@@ -460,6 +445,10 @@ export class CRDTNode {
   }
 
   async syncPeer(peer, scope) {
+    return this.lifecycle ? this.lifecycle.track(null, () => this._syncPeer(peer, scope)) : this._syncPeer(peer, scope);
+  }
+
+  async _syncPeer(peer, scope) {
     let total = 0;
 
     for (;;) {
@@ -468,6 +457,11 @@ export class CRDTNode {
       const after = this.lastSeen.get(cursorKey) || 0;
       const res = await peer.pull(after, this.syncBatchSize, scope);
       if (!res) return total;
+      if (this.lifecycle && res.contextRevision && res.contextRevision !== peer.contextRevision) {
+        const revived = await this.lifecycle.load();
+        for (const context of revived) await this.lifecycle.persistence?.restoreScope(context);
+        peer.contextRevision = res.contextRevision;
+      }
 
       if (res.status === 410) {
         const remoteId = res.nodeId || res.node || peer.nodeId;
@@ -812,11 +806,10 @@ export class CRDTNode {
   _shardQueryOptions(database, collection, shards = []) {
     const shardSet = new Set((shards || []).filter(Boolean));
     if (!shardSet.size) return {};
-    const scopeShards = [...shardSet];
     const includeIds = this.db.idsForShards(database, collection, [...shardSet]);
-    if (includeIds) return { includeIds, scopeShards };
+    if (includeIds) return { includeIds };
     const includeId = this._includeShardId(database, collection, [...shardSet]);
-    return includeId ? { includeId, scopeShards } : {};
+    return includeId ? { includeId } : {};
   }
 
   _scheduleVectorIndexWarmup() {

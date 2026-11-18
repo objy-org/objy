@@ -213,7 +213,11 @@ If `adminUser.collection` is omitted, `users` is used. The users collection rece
 
 `DELETE /api/databases/{db}`
 
-This requires a global admin token. Deletion removes the database metadata and objects across the cluster and attempts to remove associated file blobs. `_global` cannot be deleted.
+Requires a global admin token. Removes metadata, objects, persisted snapshots/journals, and associated file blobs. `_global` cannot be deleted.
+
+Database and collection deletion use the same lifecycle: writes, metadata changes, and recreation are blocked with `409` while deletion is pending. `204` confirms every configured peer has drained the affected context and shared cleanup has completed. An unavailable peer or cleanup failure returns `503`; retry the same DELETE, on any peer, to resume it. There is no timeout that automatically reopens the context. Explicit creation is allowed after completion. Clustered deletion requires shared S3 persistence; standalone deletion also works without persistence. Other databases and collections remain writable, except children of a deleting database.
+
+A DELETE sent after explicit recreation is a new operation against the recreated context, not a retry of its previous deletion.
 
 **Request**
 
@@ -421,6 +425,8 @@ Content-Type: application/json
 ```
 
 ### Delete Collection
+
+Uses the same [coordinated deletion lifecycle](#delete-database) as databases. Until completion, object writes, metadata edits, and recreating this collection return `409`. A failed DELETE is safe to retry.
 
 **Request**
 

@@ -16,8 +16,12 @@ export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
 export function createClusterInterface() {
   return {
     name: "cluster",
-    register(router, { node, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
+    register(router, { node, lifecycle, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
       const secure = secureClusterRoute(clusterSecret);
+
+      router.post("/cluster/context", secure(async (req, res) => {
+        json(res, 200, await lifecycle.command(await readJson(req)));
+      }));
 
       router.get("/health", (req, res) => {
         json(res, 200, { ok: true, node: node.id, restore: restoreStatus?.snapshot?.() || null });
@@ -35,6 +39,7 @@ export function createClusterInterface() {
 
       router.put("/cluster/shards", secure(async (req, res) => {
         try {
+          await lifecycle.assertTopologyMutable();
           const body = await readJson(req);
           const desired = body.shardMap || body;
           const next = publishShardMap(node.shardMapSnapshot(), desired);
@@ -57,6 +62,7 @@ export function createClusterInterface() {
       }));
 
       router.post("/cluster/peers", secure(async (req, res) => {
+        await lifecycle.assertTopologyMutable();
         const body = await readJson(req);
         if (!body.url) {
           json(res, 400, { error: "url is required" });
@@ -83,6 +89,7 @@ export function createClusterInterface() {
             node: node.id,
             lastSeq: node.seq,
             trimmed: node.trimmed,
+            contextRevision: lifecycle.revision,
           });
           return;
         }
@@ -93,6 +100,7 @@ export function createClusterInterface() {
         json(res, 200, {
           node: node.id,
           lastSeq: node.seq,
+          contextRevision: lifecycle.revision,
           ops: node._opsAfter(after, limit, scope),
         });
       }));
@@ -117,7 +125,7 @@ export function createClusterInterface() {
         }
       }));
 
-      router.post("/replicate", secure(async (req, res) => {
+      router.post("/replicate", secure((req, res) => lifecycle.track(null, async () => {
         if (isNdjsonContentType(req.headers["content-type"])) {
           const from = String(req.headers["x-objydb-node"] || req.query.get("node") || "");
           let applied = 0;
@@ -135,7 +143,7 @@ export function createClusterInterface() {
         const body = await readJson(req);
         node.applyRemote(String(body.node || ""), Array.isArray(body.ops) ? body.ops : []);
         json(res, 200, { ok: true, lastSeq: node.seq });
-      }));
+      })));
     },
   };
 }
@@ -163,6 +171,7 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
           status: r.status,
           node: r.headers.get("x-objydb-node") || undefined,
           lastSeq: numberHeader(r.headers, "x-objydb-last-seq"),
+          contextRevision: r.headers.get("x-objydb-context-revision"),
           opBatches: parseNdjsonBatches(r.body, {
             maxBatchObjects: replicationBatchObjects(limit),
             label: "replication stream",
@@ -196,6 +205,7 @@ async function writeReplicationNdjson(res, node, after, limit, scope) {
     "content-type": NDJSON_CONTENT_TYPE,
     "x-objydb-node": node.id,
     "x-objydb-last-seq": String(node.seq),
+    "x-objydb-context-revision": node.lifecycle?.revision || "",
   });
   for (const op of node._opsAfterIterable(after, limit, scope)) {
     if (!res.write(`${JSON.stringify(op)}\n`)) await once(res, "drain");

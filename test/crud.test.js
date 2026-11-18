@@ -254,6 +254,57 @@ test("bulk insert count path skips object hydration", () => {
   assert.deepEqual(originalGet("db", "c", "a"), { _id: "a", x: 1 });
 });
 
+for (const engine of ["object", "shape"]) {
+  for (const method of ["replaceMany", "replaceManyCount"]) {
+    test(`${engine}: ${method} preserves bulk replacement semantics`, async (t) => {
+      const n = new CRDTNode({ id: "a", storage: { engine } });
+      t.after(() => n.db.dispose());
+      n.createCollection("db", "c", { indexes: ["status"], columns: ["score"] });
+      n.insertManyCount("db", "c", [
+        { _id: "b", old: true, _vec: [1, 0] },
+        { _id: "7", old: true, _vec: [0, 1] },
+      ]);
+      const minimal = method === "replaceManyCount";
+      assert.deepEqual(n[method]("db", "c", []), minimal ? 0 : { replaced: 0, items: [] });
+      const getMany = n.getMany.bind(n);
+      let hydratedBatches = 0;
+      n.getMany = (...args) => { hydratedBatches++; return getMany(...args); };
+      const input = [
+        { _id: "b", status: "ready", score: 4 },
+        { _id: 7, score: 7, _vec: null },
+        { _id: "empty" },
+      ];
+      const original = structuredClone(input);
+      const expected = [
+        { _id: "b", status: "ready", score: 4 },
+        { _id: "7", score: 7 },
+        { _id: "empty" },
+      ];
+      assert.deepEqual(n[method]("db", "c", input), minimal ? 3 : { replaced: 3, items: expected });
+      assert.equal(hydratedBatches, minimal ? 0 : 1);
+      assert.deepEqual(input, original);
+      assert.deepEqual(getMany("db", "c", ["b", "7", "empty"]), expected);
+      assert.deepEqual(n.getVector("db", "c", "b"), [1, 0]);
+      assert.equal(n.getVector("db", "c", "7"), null);
+      await n.awaitIndexes("db", "c");
+      assert.deepEqual(n.findIds("db", "c", { status: "ready" }), ["b"]);
+      assert.deepEqual(n.aggregate("db", "c", {}, { fields: { sum: { $sum: "score" } } }), [{ sum: 11 }]);
+      const seq = n.seq;
+      for (const invalid of [
+        [{ _id: "b", score: 99 }, { score: 100 }],
+        [{ _id: "b", score: 99 }, { _id: "b", score: 100 }],
+        [{ _id: "b", score: 99 }, { _id: "bad", _vec: [NaN] }],
+      ]) {
+        assert.throws(() => n[method]("db", "c", invalid), TypeError);
+        assert.equal(n.seq, seq);
+        assert.deepEqual(getMany("db", "c", ["b", "7", "empty"]), expected);
+      }
+      n.removeCollection("db", "c");
+      assert.throws(() => n[method]("db", "c", input), /collection was deleted/);
+    });
+  }
+}
+
 test("bulk operations reject duplicate _ids", () => {
   const n = makeNode("a");
   n.insert("db", "c", { _id: "a", x: 1 });

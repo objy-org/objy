@@ -53,8 +53,8 @@ const NDJSON_MINIMAL_REQUIRED = "NDJSON write streams require Prefer: return=min
 export function createPublicObjectInterface() {
   return {
     name: "public-object",
-    register(router, { node, auth, routing, durability, memoryGuard, restoreStatus, replicationScheduler, files, imports, objectHooks }) {
-      const secure = secureRoute(auth);
+    register(router, { node, lifecycle, auth, routing, durability, memoryGuard, restoreStatus, replicationScheduler, files, imports, objectHooks }) {
+      const secure = secureRoute(auth, lifecycle, routing);
       const importLimits = normalizeImportLimits(imports);
 
       router.get("/api/databases", secure((req, res) => {
@@ -95,7 +95,7 @@ export function createPublicObjectInterface() {
         }
         const created = node.getDatabaseMeta(name) === null;
         try {
-          const meta = node.createDatabase(name, body.meta || {});
+          const meta = await lifecycle.create({ database: name }, req, () => node.createDatabase(name, body.meta || {}));
           let adminResult = null;
           let adminCollectionMeta = null;
           if (adminUser) {
@@ -162,22 +162,11 @@ export function createPublicObjectInterface() {
         if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
         try {
           const existed = node.getDatabaseMeta(req.params.database) !== null;
-          const alreadyDeleted = node.db.isDatabaseDeleted(req.params.database);
+          const alreadyDeleted = node.db.isDatabaseDeleted(req.params.database) || lifecycle.record(req.params.database);
           if (!existed && !alreadyDeleted && !routing.isForwarded(req)) {
             return json(res, 404, { error: "database not found" });
           }
-          const removed = node.removeDatabase(req.params.database);
-          if (removed || !alreadyDeleted) await afterLocalWrite(durability);
-          if (removed) await deleteDatabaseFilesBestEffort(files, req.params.database);
-          if (!routing.isForwarded(req)) {
-            await forwardSchemaChange(
-              routing,
-              req,
-              `/api/databases/${encodeURIComponent(req.params.database)}`,
-              { method: "DELETE", allowUnavailable: false },
-              "database delete fan-out failed",
-            );
-          }
+          await lifecycle.drop({ database: req.params.database });
           json(res, 204);
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
@@ -205,7 +194,8 @@ export function createPublicObjectInterface() {
         try {
           const collectionMeta = collectionMetaFromBody(body);
           objectHooks.validateMeta(collectionMeta);
-          const meta = node.createCollection(req.params.database, name, collectionMeta);
+          const meta = await lifecycle.create({ database: req.params.database, collection: name }, req,
+            () => node.createCollection(req.params.database, name, collectionMeta));
           await afterLocalWrite(durability);
           if (!routing.isForwarded(req)) {
             await forwardSchemaChange(
@@ -227,22 +217,11 @@ export function createPublicObjectInterface() {
         if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
         try {
           const existed = node.getCollectionMeta(req.params.database, req.params.collection) !== null;
-          const alreadyDeleted = node.db.isCollectionDeleted(req.params.database, req.params.collection);
+          const alreadyDeleted = node.db.isCollectionDeleted(req.params.database, req.params.collection) || lifecycle.record(req.params.database, req.params.collection);
           if (!existed && !alreadyDeleted && !routing.isForwarded(req)) {
             return json(res, 404, { error: "collection not found" });
           }
-          const removed = node.removeCollection(req.params.database, req.params.collection);
-          if (removed || !alreadyDeleted) await afterLocalWrite(durability);
-          if (removed) await deleteCollectionFilesBestEffort(files, req.params.database, req.params.collection);
-          if (!routing.isForwarded(req)) {
-            await forwardSchemaChange(
-              routing,
-              req,
-              `/api/${encodeURIComponent(req.params.database)}/collections/${encodeURIComponent(req.params.collection)}`,
-              { method: "DELETE", allowUnavailable: false },
-              "collection delete fan-out failed",
-            );
-          }
+          await lifecycle.drop({ database: req.params.database, collection: req.params.collection });
           json(res, 204);
         } catch (err) {
           json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
@@ -2169,24 +2148,6 @@ async function deleteRemovedFiles(files, database, collection, beforeObjects = [
   await deleteObjectFiles(files, database, collection, removedFiles(beforeMap, afterObjects));
 }
 
-async function deleteCollectionFilesBestEffort(files, database, collection) {
-  if (!files) return;
-  try {
-    await files.deleteCollectionFiles(database, collection);
-  } catch {
-    // File cleanup is best-effort; the collection delete is already durable.
-  }
-}
-
-async function deleteDatabaseFilesBestEffort(files, database) {
-  if (!files) return;
-  try {
-    await files.deleteDatabaseFiles(database);
-  } catch {
-    // File cleanup is best-effort; the database delete is already durable.
-  }
-}
-
 async function deleteObjectFiles(files, database, collection, objects = []) {
   if (!files) return;
   for (const object of objects || []) {
@@ -2343,12 +2304,12 @@ function normalizeQueryPath(path) {
   return value.length ? value : null;
 }
 
-function secureRoute(auth) {
+function secureRoute(auth, lifecycle, routing) {
   return (handler) => async (req, res) => {
     const result = auth.authenticateRequest(req);
     if (!result.ok) return json(res, result.status, { error: result.error, code: result.code, operationStarted: false });
     res.operationStarted = true;
-    return handler(req, res);
+    return lifecycle.runRequest(req, routing.isForwarded(req), () => handler(req, res));
   };
 }
 

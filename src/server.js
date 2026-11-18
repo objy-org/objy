@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { createAuthService } from "./auth.js";
 import { localClusterStatus } from "./cluster-status.js";
 import { CRDTNode } from "./crdt.js";
+import { ContextLifecycle } from "./context-lifecycle.js";
 import { HttpRouter, json } from "./http-router.js";
 import { createAuthInterface } from "./interfaces/auth.js";
 import { createClusterInterface, httpPeer, shardMapFromHttp } from "./interfaces/cluster.js";
@@ -94,6 +95,9 @@ export async function startServer({
   if (shardMap) n.replaceShardMap(shardMapFromHttp(shardMap, n.id, { secret, timeoutMs: replicationTimeoutMs }));
   for (const peer of peers) n.addPeer(httpPeer(peer, n.id, { secret, timeoutMs: replicationTimeoutMs }));
   const authService = createAuthService(n, auth, { environment });
+  const lifecycle = n.lifecycle || new ContextLifecycle({ node: n, persistence });
+  lifecycle.files = files;
+  if (files) files.lifecycle = lifecycle;
   const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus, objectHooks: hookRunner };
 
   const router = new HttpRouter({ maxBodyBytes: maxJsonBytes });
@@ -112,6 +116,11 @@ export async function startServer({
     imports,
     objectHooks: hookRunner,
   });
+  lifecycle.send = async (url, body) => {
+    const result = await context.routing.forwardJson({ headers: {} }, { url }, null, "/cluster/context", { method: "POST", body, forwardedOnly: true });
+    if (result.status !== 200) throw Object.assign(new Error(result.body?.error || `peer returned ${result.status}`), { status: result.status });
+    return result.body;
+  };
   const activeInterfaces = [
     ...(useDefaultInterfaces ? defaultInterfaces() : []),
     ...interfaces,
@@ -187,6 +196,7 @@ export function createInterfaceContext({
   };
   return {
     node,
+    lifecycle: node.lifecycle,
     shardMapStore,
     persistence,
     auth,

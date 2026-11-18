@@ -12,25 +12,38 @@ import { Readable } from "node:stream";
 export class MemoryObjectStorage {
   constructor() {
     this.objects = new Map();
+    this.revision = 0;
   }
 
   async put(key, body, contentType = "application/json") {
     this.objects.set(key, {
       body: typeof body === "string" ? body : JSON.stringify(body),
       contentType,
+      etag: String(++this.revision),
     });
   }
 
-  async putIfAbsent(key, body, contentType = "application/json") {
-    if (this.objects.has(key)) return false;
-    await this.put(key, body, contentType);
+  async getVersioned(key) {
+    const object = this.objects.get(key);
+    return { body: object?.body ?? null, etag: object?.etag ?? null };
+  }
+
+  async putConditional(key, body, etag, contentType = "application/json") {
+    validateCondition(etag);
+    if ((this.objects.get(key)?.etag ?? null) !== etag) return false;
+    this.objects.set(key, { body: typeof body === "string" ? body : JSON.stringify(body), contentType, etag: String(++this.revision) });
     return true;
+  }
+
+  async putIfAbsent(key, body, contentType = "application/json") {
+    return this.putConditional(key, body, null, contentType);
   }
 
   async putBlob(key, body, contentType = "application/octet-stream") {
     this.objects.set(key, {
       body: Buffer.isBuffer(body) ? Buffer.from(body) : Buffer.from(body || ""),
       contentType,
+      etag: String(++this.revision),
     });
   }
 
@@ -125,6 +138,11 @@ export class S3ObjectStorage {
   }
 
   async putIfAbsent(key, body, contentType = "application/json") {
+    return this.putConditional(key, body, null, contentType);
+  }
+
+  async putConditional(key, body, etag, contentType = "application/json") {
+    validateCondition(etag);
     await this.ensureBucket();
     try {
       await this.client.send(new PutObjectCommand({
@@ -132,12 +150,12 @@ export class S3ObjectStorage {
         Key: key,
         Body: typeof body === "string" ? body : JSON.stringify(body),
         ContentType: contentType,
-        IfNoneMatch: "*",
+        ...(etag === null ? { IfNoneMatch: "*" } : { IfMatch: etag }),
       }));
       return true;
     } catch (err) {
       const status = err.$metadata?.httpStatusCode;
-      if (status === 409 || status === 412 || err.name === "PreconditionFailed") return false;
+      if (status === 404 || status === 409 || status === 412 || err.name === "PreconditionFailed") return false;
       throw err;
     }
   }
@@ -153,16 +171,21 @@ export class S3ObjectStorage {
   }
 
   async get(key) {
+    return (await this.getVersioned(key)).body;
+  }
+
+  async getVersioned(key) {
     await this.ensureBucket();
     try {
       const got = await this.client.send(new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
       }));
-      return bodyToString(got.Body);
+      if (!got.ETag) throw new Error(`S3 response missing ETag: ${key}`);
+      return { body: await bodyToString(got.Body), etag: got.ETag };
     } catch (err) {
       const code = err.$metadata?.httpStatusCode;
-      if (code === 404 || err.name === "NoSuchKey" || err.name === "NotFound") return null;
+      if (code === 404 || err.name === "NoSuchKey" || err.name === "NotFound") return { body: null, etag: null };
       throw err;
     }
   }
@@ -223,10 +246,11 @@ export class S3ObjectStorage {
     for (let i = 0; i < keys.length; i += 1000) {
       const chunk = keys.slice(i, i + 1000);
       if (!chunk.length) continue;
-      await this.client.send(new DeleteObjectsCommand({
+      const result = await this.client.send(new DeleteObjectsCommand({
         Bucket: this.bucket,
         Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: true },
       }));
+      if (result.Errors?.length) throw new Error(`S3 deletion failed: ${result.Errors.map((error) => `${error.Key}: ${error.Code}`).join(", ")}`);
       count += chunk.length;
     }
     return count;
@@ -252,6 +276,10 @@ function createBucketLocation(region) {
       LocationConstraint: region,
     },
   };
+}
+
+function validateCondition(etag) {
+  if (etag !== null && (typeof etag !== "string" || !etag)) throw new Error("conditional writes require an ETag or null");
 }
 
 async function bodyToString(body) {

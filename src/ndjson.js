@@ -47,13 +47,12 @@ export async function* parseNdjsonBatches(stream, {
 }
 
 export async function* parseNdjsonStream(stream, { maxObjectBytes = 0, label = "NDJSON" } = {}) {
-  const decoder = new StringDecoder("utf8");
   let buffer = "";
   let line = 0;
   const maxBytes = Number(maxObjectBytes) || 0;
 
-  for await (const chunk of asyncIterableStream(stream)) {
-    buffer += decoder.write(Buffer.from(chunk));
+  for await (const text of decodeUtf8Chunks(stream)) {
+    buffer += text;
 
     let newline;
     while ((newline = buffer.indexOf("\n")) !== -1) {
@@ -73,12 +72,26 @@ export async function* parseNdjsonStream(stream, { maxObjectBytes = 0, label = "
     }
   }
 
-  buffer += decoder.end();
   if (buffer.length > 0) {
     const rawLine = stripTrailingCarriageReturn(buffer);
     line += 1;
     if (rawLine.trim()) yield parseNdjsonLine(rawLine, line, maxBytes, label);
   }
+}
+
+export async function* decodeUtf8Chunks(stream) {
+  const decoder = new StringDecoder("utf8");
+  for await (const chunk of asyncIterableStream(stream)) {
+    if (typeof chunk === "string") {
+      const tail = decoder.end();
+      yield tail ? tail + chunk : chunk;
+    } else {
+      const text = decoder.write(chunk);
+      if (text) yield text;
+    }
+  }
+  const tail = decoder.end();
+  if (tail) yield tail;
 }
 
 async function* ndjsonLines(values) {

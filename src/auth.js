@@ -359,10 +359,6 @@ export class AuthService {
     return database === GLOBAL_DATABASE && collection === USERS_COLLECTION;
   }
 
-  isAuthObject(object) {
-    return isAuthObject(object);
-  }
-
   canAccessDatabase(claims, database) {
     return canAccessDatabase(claims, database);
   }
@@ -444,10 +440,6 @@ function redactSensitiveValue(value) {
     out[key] = redactSensitiveValue(item);
   }
   return out;
-}
-
-function isAuthObject(object) {
-  return object && object.password !== undefined;
 }
 
 function optionalString(value) {
