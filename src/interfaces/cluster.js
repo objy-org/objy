@@ -5,10 +5,12 @@ import {
   clusterSecretMatches,
   normalizeClusterSecret,
 } from "../cluster-secret.js";
-import { json, readJson } from "../http-router.js";
+import { json, readJson, remoteHttpError } from "../http-router.js";
 import { localClusterStatus } from "../cluster-status.js";
 import { acceptsNdjson, isNdjsonContentType, NDJSON_CONTENT_TYPE, parseNdjsonBatches } from "../ndjson.js";
 import { publishShardMap, TOPOLOGY_RESHARDING } from "../shard-map.js";
+import { CLUSTER_ADMINISTRATION, isPrimary, primaryFor } from "../primary-state.js";
+import { ADMIN_APPLY_HEADER, ok } from "../shard-router.js";
 
 export { CLUSTER_SECRET_HEADER } from "../cluster-secret.js";
 export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
@@ -16,8 +18,42 @@ export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
 export function createClusterInterface() {
   return {
     name: "cluster",
-    register(router, { node, lifecycle, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
+    register(router, { node, lifecycle, routing, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
       const secure = secureClusterRoute(clusterSecret);
+      const administration = (handler) => secure(async (req, res) => {
+        if (routing.isForwarded(req) && req.headers[ADMIN_APPLY_HEADER] === "1") return handler(req, res);
+        if (!isPrimary(node)) {
+          const owner = primaryFor(node);
+          if (!owner?.url || routing.isForwarded(req)) return json(res, 503, { error: "topology primary is unavailable or changed" });
+          try {
+            const remote = await routing.forwardJson(req, owner, null, req.path, { method: req.method, body: await readJson(req), forwardedOnly: true });
+            return json(res, remote.status, remote.body);
+          } catch (error) { return json(res, error.status || 503, { error: error.message }); }
+        }
+        return lifecycle.administer(CLUSTER_ADMINISTRATION, () => handler(req, res));
+      });
+      const publishOnline = async (req, change) => {
+        const update = async (stored) => {
+          const current = stored || node.shardMapSnapshot();
+          const next = publishShardMap(current, await change(structuredClone(current)));
+          const startsReshard = next.topology.state === TOPOLOGY_RESHARDING && current.topology?.id !== next.topology.id;
+          if (startsReshard) {
+            throw Object.assign(new Error(!shardMapStore?.durable || !persistence?.durable
+              ? "resharding requires S3 persistence and an S3 shard map store"
+              : "partition changes must be published while the cluster is stopped"), { status: 409 });
+          }
+          if ((next.ownershipEpoch || 0) !== (current.ownershipEpoch || 0) || next.topology.state === TOPOLOGY_RESHARDING) {
+            throw Object.assign(new Error("partition or primary changes must be published while the cluster is stopped"), { status: 409 });
+          }
+          return next;
+        };
+        const published = shardMapStore ? (await shardMapStore.update(update)).shardMap : await update();
+        node.replaceShardMap(shardMapFromHttp(published, node.id, { secret: clusterSecret }));
+        const result = await routing.forwardToAllPeers(req, "/cluster/shards", {
+          method: "PUT", body: { shardMap: published }, adminApply: true, allowUnavailable: true,
+        });
+        if (!ok(result.status)) throw remoteHttpError(result, "topology propagation failed; retry the update");
+      };
 
       router.post("/cluster/context", secure(async (req, res) => {
         json(res, 200, await lifecycle.command(await readJson(req)));
@@ -37,45 +73,39 @@ export function createClusterInterface() {
         }));
       }));
 
-      router.put("/cluster/shards", secure(async (req, res) => {
+      router.put("/cluster/shards", administration(async (req, res) => {
         try {
           await lifecycle.assertTopologyMutable();
           const body = await readJson(req);
           const desired = body.shardMap || body;
-          const next = publishShardMap(node.shardMapSnapshot(), desired);
-          const startsReshard = next.topology.state === TOPOLOGY_RESHARDING
-            && node.shardMapSnapshot().topology?.id !== next.topology.id;
-          if (startsReshard && (!shardMapStore?.durable || !persistence?.durable)) {
-            json(res, 409, { error: "resharding requires S3 persistence and an S3 shard map store" });
-            return;
+          if (routing.isForwarded(req) && req.headers[ADMIN_APPLY_HEADER] === "1") {
+            const checked = publishShardMap(node.shardMapSnapshot(), desired);
+            if ((checked.ownershipEpoch || 0) !== (node.shardMapSnapshot().ownershipEpoch || 0) || checked.topology.state === TOPOLOGY_RESHARDING) {
+              return json(res, 409, { error: "partition or primary changes require a stopped cluster" });
+            }
+            node.replaceShardMap(shardMapFromHttp(desired, node.id, { secret: clusterSecret }));
+            return json(res, 200, { ok: true });
           }
-          if (startsReshard) {
-            json(res, 409, { error: "partition changes must be published while the cluster is stopped" });
-            return;
-          }
-          const published = shardMapStore ? (await shardMapStore.save(desired)).shardMap : next;
-          node.replaceShardMap(shardMapFromHttp(published, node.id, { secret: clusterSecret }));
+          await publishOnline(req, () => desired);
           json(res, 200, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
         } catch (err) {
           json(res, err.status || 409, { error: err.message });
         }
       }));
 
-      router.post("/cluster/peers", secure(async (req, res) => {
+      router.post("/cluster/peers", administration(async (req, res) => {
         await lifecycle.assertTopologyMutable();
         const body = await readJson(req);
         if (!body.url) {
           json(res, 400, { error: "url is required" });
           return;
         }
-        const desired = node.shardMapSnapshot();
         const shard = String(body.shard || "default");
-        desired.shards[shard] ||= { peers: [] };
-        if (!desired.shards[shard].peers.some((peer) => peer.url === body.url)) {
-          desired.shards[shard].peers.push({ url: String(body.url) });
-        }
-        const published = shardMapStore ? (await shardMapStore.save(desired)).shardMap : desired;
-        node.replaceShardMap(shardMapFromHttp(published, node.id, { secret: clusterSecret }));
+        await publishOnline(req, (desired) => {
+          desired.shards[shard] ||= { peers: [] };
+          if (!desired.shards[shard].peers.some((peer) => peer.url === body.url)) desired.shards[shard].peers.push({ url: String(body.url) });
+          return desired;
+        });
         json(res, 201, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
       }));
 
@@ -233,6 +263,7 @@ export function shardMapFromHttp(map, nodeId, { secret = null, timeoutMs = DEFAU
   return {
     ...(map.version ? { version: map.version } : {}),
     ...(map.topology ? { topology: map.topology } : {}),
+    ...(map.ownershipEpoch ? { ownershipEpoch: map.ownershipEpoch } : {}),
     shards: Object.fromEntries(
       Object.entries(map.shards || {}).map(([shard, shardConfig]) => [
         shard,

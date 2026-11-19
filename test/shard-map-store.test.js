@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
 import { SHARD_MAP_VERSION, TOPOLOGY_ACTIVE, TOPOLOGY_RESHARDING } from "../src/shard-map.js";
+import { readPublished } from "./helpers/primary-state.js";
 
 test("shard map store saves and loads map JSON from object storage", async () => {
   const storage = new MemoryObjectStorage();
@@ -16,7 +17,7 @@ test("shard map store saves and loads map JSON from object storage", async () =>
 
   const saved = await store.save(shardMap);
 
-  assert.ok(await storage.get("objydb/cluster/shard-map.json"));
+  assert.ok(await readPublished(storage, "objydb/cluster/shard-map.json"));
   const loaded = await store.load();
   assert.deepEqual(loaded, saved.shardMap);
   assert.equal(loaded.version, SHARD_MAP_VERSION);
@@ -24,7 +25,7 @@ test("shard map store saves and loads map JSON from object storage", async () =>
   assert.deepEqual(Object.keys(loaded.shards), ["shard-0", "shard-1"]);
 });
 
-test("legacy shard maps migrate in place without renaming shards", async () => {
+test("legacy shard maps load without writing and migrate on primary publication", async () => {
   const storage = new MemoryObjectStorage();
   const store = new ShardMapStore({ storage });
   await storage.put("objydb/cluster/shard-map.json", JSON.stringify({
@@ -42,7 +43,9 @@ test("legacy shard maps migrate in place without renaming shards", async () => {
   assert.equal(migrated.topology.state, TOPOLOGY_ACTIVE);
   assert.deepEqual(Object.keys(migrated.shards), ["shard-0", "shard-1"]);
 
-  const persisted = JSON.parse(await storage.get("objydb/cluster/shard-map.json"));
+  assert.equal((await storage.list()).length, 1);
+  await store.save(migrated);
+  const persisted = JSON.parse(await readPublished(storage, "objydb/cluster/shard-map.json"));
   assert.equal(persisted.version, 2);
   assert.deepEqual(persisted.shardMap, migrated);
 });

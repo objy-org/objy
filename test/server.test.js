@@ -1112,6 +1112,24 @@ test("_global schema writes are blocked even for global admins", async () => {
   }
 });
 
+test("_global schema protection also applies to trusted administrative fan-out", async (t) => {
+  const s = await startTestServer({ port: 0 });
+  t.after(() => { s.server.close(); s.node.db.dispose(); });
+  const base = `http://localhost:${s.port}`;
+  const session = await login(base);
+  const forwarded = api(base, session.accessToken, {
+    "x-objydb-forwarded": "1", "x-objydb-admin-apply": "1", "x-objydb-cluster-secret": TEST_CLUSTER_SECRET,
+  });
+  assert.equal((await forwarded.post("/api/databases", { name: "_global", meta: { changed: true } })).status, 403);
+  assert.equal((await forwarded.post("/api/_global/collections", { name: "blocked" })).status, 403);
+  assert.equal((await forwarded.put("/api/_global/users/meta", {})).status, 403);
+  assert.equal((await forwarded.del("/api/_global/collections/users")).status, 403);
+  assert.equal((await forwarded.del("/api/databases/_global")).status, 403);
+  assert.equal(s.node.getDatabaseMeta("_global").changed, undefined);
+  assert.equal(s.node.getCollectionMeta("_global", "blocked"), null);
+  assert.deepEqual(s.node.getCollectionMeta("_global", "users").indexes, ["username"]);
+});
+
 test("database user permissions filter reads and guard writes", async () => {
   const s = await startTestServer({ port: 0 });
   try {

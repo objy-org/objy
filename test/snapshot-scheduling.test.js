@@ -6,6 +6,7 @@ import { CRDTNode } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { nodeCompression } from "../src/node-runtime.js";
+import { readPublished } from "./helpers/primary-state.js";
 
 const scope = { database: "app", collection: "items", shard: "default" };
 const base = "objydb/db/app/collection/items/shard/default";
@@ -28,6 +29,29 @@ function duringPreparation(node, action) {
     }
   };
 }
+
+test("checkpoint selection preserves role, dirty-only, and manual checkpoint policies", async (t) => {
+  for (const snapshotRole of ["primary", "none"]) {
+    for (const replica of [false, true]) {
+      const { node, persistence } = fixture(t);
+      node.url = replica ? "http://replica" : "http://primary";
+      node.replaceShardMap({ shards: { default: { peers: [{ url: "http://primary" }, { url: "http://replica" }] } } });
+      node.createCollection("app", "items");
+      persistence.snapshotRole = snapshotRole;
+      const manual = replica ? 0 : 1;
+      const scheduled = !replica && snapshotRole === "primary" ? 1 : 0;
+      assert.equal(persistence._snapshotScopes().length, manual);
+      assert.equal(persistence._snapshotScopes({ primaryOnly: true }).length, scheduled);
+      assert.equal(persistence._snapshotScopes({ automatic: true }).length, 0, "clean collections need no automatic checkpoint");
+      persistence.start();
+      node.insertManyCount("app", "items", [{ _id: "one", score: 1 }]);
+      assert.equal(persistence._snapshotScopes({ automatic: true }).length, scheduled);
+      persistence.dirtyScopes.clear();
+      persistence.snapshotDirtyOnly = false;
+      assert.equal(persistence._snapshotScopes({ automatic: true }).length, scheduled);
+    }
+  }
+});
 
 test("the shared work budget yields for both count and elapsed-time limits", async () => {
   const budget = new WorkBudget({ batchSize: 4, maxSliceMs: 60000 });
@@ -71,7 +95,7 @@ for (const engine of ["object", "shape"]) {
       const written = await persistence.checkpoint();
       assert.equal(written.objects, 5001);
       assert.equal(written.segments, expected.length);
-      const manifest = JSON.parse(await storage.get(`${base}/latest.json`));
+      const manifest = JSON.parse(await readPublished(storage, `${base}/latest.json`));
       for (let i = 0; i < manifest.segments.length; i++) {
         const segment = manifest.segments[i];
         assert.equal(await storage.get(segment.key), expected[i]);
@@ -115,7 +139,7 @@ test("writes, deletes, and replicated tails during preparation survive restore",
   assert.equal(changed, true);
   await persistence.flush();
   await node.awaitIndexes("app", "items");
-  const manifest = JSON.parse(await storage.get(`${base}/latest.json`));
+  const manifest = JSON.parse(await readPublished(storage, `${base}/latest.json`));
   assert.equal(manifest.cursors.writer, 8193);
   assert.equal(manifest.cursors.remote, undefined);
   assert.ok((await storage.list(`${base}/journal/`)).length > 0, "post-cut operations must not be compacted");
@@ -180,7 +204,7 @@ test("preparation failure leaves the published head and journals intact", async 
   persistence.start();
   node.insertManyCount("app", "items", Array.from({ length: 8193 }, (_, i) => ({ _id: String(i), score: i })));
   await persistence.checkpoint();
-  const head = await storage.get(`${base}/latest.json`);
+  const head = await readPublished(storage, `${base}/latest.json`);
   node.replaceManyCount("app", "items", [{ _id: "0", score: 42 }]);
   await persistence.flush();
   const journals = await storage.list(`${base}/journal/`);
@@ -193,10 +217,10 @@ test("preparation failure leaves the published head and journals intact", async 
     }
   };
   await assert.rejects(persistence.checkpoint(), /injected preparation failure/);
-  assert.equal(await storage.get(`${base}/latest.json`), head);
+  assert.equal(await readPublished(storage, `${base}/latest.json`), head);
   assert.deepEqual(await storage.list(`${base}/journal/`), journals);
   node.snapshotScopeObjects = iterate;
   await turn();
   await persistence.checkpoint();
-  assert.notEqual(await storage.get(`${base}/latest.json`), head);
+  assert.notEqual(await readPublished(storage, `${base}/latest.json`), head);
 });

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { MemoryObjectStorage } from "./object-storage.js";
+import { CLUSTER_ADMINISTRATION, PrimaryStateStore, isPrimary, primaryFor, requirePrimary, isPublicationKey } from "./primary-state.js";
 
 export const CONTEXT_HEADER = "x-objydb-context";
 
@@ -10,9 +11,13 @@ export class ContextLifecycle {
     this.persistence = persistence;
     this.storage = persistence?.storage || new MemoryObjectStorage();
     this.path = `${persistence?.prefix ?? "objydb"}/context-state.json`.replace(/^\/+/, "");
+    this.states = persistence?.states || new PrimaryStateStore({ storage: this.storage, node });
+    this.changing = Promise.resolve();
+    this.administration = new Map();
     this.records = new Map();
     this.contexts = new Map();
     this.revision = "";
+    this.stateRevision = "";
     this.scope = new AsyncLocalStorage();
     this.work = new Set();
     this.runs = new Map();
@@ -86,8 +91,9 @@ export class ContextLifecycle {
     return retired(this.record(op.db), op) || retired(this.record(op.db, op.coll), op);
   }
 
-  async load() {
-    this._install((await this._read(false)).records);
+  async load(keys) {
+    const stored = await this._read(keys, true);
+    this._install(stored.records, stored.revision);
     const revived = [];
     for (const record of this.records.values()) {
       if (record.collection === undefined && record.status === "active" && this.node.db.isDatabaseDeleted(record.database)) {
@@ -106,8 +112,12 @@ export class ContextLifecycle {
   }
 
   async create(context, req, action) {
+    await this.assertNotDeleting(context);
     const captured = req?.contextTicket;
-    await this._change((records) => {
+    if (req?.schemaApply || !isPrimary(this.node)) {
+      if (!req?.schemaApply) await this._owner({ phase: "create", context }, captured);
+      await this.load();
+    } else await this._change((records) => {
       this._assertNoOverlap(records, context);
       const parent = context.collection === undefined ? null : records[key({ database: context.database })];
       if (context.collection !== undefined && parent && parent.status !== "active") throw pending("database is not active");
@@ -121,13 +131,39 @@ export class ContextLifecycle {
     return this.scope.run({ context, ticket }, action);
   }
 
+  administer(database, action) {
+    const run = (this.administration.get(database) || Promise.resolve()).catch(() => {}).then(action);
+    this.administration.set(database, run);
+    run.finally(() => { if (this.administration.get(database) === run) this.administration.delete(database); }).catch(() => {});
+    return run;
+  }
+
+  async assertNotDeleting(context, allowSame = false) {
+    if ([...this.records.values()].some((record) => record.status === "deleting" && overlaps(record, context))) await this.load();
+    this._assertNoOverlap(Object.fromEntries(this.records), context, allowSame);
+  }
+
+  async _owner(command, captured = this.scope.getStore()) {
+    const owner = primaryFor(this.node);
+    if (!owner?.url || !this.send) throw failure("administrative primary is unavailable", 503);
+    const request = this.requestHeader({ contextTicket: captured })[CONTEXT_HEADER];
+    try { return await this.send(owner.url, { ...command, ...(request ? { request } : {}) }); }
+    catch (error) { throw failure(error.message, error.status || 503); }
+  }
+
   drop(context) {
+    if (!isPrimary(this.node)) return this._owner({ phase: "drop", context }).then(() => this.load());
     const slot = key(context);
     if (this.runs.has(slot)) return this.runs.get(slot);
-    const run = this.internal(() => this._drop(context)).catch(async (error) => {
-      const current = (await this._read()).records[slot];
+    const captured = this.scope.getStore();
+    const run = this.administer(CLUSTER_ADMINISTRATION, () => {
+      this.requestHeader({ contextTicket: captured });
+      return this.internal(() => this._drop(context));
+    }).catch(async (error) => {
+      const stored = await this._read();
+      const current = stored.records[slot];
       if (current?.status !== "deleted") throw error;
-      this._install({ ...Object.fromEntries(this.records), [slot]: current });
+      this._install(stored.records, stored.revision);
     }).finally(() => this.runs.delete(slot));
     this.runs.set(slot, run);
     return run;
@@ -153,8 +189,18 @@ export class ContextLifecycle {
         cursors };
     });
     let record = this.record(context.database, context.collection);
-    if (record.status === "deleted") return;
+    if (record.status === "deleted") {
+      await this._all(record, "finish").catch(() => {});
+      return;
+    }
     this._checkTopology(record);
+    const inventories = context.collection === undefined
+      ? [this.node.listCollections(context.database), ...await this._all(record, "inspect")]
+      : [[context.collection]];
+    await this._change((records) => {
+      records[key(context)].collections = [...new Set([...(record.collections || []), ...inventories.flat()])];
+    });
+    record = this.record(context.database, context.collection);
     const results = [await this.prepare(record), ...await this._all(record, "prepare")];
     await this._change((records) => {
       const current = records[key(context)];
@@ -164,9 +210,12 @@ export class ContextLifecycle {
       current.collections = [...new Set([...(current.collections || []), ...results.flatMap((result) => result.collections || [])])];
     });
     record = this.record(context.database, context.collection);
-    await this._all(record, "fence");
-    this._checkTopology(record);
-    try { await this._cleanup(record); }
+    try {
+      await this.persistence?.fenceContext(record);
+      await this._all(record, "fence");
+      this._checkTopology(record);
+      await this._cleanup(record);
+    }
     catch (error) { throw failure(`deletion pending: ${error.message}`, 503); }
     await this._change((records) => {
       const current = records[key(context)];
@@ -181,24 +230,29 @@ export class ContextLifecycle {
     await this._all({ ...record, status: "deleted" }, "finish").catch(() => {});
   }
 
-  async command({ phase, record }) {
-    if (!record?.id || !record.database || !["prepare", "fence", "finish"].includes(phase)) throw failure("invalid lifecycle command", 400);
+  async command({ phase, record, context, request }) {
+    if (["create", "drop"].includes(phase)) {
+      if (typeof context?.database !== "string" || !context.database ||
+          (context.collection !== undefined && (typeof context.collection !== "string" || !context.collection))) throw failure("invalid lifecycle context", 400);
+      requirePrimary(this.node);
+      await this.load();
+      const req = { method: "POST", params: context, headers: request ? { [CONTEXT_HEADER]: request } : {} };
+      await this.runRequest(req, true, () => phase === "drop" ? this.drop(context) : this.create(context, req, () => {}));
+      return {};
+    }
+    if (!record?.id || !record.database || !["inspect", "prepare", "fence", "finish"].includes(phase)) throw failure("invalid lifecycle command", 400);
     await this.load();
     const current = this.record(record.database, record.collection);
     if (current?.id !== record.id || current.status !== (phase === "finish" ? "deleted" : "deleting")) throw pending("stale lifecycle command");
     if (phase !== "finish") this._checkTopology(current);
-    return phase === "prepare" ? this.internal(() => this.prepare(current)) : {};
+    if (phase === "inspect") return this.node.listCollections(record.database);
+    if (phase === "prepare") return this.internal(() => this.prepare(current));
+    if (phase === "fence") await this.persistence?.fenceContext(current);
+    return {};
   }
 
   async prepare(record) {
     const collections = record.collection === undefined ? this.node.listCollections(record.database) : [record.collection];
-    await this._change((records) => {
-      const current = records[key(record)];
-      if (current?.id !== record.id || current.status !== "deleting") throw pending("stale deletion preparation");
-      const names = [...new Set([...(current.collections || []), ...collections])];
-      if (names.length === (current.collections || []).length) return false;
-      current.collections = names;
-    });
     this.internal(() => record.collection === undefined ? this.node.removeDatabase(record.database) : this.node.removeCollection(record.database, record.collection));
     const running = [this.persistence?.checkpointing, this.persistence?.flushing,
       ...[...this.work].filter((item) => !item.context || overlaps(item.context, record)).map((item) => item.promise)].filter(Boolean);
@@ -228,41 +282,47 @@ export class ContextLifecycle {
   }
 
   _topology() {
-    const { version, topology, shards } = this.node.shardMapSnapshot();
-    return JSON.stringify({ version, topology, shards: Object.fromEntries(Object.keys(shards).sort().map((name) =>
+    const { version, topology, ownershipEpoch, shards } = this.node.shardMapSnapshot();
+    return JSON.stringify({ version, topology, ownershipEpoch, shards: Object.fromEntries(Object.keys(shards).sort().map((name) =>
       [name, shards[name].peers.map((peer) => peer.url || peer.key)])) });
   }
 
   async _all(record, phase) {
     const results = await Promise.allSettled(record.peers.filter((url) => url !== this.node.url).map((url) => this.send(url, { phase, record })));
     const failed = results.find((result) => result.status === "rejected");
-    if (failed) throw failure(`deletion pending: ${failed.reason.message}`, 503);
+    if (failed) throw failure(`deletion pending: ${failed.reason.message}`, failed.reason.status === 409 ? 409 : 503);
     return results.map((result) => result.value);
   }
 
-  async _read(versioned = true) {
+  async _read(listed, adopt = false) {
     try {
-      const value = versioned ? await this.storage.getVersioned(this.path) : { body: await this.storage.get(this.path) };
-      return { records: decodeState(value.body), etag: value.etag };
+      let current = await this.states.read(this.path, listed);
+      const records = decodeState(current.body);
+      if (adopt && isPrimary(this.node)) current = await this.states.adopt(this.path, current);
+      return { records, revision: current.revision };
     } catch (error) { throw failure(`context state unavailable: ${error.message}`, 503); }
   }
 
-  async _change(change) {
-    for (;;) {
+  _change(change) {
+    requirePrimary(this.node);
+    const run = this.changing.catch(() => {}).then(async () => {
       const stored = await this._read();
-      this._install(stored.records);
+      if (!this._install(stored.records, stored.revision)) throw pending("context state changed; retry");
       if (change(stored.records) === false) return;
       let written;
-      try { written = await this.storage.putConditional(this.path, JSON.stringify({ version: 1, contexts: stored.records }), stored.etag); }
+      try { written = await this.states.publish(this.path, { version: 1, contexts: stored.records }); }
       catch (error) { throw failure(`context state unavailable: ${error.message}`, 503); }
-      if (written) {
-        this._install(stored.records);
-        return;
-      }
-    }
+      this._install(stored.records, written.revision);
+      await this.states.prune(this.path);
+    });
+    this.changing = run;
+    return run;
   }
 
-  _install(records) {
+  _install(records, revision = this.stateRevision) {
+    if (revision < this.stateRevision) return false;
+    this.stateRevision = revision;
+    records = Object.fromEntries(Object.entries(records).sort(([a], [b]) => a.localeCompare(b)));
     this.records = new Map(Object.entries(records));
     this.contexts = new Map();
     this.revision = this.records.size ? createHash("sha256").update(JSON.stringify(records)).digest("base64url") : "";
@@ -273,6 +333,7 @@ export class ContextLifecycle {
       if (record.collection === undefined) context.database = record;
       else context.collections.set(record.collection, record);
     }
+    return true;
   }
 
   async _cleanup(record) {
@@ -281,34 +342,14 @@ export class ContextLifecycle {
       return item?.id === record.id && item.status === "deleting";
     };
     const cleanup = async (storage, prefix, metadata = false) => {
-      const paths = new Set(await storage.list(prefix));
-      if (metadata) {
-        paths.add(`${prefix}meta.json`);
-        const collections = record.collection === undefined ? record.collections || [] : [record.collection];
-        for (const name of collections) {
-          const base = record.collection === undefined ? `${prefix}collection/${encodeURIComponent(name)}/` : prefix;
-          paths.add(`${base}meta.json`);
-          for (const shard of Object.keys(this.node.shardMapSnapshot().shards)) paths.add(`${base}shard/${encodeURIComponent(shard)}/latest.json`);
-        }
-        // Also fence heads that never finished their first conditional PUT.
-        for (const path of paths) {
-          const boundary = path.indexOf("/shard/", prefix.length - 1);
-          if (boundary >= 0) paths.add(`${path.slice(0, path.indexOf("/", boundary + 7))}/latest.json`);
-        }
-      }
+      const paths = await storage.list(prefix);
       if (!await current()) return;
       const immutable = [];
       for (const path of paths) {
         if (!metadata && !/\/object\/[^/]+\/blob\/[^/]+$/.test(path)) continue;
-        if (metadata && /\/(?:db\/[^/]+\/meta|collection\/[^/]+\/meta|shard\/[^/]+\/latest)\.json$/.test(path)) {
-          const old = await storage.getVersioned(path);
-          if (!await current()) return;
-          if (old.body !== null && JSON.parse(old.body).deletedBy === record.id) continue;
-          if (!await storage.putConditional(path, JSON.stringify({ deletedBy: record.id }), old.etag)) {
-            const value = await storage.get(path);
-            if (!value || JSON.parse(value).deletedBy !== record.id) throw pending("metadata changed during cleanup");
-          }
-        } else immutable.push(path);
+        // Primary-owned publications carry the deletion fence. Keep their order
+        // even if a timed-out older PUT eventually arrives after cleanup.
+        if (!metadata || !isPublicationKey(path)) immutable.push(path);
       }
       if (await current()) await storage.delete(immutable);
     };

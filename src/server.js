@@ -96,6 +96,7 @@ export async function startServer({
   for (const peer of peers) n.addPeer(httpPeer(peer, n.id, { secret, timeoutMs: replicationTimeoutMs }));
   const authService = createAuthService(n, auth, { environment });
   const lifecycle = n.lifecycle || new ContextLifecycle({ node: n, persistence });
+  if (shardMapStore) shardMapStore.node = n;
   lifecycle.files = files;
   if (files) files.lifecycle = lifecycle;
   const state = { node: n, auth: authService, server: null, port, router: null, memoryGuard: guard, replication: scheduler, restoreStatus, objectHooks: hookRunner };

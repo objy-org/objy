@@ -13,6 +13,8 @@ import { DEFAULT_DATA_PREFIX, DEFAULT_LOCAL_WAL_DIR } from "./config.js";
 import { decodeUtf8Chunks } from "./ndjson.js";
 import { ContextLifecycle } from "./context-lifecycle.js";
 import { WorkBudget } from "./derived-state-scheduler.js";
+import { resolve } from "node:path";
+import { PrimaryStateStore, isPrimary, publicationKeys } from "./primary-state.js";
 
 const DEFAULT_SEGMENT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_JOURNAL_BYTES = 4 * 1024 * 1024;
@@ -61,6 +63,9 @@ export class PersistenceManager {
     this.restoreSnapshotId = normalizeSnapshotId(restoreSnapshotId);
     this.durable = durable === true;
     this.localWal = createLocalWalStore(localWal, node.id);
+    this.states = new PrimaryStateStore({ storage, node,
+      ...(this.durable ? { clockPath: resolve(localWal?.dir || DEFAULT_LOCAL_WAL_DIR, safe(node.id), "publication-clock.json") } : {}),
+    });
     this.ack = normalizeAckMode(ack);
     if (this.ack === "localWal" && !this.localWal) {
       throw new Error("persistence.ack localWal requires persistence.localWal.mode on");
@@ -103,8 +108,9 @@ export class PersistenceManager {
 
     try {
       progress?.update?.({ phase: "listing" });
-      const keys = await this.storage.list(root);
-      const { deletedDatabases, tombstones } = await this._contextState(keys);
+      const publications = await this.storage.list(root);
+      const keys = publicationKeys(publications);
+      const { deletedDatabases, tombstones } = await this._contextState(keys, publications);
       const scopes = this._filterRestoreScopes(uniqueScopes(keys, this.prefix))
         .filter((scope) => !deletedDatabases.has(scope.database))
         .filter((scope) => !tombstones.has(collectionKey(scope.database, scope.collection)));
@@ -118,9 +124,9 @@ export class PersistenceManager {
       this.node.db.beginBulkLoad?.();
       stats.databaseTombstones = this._restoreDatabaseTombstones(deletedDatabases);
       stats.collectionTombstones = this._restoreCollectionTombstones(tombstones);
-      stats.databases = await this._restoreDatabaseMetadata(keys);
-      stats.metadata = await this._restoreMetadata(keys);
-      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress);
+      stats.databases = await this._restoreDatabaseMetadata(keys, publications);
+      stats.metadata = await this._restoreMetadata(keys, publications);
+      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress, publications);
 
       if (this.localWal && !this.restoreSnapshotId) {
         progress?.update?.({ phase: "local-wal" });
@@ -162,8 +168,9 @@ export class PersistenceManager {
   async _restoreScope(scope, options = {}) {
     const progress = options.progress || null;
     const root = this._rootPrefix();
-    const keys = await this.storage.list(root);
-    const { deletedDatabases, tombstones } = await this._contextState(keys);
+    const publications = await this.storage.list(root);
+    const keys = publicationKeys(publications);
+    const { deletedDatabases, tombstones } = await this._contextState(keys, publications);
     const scopes = this._filterCatchUpScopes(uniqueScopes(keys, this.prefix), scope)
       .filter((candidate) => !deletedDatabases.has(candidate.database))
       .filter((candidate) => !tombstones.has(collectionKey(candidate.database, candidate.collection)));
@@ -174,9 +181,9 @@ export class PersistenceManager {
     try {
       stats.databaseTombstones = this._restoreDatabaseTombstones(deletedDatabases);
       stats.collectionTombstones = this._restoreCollectionTombstones(tombstones);
-      stats.databases = await this._restoreDatabaseMetadata(keys);
-      stats.metadata = await this._restoreMetadata(keys);
-      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress);
+      stats.databases = await this._restoreDatabaseMetadata(keys, publications);
+      stats.metadata = await this._restoreMetadata(keys, publications);
+      maxLocalSeq = await this._restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress, publications);
       if (!scope) this._rememberUnscopedCursors(scopes);
       else this._rememberScopeSetCursors(scope, scopes);
     } finally {
@@ -286,7 +293,7 @@ export class PersistenceManager {
     let completedScopes = 0;
     for (let i = 0; i < expected.length; i += 32) {
       const batch = expected.slice(i, i + 32);
-      const found = await Promise.all(batch.map(({ key }) => this.storage.get(key)));
+      const found = await Promise.all(batch.map(async ({ key }) => (await this.states.read(key)).body));
       for (let j = 0; j < batch.length; j++) {
         if (!isCompletedTargetManifest(found[j], shardMap.topology.id, batch[j].scope)) missing.push(batch[j].scope);
         else completedScopes++;
@@ -317,7 +324,7 @@ export class PersistenceManager {
   async _loadReshardCollections(shardMap) {
     const keys = await this.storage.list(this._rootPrefix());
     const sourceShards = new Set(topologySourceShards(shardMap));
-    const { deletedDatabases, tombstones } = await this._contextState(keys);
+    const { deletedDatabases, tombstones } = await this._contextState(keys, keys);
     const scopes = uniqueScopes(keys, this.prefix)
       .filter((scope) => sourceShards.has(scope.shard))
       .filter((scope) => !deletedDatabases.has(scope.database))
@@ -703,21 +710,42 @@ export class PersistenceManager {
   }
 
   async _writeContextMeta(context, path, meta) {
+    if (!isPrimary(this.node, context.database)) return;
     const version = this._contextVersion(context.database, context.collection);
-    const old = await this.storage.getVersioned(path);
+    const old = await this.states.read(path);
     if (version !== this._contextVersion(context.database, context.collection)) return;
     const marker = context.collection === undefined ? databaseTombstoneKey(this.prefix, context.database)
       : collectionTombstoneKey(this.prefix, context.database, context.collection);
     await this.storage.delete([marker]);
     if (version !== this._contextVersion(context.database, context.collection)) return;
-    // Fresh revisions prevent an identical recreated meta object from reusing an
-    // old ETag while a concurrent deletion's conditional cleanup is in flight.
+    // Keep lifecycle markers separate from application-owned meta properties.
     const managed = this.lifecycle.record(context.database) || this.lifecycle.record(context.database, context.collection);
-    const value = managed ? { version: 1, revision: randomUUID(), meta } : meta;
-    if (!await this.storage.putConditional(path, JSON.stringify(value), old.etag)) {
-      const current = await this.storage.get(path);
-      if (current && JSON.stringify(persistedMeta(current, managed)) === JSON.stringify(meta)) return;
-      throw snapshotConflict("context metadata changed during publication");
+    const value = managed ? { version: 1, meta } : meta;
+    if (old.revision && Number(old.revision.slice(0, 16)) === (this.node.shardMapSnapshot().ownershipEpoch || 0) &&
+        old.body && JSON.stringify(persistedMeta(old.body, managed)) === JSON.stringify(meta)) return;
+    await this.states.publish(path, value, { previous: old.revision, guard: () => {
+      if (version !== this._contextVersion(context.database, context.collection)) throw snapshotConflict("context changed during metadata publication");
+      this.lifecycle.assert(context.database, context.collection);
+    } });
+    await this.states.prune(path);
+  }
+
+  async fenceContext(record) {
+    const collections = record.collection === undefined ? record.collections || [] : [record.collection];
+    const paths = [];
+    if (isPrimary(this.node, record.database)) {
+      if (record.collection === undefined) paths.push(`${databasePrefix(this.prefix, record.database)}/meta.json`);
+      for (const collection of collections) paths.push(`${collectionPrefix(this.prefix, record.database, collection)}/meta.json`);
+    }
+    for (const shard of Object.keys(this.node.shardMapSnapshot().shards)) {
+      if (!this.node.isPrimaryForShard(shard)) continue;
+      for (const collection of collections) paths.push(`${scopePrefix(this.prefix, { database: record.database, collection, shard })}/latest.json`);
+    }
+    for (const path of paths) {
+      const old = await this.states.read(path);
+      if (old.body && JSON.parse(old.body).deletedBy === record.id) continue;
+      await this.states.publish(path, { deletedBy: record.id });
+      await this.states.prune(path);
     }
   }
 
@@ -792,6 +820,7 @@ export class PersistenceManager {
 
   _snapshotScopes({ automatic = false, primaryOnly = false, shards: selectedShards } = {}) {
     const scopes = [];
+    if ((automatic || primaryOnly) && this.snapshotRole === "none") return scopes;
     const selected = selectedShards?.length ? new Set(selectedShards) : null;
     const ownedShards = this._ownedShardNames().filter((shard) => !selected || selected.has(shard));
     for (const collection of this._collectionScopes()) {
@@ -801,10 +830,10 @@ export class PersistenceManager {
           ? []
           : this.node.shardMap.shardsForCollection(collection.database, collection.collection);
       for (const shard of shards.length ? shards : [DEFAULT_SHARD]) {
-        if (primaryOnly && !this._shouldSnapshotForRole(shard)) continue;
+        if (!this.node.isPrimaryForShard(shard)) continue;
         const scope = { database: collection.database, collection: collection.collection, shard };
-        if (automatic && !this._shouldAutoSnapshot(scope)) continue;
         const dirty = this.dirtyScopes.get(scopeKey(scope));
+        if (automatic && this.snapshotDirtyOnly && !dirty) continue;
         if (dirty) scope.dirtyVersion = dirty.version;
         scopes.push(scope);
       }
@@ -820,18 +849,6 @@ export class PersistenceManager {
       }
     }
     return scopes;
-  }
-
-  _shouldAutoSnapshot(scope) {
-    if (!this._shouldSnapshotForRole(scope.shard)) return false;
-    if (!this.snapshotDirtyOnly) return true;
-    return this.dirtyScopes.has(scopeKey(scope));
-  }
-
-  _shouldSnapshotForRole(shard) {
-    if (this.snapshotRole === "all") return true;
-    if (this.snapshotRole === "none") return false;
-    return this.node.isPrimaryForShard(shard);
   }
 
   _markCheckpointed(scope) {
@@ -924,12 +941,11 @@ export class PersistenceManager {
   }
 
   async _writeSnapshot(scope, id = snapshotId(), coverage = this._snapshotCoverage()) {
-    if (typeof this.storage.getVersioned !== "function" || typeof this.storage.putConditional !== "function") {
-      throw new Error("persistence storage must support conditional snapshot publication");
-    }
+    if (!this.node.isPrimaryForShard(scope.shard)) throw snapshotConflict("only the shard primary may publish snapshots");
     const contextVersion = this._contextVersion(scope.database, scope.collection);
+    const contextTicket = this.lifecycle.ticket(scope);
     const headKey = `${scopePrefix(this.prefix, scope)}/latest.json`;
-    const previous = await this.storage.getVersioned(headKey);
+    const previous = await this.states.read(headKey);
     const previousValue = previous.body === null ? null : JSON.parse(previous.body);
     const previousManifest = previousValue?.deletedBy ? null : previousValue;
     if (previousManifest) validateSnapshotManifest(previousManifest, scope);
@@ -965,15 +981,20 @@ export class PersistenceManager {
       objectCount,
       segments,
       parentSnapshotId: previousManifest?.id || null,
+      contextTicket,
     };
     if (contextVersion !== this._contextVersion(scope.database, scope.collection)) throw snapshotConflict("context changed during checkpoint");
     await this.storage.put(`${base}/manifest.json`, JSON.stringify(manifest), "application/json");
     if (contextVersion !== this._contextVersion(scope.database, scope.collection)) throw snapshotConflict("context changed during checkpoint");
-    if (!await this.storage.putConditional(headKey, JSON.stringify(manifest), previous.etag, "application/json")) {
-      throw snapshotConflict("snapshot head changed during checkpoint");
-    }
+    const published = await this.states.publish(headKey, manifest, { previous: previous.revision, guard: () => {
+      if (!this.node.isPrimaryForShard(scope.shard)) throw snapshotConflict("snapshot primary changed");
+      if (contextVersion !== this._contextVersion(scope.database, scope.collection) || JSON.stringify(contextTicket) !== JSON.stringify(this.lifecycle.ticket(scope))) throw snapshotConflict("context changed during checkpoint");
+      this.lifecycle.assert(scope.database, scope.collection);
+    } });
+    if ((await this.states.read(headKey)).revision !== published.revision) throw snapshotConflict("snapshot publication was superseded");
     const retainedJournalsDeleted = this.compactJournals ? await this._compactJournals(scope, manifest.cursors) : 0;
     const retainedSnapshotsDeleted = await this._applySnapshotRetention(scope, id);
+    await this.states.prune(headKey);
     return { objects: objectCount, segments: segments.length, retainedJournalsDeleted, retainedSnapshotsDeleted };
   }
 
@@ -1043,15 +1064,27 @@ export class PersistenceManager {
     return removed;
   }
 
-  async _restoreSnapshot(scope, progress = null) {
+  async _restoreSnapshot(scope, progress = null, publications) {
     const manifestKey = this.restoreSnapshotId
       ? `${scopePrefix(this.prefix, scope)}/snapshots/${this.restoreSnapshotId}/manifest.json`
       : `${scopePrefix(this.prefix, scope)}/latest.json`;
-    const raw = await this.storage.get(manifestKey);
-    if (!raw) return null;
+    let raw;
+    let current;
+    const ownsHead = Object.hasOwn(this.node.shardMapSnapshot().shards, scope.shard) && this.node.isPrimaryForShard(scope.shard);
+    if (this.restoreSnapshotId) raw = await this.storage.get(manifestKey);
+    else {
+      current = await this.states.read(manifestKey, publications);
+      raw = current.body;
+    }
+    if (!raw) {
+      if (current && ownsHead) await this.states.adopt(manifestKey, current);
+      return null;
+    }
     const manifest = JSON.parse(raw);
     if (manifest.deletedBy) return null;
+    if (manifest.contextTicket && JSON.stringify(manifest.contextTicket) !== JSON.stringify(this.lifecycle.ticket(scope))) return null;
     validateSnapshotManifest(manifest, scope);
+    if (current && ownsHead) await this.states.adopt(manifestKey, current);
     let objects = 0;
     let rows = 0;
     if (this.restoreSnapshotId) this._restoreManifestMetadata(scope, manifest);
@@ -1197,16 +1230,18 @@ export class PersistenceManager {
     return filtered.length;
   }
 
-  async _restoreMetadata(keys) {
+  async _restoreMetadata(keys, publications) {
     let count = 0;
     for (const key of keys) {
       const target = parseMetaFromKey(key, this.prefix);
       if (!target) continue;
       if (this.node.db.isDatabaseDeleted(target.database)) continue;
       if (this.node.db.isCollectionDeleted(target.database, target.collection)) continue;
-      const raw = await this.storage.get(key);
+      const current = await this.states.read(key, publications);
+      const raw = current.body;
       if (!raw) continue;
       const meta = persistedMeta(raw, this.lifecycle.record(target.database) || this.lifecycle.record(target.database, target.collection));
+      if (isPrimary(this.node, target.database)) await this.states.adopt(key, current);
       if (meta === null) continue;
       this.node.db.setCollectionMeta(target.database, target.collection, meta);
       count++;
@@ -1227,15 +1262,17 @@ export class PersistenceManager {
     return tombstones.size;
   }
 
-  async _restoreDatabaseMetadata(keys) {
+  async _restoreDatabaseMetadata(keys, publications) {
     let count = 0;
     for (const key of keys) {
       const target = parseDatabaseMetaFromKey(key, this.prefix);
       if (!target) continue;
       if (this.node.db.isDatabaseDeleted(target.database)) continue;
-      const raw = await this.storage.get(key);
+      const current = await this.states.read(key, publications);
+      const raw = current.body;
       if (!raw) continue;
       const meta = persistedMeta(raw, this.lifecycle.record(target.database));
+      if (isPrimary(this.node, target.database)) await this.states.adopt(key, current);
       if (meta === null) continue;
       this.node.db.setDatabaseMeta(target.database, meta);
       count++;
@@ -1335,8 +1372,8 @@ export class PersistenceManager {
     return this.prefix ? `${this.prefix}/` : "";
   }
 
-  async _contextState(keys) {
-    await this.lifecycle.load();
+  async _contextState(keys, publications) {
+    await this.lifecycle.load(publications);
     const deletedDatabases = databaseTombstones(keys, this.prefix);
     const tombstones = collectionTombstones(keys, this.prefix);
     for (const record of this.lifecycle.records.values()) {
@@ -1383,7 +1420,7 @@ export class PersistenceManager {
     return cursors;
   }
 
-  async _restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress = null) {
+  async _restoreScopeSet(keys, scopes, stats, maxLocalSeq, progress = null, publications) {
     const restoredByScope = new Map();
     let nextMaxLocalSeq = maxLocalSeq;
 
@@ -1391,7 +1428,7 @@ export class PersistenceManager {
     for (const scope of scopes) {
       progress?.scope?.(scope, scopeIndex, scopes.length);
       stats.scopes++;
-      const restored = await this._restoreSnapshot(scope, progress);
+      const restored = await this._restoreSnapshot(scope, progress, publications);
       restoredByScope.set(scopeKey(scope), restored);
       if (restored) {
         stats.snapshots++;
@@ -1891,7 +1928,7 @@ function persistedMeta(raw, managed) {
   const value = JSON.parse(raw);
   if (!managed) return value;
   if (Object.keys(value).length === 1 && value.deletedBy) return null;
-  if (value.version !== 1 || typeof value.revision !== "string" || !isPlainObject(value.meta)) throw new Error("invalid context metadata envelope");
+  if (value.version !== 1 || !isPlainObject(value.meta)) throw new Error("invalid context metadata envelope");
   return value.meta;
 }
 
@@ -2075,7 +2112,7 @@ function parseMetaFromKey(key, prefix) {
   const expected = root ? `${root}/` : "";
   if (!key.startsWith(expected)) return null;
   const parts = key.slice(expected.length).split("/");
-  if (parts[0] !== "db" || parts[2] !== "collection" || parts[4] !== "meta.json") return null;
+  if (parts.length !== 5 || parts[0] !== "db" || parts[2] !== "collection" || parts[4] !== "meta.json") return null;
   if (!parts[1] || !parts[3]) return null;
   return {
     database: decodeURIComponent(parts[1]),
@@ -2101,7 +2138,7 @@ function parseDatabaseMetaFromKey(key, prefix) {
   const expected = root ? `${root}/` : "";
   if (!key.startsWith(expected)) return null;
   const parts = key.slice(expected.length).split("/");
-  if (parts[0] !== "db" || parts[2] !== "meta.json") return null;
+  if (parts.length !== 3 || parts[0] !== "db" || parts[2] !== "meta.json") return null;
   if (!parts[1]) return null;
   return {
     database: decodeURIComponent(parts[1]),
@@ -2215,8 +2252,8 @@ function normalizePrefix(prefix) {
 }
 
 function normalizeSnapshotRole(value) {
-  if (value === "all" || value === "none" || value === "primary") return value;
-  throw new Error("persistence.snapshotRole must be one of: primary, all, none");
+  if (value === "none" || value === "primary") return value;
+  throw new Error("persistence.snapshotRole must be one of: primary, none");
 }
 
 function normalizeRetention(config = {}) {

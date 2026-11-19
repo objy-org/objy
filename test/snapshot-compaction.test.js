@@ -11,6 +11,7 @@ import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { publishShardMap } from "../src/shard-map.js";
 import { captureCompaction, compactSnapshot } from "../experiments/snapshot-compaction/compact.js";
+import { writePublished } from "./helpers/primary-state.js";
 
 const scope = { database: "app", collection: "items", shard: "default" };
 const head = "objydb/db/app/collection/items/shard/default/latest.json";
@@ -55,7 +56,7 @@ async function restore(t, storage, plan, { tail = false } = {}) {
   const key = `${plan.output}/manifest.json`;
   assert.ok(await copy.get(key));
   // Publication happens only inside this disposable restore fixture.
-  await copy.put(head, await copy.get(key));
+  await writePublished(copy, head, await copy.get(key));
   const node = new CRDTNode({ id: "fresh", storage: { engine: "object", compression: nodeCompression } });
   t.after(() => node.db.dispose());
   await new PersistenceManager({ node, storage: copy, restoreSnapshotId: tail ? undefined : plan.manifest.id }).restore();
@@ -148,10 +149,10 @@ for (const kind of ["missing", "malformed", "oversized", "row-count", "manifest-
     if (kind === "row-count") plan.snapshot.segments[0].count++;
     if (kind === "manifest-context") plan.snapshot.database = "other";
     if (kind === "total-count") plan.snapshot.objectCount++;
-    if (kind === "head-change") await f.storage.put(head, JSON.stringify({ different: true }));
-    if (kind === "meta-change") await f.storage.put(plan.guards[2][0], JSON.stringify({ indexes: ["new"] }));
+    if (kind === "head-change") await writePublished(f.storage, head, JSON.stringify({ different: true }));
+    if (kind === "meta-change") await writePublished(f.storage, plan.guards[2][0], JSON.stringify({ indexes: ["new"] }));
     if (kind === "drop") await f.storage.put(plan.guards[4][0], JSON.stringify({ deletedAt: "now" }));
-    if (kind === "recreate") await f.storage.put(plan.guards[0][0], null);
+    if (kind === "recreate") await writePublished(f.storage, plan.guards[0][0], null);
     if (kind === "upload") {
       const put = f.storage.put.bind(f.storage);
       f.storage.put = (key, ...args) => key.startsWith(plan.output) ? Promise.reject(new Error("upload failed")) : put(key, ...args);
@@ -198,7 +199,7 @@ test("database, collection and shard scopes remain separate across candidate res
       const plan = await captureCompaction(persistence, { database, collection, shard });
       await build(storage, plan);
       // Disposable fixture only; all production heads remain untouched by build().
-      await storage.put(plan.guards[0][0], await storage.get(`${plan.output}/manifest.json`));
+      await writePublished(storage, plan.guards[0][0], await storage.get(`${plan.output}/manifest.json`));
     }
   }
   const fresh = new CRDTNode({ id: "fresh", shardMap: map });

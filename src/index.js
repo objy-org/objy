@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { shardMapFromHttp, startRestoreStatusServer, startServer } from "./server.js";
 import { CRDTNode } from "./crdt.js";
 import { loadConfig } from "./config.js";
@@ -12,6 +13,7 @@ import { loadPlugins } from "./plugin-loader.js";
 import { resolveSystemSecrets } from "./system-secrets.js";
 import { isTopologyResharding } from "./shard-map.js";
 import { nodeCompression, readHeapUsageRatio } from "./node-runtime.js";
+import { isPrimary } from "./primary-state.js";
 
 const config = loadConfig();
 
@@ -23,8 +25,11 @@ const node = new CRDTNode({
   storage: { ...config.storage, compression: nodeCompression, readHeapUsageRatio },
   vector: config.vector,
 });
-const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence);
+const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence, node);
 const persistence = createPersistence(node, config.persistence);
+const storedShardMap = await shardMapStore?.load();
+const configuredShardMap = storedShardMap || config.cluster.shardMap;
+if (configuredShardMap) node.replaceShardMap(configuredShardMap);
 const sharedSecrets = config.persistence.mode === "s3"
   ? { storage: persistence.storage, prefix: config.persistence.prefix }
   : config.cluster.shardMapStore.mode === "s3"
@@ -34,12 +39,14 @@ const secrets = await resolveSystemSecrets({
   jwtSecret: config.auth.jwtSecret,
   clusterSecret: config.cluster.secret,
   ...sharedSecrets,
-  localPath: resolve(config.persistence.localWal.dir, "..", "system-secrets.json"),
+  localPath: sharedSecrets.storage
+    ? resolve(config.persistence.localWal.dir, encodeURIComponent(node.id), "system-secrets.json")
+    : resolve(config.persistence.localWal.dir, "..", "system-secrets.json"),
+  primary: isPrimary(node),
+  node,
 });
 config.auth = { ...config.auth, jwtSecret: secrets.jwtSecret };
 config.cluster.secret = secrets.clusterSecret;
-const storedShardMap = await shardMapStore?.load();
-const configuredShardMap = storedShardMap || config.cluster.shardMap;
 if (configuredShardMap) {
   node.replaceShardMap(shardMapFromHttp(configuredShardMap, node.id, {
     secret: config.cluster.secret,
@@ -69,10 +76,15 @@ if (persistence) {
   node.setLogTruncatedHandler?.(({ scope }) => persistence.restoreScope(scope));
   const restored = await persistence.restore({ progress: restoreStatus });
   if (restored.reshardCheckpoint && shardMapStore?.durable && persistence.durable) {
-    const readiness = await persistence.reshardReadiness();
+    let readiness = await persistence.reshardReadiness();
     restored.reshardReadiness = readiness;
     let activeMap;
-    if (readiness.ready) {
+    if (isPrimary(node)) {
+      while (!readiness.ready) {
+        restoreStatus.waiting({ topologyId: readiness.topologyId });
+        await sleep(1000);
+        readiness = await persistence.reshardReadiness();
+      }
       const finalized = await shardMapStore.finalize(readiness.topologyId);
       activeMap = finalized.shardMap;
       restored.reshardFinalized = true;

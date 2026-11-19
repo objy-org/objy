@@ -4,7 +4,7 @@ import { CRDTNode, localPeer } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
-import { startServer } from "../src/server.js";
+import { startServer, shardMapFromHttp } from "../src/server.js";
 
 const TEST_AUTH = {
   jwtSecret: "test-jwt-secret",
@@ -150,6 +150,11 @@ test("dynamic HTTP peer add updates the shard map and syncs", async () => {
   const a = await startTestServer({ port: 0, node: new CRDTNode({ id: "a" }), shardMap });
   const b = await startTestServer({ port: 0, node: new CRDTNode({ id: "b" }) });
   try {
+    a.node.url = `http://localhost:${a.port}`;
+    b.node.url = `http://localhost:${b.port}`;
+    const current = { shards: { "shard-0": { peers: [{ url: a.node.url }] } } };
+    a.node.replaceShardMap(shardMapFromHttp(current, a.node.id, { secret: TEST_CLUSTER_SECRET }));
+    b.node.replaceShardMap(shardMapFromHttp(current, b.node.id, { secret: TEST_CLUSTER_SECRET }));
     const token = await tokenFor(a.port);
     await fetch(`http://localhost:${a.port}/api/app/users/object`, {
       method: "POST",
@@ -162,7 +167,7 @@ test("dynamic HTTP peer add updates the shard map and syncs", async () => {
       headers: clusterHeaders(true),
       body: JSON.stringify({
         shard: "shard-0",
-        url: `http://localhost:${a.port}`,
+        url: b.node.url,
       }),
     });
     assert.equal(add.status, 201);

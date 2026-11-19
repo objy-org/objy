@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { CRDTNode, localPeer } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { publicationKeys } from "../src/primary-state.js";
 
 const OBJECTS = Number(process.env.OBJECTS || 2_000_000);
 const SHARDS = Number(process.env.SHARDS || 8);
@@ -149,7 +150,7 @@ await timed("checkpoint one replica per shard", async () => {
   }
 });
 
-const latestKeys = await storage.list("objydb/db/app/collection/events/shard/");
+const latestKeys = publicationKeys(await storage.list("objydb/db/app/collection/events/shard/"));
 for (const shard of shardNames) {
   assert.ok(latestKeys.includes(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
 }

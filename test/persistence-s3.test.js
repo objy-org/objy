@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
 import { CRDTNode } from "../src/crdt.js";
 import { S3ObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { PrimaryStateStore } from "../src/primary-state.js";
 
 test("S3 persistence adapter stores journals through an S3-compatible API", async () => {
   const mock = createMockS3Server();
@@ -57,18 +57,20 @@ test("S3 adapter creates non-us-east-1 buckets with a location constraint", asyn
   }
 });
 
-test("S3 conditional writes reject stale and competing snapshot heads", async () => {
+test("S3 publication works without ETags or conditional requests", async () => {
   const mock = createMockS3Server();
   const port = await mock.start();
   const storage = new S3ObjectStorage({ bucket: "test", endpoint: `http://127.0.0.1:${port}`, accessKeyId: "test", secretAccessKey: "test" });
   try {
-    assert.deepEqual(await storage.getVersioned("head"), { body: null, etag: null });
-    assert.equal(await storage.putConditional("head", "one", null), true);
-    assert.equal(await storage.putConditional("head", "other", null), false);
-    const first = await storage.getVersioned("head");
-    const winners = await Promise.all([storage.putConditional("head", "two", first.etag), storage.putConditional("head", "three", first.etag)]);
-    assert.deepEqual(winners.sort(), [false, true]);
-    assert.equal(await storage.putConditional("head", "stale", first.etag), false);
+    const states = new PrimaryStateStore({ storage });
+    assert.equal((await states.read("head")).body, null);
+    const first = await states.publish("head", "one");
+    await states.publish("head", "two", { previous: first.revision });
+    await assert.rejects(states.publish("head", "stale", { previous: first.revision }), { code: "SNAPSHOT_CONFLICT" });
+    assert.equal((await states.read("head")).body, "two");
+    await states.prune("head", 1);
+    assert.equal((await storage.list("head.publications/")).length, 1);
+    assert.equal(mock.log.some((entry) => entry.conditional), false);
   } finally {
     await mock.stop();
   }
@@ -77,7 +79,6 @@ test("S3 conditional writes reject stale and competing snapshot heads", async ()
 function createMockS3Server({ bucketExists = true } = {}) {
   const objects = new Map();
   const log = [];
-  const etag = (key) => objects.has(key) ? `"${createHash("sha256").update(objects.get(key)).digest("hex")}"` : null;
 
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -106,15 +107,15 @@ function createMockS3Server({ bucketExists = true } = {}) {
 
     if (req.method === "PUT" && key) {
       readBody().then((body) => {
-        log.push({ method: req.method, path: url.pathname, search: url.search, body });
-        if ((req.headers["if-none-match"] === "*" && objects.has(key)) ||
-            (req.headers["if-match"] && req.headers["if-match"] !== etag(key))) {
-          res.writeHead(412, { "content-type": "application/xml" });
-          res.end("<Error><Code>PreconditionFailed</Code></Error>");
+        const conditional = !!(req.headers["if-none-match"] || req.headers["if-match"]);
+        log.push({ method: req.method, path: url.pathname, search: url.search, body, conditional });
+        if (conditional) {
+          res.writeHead(501, { "content-type": "application/xml" });
+          res.end("<Error><Code>NotImplemented</Code></Error>");
           return;
         }
         objects.set(key, body);
-        res.writeHead(200, { ETag: etag(key) });
+        res.writeHead(200);
         res.end();
       });
       return;
@@ -146,8 +147,18 @@ function createMockS3Server({ bucketExists = true } = {}) {
         res.end(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`);
         return;
       }
-      res.writeHead(200, { "content-type": "application/json", ETag: etag(key) });
+      res.writeHead(200, { "content-type": "application/json" });
       res.end(objects.get(key));
+      return;
+    }
+
+    if (req.method === "POST" && url.searchParams.has("delete")) {
+      readBody().then((body) => {
+        const keys = [...body.matchAll(/<Key>(.*?)<\/Key>/g)].map((match) => match[1].replace(/&amp;/g, "&"));
+        for (const key of keys) objects.delete(key);
+        res.writeHead(200, { "content-type": "application/xml" });
+        res.end(`<DeleteResult>${keys.map((key) => `<Deleted><Key>${escapeXml(key)}</Key></Deleted>`).join("")}</DeleteResult>`);
+      });
       return;
     }
 

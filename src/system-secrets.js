@@ -1,6 +1,8 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { link, mkdir, open, readFile, rm } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { PrimaryStateStore } from "./primary-state.js";
 
 const DEFAULT_KEY = "system/secrets.json";
 const DEFAULT_PREFIX = "objydb";
@@ -11,6 +13,9 @@ export async function resolveSystemSecrets({
   storage,
   prefix = DEFAULT_PREFIX,
   localPath,
+  primary = true,
+  timeoutMs = 60_000,
+  node,
 } = {}) {
   const configured = {
     jwtSecret: optionalSecret(jwtSecret),
@@ -19,18 +24,36 @@ export async function resolveSystemSecrets({
   if (configured.jwtSecret && configured.clusterSecret) return configured;
 
   const store = storage
-    ? new ObjectSecretStore(storage, `${normalizePrefix(prefix)}/${DEFAULT_KEY}`)
+    ? new ObjectSecretStore(new PrimaryStateStore({ storage, node,
+      ...(localPath ? { clockPath: resolve(dirname(localPath), "publication-clock.json") } : {}),
+    }), `${normalizePrefix(prefix)}/${DEFAULT_KEY}`, primary)
     : new FileSecretStore(localPath);
   let stored = await store.load();
   if (!stored) {
-    const candidate = {
-      version: 1,
-      jwtSecret: configured.jwtSecret || randomSecret(),
-      clusterSecret: configured.clusterSecret || randomSecret(),
-      createdAt: new Date().toISOString(),
-    };
-    await store.create(candidate);
-    stored = await store.load();
+    if (storage && !primary) {
+      const deadline = Date.now() + timeoutMs;
+      while (!stored && Date.now() < deadline) {
+        await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+        stored = await store.load();
+      }
+      if (!stored) throw new Error("system secrets are not initialized; start the cluster primary first");
+    } else {
+      const candidate = {
+        version: 1,
+        jwtSecret: configured.jwtSecret || randomSecret(),
+        clusterSecret: configured.clusterSecret || randomSecret(),
+        createdAt: new Date().toISOString(),
+      };
+      if (storage) {
+        // Persist the candidate before upload. An ambiguous PUT retry must publish
+        // the same secrets, not generate a second set after a restart.
+        const scope = createHash("sha256").update(`${normalizePrefix(prefix)}/${DEFAULT_KEY}`).digest("hex").slice(0, 16);
+        const local = new FileSecretStore(localPath && `${localPath}.${scope}`);
+        if (!await local.load()) await local.create(candidate);
+        await store.create(await local.load());
+      } else await store.create(candidate);
+      stored = await store.load();
+    }
   }
 
   const resolved = {
@@ -48,18 +71,22 @@ export function randomSecret(bytes = 32) {
 }
 
 class ObjectSecretStore {
-  constructor(storage, key) {
-    this.storage = storage;
+  constructor(states, key, primary) {
+    this.states = states;
     this.key = key;
+    this.primary = primary;
   }
 
   async load() {
-    const raw = await this.storage.get(this.key);
-    return raw ? parseSecrets(raw) : null;
+    const current = await this.states.read(this.key);
+    const value = current.body ? parseSecrets(current.body) : null;
+    if (value && this.primary) await this.states.adopt(this.key, current);
+    return value;
   }
 
   async create(value) {
-    return this.storage.putIfAbsent(this.key, JSON.stringify(value), "application/json");
+    await this.states.publish(this.key, value);
+    await this.states.prune(this.key);
   }
 }
 
@@ -80,13 +107,19 @@ class FileSecretStore {
 
   async create(value) {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    const temporary = `${this.path}.${randomSecret(12)}`;
     try {
-      await writeFile(this.path, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+      const file = await open(temporary, "wx", 0o600);
+      try { await file.writeFile(`${JSON.stringify(value, null, 2)}\n`); await file.sync(); }
+      finally { await file.close(); }
+      await link(temporary, this.path);
+      const directory = await open(dirname(this.path), "r");
+      try { await directory.sync(); } finally { await directory.close(); }
       return true;
     } catch (err) {
       if (err.code === "EEXIST") return false;
       throw err;
-    }
+    } finally { await rm(temporary, { force: true }); }
   }
 }
 

@@ -306,8 +306,8 @@ function percent(value, fallback) {
 
 function snapshotRole(value) {
   const role = value || "primary";
-  if (role === "primary" || role === "all" || role === "none") return role;
-  throw new Error("persistence.snapshotRole must be one of: primary, all, none");
+  if (role === "primary" || role === "none") return role;
+  throw new Error("persistence.snapshotRole must be one of: primary, none");
 }
 
 function ackMode(value) {

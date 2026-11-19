@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { CRDTNode } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { PrimaryStateStore, publicationKeys } from "../src/primary-state.js";
 import { finalizeShardMap, publishShardMap, TOPOLOGY_ACTIVE, TOPOLOGY_RESHARDING } from "../src/shard-map.js";
 
 const OBJECTS = Number(process.env.OBJECTS || 2_000_000);
@@ -98,12 +99,12 @@ await timed("persist old shard snapshots", async () => {
 });
 await oldPersistence.stop();
 
-const latestKeys = await storage.list("objydb/db/app/collection/events/shard/");
+const latestKeys = publicationKeys(await storage.list("objydb/db/app/collection/events/shard/"));
 const sourceLatest = new Map();
 for (const shard of oldShardNames) {
   const key = `objydb/db/app/collection/events/shard/${shard}/latest.json`;
   assert.ok(latestKeys.includes(key));
-  sourceLatest.set(key, await storage.get(key));
+  sourceLatest.set(key, (await new PrimaryStateStore({ storage }).read(key)).body);
 }
 console.log("old persisted shard latest files", OLD_SHARDS);
 
@@ -162,7 +163,7 @@ await timed("restore new shard nodes from all old shards", async () => {
   }
 });
 
-for (const [key, manifest] of sourceLatest) assert.equal(await storage.get(key), manifest);
+for (const [key, manifest] of sourceLatest) assert.equal((await new PrimaryStateStore({ storage }).read(key)).body, manifest);
 const readiness = await lastPersistence.reshardReadiness();
 assert.equal(readiness.ready, true);
 assert.equal(readiness.expectedScopes, NEW_SHARDS);

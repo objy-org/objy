@@ -85,7 +85,7 @@ process.once("message", async (config) => {
       const readyMs = performance.now() - start;
       stage = "verify";
       const result = await verify(config.versions);
-      const manifest = JSON.parse(await storage.get(head));
+      const manifest = JSON.parse((await persistence.states.read(head)).body);
       if (manifest.id.startsWith("candidate-")) {
         // Every controlled public replacement increments both revision and seq.
         // The only later fixture writes are the 3000 crash-test objects.
@@ -145,13 +145,13 @@ process.once("message", async (config) => {
           let work;
           if (args.mode === "baseline") {
             const checkpoint = await persistence.checkpoint();
-            work = { checkpoint, manifest: JSON.parse(await storage.get(head)) };
+            work = { checkpoint, manifest: JSON.parse((await persistence.states.read(head)).body) };
           } else {
             const plan = await captureCompaction(persistence, scope);
             work = await runCompaction(plan, { s3: config.s3, onSample: (message) => send({ ...message, type: `compactor-${message.type}`, round }) });
             work.manifest = JSON.parse(await storage.get(work.manifestKey));
             // Disposable benchmark bucket only. The candidate itself never publishes.
-            await storage.put(head, JSON.stringify(work.manifest));
+            await persistence.states.publish(head, work.manifest);
           }
           result = { work, ms: performance.now() - start, cpu: process.cpuUsage(cpu), ...memory() };
           stage = "drain";
@@ -173,7 +173,7 @@ process.once("message", async (config) => {
             onSample: (message) => { if (message.type === "progress" && message.stage === "upload") abort.abort(new Error("simulated compactor crash")); },
           }), /simulated compactor crash/);
           assert.equal(await storage.get(`${plan.output}/manifest.json`), null);
-          result = { killedAfterSegmentUpload: true, stagedFiles: (await storage.list(plan.output)).length, normalHead: await storage.get(head) };
+          result = { killedAfterSegmentUpload: true, stagedFiles: (await storage.list(plan.output)).length, normalHead: (await persistence.states.read(head)).body };
         } else if (command === "close") {
           await close(); send({ id, result: {} }); process.disconnect(); return;
         } else throw new Error(`unknown benchmark command ${command}`);

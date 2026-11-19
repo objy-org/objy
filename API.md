@@ -10,6 +10,8 @@ This is the public HTTP contract for OBJY DB. The standalone [JavaScript client]
 
 Examples use `{URL}` as the server base URL. Public requests may reach any cluster node; OBJY DB routes them to the owning object shard.
 
+Database/collection creation and metadata changes route to a fixed administrative primary. Deletion and topology coordination use the first shard's primary. If a required primary is unavailable, administration fails with `503` or a forwarding timeout (`504`); another replica does not take over. Ordinary object CRUD still uses available shard replicas. Primary replacement and resharding require a stopped cluster.
+
 ```text
 database
   collection
@@ -216,6 +218,8 @@ If `adminUser.collection` is omitted, `users` is used. The users collection rece
 Requires a global admin token. Removes metadata, objects, persisted snapshots/journals, and associated file blobs. `_global` cannot be deleted.
 
 Database and collection deletion use the same lifecycle: writes, metadata changes, and recreation are blocked with `409` while deletion is pending. `204` confirms every configured peer has drained the affected context and shared cleanup has completed. An unavailable peer or cleanup failure returns `503`; retry the same DELETE, on any peer, to resume it. There is no timeout that automatically reopens the context. Explicit creation is allowed after completion. Clustered deletion requires shared S3 persistence; standalone deletion also works without persistence. Other databases and collections remain writable, except children of a deleting database.
+
+Shared S3 state uses ordinary PUT, GET, LIST, and DELETE with strongly consistent reads/listing, not conditional writes or ETags. Keep each node's local WAL directory, including its small `publication-clock.json` and generated-secret files. Run only one process per node identity. Upgrade all nodes together with the cluster stopped; older servers and deployment tools do not understand the new publication records.
 
 A DELETE sent after explicit recreation is a new operation against the recreated context, not a retry of its previous deletion.
 

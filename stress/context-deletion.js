@@ -3,6 +3,7 @@ import { performance, monitorEventLoopDelay } from "node:perf_hooks";
 import { CRDTNode } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
+import { isPublicationKey, publicationKeys } from "../src/primary-state.js";
 import { startServer, shardMapFromHttp } from "../src/server.js";
 
 const count = Number(process.env.OBJECTS || 1_000_000);
@@ -83,12 +84,13 @@ try {
   await atUpload;
   const deletion = fetch(`${nodes[2].url}/api/${db}/collections/${coll}`, { method: "DELETE" });
   for (let i = 0; !nodes[0].lifecycle.record(db, coll) && i < 100; i++) await new Promise((resolve) => setTimeout(resolve, 5));
-  for (const node of nodes.slice(0, 3)) assert.throws(() => node.insert(db, coll, { _id: "blocked" }), { status: 409 });
+  assert.throws(() => nodes[0].insert(db, coll, { _id: "blocked" }), { status: 409 });
   await assert.rejects(nodes[1].lifecycle.create({ database: db, collection: coll }, null, () => nodes[1].createCollection(db, coll)), { status: 409 });
-  const id = nodes[2].lifecycle.record(db, coll).id;
+  const id = nodes[0].lifecycle.record(db, coll).id;
   release();
   await checkpoint;
   assert.equal((await deletion).status, 503);
+  for (const node of nodes.slice(0, 3)) assert.throws(() => node.insert(db, coll, { _id: "blocked" }), { status: 409 });
   servers[3] = await startServer({ port: servers[3].port, node: nodes[3], persistence: managers[3], ...options });
   const deleteStart = performance.now();
   const retry = await fetch(`${nodes[1].url}/api/${db}/collections/${coll}`, { method: "DELETE" });
@@ -97,7 +99,11 @@ try {
   assert.equal(nodes[1].lifecycle.record(db, coll).id, id);
   for (const node of nodes) assert.equal(node.count(db, coll), 0);
   const remaining = await storage.list(`objydb/db/${db}/collection/${coll}/`);
-  assert.ok(remaining.every((key) => /\/(meta|latest)\.json$/.test(key)), "only fixed-key deletion fences may remain");
+  assert.ok(remaining.every(isPublicationKey), "only primary-owned control publications may remain");
+  for (const key of publicationKeys(remaining)) {
+    assert.match(key, /\/(meta|latest)\.json$/);
+    assert.equal(JSON.parse((await managers[0].states.read(key)).body).deletedBy, id);
+  }
 
   for (const node of nodes) await node.lifecycle.create({ database: db, collection: coll }, null, () => node.createCollection(db, coll, meta));
   const newCount = Math.min(25_000, count);

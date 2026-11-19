@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { CRDTNode } from "../src/crdt.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { MemoryObjectStorage, S3ObjectStorage } from "../src/object-storage.js";
 import { FileService } from "../src/files.js";
 import { httpPeer, startServer } from "../src/server.js";
 import { CONTEXT_HEADER } from "../src/context-lifecycle.js";
+import { readPublished } from "./helpers/primary-state.js";
 
 const db = "app", coll = "items";
 const collection = { database: db, collection: coll };
@@ -310,12 +310,22 @@ test("timed-out first metadata/head publications cannot arrive after deletion an
   const node = nodes[0], manager = managers[0];
   const metaKey = "objydb/db/app/collection/items/meta.json";
   const headKey = "objydb/db/app/collection/items/shard/default/latest.json";
-  // These requests acquired If-None-Match before deletion but their server-side
-  // completion was delayed beyond the client's failed request.
+  const late = [];
+  const put = storage.put.bind(storage);
+  storage.put = async (key, body, type) => {
+    if ([metaKey, headKey].some((path) => key.startsWith(`${path}.publications/`)) && !JSON.parse(body).deletedBy) {
+      late.push(() => put(key, body, type));
+      throw new Error("client timed out");
+    }
+    return put(key, body, type);
+  };
+  await assert.rejects(manager._writeCollectionMeta(collection, { indexes: ["old"] }), /timed out/);
+  await assert.rejects(manager.states.publish(headKey, { id: "old-snapshot" }), /timed out/);
+  storage.put = put;
   await node.lifecycle.drop(database);
   await recreate(node, database);
-  assert.equal(await storage.putConditional(metaKey, JSON.stringify({ indexes: ["old"] }), null), false);
-  assert.equal(await storage.putConditional(headKey, JSON.stringify({ id: "old-snapshot" }), null), false);
+  for (const upload of late) await upload();
+  assert.equal(JSON.parse(await readPublished(storage, headKey)).deletedBy, node.lifecycle.record(db).id);
   node.insert(db, coll, { _id: "new" });
   await manager.flush();
   const restored = new CRDTNode({ id: "restored" });
@@ -328,12 +338,12 @@ test("timed-out first metadata/head publications cannot arrive after deletion an
 test("a failed completion write can resume after coordinator restart", async (t) => {
   const { nodes, managers, storage, map } = cluster(t);
   let fail = true;
-  const put = storage.putConditional.bind(storage);
-  storage.putConditional = async (path, body, etag) => {
-    if (fail && path.endsWith("context-state.json") && Object.values(JSON.parse(body).contexts).some((record) => record.status === "deleted")) {
+  const put = storage.put.bind(storage);
+  storage.put = async (path, body, type) => {
+    if (fail && path.includes("context-state.json.publications/") && Object.values(JSON.parse(body).contexts).some((record) => record.status === "deleted")) {
       fail = false; throw new Error("connection lost before completion");
     }
-    return put(path, body, etag);
+    return put(path, body, type);
   };
   await assert.rejects(nodes[0].lifecycle.drop(collection), { status: 503 });
   const id = nodes[0].lifecycle.record(db, coll).id;
@@ -356,7 +366,7 @@ test("normal bulk writes do not read or write shared lifecycle state", async (t)
   const node = nodes[0];
   await node.lifecycle.drop(collection);
   await recreate(node, collection);
-  storage.getVersioned = storage.putConditional = async () => { throw new Error("unexpected shared-state I/O on object writes"); };
+  storage.get = storage.list = storage.put = async () => { throw new Error("unexpected shared-state I/O on object writes"); };
   node.insertManyCount(db, coll, Array.from({ length: 1000 }, (_, i) => ({ _id: `new-${i}`, score: i })));
   assert.equal(node.count(db, coll), 1000);
 });
@@ -408,7 +418,7 @@ test("deleting a database retires child state and preserves its origin cutoffs",
   await recreate(node, database);
   node.insert(db, coll, { _id: "new" });
   await managers[0].flush();
-  const raw = JSON.parse(await storage.get(node.lifecycle.path));
+  const raw = JSON.parse(await readPublished(storage, node.lifecycle.path));
   assert.equal(Object.keys(raw.contexts).length, 1, "parent retirement replaces child control history");
 });
 
@@ -421,7 +431,7 @@ test("file and persistence prefixes may overlap without removing publication fen
   await nodes[0].lifecycle.drop(collection);
   assert.equal(await storage.getBlob(meta.key), null);
   const head = "objydb/db/app/collection/items/shard/default/latest.json";
-  assert.equal(await storage.putConditional(head, "{}", null), false);
+  assert.ok(JSON.parse(await readPublished(storage, head)).deletedBy);
 });
 
 test("custom metadata cannot be confused with persistence envelopes or deletion markers", async (t) => {
@@ -444,30 +454,20 @@ test("custom metadata cannot be confused with persistence envelopes or deletion 
   assert.deepEqual(restored.getCollectionMeta(db, coll).meta, { custom: true });
 });
 
-test("a timed-out cleanup CAS cannot erase identical metadata after recreation (S3 ETag ABA)", async (t) => {
+test("a timed-out deletion publication cannot erase identical metadata after recreation", async (t) => {
   const metaKey = "objydb/db/app/collection/items/meta.json";
   let pause = false, delayed;
-  class ContentEtagStorage extends MemoryObjectStorage {
-    etag(key) {
-      const body = this.objects.get(key)?.body;
-      return body === undefined ? null : createHash("sha256").update(body).digest("hex");
-    }
-    async getVersioned(key) { return { body: await this.get(key), etag: this.etag(key) }; }
-    async cas(key, body, etag) {
-      if (this.etag(key) !== etag) return false;
-      await super.put(key, body);
-      return true;
-    }
-    async putConditional(key, body, etag) {
-      if (pause && key === metaKey && JSON.parse(body).deletedBy) {
+  class DelayedStorage extends MemoryObjectStorage {
+    async put(key, body, type) {
+      if (pause && key.startsWith(`${metaKey}.publications/`) && JSON.parse(body).deletedBy) {
         pause = false;
-        delayed = () => this.cas(key, body, etag);
+        delayed = () => super.put(key, body, type);
         throw new Error("client timed out while S3 still had the request");
       }
-      return this.cas(key, body, etag);
+      return super.put(key, body, type);
     }
   }
-  const { nodes, managers, storage } = cluster(t, { storage: new ContentEtagStorage(), count: 2 });
+  const { nodes, managers, storage } = cluster(t, { storage: new DelayedStorage(), count: 2 });
   await nodes[0].lifecycle.drop(collection);
   for (const node of nodes) await recreate(node, collection);
   await managers[0].flush();
@@ -475,9 +475,10 @@ test("a timed-out cleanup CAS cannot erase identical metadata after recreation (
   await assert.rejects(nodes[0].lifecycle.drop(collection), { status: 503 });
   await nodes[1].lifecycle.drop(collection);
   for (const node of nodes) await recreate(node, collection);
+  await managers[0].flush();
   nodes[1].insert(db, coll, { _id: "new" });
   await managers[1].flush();
-  assert.equal(await delayed(), false);
+  await delayed();
   const restored = new CRDTNode({ id: "restored" });
   t.after(() => restored.db.dispose());
   await new PersistenceManager({ node: restored, storage }).restore();

@@ -44,7 +44,8 @@ import {
   sortReferencePairs,
   stripReferenceObjects,
 } from "../references.js";
-import { objectPath, ok } from "../shard-router.js";
+import { objectPath, ok, ADMIN_APPLY_HEADER } from "../shard-router.js";
+import { isPrimary, primaryFor } from "../primary-state.js";
 import { isValidVector } from "../vector.js";
 
 const READ_ONLY_DATABASES = new Set([GLOBAL_DATABASE]);
@@ -55,6 +56,8 @@ export function createPublicObjectInterface() {
     name: "public-object",
     register(router, { node, lifecycle, auth, routing, durability, memoryGuard, restoreStatus, replicationScheduler, files, imports, objectHooks }) {
       const secure = secureRoute(auth, lifecycle, routing);
+      const admin = administrationRoute(secure, lifecycle, routing, node, auth, memoryGuard);
+      const globalAdmin = (databaseOf, handler) => admin(databaseOf, handler, true);
       const importLimits = normalizeImportLimits(imports);
 
       router.get("/api/databases", secure((req, res) => {
@@ -75,21 +78,18 @@ export function createPublicObjectInterface() {
         }));
       }));
 
-      router.post("/api/databases", secure(async (req, res) => {
-        if (rejectUnlessGlobalAdmin(req, res, auth)) return;
+      router.post("/api/databases", globalAdmin(async (req) => (await readJson(req))?.name, async (req, res) => {
         const body = await readJson(req);
         const name = body?.name;
         if (typeof name !== "string" || name.length === 0) {
           return json(res, 400, { error: "body.name must be a non-empty string" });
         }
-        if (rejectIfReadOnlyDatabaseWrite(res, name)) return;
-        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
         if (body.meta !== undefined && !isPlainObject(body.meta)) {
           return json(res, 400, { error: "body.meta must be a plain object" });
         }
         let adminUser;
         try {
-          adminUser = routing.isForwarded(req) ? null : parseDatabaseAdminUser(body);
+          adminUser = req.schemaApply ? null : parseDatabaseAdminUser(body);
         } catch (err) {
           return json(res, err.status || 400, err.body || errorBody(err), err.headers || {});
         }
@@ -102,7 +102,7 @@ export function createPublicObjectInterface() {
             adminCollectionMeta = ensureAdminUserCollection(node, name, adminUser.collection);
           }
           await afterLocalWrite(durability);
-          if (!routing.isForwarded(req)) {
+          if (!req.schemaApply) {
             await forwardSchemaChange(routing, req, "/api/databases", {
               method: "POST",
               body: databaseCreateFanoutBody(name, body),
@@ -157,9 +157,7 @@ export function createPublicObjectInterface() {
         }
       }));
 
-      router.delete("/api/databases/:database", secure(async (req, res) => {
-        if (rejectUnlessGlobalAdmin(req, res, auth)) return;
-        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
+      router.delete("/api/databases/:database", globalAdmin((req) => req.params.database, async (req, res) => {
         try {
           const existed = node.getDatabaseMeta(req.params.database) !== null;
           const alreadyDeleted = node.db.isDatabaseDeleted(req.params.database) || lifecycle.record(req.params.database);
@@ -181,10 +179,7 @@ export function createPublicObjectInterface() {
         });
       }));
 
-      router.post("/api/:database/collections", secure(async (req, res) => {
-        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
-        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
-        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
+      router.post("/api/:database/collections", admin((req) => req.params.database, async (req, res) => {
         const body = await readJson(req);
         const name = body?.name;
         if (typeof name !== "string" || name.length === 0) {
@@ -197,7 +192,7 @@ export function createPublicObjectInterface() {
           const meta = await lifecycle.create({ database: req.params.database, collection: name }, req,
             () => node.createCollection(req.params.database, name, collectionMeta));
           await afterLocalWrite(durability);
-          if (!routing.isForwarded(req)) {
+          if (!req.schemaApply) {
             await forwardSchemaChange(
               routing,
               req,
@@ -212,9 +207,7 @@ export function createPublicObjectInterface() {
         }
       }));
 
-      router.delete("/api/:database/collections/:collection", secure(async (req, res) => {
-        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
-        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
+      router.delete("/api/:database/collections/:collection", admin((req) => req.params.database, async (req, res) => {
         try {
           const existed = node.getCollectionMeta(req.params.database, req.params.collection) !== null;
           const alreadyDeleted = node.db.isCollectionDeleted(req.params.database, req.params.collection) || lifecycle.record(req.params.database, req.params.collection);
@@ -238,17 +231,14 @@ export function createPublicObjectInterface() {
         json(res, 200, meta);
       }));
 
-      router.put("/api/:database/:collection/meta", secure(async (req, res) => {
-        if (rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
-        if (rejectUnlessDatabaseAdmin(req, res, auth)) return;
-        if (rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
+      router.put("/api/:database/:collection/meta", admin((req) => req.params.database, async (req, res) => {
         const body = await readJson(req);
         if (!isPlainObject(body)) return json(res, 400, { error: "collection meta must be a plain object" });
         try {
           objectHooks.validateMeta(body);
           const meta = node.setCollectionMeta(req.params.database, req.params.collection, body);
           await afterLocalWrite(durability);
-          if (!routing.isForwarded(req)) {
+          if (!req.schemaApply) {
             await forwardSchemaChange(
               routing,
               req,
@@ -2017,6 +2007,7 @@ async function forwardSchemaChange(routing, req, path, options, message) {
   const remote = await routing.forwardToAllPeers(req, path, {
     ...forwardOptions,
     allowUnavailable,
+    adminApply: true,
   });
   if (!ok(remote.status)) throw remoteHttpError(remote, message);
   return remote;
@@ -2311,6 +2302,35 @@ function secureRoute(auth, lifecycle, routing) {
     res.operationStarted = true;
     return lifecycle.runRequest(req, routing.isForwarded(req), () => handler(req, res));
   };
+}
+
+function administrationRoute(secure, lifecycle, routing, node, auth, memoryGuard) {
+  return (databaseOf, handler, global = false) => secure(async (req, res) => {
+    if ((global ? rejectUnlessGlobalAdmin : rejectUnlessDatabaseAdmin)(req, res, auth)) return;
+    if (req.params.database && rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
+    if (req.method !== "DELETE" && rejectIfMemoryGuardBlocked(res, memoryGuard)) return;
+    req.schemaApply = routing.isForwarded(req) && req.headers[ADMIN_APPLY_HEADER] === "1";
+    const database = await databaseOf(req);
+    if (typeof database !== "string" || !database) return handler(req, res);
+    if (!req.params.database && rejectIfReadOnlyDatabaseWrite(res, database)) return;
+    if (req.schemaApply) return handler(req, res);
+    await lifecycle.assertNotDeleting({ database, collection: req.params.collection || (req.method === "POST" && req.params.database ? (await readJson(req))?.name : undefined) }, req.method === "DELETE");
+    if (!isPrimary(node, database)) {
+      if (routing.isForwarded(req)) return json(res, 503, { error: "administrative primary changed; refresh the shard map" });
+      const owner = primaryFor(node, database);
+      if (!owner?.url) return json(res, 503, { error: "administrative primary is unavailable" });
+      try {
+        const remote = await routing.forwardJson(req, owner, null, req.path, {
+          method: req.method, body: req.method === "DELETE" ? undefined : await readJson(req), forwardedOnly: true,
+        });
+        return json(res, remote.status, remote.status === 204 ? undefined : remote.body);
+      } catch (error) { return json(res, error.status || 503, { error: error.message }); }
+    }
+    return lifecycle.administer(database, () => {
+      lifecycle.requestHeader(req);
+      return handler(req, res);
+    });
+  });
 }
 
 function parseQueryParam(req) {

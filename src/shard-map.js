@@ -13,6 +13,7 @@ export class ShardMap {
     this.shards = new Map();
     this.version = SHARD_MAP_VERSION;
     this.topology = null;
+    this.ownershipEpoch = 0;
     if (map) this.replace(map);
   }
 
@@ -21,6 +22,7 @@ export class ShardMap {
     this.shards.clear();
     this.version = normalized.version;
     this.topology = normalized.topology;
+    this.ownershipEpoch = normalized.ownershipEpoch || 0;
     for (const [shard, shardConfig] of Object.entries(normalized.shards)) {
       this._ensureShard(shard);
       for (const peer of shardConfig.peers || []) this.addPeer(shard, peer);
@@ -83,6 +85,7 @@ export class ShardMap {
     }
     return {
       version: this.version,
+      ...(this.ownershipEpoch ? { ownershipEpoch: this.ownershipEpoch } : {}),
       topology: cloneTopology(this.topology),
       shards,
     };
@@ -117,8 +120,11 @@ export function normalizeShardMap(map) {
   const shardNames = Object.keys(shards).sort();
   const topology = normalizeTopology(map.topology, shardNames);
   validateTopology(topology, shardNames);
+  const ownershipEpoch = Number(map.ownershipEpoch || 0);
+  if (!Number.isSafeInteger(ownershipEpoch) || ownershipEpoch < 0) throw new Error("invalid shard ownership epoch");
   return {
     version: SHARD_MAP_VERSION,
+    ...(ownershipEpoch ? { ownershipEpoch } : {}),
     topology,
     shards,
   };
@@ -131,20 +137,17 @@ export function publishShardMap(currentMap, desiredMap) {
   const currentSignature = partitionSignature(current);
   const desiredSignature = partitionSignature(desired);
 
-  if (current.topology.state === TOPOLOGY_RESHARDING) {
-    if (currentSignature !== desiredSignature) {
-      throw new Error("cannot start another topology change while resharding is unfinished");
-    }
-    return {
-      ...current,
-      shards: assignPeerLayout(Object.keys(current.shards), desired.shards),
-    };
+  if (current.topology.state === TOPOLOGY_RESHARDING && currentSignature !== desiredSignature) {
+    throw new Error("cannot start another topology change while resharding is unfinished");
   }
 
   if (currentSignature === desiredSignature) {
+    const shards = assignPeerLayout(Object.keys(current.shards), desired.shards);
+    const changed = Object.keys(shards).some((name) => peerKey(shards[name].peers[0] || {}) !== peerKey(current.shards[name].peers[0] || {}));
     return {
       ...current,
-      shards: assignPeerLayout(Object.keys(current.shards), desired.shards),
+      ...(changed ? { ownershipEpoch: (current.ownershipEpoch || 0) + 1 } : {}),
+      shards,
     };
   }
 
@@ -154,6 +157,7 @@ export function publishShardMap(currentMap, desiredMap) {
     .map((_, index) => topologyShardName(topologyId, index));
   return {
     version: SHARD_MAP_VERSION,
+    ownershipEpoch: (current.ownershipEpoch || 0) + 1,
     topology: {
       id: topologyId,
       state: TOPOLOGY_RESHARDING,

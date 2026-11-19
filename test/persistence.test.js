@@ -7,6 +7,8 @@ import { CRDTNode } from "../src/crdt.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { finalizeShardMap, publishShardMap, TOPOLOGY_ACTIVE, TOPOLOGY_RESHARDING } from "../src/shard-map.js";
+import { publicationKeys } from "../src/primary-state.js";
+import { readPublished, writePublished } from "./helpers/primary-state.js";
 
 function shardMapFor(shards, peerByShard = {}) {
   return {
@@ -41,7 +43,7 @@ class HookedMemoryObjectStorage extends MemoryObjectStorage {
 
 async function convertLatestSnapshotToLegacy(storage, scopePrefix) {
   const latestKey = `${scopePrefix}/latest.json`;
-  const manifest = JSON.parse(await storage.get(latestKey));
+  const manifest = JSON.parse(await readPublished(storage, latestKey));
   manifest.segments = await Promise.all(manifest.segments.map(async (segment) => {
     const rows = String(await storage.get(segment.key))
       .split(/\r?\n/)
@@ -52,6 +54,7 @@ async function convertLatestSnapshotToLegacy(storage, scopePrefix) {
     return { ...segment, key, format: "json" };
   }));
   await storage.put(latestKey, JSON.stringify(manifest));
+  await storage.delete(await storage.list(`${latestKey}.publications/`));
 }
 
 test("local WAL restores acknowledged writes before S3 journal flush", async () => {
@@ -204,7 +207,7 @@ test("snapshots restore full objects and tombstones", async () => {
 
   assert.equal(written.scopes, 1);
   assert.equal(written.objects, 2);
-  assert.ok(await storage.get("objydb/db/app/collection/users/shard/default/latest.json"));
+  assert.ok(await readPublished(storage, "objydb/db/app/collection/users/shard/default/latest.json"));
   assert.ok((await storage.list("objydb/")).some((key) => key.includes("/snapshots/") && key.endsWith(".jsonl")));
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -257,14 +260,14 @@ test("restore accepts mixed JSON and JSONL snapshot segments but writes only JSO
   })));
   const scopePrefix = "objydb/db/app/collection/events/shard/default";
   await new PersistenceManager({ node: writer, storage, segmentBytes: 1024 }).checkpoint();
-  const manifest = JSON.parse(await storage.get(`${scopePrefix}/latest.json`));
+  const manifest = JSON.parse(await readPublished(storage, `${scopePrefix}/latest.json`));
   assert.ok(manifest.segments.length > 1);
   const first = manifest.segments[0];
   const rows = String(await storage.get(first.key)).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
   const legacyKey = first.key.replace(/\.jsonl$/, ".json");
   await storage.put(legacyKey, JSON.stringify(rows));
   manifest.segments[0] = { ...first, key: legacyKey, format: "json" };
-  await storage.put(`${scopePrefix}/latest.json`, JSON.stringify(manifest));
+  await writePublished(storage, `${scopePrefix}/latest.json`, JSON.stringify(manifest));
 
   const fresh = new CRDTNode({ id: "fresh" });
   const persistence = new PersistenceManager({ node: fresh, storage });
@@ -273,7 +276,7 @@ test("restore accepts mixed JSON and JSONL snapshot segments but writes only JSO
   for (let i = 0; i < 6; i++) assert.deepEqual(fresh.get("app", "events", `e${i}`), writer.get("app", "events", `e${i}`));
 
   await persistence.checkpoint();
-  const latest = JSON.parse(await storage.get(`${scopePrefix}/latest.json`));
+  const latest = JSON.parse(await readPublished(storage, `${scopePrefix}/latest.json`));
   assert.ok(latest.segments.length > 0);
   assert.ok(latest.segments.every((segment) => segment.format === "jsonl" && segment.key.endsWith(".jsonl")));
 });
@@ -379,7 +382,7 @@ test("snapshot cursors only cover writes that existed before snapshot streaming"
   await persistence.flush();
   await persistence.stop();
 
-  const manifest = JSON.parse(await storage.get("objydb/db/app/collection/events/shard/default/latest.json"));
+  const manifest = JSON.parse(await readPublished(storage, "objydb/db/app/collection/events/shard/default/latest.json"));
   assert.equal(manifest.cursors.n1, 1);
   assert.equal(insertedDuringSnapshot, true);
 
@@ -407,16 +410,16 @@ test("collection metadata persists outside shard snapshots and restores indexes"
   node.insert("app", "orders", { _id: "o1", status: "paid", amount: 10 });
   await persistence.stop();
 
-  const rawMeta = await storage.get("objydb/db/app/collection/orders/meta.json");
+  const rawMeta = await readPublished(storage, "objydb/db/app/collection/orders/meta.json");
   assert.deepEqual(JSON.parse(rawMeta), {
     indexes: ["status"],
     columns: [],
     owner: "events-team",
   });
-  assert.deepEqual(JSON.parse(await storage.get("objydb/db/empty/meta.json")), {
+  assert.deepEqual(JSON.parse(await readPublished(storage, "objydb/db/empty/meta.json")), {
     owner: "platform",
   });
-  assert.deepEqual(JSON.parse(await storage.get("objydb/db/app/collection/empty_collection/meta.json")), {
+  assert.deepEqual(JSON.parse(await readPublished(storage, "objydb/db/app/collection/empty_collection/meta.json")), {
     indexes: [],
     columns: [],
   });
@@ -507,7 +510,7 @@ test("collection removal deletes the persisted collection prefix", async () => {
   for (const key of await storage.list("objydb/db/app/collection/orders/")) {
     staleObjects.set(key, await storage.get(key));
   }
-  assert.ok(await storage.get("objydb/db/app/collection/orders/meta.json"));
+  assert.ok(await readPublished(storage, "objydb/db/app/collection/orders/meta.json"));
   assert.ok((await storage.list("objydb/db/app/collection/orders/")).length > 0);
 
   node.removeCollection("app", "orders");
@@ -596,7 +599,7 @@ test("checkpoints are partitioned per object shard", async () => {
 
   const keys = await storage.list("objydb/db/app/collection/events/shard/");
   for (const shard of ["events-0", "events-1", "events-2"]) {
-    assert.ok(keys.includes(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
+    assert.ok(publicationKeys(keys).includes(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
   }
 
   const fresh = new CRDTNode({ id: "fresh" });
@@ -651,7 +654,7 @@ test("checkpoint compacts journal segments for the snapshotted scope", async () 
 
   await persistence.checkpoint();
   assert.equal((await storage.list(journalPrefix)).length, 0);
-  assert.ok(await storage.get("objydb/db/app/collection/users/shard/default/latest.json"));
+  assert.ok(await readPublished(storage, "objydb/db/app/collection/users/shard/default/latest.json"));
 
   const fresh = new CRDTNode({ id: "fresh" });
   await new PersistenceManager({ node: fresh, storage }).restore();
@@ -680,7 +683,7 @@ test("snapshot retention prunes old snapshot folders but keeps latest restore po
   assert.ok(keys.some((key) => key.includes(`/${second.id}/`)));
   assert.ok(keys.some((key) => key.includes(`/${third.id}/`)));
 
-  const latest = JSON.parse(await storage.get("objydb/db/app/collection/users/shard/default/latest.json"));
+  const latest = JSON.parse(await readPublished(storage, "objydb/db/app/collection/users/shard/default/latest.json"));
   assert.equal(latest.id, third.id);
 });
 
@@ -771,7 +774,7 @@ test("automatic checkpoints are dirty-only and primary-only", async () => {
   const first = await primaryPersistence.checkpoint({ automatic: true });
   assert.equal(first.scopes, 1);
   assert.equal(first.objects, 1);
-  assert.ok(await primaryStorage.get("objydb/db/app/collection/events/shard/events-0/latest.json"));
+  assert.ok(await readPublished(primaryStorage, "objydb/db/app/collection/events/shard/events-0/latest.json"));
   assert.equal(primaryPersistence.getStats().dirtyScopes, 0);
 
   const clean = await primaryPersistence.checkpoint({ automatic: true });
@@ -789,8 +792,8 @@ test("automatic checkpoints are dirty-only and primary-only", async () => {
   assert.equal(await secondaryStorage.get("objydb/db/app/collection/events/shard/events-0/latest.json"), null);
 
   const manual = await secondaryPersistence.checkpoint();
-  assert.equal(manual.scopes, 1);
-  assert.ok(await secondaryStorage.get("objydb/db/app/collection/events/shard/events-0/latest.json"));
+  assert.equal(manual.scopes, 0);
+  assert.equal(await readPublished(secondaryStorage, "objydb/db/app/collection/events/shard/events-0/latest.json"), null);
 
   await primaryPersistence.stop();
   await secondaryPersistence.stop();
@@ -858,7 +861,7 @@ test("restore and checkpoint use node url ownership when a full global map is lo
   const checkpointStorage = new MemoryObjectStorage();
   const checkpoint = await new PersistenceManager({ node: owned, storage: checkpointStorage }).checkpoint();
   assert.equal(checkpoint.scopes, 1);
-  assert.ok(await checkpointStorage.get("objydb/db/app/collection/events/shard/shard-0/latest.json"));
+  assert.ok(await readPublished(checkpointStorage, "objydb/db/app/collection/events/shard/shard-0/latest.json"));
   assert.equal(await checkpointStorage.get("objydb/db/app/collection/events/shard/shard-1/latest.json"), null);
 });
 
@@ -913,9 +916,11 @@ test("topology reshard preserves source snapshots, checkpoints targets, and fina
   await persistence.flush();
 
   const sourceLatest = new Map();
+  const sourcePublications = new Map();
   for (const shard of oldShardNames) {
     const key = `objydb/db/app/collection/events/shard/${shard}/latest.json`;
     sourceLatest.set(key, await storage.get(key));
+    sourcePublications.set(key, await storage.list(`${key}.publications/`));
   }
   await storage.put(
     "objydb/db/app/collection/events/shard/stale-generation/latest.json",
@@ -967,20 +972,21 @@ test("topology reshard preserves source snapshots, checkpoints targets, and fina
   }
 
   for (const [key, manifest] of sourceLatest) assert.equal(await storage.get(key), manifest);
+  for (const [key, paths] of sourcePublications) assert.deepEqual(await storage.list(`${key}.publications/`), paths);
   for (const shard of newShardNames) {
-    assert.ok(await storage.get(`objydb/db/app/collection/events/shard/${shard}/latest.json`));
+    assert.ok(await readPublished(storage, `objydb/db/app/collection/events/shard/${shard}/latest.json`));
   }
 
   const invalidTargetKey = `objydb/db/app/collection/events/shard/${newShardNames[0]}/latest.json`;
-  const validTargetManifest = await storage.get(invalidTargetKey);
+  const validTargetManifest = await readPublished(storage, invalidTargetKey);
   const invalidTargetManifest = JSON.parse(validTargetManifest);
   invalidTargetManifest.topologyId = "wrong-generation";
-  await storage.put(invalidTargetKey, JSON.stringify(invalidTargetManifest));
+  await writePublished(storage, invalidTargetKey, JSON.stringify(invalidTargetManifest));
   const incomplete = await lastPersistence.reshardReadiness();
   assert.equal(incomplete.ready, false);
   assert.equal(incomplete.completedScopes, 2);
   assert.deepEqual(incomplete.missing, [{ database: "app", collection: "events", shard: newShardNames[0] }]);
-  await storage.put(invalidTargetKey, validTargetManifest);
+  await writePublished(storage, invalidTargetKey, validTargetManifest);
 
   const readiness = await lastPersistence.reshardReadiness();
   assert.deepEqual(readiness, {

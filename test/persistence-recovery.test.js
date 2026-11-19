@@ -8,6 +8,8 @@ import { CRDTNode, localPeer } from "../src/crdt.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { MemoryObjectStorage } from "../src/object-storage.js";
 import { parseNdjsonStream } from "../src/ndjson.js";
+import { PrimaryStateStore } from "../src/primary-state.js";
+import { readPublished, writePublished } from "./helpers/primary-state.js";
 
 const scope = { database: "app", collection: "items", shard: "default" };
 const base = "objydb/db/app/collection/items/shard/default";
@@ -204,14 +206,14 @@ for (const format of ["jsonl", "json"]) {
     writer.insert("app", "items", expected);
     await f.persistence(writer).checkpoint();
     if (format === "json") {
-      const manifest = JSON.parse(await f.storage.get(`${base}/latest.json`));
+      const manifest = JSON.parse(await readPublished(f.storage, `${base}/latest.json`));
       for (const segment of manifest.segments) {
         const rows = (await f.storage.get(segment.key)).trim().split("\n").map(JSON.parse);
         segment.key = segment.key.replace(/\.jsonl$/, ".json");
         segment.format = "json";
         await f.storage.put(segment.key, JSON.stringify(rows));
       }
-      await f.storage.put(`${base}/latest.json`, JSON.stringify(manifest));
+      await writePublished(f.storage, `${base}/latest.json`, JSON.stringify(manifest));
     }
     const restored = f.node("restored");
     await f.persistence(restored).restore();
@@ -236,7 +238,7 @@ test("short but valid snapshots fail without advancing recovery coverage", async
   const f = fixture(t), writer = f.node("writer");
   writer.insertManyCount("app", "items", [{ _id: "one" }, { _id: "two" }]);
   await f.persistence(writer).checkpoint();
-  const manifest = JSON.parse(await f.storage.get(`${base}/latest.json`));
+  const manifest = JSON.parse(await readPublished(f.storage, `${base}/latest.json`));
   const key = manifest.segments[0].key;
   await f.storage.put(key, (await f.storage.get(key)).split("\n")[0] + "\n");
   const restored = f.node("restored");
@@ -248,37 +250,37 @@ test("snapshot manifests cannot cross database, collection, or shard boundaries"
   const f = fixture(t), writer = f.node("writer");
   writer.insert("app", "items", { _id: "private" });
   await f.persistence(writer).checkpoint();
-  await f.storage.put("objydb/db/other/collection/items/shard/default/latest.json", await f.storage.get(`${base}/latest.json`));
+  await f.storage.put("objydb/db/other/collection/items/shard/default/latest.json", await readPublished(f.storage, `${base}/latest.json`));
   await assert.rejects(f.persistence(f.node("restored")).restore(), /context|scope/i);
 });
 
-test("an older checkpoint cannot replace a newer published snapshot", async (t) => {
-  let block = false, release, reached;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const atGate = new Promise((resolve) => { reached = resolve; });
+test("a timed-out snapshot PUT cannot replace the primary's newer checkpoint after restart", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "objy-publication-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let block = false, delayed;
   class Storage extends MemoryObjectStorage {
-    async putConditional(key, body, etag, type) {
-      if (block && key === `${base}/latest.json` && JSON.parse(body).node === "old") {
+    async put(key, body, type) {
+      if (block && key.startsWith(`${base}/latest.json.publications/`)) {
         block = false;
-        reached();
-        await gate;
+        delayed = () => super.put(key, body, type);
+        throw new Error("client timed out");
       }
-      return super.putConditional(key, body, etag, type);
+      return super.put(key, body, type);
     }
   }
-  const f = fixture(t, new Storage()), old = f.node("old"), current = f.node("current");
-  const p1 = f.persistence(old), p2 = f.persistence(current);
-  p1.start(); p2.start();
+  const f = fixture(t, new Storage()), old = f.node("primary"), current = f.node("primary");
+  const options = { durable: true, localWal: { mode: "on", dir, fsync: true } };
+  const p1 = f.persistence(old, options), p2 = f.persistence(current, options);
+  p1.start();
   old.insert("app", "items", { _id: "x", value: 1 });
-  current.applyRemote("old", structuredClone(old.log), current._cursorKey("old", scope));
   block = true;
-  const job = p1.checkpoint();
-  const rejected = assert.rejects(job, { code: "SNAPSHOT_CONFLICT" });
-  await atGate;
+  await assert.rejects(p1.checkpoint(), /client timed out/);
+  p1.unsubscribe();
+  await p2.restore();
+  p2.start();
   current.update("app", "items", "x", { value: 2 });
   await p2.checkpoint();
-  release();
-  await rejected;
+  await delayed();
   const restored = f.node("restored");
   await f.persistence(restored).restore();
   assert.deepEqual(restored.get("app", "items", "x"), { _id: "x", value: 2 });
@@ -290,9 +292,9 @@ test("a lagging replica cannot publish less coverage even without a concurrent w
   lagging.applyRemote("current", structuredClone(current.log), lagging._cursorKey("current", scope));
   current.update("app", "items", "x", { value: 2 });
   await f.persistence(current).checkpoint();
-  const head = await f.storage.get(`${base}/latest.json`);
+  const head = await readPublished(f.storage, `${base}/latest.json`);
   await assert.rejects(f.persistence(lagging).checkpoint(), { code: "SNAPSHOT_CONFLICT" });
-  assert.equal(await f.storage.get(`${base}/latest.json`), head);
+  assert.equal(await readPublished(f.storage, `${base}/latest.json`), head);
 });
 
 test("retention never removes an unpublished checkpoint candidate", async (t) => {
@@ -306,16 +308,14 @@ test("retention never removes an unpublished checkpoint candidate", async (t) =>
   assert.equal(await f.storage.get(candidateKey), "still uploading");
 });
 
-test("conditional storage updates have exactly one winner", async () => {
+test("one primary serializes publications and rejects stale expected revisions", async () => {
   const storage = new MemoryObjectStorage();
-  const missing = await storage.getVersioned("head");
-  assert.deepEqual(missing, { body: null, etag: null });
-  assert.equal(await storage.putConditional("head", "first", missing.etag), true);
-  const first = await storage.getVersioned("head");
-  const outcomes = await Promise.all([storage.putConditional("head", "second", first.etag), storage.putConditional("head", "third", first.etag)]);
-  assert.deepEqual(outcomes.sort(), [false, true]);
-  await storage.delete(["head"]);
-  assert.equal(await storage.putConditional("head", "old", first.etag), false);
+  const states = new PrimaryStateStore({ storage });
+  const first = await states.publish("head", "first");
+  const outcomes = await Promise.allSettled([states.publish("head", "second", { previous: first.revision }), states.publish("head", "third", { previous: first.revision })]);
+  assert.equal(outcomes.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(outcomes.find((result) => result.status === "rejected").reason.code, "SNAPSHOT_CONFLICT");
+  assert.equal((await states.read("head")).body, "second");
 });
 
 for (const context of ["database", "collection"]) {

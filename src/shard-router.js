@@ -9,6 +9,7 @@ import { combineQueryPaths, publicAggregatePath, publicReadPath, QUERY_PATH_HEAD
 
 export const FORWARDED_HEADER = "x-objydb-forwarded";
 export const TARGET_SHARD_HEADER = "x-objydb-target-shard";
+export const ADMIN_APPLY_HEADER = "x-objydb-admin-apply";
 export const DEFAULT_FORWARD_TIMEOUT_MS = 5_000;
 
 export class ShardRequestRouter {
@@ -454,6 +455,7 @@ export class ShardRequestRouter {
     retryStatuses = [502, 503, 504],
     allowUnavailable = false,
     timeoutMs,
+    adminApply = false,
   } = {}) {
     const peers = this.node.shardMap.allPeers().filter((peer) => peer.url && !this.node._isSelfPeer(peer));
     const unique = new Map(peers.map((peer) => [peer.url, peer]));
@@ -463,6 +465,7 @@ export class ShardRequestRouter {
         body,
         forwardedOnly: true,
         timeoutMs,
+        adminApply,
       }).catch((err) => ({
         status: err.status || 503,
         body: err.body || { error: err.message },
@@ -486,12 +489,13 @@ export class ShardRequestRouter {
     };
   }
 
-  async forwardJson(req, peer, shard, path, { method = "GET", body, query, forwardedOnly = false, timeoutMs } = {}) {
+  async forwardJson(req, peer, shard, path, { method = "GET", body, query, forwardedOnly = false, timeoutMs, adminApply = false } = {}) {
     const suffix = query ? `?${query}` : "";
     const headers = forwardedOnly
       ? forwardedControlHeaders(req, body !== undefined, this.clusterSecret)
       : forwardedHeaders(req, shard, body !== undefined, this.clusterSecret);
     Object.assign(headers, this.node.lifecycle?.requestHeader(req));
+    if (adminApply) headers[ADMIN_APPLY_HEADER] = "1";
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);

@@ -6,6 +6,7 @@ import { tmpdir, totalmem, freemem } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { S3ObjectStorage } from "../../src/object-storage.js";
+import { PrimaryStateStore } from "../../src/primary-state.js";
 import { DB, COLL, SLOTS, head, row, live, sleep, request, quantiles } from "./fixture.js";
 
 const exec = promisify(execFile), args = Object.fromEntries(process.argv.slice(2).map((arg) => arg.replace(/^--/, "").split("=")));
@@ -152,7 +153,7 @@ try {
     assert.equal(baseline.errors.length, 0);
   }
   log("crash-test-start");
-  const oldHead = await storage.get(head);
+  const oldHead = (await new PrimaryStateStore({ storage }).read(head)).body;
   report.failure = await rpc("crash");
   assert.equal(report.failure.normalHead, oldHead);
   assert.ok(report.failure.stagedFiles > 0);
@@ -163,7 +164,7 @@ try {
   for (const mode of ["baseline", "compactor"]) {
     const source = rounds.findLast((item) => item.mode === mode);
     if (!source) continue;
-    await storage.put(head, JSON.stringify(source.work.work.manifest));
+    await new PrimaryStateStore({ storage }).publish(head, source.work.work.manifest);
     const validator = launch("verify", { versions });
     const result = await validator.ready;
     await validator.exit;

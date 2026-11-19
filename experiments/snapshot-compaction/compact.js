@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { parseNdjsonStream } from "../../src/ndjson.js";
 import { Store } from "../../src/store.js";
 import { isTopologyResharding } from "../../src/shard-map.js";
+import { PrimaryStateStore } from "../../src/primary-state.js";
 
 const MiB = 1024 * 1024;
 
@@ -28,7 +29,7 @@ export async function captureCompaction(persistence, scope) {
     `${db}/collection-tombstones/${encodeURIComponent(scope.collection)}.json`,
   ];
   const guards = [];
-  for (const key of guardKeys) guards.push([key, await persistence.storage.get(key)]);
+  for (const key of guardKeys) guards.push([key, (await persistence.states.read(key)).body]);
   if (guards[3][1] || guards[4][1]) throw new Error("cannot compact a deleted context");
   const snapshot = guards[0][1] ? JSON.parse(guards[0][1]) : null;
   const cursors = Object.assign(Object.create(null), snapshot?.cursors);
@@ -205,7 +206,7 @@ export async function compactSnapshot(storage, plan, {
 
     // Staging is intentionally non-destructive. Changed inputs invalidate the job.
     for (const [key, expected] of plan.guards) {
-      if (await storage.get(key) !== expected) throw new Error(`compaction input changed: ${key}`);
+      if ((await new PrimaryStateStore({ storage }).read(key)).body !== expected) throw new Error(`compaction input changed: ${key}`);
     }
     const manifest = { ...plan.manifest, objectCount: objects, segments };
     const manifestKey = `${plan.output}/manifest.json`;
