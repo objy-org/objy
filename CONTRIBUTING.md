@@ -28,7 +28,7 @@ The database UI lives in `ui/` as an npm workspace in this same Git repository. 
 - `npm run test:ui:manual` prints a disposable localhost browser-test page; open it and click **Run checks**. It tests the actual server UI routes and API without modifying an existing database.
 - `npm run test:ui` runs the same browser regression suite in Chromium, Firefox, and WebKit through Playwright. Install those browsers first with `npx playwright install --with-deps`.
 
-Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` for compatibility with the CLI’s server-package extraction.
+Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` for compatibility with the CLI's database-package extraction.
 
 Add focused tests beside the behavior being changed. The broader suites are selected by impact:
 

@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/objy-org/objy/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/objy-org/objy/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://www.npmjs.com/package/@objy/server"><img alt="npm @objy/server" src="https://img.shields.io/npm/v/%40objy%2Fserver?label=%40objy%2Fserver"></a>
+  <a href="https://www.npmjs.com/package/@objy/db"><img alt="npm @objy/db" src="https://img.shields.io/npm/v/%40objy%2Fdb?label=%40objy%2Fdb"></a>
   <img alt="Node.js 20 or newer" src="https://img.shields.io/badge/node-%3E%3D20-339933">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2f81f7"></a>
   <img alt="Alpha" src="https://img.shields.io/badge/status-alpha-f0a020">
@@ -19,9 +19,9 @@ OBJY DB keeps dynamic objects and their indexes in memory while local WAL and S3
 
 [REST API](API.md) · [JavaScript client](https://github.com/objy-org/objy-client) · [Benchmarks](BENCHMARKS.md)
 
-## Server and Client
+## Database and Client
 
-**`@objy/server` is the database.** It owns memory, storage, queries, authentication, persistence, sharding, replication, and the administration console.
+**`@objy/db` is the database.** It owns memory, storage, queries, authentication, persistence, sharding, replication, and the administration console.
 
 **`@objy/client` connects applications to it.** It is a small dependency-free HTTP client for browsers and Node.js. It does not contain or start the database.
 
@@ -131,7 +131,7 @@ Changing meta rebuilds the affected in-memory structures cooperatively. Full obj
 
 ## Run the Server
 
-The deployment CLI installs and starts `@objy/server` locally:
+The deployment CLI installs and starts OBJY DB locally:
 
 ```sh
 npm install --global @objy/cli
@@ -151,11 +151,11 @@ objy stop dev
 <summary><strong>Start from another Node.js process</strong></summary>
 
 ```sh
-npm install @objy/server
+npm install @objy/db
 ```
 
 ```js
-import { startServer } from "@objy/server";
+import { startServer } from "@objy/db";
 
 const runtime = await startServer({ port: 8080 });
 console.log(`OBJY DB listening on http://127.0.0.1:${runtime.port}`);

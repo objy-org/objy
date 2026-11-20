@@ -9,7 +9,7 @@ import { buildRelease } from "./build-release.js";
 const run = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifest = await buildRelease();
-const workspace = await mkdtemp(join(tmpdir(), "objy-server-"));
+const workspace = await mkdtemp(join(tmpdir(), "objy-db-"));
 
 try {
   await writeFile(join(workspace, "package.json"), JSON.stringify({ private: true, type: "module" }));
@@ -22,8 +22,8 @@ try {
   ]);
   await command(workspace, process.execPath, ["--input-type=module", "--eval", `
     import assert from "node:assert/strict";
-    import { startServer } from "@objy/server";
-    import { createObjectHookRegistry } from "@objy/server/hooks";
+    import { startServer } from "@objy/db";
+    import { createObjectHookRegistry } from "@objy/db/hooks";
 
     assert.equal(typeof createObjectHookRegistry, "function");
     const runtime = await startServer({ port: { port: 0, host: "127.0.0.1" }, auth: false, environment: {}, bootstrapLogger: () => {} });
@@ -56,7 +56,7 @@ try {
   await rm(workspace, { recursive: true, force: true });
 }
 
-console.log(`server release passed isolated install and runtime smoke tests (${manifest.version})`);
+console.log(`database release passed isolated install and runtime smoke tests (${manifest.version})`);
 
 async function command(cwd, file, args) {
   try {

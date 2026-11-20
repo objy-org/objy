@@ -10,7 +10,7 @@ import { buildSite } from "../ui/scripts/build.mjs";
 const run = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const releaseRoot = join(root, ".release");
-const stage = join(releaseRoot, "staging", "server");
+const stage = join(releaseRoot, "staging", "db");
 const artifactsRoot = join(releaseRoot, "artifacts");
 
 export async function buildRelease() {
@@ -26,12 +26,12 @@ export async function buildRelease() {
   await copyFile(join(root, "public", "objy-db-logo.png"), join(stage, "public", "objy-db-logo.png"));
   await copyFile(join(root, "API.md"), join(stage, "API.md"));
   await copyFile(join(root, "objydb.config.json"), join(stage, "objydb.config.json"));
-  await copyFile(join(root, "release", "server.README.md"), join(stage, "README.md"));
+  await copyFile(join(root, "release", "db.README.md"), join(stage, "README.md"));
   await copyFile(join(root, "LICENSE"), join(stage, "LICENSE"));
   await copyFile(join(root, "NOTICE.md"), join(stage, "NOTICE.md"));
   await writeJson(join(stage, "package.json"), packageManifest(sourcePackage));
 
-  const packed = await packServer();
+  const packed = await packDatabase();
   const checksum = createHash("sha256")
     .update(await readFile(join(artifactsRoot, packed.artifact)))
     .digest("hex");
@@ -48,7 +48,7 @@ export async function buildRelease() {
   return manifest;
 }
 
-async function packServer() {
+async function packDatabase() {
   const { stdout } = await run("npm", [
     "pack",
     stage,
@@ -83,7 +83,7 @@ function parsePackResult(stdout) {
 
 function packageManifest(sourcePackage) {
   return {
-    name: "@objy/server",
+    name: sourcePackage.name,
     version: sourcePackage.version,
     description: sourcePackage.description,
     type: "module",

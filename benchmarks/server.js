@@ -85,7 +85,7 @@ async function openVariant(variant) {
   }
   const entry = variant === "source-server"
     ? new URL("../src/api.js", import.meta.url)
-    : new URL("../.release/staging/server/src/api.js", import.meta.url);
+    : new URL("../.release/staging/db/src/api.js", import.meta.url);
   const { startServer } = await import(entry);
   const { createClient } = await import("@objy/client");
   const server = await startServer({

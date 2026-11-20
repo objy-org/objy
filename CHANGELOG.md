@@ -4,9 +4,13 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ## Unreleased
 
+### Changed
+
+- Renamed the database runtime package from `@objy/server` to `@objy/db`, including the `@objy/db/hooks` entry point and `objy-db-VERSION.tgz` release archive. Update application imports; the HTTP API, runtime exports, configuration, and persisted data formats are unchanged. This package runs the server and does not restore the retired embedded/browser API formerly published as `@objy/db`.
+
 ### Removed
 
-- Embedded Node.js and browser database distributions. OBJY DB now ships as the `@objy/server` runtime; applications connect through HTTP or `@objy/client`.
+- Embedded Node.js and browser database distributions. OBJY DB now ships as the `@objy/db` server runtime; applications connect through HTTP or `@objy/client`.
 
 ## 0.1.0 - 2026-11-04
 

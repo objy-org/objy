@@ -7,8 +7,11 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifest = await buildRelease();
 const item = manifest.package;
 
-if (item.name !== "@objy/server") {
-  throw new Error(`release package must be @objy/server, received ${item.name}`);
+if (item.name !== "@objy/db") {
+  throw new Error(`release package must be @objy/db, received ${item.name}`);
+}
+if (item.artifact !== `objy-db-${manifest.version}.tgz`) {
+  throw new Error(`unexpected database release artifact: ${item.artifact}`);
 }
 
 const paths = new Set(item.files.map(({ path }) => path));
@@ -31,20 +34,20 @@ for (const path of [
   "src/api.js",
   "src/index.js",
 ]) {
-  if (!paths.has(path)) throw new Error(`server package is missing ${path}`);
+  if (!paths.has(path)) throw new Error(`database package is missing ${path}`);
 }
 
 for (const path of paths) {
   if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js"].includes(path) ||
       path.startsWith("bin/") || path.startsWith("client/") || path.startsWith("release/") || path === "public/index.html" ||
       path.startsWith("ui/")) {
-    throw new Error(`server package contains removed or private source ${path}`);
+    throw new Error(`database package contains removed or private source ${path}`);
   }
 }
 
 const packageJson = JSON.parse(await readFile(join(root, item.stage, "package.json"), "utf8"));
-if (packageJson.bin) throw new Error("server package must not expose a CLI binary");
-if (packageJson.dependencies?.["@objy/client"]) throw new Error("server package must not depend on the standalone client");
-if (packageJson.exports?.["./client"]) throw new Error("server package must not export the standalone client");
+if (packageJson.bin) throw new Error("database package must not expose a CLI binary");
+if (packageJson.dependencies?.["@objy/client"]) throw new Error("database package must not depend on the standalone client");
+if (packageJson.exports?.["./client"]) throw new Error("database package must not export the standalone client");
 
 console.log(`${item.name}@${item.version}: ${paths.size} files, ${item.size} bytes`);

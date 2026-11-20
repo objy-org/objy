@@ -1,5 +1,5 @@
 {
-  "name": "@objy/server-ui",
+  "name": "@objy/db-ui",
   "private": true,
   "type": "module",
   "scripts": {

@@ -131,12 +131,12 @@ jobs:
             npm dist-tag add "$package_name@$RELEASE_VERSION" "$NPM_TAG"
           }
 
-          publish_if_missing "@objy/server" ".release/artifacts/objy-server-$RELEASE_VERSION.tgz" --access public
+          publish_if_missing "@objy/db" ".release/artifacts/objy-db-$RELEASE_VERSION.tgz" --access public
       - name: Create GitHub release
         run: |
           TAG="v$RELEASE_VERSION"
           ARTIFACTS=(
-            ".release/artifacts/objy-server-$RELEASE_VERSION.tgz"
+            ".release/artifacts/objy-db-$RELEASE_VERSION.tgz"
             ".release/artifacts/SHA256SUMS"
           )
           if gh release view "$TAG" >/dev/null 2>&1; then

@@ -15,8 +15,8 @@ Measured on 2026-10-31 with an Apple M2 Pro, 32 GiB memory, macOS 15.7.7, and No
 
 | Runtime | Inserts/s | Patches/s | Deletes/s | Point read p95 | Aggregate | Grouped aggregate | Sorted page | Final heap |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Source `@objy/server` | 28,313 | 8,689 | 35,087 | 0.397 ms | 12.6 ms | 22.5 ms | 8.2 ms | 236.9 MiB |
-| Packed `@objy/server` | 29,529 | 8,469 | 35,888 | 0.384 ms | 12.6 ms | 21.0 ms | 7.6 ms | 236.8 MiB |
+| Source database | 28,313 | 8,689 | 35,087 | 0.397 ms | 12.6 ms | 22.5 ms | 8.2 ms | 236.9 MiB |
+| Packed database | 29,529 | 8,469 | 35,888 | 0.384 ms | 12.6 ms | 21.0 ms | 7.6 ms | 236.8 MiB |
 
 The two variants produced the same correctness signature before and after mutation. `Final heap` includes objects, indexes, columns, vectors, compression state, the HTTP runtime, and temporary work. It is not a per-object storage estimate.
 

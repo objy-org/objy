@@ -19,8 +19,8 @@ body:
     attributes:
       label: Runtime
       options:
-        - "@objy/server single node"
-        - "@objy/server cluster"
+        - "@objy/db single node"
+        - "@objy/db cluster"
         - "Admin console"
         - "Other"
     validations:
