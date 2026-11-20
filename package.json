@@ -70,7 +70,7 @@
   },
   "devDependencies": {
     "@objy/client": "0.1.0",
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.65.0"
   },
   "workspaces": [
     "ui"
