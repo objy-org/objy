@@ -25,8 +25,9 @@ export async function buildRelease() {
   await cp(join(root, "public", "ui"), join(stage, "public", "ui"), { recursive: true });
   await copyFile(join(root, "public", "objy-db-logo.png"), join(stage, "public", "objy-db-logo.png"));
   await copyFile(join(root, "API.md"), join(stage, "API.md"));
+  await copyFile(join(root, "DB.md"), join(stage, "DB.md"));
   await copyFile(join(root, "objydb.config.json"), join(stage, "objydb.config.json"));
-  await copyFile(join(root, "release", "db.README.md"), join(stage, "README.md"));
+  await copyFile(join(root, "README.md"), join(stage, "README.md"));
   await copyFile(join(root, "LICENSE"), join(stage, "LICENSE"));
   await copyFile(join(root, "NOTICE.md"), join(stage, "NOTICE.md"));
   await writeJson(join(stage, "package.json"), packageManifest(sourcePackage));

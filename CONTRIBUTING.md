@@ -25,10 +25,13 @@ The database UI lives in `ui/` as an npm workspace in this same Git repository. 
 
 - `npm run build:ui` generates `ui/dist/` for standalone development and `public/ui/` for the server, which serves the UI at `/`, `/ui`, and `/ui/`.
 - `npm run dev:ui` runs the UI alone at `http://127.0.0.1:4317/` with rebuild-on-change. Connect it to a local server allowed by that server's CORS configuration.
+- Set `PORT` to use another UI development port. Refresh the browser after a rebuild.
 - `npm run test:ui:manual` prints a disposable localhost browser-test page; open it and click **Run checks**. It tests the actual server UI routes and API without modifying an existing database.
 - `npm run test:ui` runs the same browser regression suite in Chromium, Firefox, and WebKit through Playwright. Install those browsers first with `npx playwright install --with-deps`.
 
 Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` for compatibility with the CLI's database-package extraction.
+
+Start a configured database from this checkout with `node src/index.js --config objydb.config.json`. See the [database guide](DB.md) for configuration and operation, and the [UI module map](ui/README.md) for its internal architecture. UI build and browser-test implementation details live in `ui/scripts/`; those commands never publish anything.
 
 Add focused tests beside the behavior being changed. The broader suites are selected by impact:
 

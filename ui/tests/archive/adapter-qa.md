@@ -1,5 +1,7 @@
 # Database adapter verification — 2026-11-08
 
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
 Local-only work; no publication, remote source synchronization or deployment.
 
 ## Automated checks

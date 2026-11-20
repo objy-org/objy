@@ -1,5 +1,7 @@
 # Cluster node overview — November 10, 2026
 
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
 Verified locally at http://127.0.0.1:4317/ against the existing authenticated CLI server at http://127.0.0.1:8179/. No server settings or existing objects were changed.
 
 - The official client's detailed config response supplies the overview. RSS uses the current `memory.rss`, with the memory guard's configured 8 GiB capacity. The dialog shows actual bytes prominently; there is no heap section.

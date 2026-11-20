@@ -16,6 +16,8 @@ if (item.artifact !== `objy-db-${manifest.version}.tgz`) {
 
 const paths = new Set(item.files.map(({ path }) => path));
 for (const path of [
+  "README.md",
+  "DB.md",
   "API.md",
   "LICENSE",
   "NOTICE.md",
@@ -49,5 +51,11 @@ const packageJson = JSON.parse(await readFile(join(root, item.stage, "package.js
 if (packageJson.bin) throw new Error("database package must not expose a CLI binary");
 if (packageJson.dependencies?.["@objy/client"]) throw new Error("database package must not depend on the standalone client");
 if (packageJson.exports?.["./client"]) throw new Error("database package must not export the standalone client");
+
+for (const path of ["README.md", "DB.md", "API.md"]) {
+  const source = await readFile(join(root, path), "utf8");
+  const packaged = await readFile(join(root, item.stage, path), "utf8");
+  if (packaged !== source) throw new Error(`packaged ${path} differs from its source`);
+}
 
 console.log(`${item.name}@${item.version}: ${paths.size} files, ${item.size} bytes`);

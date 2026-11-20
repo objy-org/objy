@@ -1,6 +1,8 @@
 # Database-only verification — 2026-11-07
 
-Historical report: the outer sidebar, Data/Chat screens, manual table editor, query/settings screens and Open actions described here were removed on 2026-11-08. See `canvas-qa.md` for the current interface.
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
+Historical report: the outer sidebar, Data/Chat screens, manual table editor, query/settings screens and Open actions described here were removed on 2026-11-08. See `canvas-qa.md` for the subsequent interface at that time.
 
 ## Scope
 

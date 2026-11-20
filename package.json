@@ -25,6 +25,7 @@
   "files": [
     "public/objy-db-logo.png",
     "src/",
+    "DB.md",
     "API.md",
     "LICENSE",
     "NOTICE.md",

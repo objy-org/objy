@@ -2,6 +2,8 @@
 
 ## Automated checks
 
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
 `npm test`: **65/65 passing**, including 13 saved-session tests and an AI authentication-stop regression. Tests use the pinned official `@objy/client` with disposable loopback `@objy/server` instances and actual IndexedDB transactions supplied by fake-indexeddb. The test lock queue models exclusive cross-tab Web Locks; real browser behavior is checked below.
 
 Verified:

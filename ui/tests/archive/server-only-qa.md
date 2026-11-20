@@ -2,6 +2,8 @@
 
 ## Implementation
 
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
 The three-pane explorer remains unchanged: database/collection tree, object list, JSON. The UI starts disconnected. All database operations use `@objy/client@0.1.0` and a required server adapter. Removed the browser adapter, embedded default, fallback connection, direct `@objy/db` dependency and its generated license. Build metadata rejects database engine/server code in the browser data bundle.
 
 ## Automated checks

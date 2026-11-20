@@ -2,254 +2,45 @@
 
 # OBJY DB
 
-<p align="center">
-  <strong>Fast in-memory object database for large-scale JavaScript workloads.</strong><br>
-  Dynamic objects, low-latency queries, durable distributed storage.
-</p>
+<p align="center"><strong>Fast in-memory object database for large-scale JavaScript workloads.</strong></p>
 
 <p align="center">
   <a href="https://github.com/objy-org/objy/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/objy-org/objy/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://www.npmjs.com/package/@objy/db"><img alt="npm @objy/db" src="https://img.shields.io/npm/v/%40objy%2Fdb?label=%40objy%2Fdb"></a>
   <img alt="Node.js 20 or newer" src="https://img.shields.io/badge/node-%3E%3D20-339933">
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2f81f7"></a>
+  <a href="https://github.com/objy-org/objy/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2f81f7"></a>
   <img alt="Alpha" src="https://img.shields.io/badge/status-alpha-f0a020">
 </p>
 
-OBJY DB keeps dynamic objects and their indexes in memory while local WAL and S3 protect durable state. It scales across shards and replicas without exposing that machinery to application code.
-
-[REST API](API.md) · [JavaScript client](https://github.com/objy-org/objy-client) · [Benchmarks](BENCHMARKS.md)
-
-## Database and Client
-
-**`@objy/db` is the database.** It owns memory, storage, queries, authentication, persistence, sharding, replication, and the administration console.
-
-**`@objy/client` connects applications to it.** It is a small dependency-free HTTP client for browsers and Node.js. It does not contain or start the database.
-
-You can also use the [REST API](API.md) directly.
-
-## Database UI
-
-The server includes the Data Explorer at `/` and `/ui`: browse databases and collections, run native JSON queries, edit objects and metadata, and inspect cluster nodes. Connections and tokens can be saved in the browser; database objects stay on the server. The connection form defaults to the server hosting the UI. Other compatible servers can still be selected.
-
-UI source lives in [`ui/`](ui/) inside this repository. Run `npm ci` and `npm run build:ui` before starting from source, or `npm run dev:ui` for the standalone local development view. Packaged releases and Docker images include the compiled UI. See [Contributing](CONTRIBUTING.md) for development and tests.
-
-## Object Model
+Keep dynamic JSON objects in memory. Query, aggregate, and follow live references. Use indexes, compact columns, and compressed memory to fit more data. Scale across shards and replicas, with local WAL and S3 durability when configured.
 
 ```text
-database
-  collection
-    object
+database -> collection -> objects
 ```
 
-- A **database** is an independent namespace.
-- A **collection** holds dynamic objects and one small metadata document.
-- An **object** is a schema-free JSON record identified by `_id`.
+Objects need no shared schema. Each has an `_id`; collections have metadata for indexes, storage, and conditional read defaults. Applications connect through REST or the small JavaScript client.
 
-Objects in one collection may have completely different fields and value types. Metadata optimizes how a collection is stored and queried without imposing a schema.
+## Start the Database
 
-## Object Anatomy
-
-An object starts as ordinary JSON:
-
-```json
-{
-  "_id": "post-1",
-  "title": "Hello",
-  "status": "published",
-  "author": {
-    "type": "reference",
-    "collection": "users",
-    "value": "user-1"
-  },
-  "_vec": [0.12, 0.48, 0.91]
-}
-```
-
-- `_id` is unique inside its collection. OBJY DB generates a compact id when it is omitted.
-- References point to objects in another collection or database. They stay live rather than storing an embedded copy and can be expanded or queried through `.object` paths.
-- `_vec` supplies a custom embedding for vector search. Vector data is indexed separately and hidden from ordinary reads.
-- `_file` can connect an object to a private S3 blob, so metadata, permissions, and file content share one object lifecycle.
-
-Reads still return complete, ordinary objects. Indexes, columns, references, compression, vectors, and files remain storage and query capabilities rather than a second object format.
-
-## Collection Meta
-
-Every collection has a small metadata object that configures its derived behavior:
-
-```json
-{
-  "indexes": ["status", "tenantId"],
-  "columns": ["score"],
-  "tiering": {
-    "mode": "compressedMemory",
-    "keep": ["name", "status", "tenantId"],
-    "minBytes": 4096
-  },
-  "structure": [
-    {
-      "condition": { "type": "asset" },
-      "apply": { "lifecycle": { "managed": true } }
-    }
-  ]
-}
-```
-
-### Indexes
-
-Indexes maintain an in-memory lookup from field values to matching objects. A query on an indexed field can start with a small candidate set instead of scanning the entire collection. Nested field paths are supported too.
-
-```js
-await assets.find({ status: "active", tenantId: "acme" });
-```
-
-### Columns
-
-Columns keep selected values in RID-addressed typed storage. They are useful for numeric aggregation such as `$sum`, `$avg`, `$min`, and `$max` without changing the returned object shape.
-
-### Compressed Memory
-
-Compressed memory keeps the fields in `keep` directly available and compresses the rest of each object when its compressible payload reaches `minBytes`. Indexed and column fields remain hot automatically. Reads transparently hydrate the original full JSON object, so applications do not need a different query or response format. Use `offload` instead of `keep` when naming the fields to compress is simpler.
-
-### Structure
-
-Structure adds conditional virtual values to returned objects without storing a copy on every object. `condition: {}` applies to every object, later matching entries override earlier virtual values, and explicit object values always win.
-
-```json
-{
-  "structure": [
-    {
-      "condition": { "type": "asset" },
-      "apply": { "status": "managed" }
-    }
-  ]
-}
-```
-
-Virtual values are currently read-only defaults. Filters, sorting, paging membership, aggregation, indexes, columns, persistence, and replication use physical object fields only. Unsetting a physical override reveals its virtual fallback on the next read. Changing structure takes effect on the next read without rewriting objects or rebuilding indexes.
-
-Changing meta rebuilds the affected in-memory structures cooperatively. Full objects remain the persistence format and the API result shape.
-
-## Run the Server
-
-The deployment CLI installs and starts OBJY DB locally:
+The deployment CLI (Node.js 22+) downloads and starts OBJY DB locally:
 
 ```sh
 npm install --global @objy/cli
 objy deploy local --name dev --size tiny
 ```
 
-It prints the server URL and initial administrator password. Open the URL for the admin console.
+Open the printed URL for the Data Explorer and sign in with the initial administrator password printed in the logs.
 
 ```sh
 objy status dev
 objy logs dev --follow
-objy restart dev
 objy stop dev
+objy start dev
 ```
 
-<details>
-<summary><strong>Start from another Node.js process</strong></summary>
+Prefer to run it yourself? See [Run the Server](https://github.com/objy-org/objy/blob/main/DB.md#run-the-server) for direct Node.js startup and configuration.
 
-```sh
-npm install @objy/db
-```
-
-```js
-import { startServer } from "@objy/db";
-
-const runtime = await startServer({ port: 8080 });
-console.log(`OBJY DB listening on http://127.0.0.1:${runtime.port}`);
-```
-
-</details>
-
-## Architecture
-
-![OBJY DB server architecture](https://raw.githubusercontent.com/objy-org/objy/main/public/branding/objy-server-architecture.svg)
-
-Requests may enter either node. Each shard has two in-memory replicas, nodes replicate asynchronously, and S3 holds the shared shard map, journals, and snapshots. The local WAL protects acknowledged writes before asynchronous persistence catches up.
-
-## Configuration
-
-OBJY DB reads `objydb.config.json`. This example shows a durable S3-backed node:
-
-```json
-{
-  "node": {
-    "id": "node-a",
-    "url": "http://node-a:8080",
-    "retainOps": 256,
-    "syncBatchSize": 50000
-  },
-  "server": {
-    "port": 8080,
-    "cors": false
-  },
-  "storage": {
-    "engine": "object"
-  },
-  "files": {
-    "mode": "s3",
-    "prefix": "objydb/files"
-  },
-  "memoryGuard": {
-    "enabled": true,
-    "rejectWritesPercent": 85,
-    "resumeWritesPercent": 78
-  },
-  "cluster": {
-    "syncMs": 2500,
-    "forwardTimeoutMs": 60000,
-    "replicationTimeoutMs": 60000,
-    "shardMapStore": {
-      "mode": "s3",
-      "prefix": "objydb",
-      "key": "cluster/shard-map.json"
-    }
-  },
-  "auth": {
-    "accessTokenTtlSeconds": 3600,
-    "refreshTokenTtlSeconds": 1209600
-  },
-  "persistence": {
-    "mode": "s3",
-    "prefix": "objydb",
-    "ack": "localWal",
-    "flushMs": 5000,
-    "snapshotMs": 60000,
-    "compactJournals": true,
-    "snapshotRetention": { "keepLatest": 5 },
-    "localWal": {
-      "mode": "on",
-      "dir": "/var/lib/objydb/wal",
-      "fsync": true
-    },
-    "s3": {
-      "bucket": "objydb",
-      "endpoint": "https://s3.example.com",
-      "region": "us-east-1",
-      "accessKeyId": { "fromEnvironment": "OBJYDB_S3_ACCESS_KEY_ID" },
-      "secretAccessKey": { "fromEnvironment": "OBJYDB_S3_SECRET_ACCESS_KEY" }
-    }
-  }
-}
-```
-
-| Section | Purpose |
-| --- | --- |
-| `node` | Local identity, public URL, retained replication operations, and pull batch size. Every peer needs a unique `id` and `url`. |
-| `server` | HTTP port, CORS, and request limits. |
-| `storage` | In-memory engine. `object` is the default. |
-| `files` | Optional object-backed file storage. S3 settings inherit from `persistence.s3`. |
-| `memoryGuard` | Pauses writes under memory pressure and resumes them after usage falls below the lower threshold. |
-| `cluster` | Replication timing, forwarding timeouts, hints, and shard-map storage. A map may be inline or shared through S3. |
-| `auth` | Access- and refresh-token lifetimes. System secrets and the first admin password are generated when omitted. |
-| `persistence` | Durability mode, namespace, WAL acknowledgement, journal flushes, snapshots, retention, and S3 access. |
-| `imports`, `plugins`, `vector` | Optional limits, server plugins, and vector-index settings. |
-
-Nodes in one cluster share the S3 bucket and prefix. Give each node a unique identity and keep its WAL on durable local storage. Use `mode: "off"` for persistence and shard-map storage when running a temporary memory-only server.
-
-## Use the Client
+## Work with Objects
 
 ```sh
 npm install @objy/client
@@ -258,48 +49,32 @@ npm install @objy/client
 ```js
 import { createClient } from "@objy/client";
 
-const client = createClient({ url: "http://localhost:8080" });
+const client = createClient({ url: "http://127.0.0.1:8080" });
 await client.login({ username: "admin", password: "<printed-password>" });
 
 await client.createDatabase("app");
 const app = client.database("app");
 await app.createCollection("assets", { indexes: ["status"] });
-
 const assets = app.collection("assets");
-```
 
-### Object Operations
-
-The complete object surface stays on one collection handle:
-
-```js
-// One object
 await assets.insert({ _id: "a1", name: "Laptop", status: "new" });
 await assets.get("a1");
+await assets.find({ status: "new" });
 await assets.replace("a1", { name: "Laptop Pro", status: "active" });
 await assets.patch("a1", { $set: { score: 9 }, $unset: ["status"] });
 await assets.remove("a1");
-
-// Read many
-await assets.find({ score: { $gte: 5 } }, { limit: 20, sortBy: "score" });
-await assets.search({ status: "active" });
-await assets.count({ status: "active" });
-for await (const asset of assets.iterate({ status: "active" })) console.log(asset);
-
-// Write many
-await assets.insertMany([{ _id: "a2" }, { _id: "a3" }]);
-await assets.replaceMany([{ _id: "a2", status: "active" }]);
-await assets.patchMany([{ _id: "a2", $set: { score: 10 } }]);
-await assets.removeMany(["a2", "a3"]);
-
-// Stream insert, replace, patch, or remove sources as NDJSON
-await assets.import(source, { operation: "insert" });
 ```
 
-`replace` is a full-object upsert. `patch` supports Mongo-like `$set` and `$unset`. Aggregation, vectors, references, and files use the same collection context and are covered by the [client guide](https://github.com/objy-org/objy-client) and [REST API](API.md).
+The same collection handle supports bulk and streamed writes, aggregation, vector search, references, and files. `@objy/db` runs the database; `@objy/client` connects to it; `@objy/cli` manages deployments.
 
-See [BENCHMARKS.md](BENCHMARKS.md) for reproducible performance results.
+## Go Deeper
+
+- [Database guide](https://github.com/objy-org/objy/blob/main/DB.md): objects, queries, collection meta, configuration, persistence, and clusters.
+- [JavaScript client](https://github.com/objy-org/objy-client): application API and client options.
+- [REST API](https://github.com/objy-org/objy/blob/main/API.md): public endpoints with requests and responses.
+- [Benchmarks](https://github.com/objy-org/objy/blob/main/BENCHMARKS.md): reproducible measurements and their limits.
+- [Contributing](https://github.com/objy-org/objy/blob/main/CONTRIBUTING.md): source setup, development, and verification.
 
 ## License
 
-Original source code is available under the [MIT License](LICENSE). OBJY and OBJY DB names, logos, brand artwork, and product copy remain reserved as described in [NOTICE.md](NOTICE.md). Third-party materials retain their respective licenses.
+Original source code is available under the [MIT License](https://github.com/objy-org/objy/blob/main/LICENSE). OBJY and OBJY DB names, logos, brand artwork, and product copy remain reserved as described in [NOTICE.md](https://github.com/objy-org/objy/blob/main/NOTICE.md). Third-party materials retain their respective licenses.

@@ -1,5 +1,7 @@
 # Collection JSON queries — 2026-11-10
 
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
 `npm test`: **75/75 passing**. Build, JavaScript syntax checks and `git diff --check` passed.
 
 Seven new real-server tests cover native filters and sort, collection totals versus match counts, Load more, explicit JSON pagination, aggregation, native reference expansion, read-only derived results, query retention through refresh/writes, per-collection isolation, empty results, failed requests retaining the previous snapshot, and paging beyond the server's 250-row cap.

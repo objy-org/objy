@@ -2,6 +2,8 @@
 
 ## Checks
 
+> Historical report, not current product documentation. See the [verification guide](../README.md) for the current tests.
+
 - `npm test`: **68/68 passing**. New real-HTTP integration cases verify full JSON replacement by immutable ID, key-order-independent snapshot checks, rejection of stale saves/deletes, deletion of exactly one selected ID, and native metadata round-trips/conflicts.
 - Browser build, JavaScript syntax checks and `git diff --check` passed.
 - Actual local browser testing used the official OBJY client against a separate, disposable in-memory server. No objects were modified on the user's CLI test server.

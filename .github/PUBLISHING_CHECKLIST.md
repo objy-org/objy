@@ -27,7 +27,7 @@ Use this before publishing an OBJY DB release to GitHub, npm, or a container reg
 - [ ] Run `npm run test:package` against a clean tarball installation.
 - [ ] Build and smoke-test the Docker image.
 - [ ] Start a multi-node cluster and verify routing, replication, persistence, queries, aggregations, references, and vector search.
-- [ ] Verify the main and packaged READMEs, API, benchmarks, changelog, links, and images.
+- [ ] Verify the shared source/package README, DB guide, API, benchmarks, changelog, links, and images.
 
 ## Publish
 

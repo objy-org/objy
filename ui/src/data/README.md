@@ -52,13 +52,4 @@ Attachments use `insertFile`, `replaceFile` and `download` from the official cli
 
 ## Local development
 
-This directory is the `ui/` workspace of the OBJY Server repository. Root `npm ci` installs dependencies. Root `npm run build:ui` builds this UI, and root `npm test` builds it before testing both server and UI. The commands below also work from `ui/` after the root install. The root build also writes the server’s generated assets under `public/ui/` so the CLI’s existing release-file allowlist includes them. The hosting server serves these assets at `/`, `/ui`, and `/ui/`; server packaging and Docker compile and include them automatically.
-
-Editable UI source lives in `src/ui/`, with the page template in `src/index.html`. The standalone explorer and its integration documentation are in `src/ui/components/`. `dist/` is generated output only and can be deleted and rebuilt. No build reads from or edits source inside `dist/`.
-
-- `npm run build` builds the server-only UI from source, checks for embedded database engines, copies the official client license, fingerprints assets, and replaces obsolete output after a successful build.
-- `npm run dev` builds, serves `dist/` at `http://127.0.0.1:4317/`, and rebuilds when source changes. Refresh the browser after a rebuild. `PORT` overrides the default port.
-- `npm test` runs the HTTP integration, token/session, paging, and refresh regression tests.
-- `npm run test:browser` starts a disposable in-memory OBJY server from this repository and tests its actual UI routes on a separate loopback origin. Open the printed URL and click Run checks. The script prints the report, independently checks server data, shuts down, and exits with a passing/failing status. See `tests/README.md`.
-
-No publishing is part of these commands.
+Use the root [development instructions](../../../CONTRIBUTING.md#development), [UI module map](../../README.md), and [verification guide](../../tests/README.md). Editable UI source lives in `src/ui/`, with the page template in `src/index.html`. The build checks for embedded database engines, copies the official client license, fingerprints assets, and replaces obsolete generated output only after a successful build. It never reads or edits source inside `dist/`.

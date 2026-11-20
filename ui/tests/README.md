@@ -22,7 +22,7 @@ Results appear in the page and terminal. The server independently verifies the r
 
 The 15 browser flows also cover the query builder's filter rows, grouped counts, reopening, cancellation, unsupported JSON and focus return; upload validation, attachment replacement/cancellation, dirty-editor guards, download bytes and filename, exact-name scope deletion confirmation/cancellation, selection cleanup, draft cleanup and protection of unrelated data. The file download is captured at the browser save boundary; its contents still come from the real authenticated client/server. The server independently checks resulting file bytes and deleted-scope blob cleanup.
 
-The earlier `*-qa.md` files record manual checks of previous versions; some describe retired UI or AI behavior. Current source and these executable tests define the current implementation.
+The [archived QA reports](archive/) record manual checks of previous versions, including retired UI or AI behavior. They are historical evidence, not current setup instructions. Current source and these executable tests define the current implementation.
 
 The root Playwright suite runs this same harness in each configured browser for CI; the old console selectors and localStorage-session tests have been replaced. Token rotation, invalid sessions and cross-tab races remain covered by `connection-storage.test.mjs` against the real server and official client.
 
