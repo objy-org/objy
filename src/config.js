@@ -14,6 +14,7 @@ export const DEFAULT_IMPORT_CONFIG = {
   maxBulkBytes: DEFAULT_MAX_JSON_BYTES,
   maxObjectBytes: 8 * 1024 * 1024,
   maxPendingPersistenceBytes: 256 * 1024 * 1024,
+  persistenceWaitMs: 60_000,
   retryAfterMs: 1000,
 };
 
@@ -334,12 +335,13 @@ function normalizeLocalWalConfig(config = {}, ack = "memory") {
   };
 }
 
-function normalizeImportConfig(config = {}) {
+export function normalizeImportConfig(config = {}) {
   return {
     maxBulkObjects: positiveInt(config.maxBulkObjects, DEFAULT_IMPORT_CONFIG.maxBulkObjects),
     maxBulkBytes: positiveInt(config.maxBulkBytes, DEFAULT_IMPORT_CONFIG.maxBulkBytes),
     maxObjectBytes: positiveInt(config.maxObjectBytes, DEFAULT_IMPORT_CONFIG.maxObjectBytes),
     maxPendingPersistenceBytes: positiveInt(config.maxPendingPersistenceBytes, DEFAULT_IMPORT_CONFIG.maxPendingPersistenceBytes),
+    persistenceWaitMs: positiveInt(config.persistenceWaitMs, DEFAULT_IMPORT_CONFIG.persistenceWaitMs),
     retryAfterMs: positiveInt(config.retryAfterMs, DEFAULT_IMPORT_CONFIG.retryAfterMs),
   };
 }

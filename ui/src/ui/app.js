@@ -5,17 +5,18 @@ import {
   ConnectionStorage,
   ClusterMonitor,
 } from "../data/connections.js";
-import { previewKind, mountPreview, saveAttachment } from "./attachments.js";
+import { openAttachment } from "./attachments.js";
 import { showQueryBuilder } from "./query-builder.js";
 
 import { escapeHTML as esc, icon as svg, parseJSON, parseObjectJSON } from "./markup.js";
 const icon = (name) => svg(name, 1.5);
-let clusterMonitor, nodeDialog, attachmentPreview;
+let clusterMonitor, nodeDialog;
 let connections,
   store,
   explorer,
   toastTimer,
   editorBusy = false;
+let countsScheduled = false;
 const dialog = new Dialog(render);
 function toast(message) {
   const el = document.querySelector("#toast");
@@ -26,7 +27,6 @@ function toast(message) {
 }
 function render() {
   if (!explorer) return;
-  if (attachmentPreview && attachmentPreview.store !== store) dialog.close(true);
   const entry = connections.active;
   const pending = entry?.loading || new Set(),
     errors = entry?.errors || new Map();
@@ -34,6 +34,8 @@ function render() {
     pending.size || errors.size
       ? store.databases.map((db) => ({
           ...db,
+          loading: pending.has(JSON.stringify([db.id])),
+          error: errors.get(JSON.stringify([db.id])),
           collections: db.collections.map((c) => ({
             ...c,
             loading: pending.has(JSON.stringify([db.id, c.id])),
@@ -67,6 +69,24 @@ function render() {
   ].filter(Boolean);
   notice.hidden = !notices.length;
   notice.textContent = notices.join(" ");
+  // Let the rows paint before optional counts start. No polling or automatic retries.
+  const selection = explorer.selection;
+  const page = selection?.collectionId && store?.assertCollection(selection.databaseId, selection.collectionId);
+  if (page?.loaded && !page.directQuery && !page.countError &&
+      (page.count === null || page.resultCount === null) &&
+      !pending.size && !dialog.busy && !editorBusy && !countsScheduled) {
+    countsScheduled = true;
+    requestAnimationFrame(() => setTimeout(async () => {
+      countsScheduled = false;
+      const target = store;
+      if (!target || explorer.selection?.collectionId !== selection.collectionId ||
+          explorer.selection?.databaseId !== selection.databaseId) return;
+      try {
+        const changed = await target.loadCounts(selection.databaseId, selection.collectionId);
+        if (changed && store === target) render();
+      } catch { /* A removed collection or connection needs no count. */ }
+    }, 0));
+  }
 }
 function renderClusterNodes(state) {
   renderNodeDetails(state);
@@ -207,38 +227,16 @@ function attachFile({ databaseId: database, collectionId: collection, objectId: 
     toast(replacing ? "Attachment replaced" : "File attached");
   });
 }
-function disposeAttachmentPreview() {
-  attachmentPreview?.controller.abort();
-  attachmentPreview?.dispose?.();
-  attachmentPreview = null;
-}
 async function openFile({ databaseId: database, collectionId: collection, objectId: id, original }) {
   if (!store || dialog.busy || editorBusy) return;
-  const targetStore = store, name = String(original.name || id);
-  const modal = dialog.show(name, '<div class="file-viewer" role="region" aria-label="Attachment preview"><p role="status">Loading attachment…</p></div><div class="modal-actions"><button type="button" class="secondary-btn" data-download-preview disabled>Download</button></div>',
-    null, { className: "file-preview-modal", onClose: disposeAttachmentPreview });
-  const viewer = modal.querySelector(".file-viewer"),
-    download = modal.querySelector("[data-download-preview]"),
-    preview = { store: targetStore, controller: new AbortController() };
-  attachmentPreview = preview;
+  const targetStore = store;
   try {
-    const blob = await targetStore.downloadFile(database, collection, id, { signal: preview.controller.signal });
-    const kind = await previewKind(blob);
-    if (attachmentPreview !== preview) return;
-    if (!kind) {
-      dialog.close();
-      saveAttachment(blob, name);
-      return;
-    }
-    download.disabled = false;
-    download.addEventListener("click", () => saveAttachment(blob, name));
-    preview.dispose = mountPreview(viewer, blob, name, kind);
+    await openAttachment(
+      (signal) => targetStore.downloadFile(database, collection, id, { signal }),
+      String(original.name || id),
+    );
   } catch (error) {
-    if (attachmentPreview !== preview) return;
-    viewer.textContent = "";
-    const message = modal.querySelector(".modal-error");
-    message.textContent = error.message;
-    message.hidden = false;
+    if (store === targetStore) toast(error.message);
   }
 }
 async function writeObject(detail, remove = false) {
@@ -368,11 +366,14 @@ function saveConnectionView() {
 }
 function showActiveConnection() {
   const entry = connections.active;
+  if (store && store !== entry?.store) store.releasePages();
   store = entry?.store;
   explorer.databases = store?.databases || [];
   explorer.viewState = entry?.viewState || {};
   dialog.close(true);
   render();
+  const selected = explorer.selection;
+  if (selected?.collectionId) void loadObjects(selected);
 }
 function connectionChanged() {
   if (!explorer) return;
@@ -439,6 +440,21 @@ function connectionSettings(selectedId) {
     },
   );
 }
+async function loadDatabase({ databaseId: database }) {
+  const entry = connections.active;
+  if (!entry || entry.store.assertDatabase(database).collectionsLoaded) return;
+  const key = JSON.stringify([database]);
+  if (entry.loading.has(key)) return;
+  entry.loading.add(key);
+  entry.errors.delete(key);
+  render();
+  try { await entry.store.loadDatabase(database); }
+  catch (error) { entry.errors.set(key, error.message); }
+  finally {
+    entry.loading.delete(key);
+    if (connections.active === entry) render();
+  }
+}
 async function loadObjects({ databaseId: database, collectionId: collection, more = false, query }) {
   const entry = connections.active, querying = query !== undefined;
   if (!entry) {
@@ -453,7 +469,8 @@ async function loadObjects({ databaseId: database, collectionId: collection, mor
     return;
   }
   const cached = entry.store.assertCollection(database, collection);
-  if (!querying && cached.loaded && !more && !entry.errors.has(key)) return;
+  entry.store.activateCollection(database, collection);
+  if (!querying && cached.loaded && !more && !entry.errors.has(key)) { render(); return; }
   entry.loading.add(key);
   if (!querying) entry.errors.delete(key);
   render();
@@ -529,6 +546,7 @@ async function initialize() {
     clusterMonitor = new ClusterMonitor({ onChange: renderClusterNodes });
     explorer = document.querySelector("objy-data-explorer");
     const actions = {
+      "database-expand": loadDatabase,
       "build-query": (detail) => {
         if (!store || dialog.busy || editorBusy) return;
         const objects = store.assertCollection(detail.databaseId, detail.collectionId).objects;

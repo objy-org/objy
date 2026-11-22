@@ -66,6 +66,10 @@ Authentication is collection-based: any collection may contain user objects. On 
 
 Passwords are hashed on write and redacted from responses. Tokens are scoped to the database and collection used for authentication.
 
+Passwords are plaintext inputs, even when they resemble a hash, and must fit within 1024 UTF-8 bytes. New passwords use salted PBKDF2-HMAC-SHA256 with 600,000 iterations. Existing weaker hashes are upgraded after successful login through the normal durable write path. Hashing is asynchronous and bounded; overload returns `503` with `Retry-After` rather than queuing unlimited work.
+
+Access tokens remain valid until expiry, even after account deletion or permission changes. Renewal reloads the current user and permissions; it fails if the account is missing or its `tokenVersion` changed.
+
 ### Login
 
 **Request**
@@ -728,6 +732,8 @@ Prefer: return=minimal
 
 If a streamed request fails after earlier chunks were written, those earlier chunks stay committed. Use stable `_id` values when clients retry large streams. Omitted `_id` values are allowed on insert, but generated ids are not returned by minimal streamed responses.
 
+When persistence falls behind, the owning node pauses the next batch before applying it, for up to `imports.persistenceWaitMs` (default 60000 ms). This uses flush completion notifications, not polling, and also applies to ordinary writes and replication. A timeout, storage failure, or exhausted waiting capacity returns `503` with `Retry-After`; a disconnected client cancels an unapplied waiting batch. Earlier completed batches remain committed. Client/proxy timeouts still apply, so allow enough time for large streams. Write acknowledgement policy is unchanged.
+
 #### Stream Insert
 
 **Request**
@@ -862,6 +868,14 @@ Object-level rules combine a query with `c`, `r`, `u`, and `d` permissions:
 ```
 
 Read rules are merged into the requested query. Updates must permit both the stored object and its resulting value. A non-admin user without a matching rule or collection grant is denied by default.
+
+Account security is separate from ordinary collection-write access, in every collection:
+
+- Only a database admin (for that database) or global admin may assign or change an account's `admin`, `role`, `permissions`, `collectionPermissions`, or `tokenVersion`.
+- With the usual write permission, users may change their own credentials or delete their own account. Other accounts' credentials and deletion require an admin. Ownership matches database, collection, and `_id`, not username alone.
+- Creating an unprivileged account is allowed with create permission; activating an object with existing privilege fields requires an admin. Ordinary non-account objects may still use those field names as business data.
+
+These checks cover single, bulk, NDJSON, multipart, and hook-modified writes. Unauthorized changes return `403`; fields are not silently stripped. Already issued access tokens retain their authority until expiry.
 
 ## File Handling
 

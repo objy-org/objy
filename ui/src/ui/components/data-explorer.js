@@ -17,13 +17,24 @@ import { escapeHTML as escape, icon as svg, parseObjectJSON } from "../markup.js
  */
 const keyFor = (...parts) => JSON.stringify(parts);
 const objectLabel = (object) => String(object._id ?? object.id ?? "No ID");
+const previews = new WeakMap();
 const format = (object) => JSON.stringify(object, null, 2);
-const preview = (object) =>
-  JSON.stringify(
-    Object.fromEntries(
-      Object.entries(object).filter(([key]) => key !== "_id"),
-    ),
-  ).slice(0, 180);
+const preview = (object) => {
+  if (!previews.has(object)) {
+    // Bound work even when one field contains a very large string or nested array.
+    const sample = (value, depth = 0) => {
+      if (typeof value === "string") return value.slice(0, 180);
+      if (!value || typeof value !== "object") return value;
+      if (depth === 2) return Array.isArray(value) ? ["…"] : { "…": "…" };
+      if (Array.isArray(value)) return value.slice(0, 4).map((v) => sample(v, depth + 1));
+      return Object.fromEntries(Object.keys(value).slice(0, 8).map((k) => [k, sample(value[k], depth + 1)]));
+    };
+    const keys = Object.keys(object).filter((key) => key !== "_id").slice(0, 8);
+    previews.set(object, JSON.stringify(Object.fromEntries(keys.map((key) => [key, sample(object[key])]))).slice(0, 180));
+  }
+  return previews.get(object);
+};
+const ROW_HEIGHT = 52, OVERSCAN = 6;
 const styles = `
   :host { display:block; min-width:0; container-type:inline-size; font-family:inherit; color:var(--ink,#e7e7e7); color-scheme:dark; }
   * { box-sizing:border-box; }
@@ -31,6 +42,7 @@ const styles = `
   button:disabled { cursor:default; opacity:.35; }
   .icon-button:disabled:hover { background:none; }
   .objects-pane h2 { flex:1; }
+  .objects-header,.objects-footer { flex-shrink:0; }
   .objects-pane .count,.objects-pane .icon-button { margin-left:0; }
   ::selection { background:var(--selection,#474747); color:var(--ink,#e7e7e7); }
   button:focus-visible { outline:1px solid var(--accent,#c4c4c4); outline-offset:-2px; }
@@ -74,7 +86,7 @@ const styles = `
   .scope-delete { opacity:0; }
   .node-row:hover .scope-delete,.node-row:focus-within .scope-delete { opacity:1; }
   @media(hover:none) { .scope-delete { opacity:1; } }
-  .object-row { width:100%; display:flex; gap:9px; align-items:center; padding:10px 9px; text-align:left; border-radius:5px; color:var(--secondary,#b8b8b8); }
+  .object-row { height:52px; width:100%; display:flex; gap:9px; align-items:center; padding:10px 9px; text-align:left; border-radius:5px; color:var(--secondary,#b8b8b8); }
   .object-text { display:flex; flex:1; flex-direction:column; gap:5px; min-width:0; }
   .object-label { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .object-preview { font:9px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted,#929292); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -109,6 +121,9 @@ class DataExplorer extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._databases = [];
     this._nodes = new Map();
+    this._objectKeys = [];
+    this._markup = new Map();
+    this._treeDirty = true;
     this._expanded = new Set();
     this._collection =
       this._selected =
@@ -117,6 +132,7 @@ class DataExplorer extends HTMLElement {
         null;
     this._initialized = false;
     this._drafts = new Map();
+    this._draftSources = new WeakMap();
     this._queries = new Map();
     this._busy = false;
     this.shadowRoot.addEventListener("click", (event) =>
@@ -157,7 +173,10 @@ class DataExplorer extends HTMLElement {
   }
   connectedCallback() {
     this._render();
+    this._resize ||= new ResizeObserver(() => this._renderRows());
+    this._resize.observe(this.shadowRoot.querySelector(".object-list"));
   }
+  disconnectedCallback() { this._resize?.disconnect(); }
   set databases(value) {
     this._databases = Array.isArray(value) ? value : [];
     this._nodes = new Map();
@@ -167,6 +186,9 @@ class DataExplorer extends HTMLElement {
         key: dbKey,
         id: database.id,
         name: String(database.name ?? database.id),
+        loaded: database.collectionsLoaded !== false,
+        loading: database.loading,
+        error: database.error,
         type: "database",
         children: [],
         parent: null,
@@ -186,49 +208,24 @@ class DataExplorer extends HTMLElement {
           loading: collection.loading,
           error: collection.error,
           hasMore: collection.hasMore,
+          objects: collection.objects || [],
           query: collection.query || null,
           readOnly: collection.readOnly,
           directQuery: collection.directQuery,
-          resultCount: collection.resultCount ?? collection.count,
+          resultCount: Object.hasOwn(collection, "resultCount") ? collection.resultCount : collection.count,
           count:
-            collection.count ??
+            Object.hasOwn(collection, "count") ? collection.count :
             (collection.loaded === false
               ? null
               : (collection.objects || []).length),
         };
         dbNode.children.push(colKey);
         this._nodes.set(colKey, colNode);
-        (collection.objects || []).forEach((object, index) => {
-          const result =
-            collection.readOnly || (object._id == null && object.id == null);
-          const key = result
-            ? keyFor(
-                "result",
-                database.id,
-                collection.id,
-                collection.query,
-                index,
-              )
-            : keyFor(
-                "object",
-                database.id,
-                collection.id,
-                object._id ?? object.id,
-              );
-          colNode.children.push(key);
-          this._nodes.set(key, {
-            key,
-            name: result ? `Result ${index + 1}` : objectLabel(object),
-            type: "object",
-            readOnly: result,
-            parent: colKey,
-            object,
-            databaseId: database.id,
-            collectionId: collection.id,
-          });
-        });
+
       });
     });
+    this._indexObjects();
+    this._treeDirty = true;
     this._expanded = new Set(
       [...this._expanded].filter(
         (key) => this._nodes.get(key)?.type === "database",
@@ -254,6 +251,36 @@ class DataExplorer extends HTMLElement {
       this._initialized = true;
     }
     this._render();
+    for (const key of this._expanded) this._loadDatabase(this._nodes.get(key));
+  }
+  _indexObjects() {
+    for (const key of this._objectKeys) this._nodes.delete(key);
+    this._objectKeys = [];
+    const collection = this._nodes.get(this._collection);
+    if (!collection) return;
+    collection.children = [];
+    collection.objects.forEach((object, index) => {
+      const result = collection.readOnly || (object._id == null && object.id == null);
+      const key = result ? keyFor("result", collection.databaseId, collection.id, collection.query, index)
+        : keyFor("object", collection.databaseId, collection.id, object._id ?? object.id);
+      collection.children.push(key);
+      this._objectKeys.push(key);
+      this._nodes.set(key, { key, name: result ? `Result ${index + 1}` : objectLabel(object),
+        type: "object", readOnly: result, parent: collection.key, object,
+        databaseId: collection.databaseId, collectionId: collection.id });
+    });
+  }
+  _loadDatabase(node) {
+    if (node && !node.loaded && !node.loading && !node.error)
+      queueMicrotask(() => {
+        if (this._nodes.get(node.key) === node && this._expanded.has(node.key))
+          this._emit("database-expand", { databaseId: node.id });
+      });
+  }
+  _pruneDrafts() {
+    for (const [key, draft] of this._drafts)
+      if (key !== this._selected && draft.text === draft.base && !draft.pending && !draft.uncertain)
+        this._drafts.delete(key);
   }
   get databases() {
     return this._databases;
@@ -309,14 +336,16 @@ class DataExplorer extends HTMLElement {
         (key) => this._nodes.get(key)?.type === "database",
       ),
     );
-    const selected = this._nodes.get(value.selected);
-    const collection = this._nodes.get(value.collection || selected?.parent);
+    const collection = this._nodes.get(value.collection || this._nodes.get(value.selected)?.parent);
     this._collection =
       collection?.type === "collection" ? collection.key : null;
+    this._indexObjects();
+    const selected = this._nodes.get(value.selected);
     this._selected =
       selected?.type === "object" && selected.parent === this._collection
         ? selected.key
         : null;
+    this._treeDirty = true;
     this._focused = this._nodes.has(value.focused) ? value.focused : null;
     this._objectFocus = value.objectFocus || this._selected;
     this._render();
@@ -325,6 +354,8 @@ class DataExplorer extends HTMLElement {
       value.objectsScrollTop || 0;
     const json = this.shadowRoot.querySelector(".json");
     if (json) json.scrollTop = value.jsonScrollTop || 0;
+    this._renderRows(true);
+    for (const key of this._expanded) this._loadDatabase(this._nodes.get(key));
   }
   selectDatabase(databaseId) {
     const key = keyFor("database", databaseId);
@@ -332,6 +363,9 @@ class DataExplorer extends HTMLElement {
     this._expanded.add(key);
     this._collection = this._selected = this._objectFocus = null;
     this._focused = key;
+    this._indexObjects();
+    this._treeDirty = true;
+    this._loadDatabase(this._nodes.get(key));
     this._render({ resetObjects: true, resetJson: true });
     this._focus(key);
   }
@@ -343,6 +377,9 @@ class DataExplorer extends HTMLElement {
     const changed = this._collection !== node.key;
     if (changed) this._selected = this._objectFocus = null;
     this._collection = node.key;
+    this._indexObjects();
+    this._pruneDrafts();
+    this._treeDirty = true;
     this._expanded.add(node.parent);
     this._focused = node.key;
     this._render({ resetObjects: changed, resetJson: changed });
@@ -455,8 +492,9 @@ class DataExplorer extends HTMLElement {
   }
   _draft(node) {
     if (!node) return null;
-    const base = format(node.object);
     let draft = this._drafts.get(node.key);
+    if (draft && this._draftSources.get(draft) === node.object) return draft;
+    const base = format(node.object);
     if (
       !draft ||
       (draft.text === draft.base &&
@@ -475,6 +513,7 @@ class DataExplorer extends HTMLElement {
       };
       this._drafts.set(node.key, draft);
     }
+    this._draftSources.set(draft, node.object);
     return draft;
   }
   _updateEditor() {
@@ -595,8 +634,8 @@ class DataExplorer extends HTMLElement {
   }
   _visibleNodes() {
     const result = [];
-    for (const node of this._nodes.values())
-      if (node.type === "database") {
+    for (const db of this._databases) {
+        const node = this._nodes.get(keyFor("database", db.id));
         result.push(node);
         if (this._expanded.has(node.key))
           result.push(...node.children.map((key) => this._nodes.get(key)));
@@ -609,69 +648,93 @@ class DataExplorer extends HTMLElement {
     const button = `<button type="button" class="node ${node.type}" role="treeitem" aria-label="${escape(node.name)}, ${node.type}" aria-level="${database ? 1 : 2}" ${database ? `aria-expanded="${expanded}"` : ""} aria-selected="${this._collection === node.key}" data-node="${escape(node.key)}" tabindex="${this._focused === node.key ? "0" : "-1"}" title="${escape(node.name)}">${database ? `<span class="chevron">${svg("chevron")}</span>` : ""}<span class="node-icon">${svg(node.type)}</span><span class="label">${escape(node.name)}</span>${database ? "" : `<span class="count" aria-hidden="true">${node.count ?? "–"}</span>`}</button>`;
     const remove = database && node.id === "_global" ? "" : `<button type="button" class="icon-button scope-delete" data-delete-scope="${escape(node.key)}" aria-label="Delete ${node.type} ${escape(database ? node.name : `${node.databaseId}/${node.name}`)}" title="Delete ${node.type}">${svg("trash")}</button>`;
     if (!database) return `<div class="node-row" role="none">${button}${remove}</div>`;
-    return `<div role="none"><div class="node-row" role="none">${button}${remove}<button type="button" class="icon-button" data-add-collection="${escape(node.key)}" aria-label="Add collection to ${escape(node.name)}" title="Add collection">${svg("plus")}</button></div>${expanded ? `<div role="group" aria-label="Collections in ${escape(node.name)}">${node.children.map((key) => this._nodeMarkup(this._nodes.get(key))).join("") || '<div class="tree-note">No collections</div>'}</div>` : ""}</div>`;
+    return `<div role="none"><div class="node-row" role="none">${button}${remove}<button type="button" class="icon-button" data-add-collection="${escape(node.key)}" aria-label="Add collection to ${escape(node.name)}" title="Add collection">${svg("plus")}</button></div>${expanded ? `<div role="group" aria-label="Collections in ${escape(node.name)}">${node.loading ? '<div class="tree-note">Loading…</div>' : node.error ? `<div class="tree-note">${escape(node.error)}<button data-load-database="${escape(node.key)}">Retry</button></div>` : node.children.map((key) => this._nodeMarkup(this._nodes.get(key))).join("") || `<div class="tree-note">${node.loaded ? "No collections" : "Select to load"}</div>`}</div>` : ""}</div>`;
+  }
+  _setHTML(selector, markup) {
+    if (this._markup.get(selector) === markup) return;
+    this._markup.set(selector, markup);
+    this.shadowRoot.querySelector(selector).innerHTML = markup;
   }
   _render({ resetObjects = false, resetJson = false } = {}) {
-    const previousQuery = this.shadowRoot.querySelector(".query-input");
-    const querying =
-      this.shadowRoot.activeElement === previousQuery && previousQuery;
-    const queryCaret = querying
-      ? [previousQuery.selectionStart, previousQuery.selectionEnd]
-      : null;
-    const previousEditor = this.shadowRoot.querySelector(".json");
-    const editing =
-      this.shadowRoot.activeElement === previousEditor && previousEditor;
-    const caret = editing
-      ? [previousEditor.selectionStart, previousEditor.selectionEnd]
-      : null;
-    const scrolls = [".tree", ".object-list", ".json"].map(
-      (selector) => this.shadowRoot.querySelector(selector)?.scrollTop || 0,
-    );
-    const visible = this._visibleNodes();
-    if (!visible.some((node) => node.key === this._focused))
-      this._focused = visible[0]?.key || null;
-    const collection = this._nodes.get(this._collection);
-    const queryState = this._queryState(),
-      resultCount = collection?.resultCount ?? collection?.count;
-    const objects = (collection?.children || []).map((key) =>
-      this._nodes.get(key),
-    );
-    if (!objects.some((node) => node.key === this._objectFocus))
-      this._objectFocus = this._selected || objects[0]?.key || null;
-    const selected = this._nodes.get(this._selected),
-      draft = this._draft(selected);
-    const databases = [...this._nodes.values()].filter(
-      (node) => node.type === "database",
-    );
-    this.shadowRoot.innerHTML = `<style>${styles}</style><section class="explorer" aria-label="Data Explorer"><div class="panes">
-      <div class="pane tree-pane"><header class="pane-head"><h2>Databases</h2><button type="button" class="icon-button" data-add-database aria-label="Add database" title="Add database">${svg("plus")}</button></header><div class="tree" role="tree" aria-label="Databases">${databases.map((node) => this._nodeMarkup(node)).join("") || '<div class="empty-list">No databases</div>'}</div></div>
-      <div class="workspace"><div class="query-panel"><form class="query-bar" aria-label="Collection query"><textarea class="query-input" rows="1" aria-label="JSON query" placeholder="${collection ? "JSON query…  {}" : "Select a collection to query"}" title="Enter inserts a new line. Command+Enter or Ctrl+Enter runs the query." spellcheck="false" autocomplete="off" autocapitalize="off">${escape(queryState?.text || "")}</textarea><button type="button" class="icon-button" data-build-query aria-label="Query builder" title="Query builder">${svg("settings")}</button><button type="button" class="icon-button" data-clear-query aria-label="Clear query" title="Clear query">${svg("close")}</button><button type="submit" class="icon-button" data-run-query aria-label="Run query" aria-keyshortcuts="Meta+Enter Control+Enter" title="Run query (⌘/Ctrl+Enter)">${svg("run")}</button></form><div class="query-message" role="status" aria-live="polite"></div></div><div class="results-panes">
-      <div class="pane objects-pane"><header class="pane-head"><h2 title="${escape(collection?.name || "")}">${escape(collection?.name || "Objects")}</h2>${collection ? `<span class="count" aria-label="${objects.length} loaded${resultCount == null ? "" : ` of ${resultCount}`} results">${resultCount ?? "–"}</span>` : ""}<button type="button" class="icon-button" data-manage-collection aria-label="Collection metadata" title="Collection metadata" ${collection ? "" : "disabled"}>${svg("settings")}</button><button type="button" class="icon-button" data-add-objects aria-label="Add objects" title="${collection ? "Add objects" : "Select a collection to add objects"}" ${collection ? "" : "disabled"}>${svg("plus")}</button></header><div class="object-list" role="listbox" aria-label="${collection ? `Objects in ${escape(collection.name)}` : "Objects"}">${objects.map((node) => `<button type="button" class="object-row" role="option" aria-selected="${this._selected === node.key}" aria-label="${escape(node.name)}" data-object="${escape(node.key)}" tabindex="${this._objectFocus === node.key ? "0" : "-1"}"><span class="node-icon">${svg("object")}</span><span class="object-text"><span class="object-label" title="${escape(node.name)}">${escape(node.name)}</span><span class="object-preview">${escape(preview(node.object))}</span></span></button>`).join("") || `<div class="empty-list">${collection ? (collection.loading ? "Loading…" : collection.error ? "Could not load objects" : !collection.loaded ? "Select to load" : collection.query ? "No matches" : "No objects") : "Select a collection"}</div>`}</div>${collection?.error ? `<div class="load-state" role="alert">${escape(collection.error)}<button type="button" data-load-objects>Retry</button></div>` : collection?.loading ? '<div class="load-state" role="status">Loading…</div>' : collection?.hasMore ? '<div class="load-state"><button type="button" data-load-objects data-more="true">Load more</button></div>' : ""}</div>
-      <div class="pane viewer" role="region" aria-label="Object JSON"><header class="pane-head"><h2 title="${escape(selected?.name || "")}">${escape(selected?.name || "JSON")}</h2>${selected ? '<span class="dirty-dot" aria-label="Unsaved changes" hidden></span>' : ""}${selected ? `<button type="button" class="icon-button" data-copy aria-label="Copy object JSON" title="Copy JSON">${svg("copy")}</button>` : ""}</header>${selected ? `<textarea class="json" aria-label="JSON for ${escape(selected.name)}" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off">${escape(draft.text)}</textarea><div class="attachment-bar">${svg("attachment")}<span title="${escape(selected.object._file?.mimeType || "")}">${escape(selected.object._file ? selected.object.name || selected.object._file.mimeType || "Attachment" : "No attachment")}</span>${selected.object._file ? `<button type="button" class="icon-button" data-open-file aria-label="Open attachment" title="Open attachment">${svg("open")}</button>` : ""}<button type="button" data-attach-file>${selected.object._file ? "Replace file" : "Attach file"}</button></div><footer class="editor-actions"><button type="button" class="save" data-save>Save</button><button type="button" class="undo" data-undo>Undo</button><button type="button" class="delete" data-delete aria-label="Delete object">Delete</button></footer><div class="editor-status" role="status" aria-live="polite"></div>` : '<div class="empty-view">Select an object</div>'}</div>
-      </div></div></div><span class="sr-only" role="status" aria-live="polite"></span></section>`;
-    this.shadowRoot.querySelector(".tree").scrollTop = scrolls[0];
-    this.shadowRoot.querySelector(".object-list").scrollTop = resetObjects
-      ? 0
-      : scrolls[1];
-    const json = this.shadowRoot.querySelector(".json");
-    if (json) {
-      json.scrollTop = resetJson ? 0 : scrolls[2];
-      if (editing && !resetJson) {
-        json.focus({ preventScroll: true });
-        json.setSelectionRange(...caret);
-      }
+    const collection = this._nodes.get(this._collection), queryState = this._queryState();
+    if (!this.shadowRoot.querySelector(".explorer")) {
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section class="explorer" aria-label="Data Explorer"><div class="panes">
+        <div class="pane tree-pane"><header class="pane-head"><h2>Databases</h2><button type="button" class="icon-button" data-add-database aria-label="Add database" title="Add database">${svg("plus")}</button></header><div class="tree" role="tree" aria-label="Databases"></div></div>
+        <div class="workspace"><div class="query-panel"><form class="query-bar" aria-label="Collection query"><textarea class="query-input" rows="1" aria-label="JSON query" placeholder="${collection ? "JSON query…  {}" : "Select a collection to query"}" title="Enter inserts a new line. Command+Enter or Ctrl+Enter runs the query." spellcheck="false" autocomplete="off" autocapitalize="off">${escape(queryState?.text || "")}</textarea><button type="button" class="icon-button" data-build-query aria-label="Query builder" title="Query builder">${svg("settings")}</button><button type="button" class="icon-button" data-clear-query aria-label="Clear query" title="Clear query">${svg("close")}</button><button type="submit" class="icon-button" data-run-query aria-label="Run query" aria-keyshortcuts="Meta+Enter Control+Enter" title="Run query (⌘/Ctrl+Enter)">${svg("run")}</button></form><div class="query-message" role="status" aria-live="polite"></div></div><div class="results-panes"><div class="pane objects-pane"><div class="objects-header"></div><div class="object-list" role="listbox" aria-label="Objects"></div><div class="objects-footer"></div></div><div class="pane viewer" role="region" aria-label="Object JSON"></div></div></div>
+        </div><span class="sr-only" role="status" aria-live="polite"></span></section>`;
+      this.shadowRoot.querySelector(".object-list").addEventListener("scroll", () => this._renderRows(), { passive: true });
     }
+    if (this._treeDirty) {
+      const visible = this._visibleNodes();
+      if (!visible.some((node) => node.key === this._focused)) this._focused = visible[0]?.key || null;
+      this._setHTML(".tree", this._databases.map((db) => this._nodeMarkup(this._nodes.get(keyFor("database", db.id)))).join("") || '<div class="empty-list">No databases</div>');
+      this._treeDirty = false;
+    }
+    const input = this.shadowRoot.querySelector(".query-input");
+    if (input.value !== (queryState?.text || "")) input.value = queryState?.text || "";
+    input.placeholder = collection ? "JSON query…  {}" : "Select a collection to query";
+    const objects = collection?.objects || [], resultCount = collection?.resultCount;
+    this._setHTML(".objects-header", `<header class="pane-head"><h2 title="${escape(collection?.name || "")}">${escape(collection?.name || "Objects")}</h2>${collection ? `<span class="count" aria-label="${objects.length} loaded${resultCount == null ? "" : ` of ${resultCount}`} results">${resultCount ?? "–"}</span>` : ""}<button type="button" class="icon-button" data-manage-collection aria-label="Collection metadata" title="Collection metadata" ${collection ? "" : "disabled"}>${svg("settings")}</button><button type="button" class="icon-button" data-add-objects aria-label="Add objects" title="${collection ? "Add objects" : "Select a collection to add objects"}" ${collection ? "" : "disabled"}>${svg("plus")}</button></header>`);
+    this._setHTML(".objects-footer", collection?.error
+      ? `<div class="load-state" role="alert">${escape(collection.error)}<button type="button" data-load-objects>Retry</button></div>`
+      : collection?.loading ? '<div class="load-state" role="status">Loading…</div>'
+      : collection?.hasMore ? '<div class="load-state"><button type="button" data-load-objects data-more="true">Load more</button></div>' : "");
+    if (resetObjects) this.shadowRoot.querySelector(".object-list").scrollTop = 0;
+    if (!collection?.children.includes(this._objectFocus)) this._objectFocus = this._selected || collection?.children[0] || null;
+    this._renderRows(this._rowsSource !== objects || this._rowsCollection !== this._collection);
+    this._rowsSource = objects;
+    this._rowsCollection = this._collection;
+    this._renderViewer(resetJson);
     this._updateEditor();
-    if (querying && !resetObjects) {
-      const input = this.shadowRoot.querySelector(".query-input");
-      input.focus({ preventScroll: true });
-      input.setSelectionRange(...queryCaret);
+  }
+  _renderRows(force = false) {
+    const list = this.shadowRoot.querySelector(".object-list");
+    if (!list) return;
+    const collection = this._nodes.get(this._collection), keys = collection?.children || [];
+    const virtual = keys.length > 200;
+    const start = virtual ? Math.min(Math.max(0, keys.length - Math.ceil(list.clientHeight / ROW_HEIGHT)), Math.max(0, Math.floor((list.scrollTop - 8) / ROW_HEIGHT) - OVERSCAN)) : 0;
+    const end = virtual ? Math.min(keys.length, start + Math.ceil(list.clientHeight / ROW_HEIGHT) + 2 * OVERSCAN + 1) : keys.length;
+    const window = `${start}:${end}`;
+    if (!force && this._rowWindow === window) return;
+    this._rowWindow = window;
+    list.setAttribute("aria-label", collection ? `Objects in ${collection.name}` : "Objects");
+    const focused = this.shadowRoot.activeElement?.dataset.object;
+    const objects = keys.slice(start, end).map((key) => this._nodes.get(key));
+    list.innerHTML = keys.length
+      ? `<div aria-hidden="true" style="height:${start * ROW_HEIGHT}px"></div>${objects.map((node, index) => `<button type="button" class="object-row" aria-posinset="${start + index + 1}" aria-setsize="${keys.length}" role="option" aria-selected="${this._selected === node.key}" aria-label="${escape(node.name)}" data-object="${escape(node.key)}" tabindex="${this._objectFocus === node.key ? "0" : "-1"}"><span class="node-icon">${svg("object")}</span><span class="object-text"><span class="object-label" title="${escape(node.name)}">${escape(node.name)}</span><span class="object-preview">${escape(preview(node.object))}</span></span></button>`).join("")}<div aria-hidden="true" style="height:${(keys.length - end) * ROW_HEIGHT}px"></div>`
+      : `<div class="empty-list">${collection ? (collection.loading ? "Loading…" : collection.error ? "Could not load objects" : !collection.loaded ? "Select to load" : collection.query ? "No matches" : "No objects") : "Select a collection"}</div>`;
+    if (focused) this._focus(focused, false);
+  }
+  _renderViewer(reset = false) {
+    const selected = this._nodes.get(this._selected), draft = this._draft(selected);
+    if (this._viewerKey === this._selected && this._viewerSource === selected?.object && this._viewerText === draft?.text) return;
+    const previous = this.shadowRoot.querySelector(".json");
+    const editing = previous && this.shadowRoot.activeElement === previous;
+    const caret = editing ? [previous.selectionStart, previous.selectionEnd] : null;
+    const scrollTop = previous?.scrollTop || 0;
+    this.shadowRoot.querySelector(".viewer").innerHTML = `<header class="pane-head"><h2 title="${escape(selected?.name || "")}">${escape(selected?.name || "JSON")}</h2>${selected ? '<span class="dirty-dot" aria-label="Unsaved changes" hidden></span>' : ""}${selected ? `<button type="button" class="icon-button" data-copy aria-label="Copy object JSON" title="Copy JSON">${svg("copy")}</button>` : ""}</header>${selected ? `<textarea class="json" aria-label="JSON for ${escape(selected.name)}" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off">${escape(draft.text)}</textarea><div class="attachment-bar">${svg("attachment")}<span title="${escape(selected.object._file?.mimeType || "")}">${escape(selected.object._file ? selected.object.name || selected.object._file.mimeType || "Attachment" : "No attachment")}</span>${selected.object._file ? `<button type="button" class="icon-button" data-open-file aria-label="Open attachment" title="Open attachment in new tab">${svg("open")}</button>` : ""}<button type="button" data-attach-file>${selected.object._file ? "Replace file" : "Attach file"}</button></div><footer class="editor-actions"><button type="button" class="save" data-save>Save</button><button type="button" class="undo" data-undo>Undo</button><button type="button" class="delete" data-delete aria-label="Delete object">Delete</button></footer><div class="editor-status" role="status" aria-live="polite"></div>` : '<div class="empty-view">Select an object</div>'}`;
+    this._viewerKey = this._selected;
+    this._viewerSource = selected?.object;
+    this._viewerText = draft?.text;
+    const json = this.shadowRoot.querySelector(".json");
+    if (json && !reset) {
+      json.scrollTop = scrollTop;
+      if (editing) { json.focus({ preventScroll: true }); json.setSelectionRange(...caret); }
     }
   }
   _focus(key, moveFocus = true) {
     const object = this._nodes.get(key)?.type === "object";
-    if (object) this._objectFocus = key;
-    else this._focused = key;
+    if (object) {
+      this._objectFocus = key;
+      if (moveFocus) {
+        const list = this.shadowRoot.querySelector(".object-list");
+        const index = this._nodes.get(this._collection).children.indexOf(key);
+        const top = index * ROW_HEIGHT + 8;
+        if (top < list.scrollTop) list.scrollTop = top;
+        else if (top + ROW_HEIGHT > list.scrollTop + list.clientHeight) list.scrollTop = top + ROW_HEIGHT - list.clientHeight;
+        this._renderRows();
+      }
+    } else this._focused = key;
     for (const button of this.shadowRoot.querySelectorAll(
       object ? "[data-object]" : "[data-node]",
     )) {
@@ -684,13 +747,19 @@ class DataExplorer extends HTMLElement {
   _toggle(node, expanded = !this._expanded.has(node.key)) {
     expanded ? this._expanded.add(node.key) : this._expanded.delete(node.key);
     this._focused = node.key;
+    this._treeDirty = true;
+    if (expanded) this._loadDatabase(node);
     this._render();
     this._focus(node.key);
   }
   _selectObject(node) {
     this._selected = node.key;
     this._objectFocus = node.key;
-    this._render({ resetJson: true });
+    this._pruneDrafts();
+    this._renderViewer(true);
+    for (const row of this.shadowRoot.querySelectorAll("[data-object]"))
+      row.setAttribute("aria-selected", String(row.dataset.object === node.key));
+    this._updateEditor();
     this._focus(node.key);
     this._emit("object-select", {
       databaseId: node.databaseId,
@@ -699,6 +768,8 @@ class DataExplorer extends HTMLElement {
     });
   }
   async _onClick(event) {
+    const retry = event.target.closest("[data-load-database]");
+    if (retry) return this._emit("database-expand", { databaseId: this._nodes.get(retry.dataset.loadDatabase).id });
     if (event.target.closest("[data-build-query]")) {
       const collection = this._nodes.get(this._collection), state = this._queryState();
       if (!collection || this._busy || state.pending || collection.loading) return;

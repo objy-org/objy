@@ -30,6 +30,7 @@ export async function* parseNdjsonBatches(stream, {
 
   for await (const entry of parseNdjsonStream(stream, { maxObjectBytes, label })) {
     if (batch.length && maxBytes && bytes + entry.bytes > maxBytes) {
+      Object.defineProperty(batch, "byteLength", { value: bytes });
       yield batch;
       batch = [];
       bytes = 0;
@@ -37,13 +38,17 @@ export async function* parseNdjsonBatches(stream, {
     batch.push(entry.value);
     bytes += entry.bytes;
     if (batch.length >= maxObjects || (maxBytes && bytes >= maxBytes)) {
+      Object.defineProperty(batch, "byteLength", { value: bytes });
       yield batch;
       batch = [];
       bytes = 0;
     }
   }
 
-  if (batch.length) yield batch;
+  if (batch.length) {
+    Object.defineProperty(batch, "byteLength", { value: bytes });
+    yield batch;
+  }
 }
 
 export async function* parseNdjsonStream(stream, { maxObjectBytes = 0, label = "NDJSON" } = {}) {

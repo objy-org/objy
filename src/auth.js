@@ -1,10 +1,10 @@
 import { createRequire } from "node:module";
-import { normalizeCollectionPermissions, normalizePermissions } from "./permissions.js";
+import { accountAuthority, normalizeCollectionPermissions, normalizePermissions } from "./permissions.js";
 import { randomSecret } from "./system-secrets.js";
 
 const require = createRequire(import.meta.url);
 const JWT = require("./lib/jwt.cjs");
-const { hashPassword, randomUUID, verifyPassword } = require("./lib/crypto.cjs");
+const { assertPassword, hashPassword, parsePasswordHash, passwordNeedsUpgrade, randomUUID, verifyPassword } = require("./lib/crypto.cjs");
 
 export const GLOBAL_DATABASE = "_global";
 export const USERS_COLLECTION = "users";
@@ -25,12 +25,12 @@ export function normalizeAuthConfig(config = {}) {
   };
 }
 
-export function createAuthService(node, config = {}, { environment = process.env } = {}) {
+export async function createAuthService(node, config = {}, { environment = process.env } = {}) {
   const normalized = normalizeAuthConfig(config);
   if (normalized.enabled === false) return new DisabledAuthService();
   normalized.jwtSecret ||= randomSecret();
   const auth = new AuthService(node, normalized);
-  auth.ensureGlobalUsers({ adminPassword: environment?.OBJYDB_ADMIN_PASSWORD });
+  await auth.ensureGlobalUsers({ adminPassword: environment?.OBJYDB_ADMIN_PASSWORD });
   return auth;
 }
 
@@ -43,7 +43,7 @@ export class AuthService {
     this.bootstrapNotice = null;
   }
 
-  ensureGlobalUsers({ adminPassword } = {}) {
+  async ensureGlobalUsers({ adminPassword } = {}) {
     if (this.node.getDatabaseMeta(GLOBAL_DATABASE) === null) {
       this.node.createDatabase(GLOBAL_DATABASE, { system: true });
     }
@@ -61,11 +61,11 @@ export class AuthService {
       });
     }
 
-    for (const user of this.config.users) this.ensureBootstrapUser(user);
-    this.ensureDefaultAdmin(adminPassword);
+    for (const user of this.config.users) await this.ensureBootstrapUser(user);
+    await this.ensureDefaultAdmin(adminPassword);
   }
 
-  ensureDefaultAdmin(adminPassword) {
+  async ensureDefaultAdmin(adminPassword) {
     const id = "admin";
     const shard = this.node.shardForObject(GLOBAL_DATABASE, USERS_COLLECTION, id);
     if (!this.node.isPrimaryForShard(shard)) return null;
@@ -74,7 +74,7 @@ export class AuthService {
 
     const supplied = typeof adminPassword === "string" && adminPassword.length > 0;
     const password = supplied ? adminPassword : randomSecret(18);
-    const user = this.ensureBootstrapUser({
+    const user = await this.ensureBootstrapUser({
       _id: id,
       username: "admin",
       password,
@@ -91,16 +91,19 @@ export class AuthService {
     return notice;
   }
 
-  ensureBootstrapUser(user) {
+  async ensureBootstrapUser(user) {
     const { id: _ignoredId, _id, ...rest } = user;
-    const prepared = this.prepareUserObject({
+    const object = {
       role: "user",
       ...rest,
       _id: _id || user.username,
-    }, { partial: false });
-    const existingById = this.node.has(GLOBAL_DATABASE, USERS_COLLECTION, prepared._id);
-    const existingByUsername = this.findUserByUsername(GLOBAL_DATABASE, USERS_COLLECTION, prepared.username);
-    if (existingById || existingByUsername) return null;
+    };
+    const exists = () => this.node.has(GLOBAL_DATABASE, USERS_COLLECTION, object._id)
+      || this.findUserByUsername(GLOBAL_DATABASE, USERS_COLLECTION, object.username);
+    if (exists()) return null;
+    const [hashed] = await this.hashWritePasswords([object]);
+    const prepared = this.prepareUserObject(hashed, { partial: false });
+    if (exists()) return null;
     return this.node.insertMany(GLOBAL_DATABASE, USERS_COLLECTION, [prepared])[0];
   }
 
@@ -110,11 +113,37 @@ export class AuthService {
     return this.loginFromUsers(database, collection, username, password, this.node.find(database, collection, { username }));
   }
 
-  loginFromUsers(database, collection, username, password, users = []) {
+  async loginFromUsers(database, collection, username, password, users = []) {
     this.assertLoginInput(database, collection, username, password);
-    const user = (users || []).find((candidate) => verifyPassword(password, candidate.password));
-    if (!user) return null;
-    return this.authResponse(database, collection, user);
+    for (const candidate of users || []) {
+      const { _id: id, password: storedHash } = candidate;
+      if (!await verifyPassword(password, storedHash)) continue;
+      const expectedHash = passwordNeedsUpgrade(storedHash)
+        ? await this.upgradePassword(database, collection, { _id: id, password: storedHash }, password)
+        : storedHash;
+      // Hashing and durable writes yield; never issue privileges from an old user snapshot.
+      const current = this.node.get(database, collection, id);
+      if (!expectedHash || current?.password !== expectedHash || current.username !== username) return null;
+      return this.authResponse(database, collection, current);
+    }
+    return null;
+  }
+
+  async upgradePassword(database, collection, { _id: id, password: previousHash }, password) {
+    const hash = await hashPassword(password);
+    const apply = () => {
+      this.node.lifecycle?.assert(database, collection);
+      if (this.node.getField(database, collection, id, "password") !== previousHash) return false;
+      this.node.updateMany(database, collection, [{ _id: id, password: hash }]);
+      return true;
+    };
+    const changed = await (this.durability?.withCapacity ? this.durability.withCapacity(apply) : apply());
+    if (!changed) {
+      const current = this.node.getField(database, collection, id, "password");
+      return await verifyPassword(password, current) ? current : null;
+    }
+    await this.durability?.afterWrite();
+    return hash;
   }
 
   assertLoginInput(database, collection, username, password) {
@@ -126,6 +155,7 @@ export class AuthService {
     if (typeof password !== "string") {
       throw httpError(400, "body.password must be a string");
     }
+    assertPassword(password);
   }
 
   renew(database, collection, refreshToken) {
@@ -194,20 +224,15 @@ export class AuthService {
 
   issueToken(database, collection, user, type, ttlSeconds, sessionId) {
     const now = Math.floor(Date.now() / 1000);
-    const permissions = normalizePermissions(user.permissions);
-    const collectionPermissions = normalizeCollectionPermissions(user.collectionPermissions);
-    const role = user.role || "user";
-    const admin = user.admin === true || role === "admin";
+    const authority = accountAuthority(user);
     return JWT.sign({
       typ: type,
       sub: user._id,
       id: user._id,
       username: user.username,
-      role,
-      userFamily: role,
-      admin,
-      permissions,
-      collectionPermissions,
+      ...authority,
+      userFamily: authority.role,
+      admin: authority.admin || authority.role === "admin",
       authorisations: user.authorisations || {},
       applications: Array.isArray(user.applications) ? user.applications : [],
       database,
@@ -218,7 +243,6 @@ export class AuthService {
       globalUser: this.isGlobalUsersCollection(database, collection),
       sessionId,
       tokenId: sessionId,
-      tokenVersion: user.tokenVersion || 0,
       iat: now,
       exp: now + ttlSeconds,
     }, this.config.jwtSecret);
@@ -261,6 +285,23 @@ export class AuthService {
     }
   }
 
+  async hashWritePasswords(objects, { patch = false } = {}) {
+    let result = objects;
+    for (let i = 0; i < objects.length; i++) {
+      const value = patch ? objects[i]?.$set : objects[i];
+      if (value?.password === undefined) continue;
+      if (typeof value.password !== "string" || value.password.length === 0) {
+        throw httpError(400, "user.password must be a non-empty string");
+      }
+      const password = await hashPassword(value.password);
+      if (result === objects) result = objects.slice();
+      result[i] = patch
+        ? { ...objects[i], $set: { ...value, password } }
+        : { ...value, password };
+    }
+    return result;
+  }
+
   prepareWriteObjects(database, collection, objects, { partial = false } = {}) {
     const prepared = objects.map((object) => {
       const existing = !partial &&
@@ -284,13 +325,8 @@ export class AuthService {
       next.password = existing.password;
     }
 
-    if (!partial && next.password !== undefined) {
-      if (typeof next.username !== "string" || next.username.length === 0) {
-        throw httpError(400, "user.username must be a non-empty string");
-      }
-      if (typeof next.password !== "string" || next.password.length === 0) {
-        throw httpError(400, "user.password must be a non-empty string");
-      }
+    if (!partial && next.password !== undefined && next.username === undefined) {
+      throw httpError(400, "user.username must be a non-empty string");
     }
 
     if (next.username !== undefined && (typeof next.username !== "string" || next.username.length === 0)) {
@@ -300,7 +336,7 @@ export class AuthService {
       if (typeof next.password !== "string" || next.password.length === 0) {
         throw httpError(400, "user.password must be a non-empty string");
       }
-      if (!isPasswordHash(next.password)) next.password = hashPassword(next.password);
+      if (!parsePasswordHash(next.password)) throw httpError(400, "password must be prepared before writing");
     }
     if (next.tokenVersion !== undefined) next.tokenVersion = positiveInt(next.tokenVersion, 0);
     if (next.permissions !== undefined) next.permissions = normalizePermissions(next.permissions);
@@ -401,6 +437,10 @@ class DisabledAuthService {
     return objects;
   }
 
+  hashWritePasswords(objects) {
+    return objects;
+  }
+
   redactObject(_database, _collection, object) {
     return object;
   }
@@ -412,10 +452,6 @@ class DisabledAuthService {
   redactResult(_database, _collection, result) {
     return result;
   }
-}
-
-export function isPasswordHash(value) {
-  return typeof value === "string" && value.startsWith("pbkdf2$sha256$");
 }
 
 export function accessTokenFromRequest(req) {

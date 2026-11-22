@@ -95,6 +95,12 @@ export class CRDTNode {
     return applied.length;
   }
 
+  applyRemoteBatch(fromId, ops, cursorKey = fromId, options = {}) {
+    const apply = () => this.applyRemote(fromId, ops, cursorKey);
+    options.signal?.throwIfAborted();
+    return ops.length && this.writeAdmission ? this.writeAdmission(apply, { bytes: ops.byteLength || 0, ...options }) : apply();
+  }
+
   _writeMany(db, coll, items) {
     this.db.assertCollectionWritable(db, coll);
     return this._commitLocalOps((items || []).map(({ id, value }) => ({
@@ -444,14 +450,15 @@ export class CRDTNode {
     await this.db.awaitVectorIndexes();
   }
 
-  async syncPeer(peer, scope) {
-    return this.lifecycle ? this.lifecycle.track(null, () => this._syncPeer(peer, scope)) : this._syncPeer(peer, scope);
+  async syncPeer(peer, scope, options) {
+    return this.lifecycle ? this.lifecycle.track(null, () => this._syncPeer(peer, scope, options)) : this._syncPeer(peer, scope, options);
   }
 
-  async _syncPeer(peer, scope) {
+  async _syncPeer(peer, scope, options = {}) {
     let total = 0;
 
     for (;;) {
+      options.signal?.throwIfAborted();
       const key = this._peerKey(peer);
       const cursorKey = this._cursorKey(key, scope);
       const after = this.lastSeen.get(cursorKey) || 0;
@@ -500,7 +507,7 @@ export class CRDTNode {
         for await (const ops of res.opBatches) {
           if (!Array.isArray(ops) || !ops.length) continue;
           received += ops.length;
-          total += this.applyRemote(remoteId, ops, remoteKey);
+          total += await this.applyRemoteBatch(remoteId, ops, remoteKey, options);
           seen = ops.length ? ops[ops.length - 1].seq : seen;
           this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
           await this._ack(peer, seen, scope);
@@ -513,7 +520,7 @@ export class CRDTNode {
       } else {
         const ops = Array.isArray(res.ops) ? res.ops : [];
         received = ops.length;
-        total += this.applyRemote(remoteId, ops, remoteKey);
+        total += await this.applyRemoteBatch(remoteId, ops, remoteKey, options);
         seen = ops.length ? ops[ops.length - 1].seq : res.lastSeq || after;
         this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
         await this._ack(peer, seen, scope);
@@ -709,14 +716,14 @@ export class CRDTNode {
     };
   }
 
-  async syncAll() {
+  async syncAll(options) {
     let total = 0;
     const failures = [];
     for (const target of this.ownedShardTargets()) {
       const scope = this._scope(target.database, target.collection, target.shard);
       for (const peer of this._syncPeersForTarget(target)) {
         try {
-          total += await this.syncPeer(peer, scope);
+          total += await this.syncPeer(peer, scope, options);
         } catch (err) {
           // peer unreachable; will retry on next sync
           failures.push({

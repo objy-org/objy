@@ -28,8 +28,10 @@ test("collection queries run native filters and sort on the server, with separat
     page.objects.map((o) => o._id),
     ["c"],
   );
-  assert.equal(page.count, 3);
-  assert.equal(page.resultCount, 2);
+  assert.equal(page.count, null);
+  await s.loadCounts("query", "bikes");
+  assert.equal(s.assertCollection("query", "bikes").count, 3);
+  assert.equal(s.assertCollection("query", "bikes").resultCount, 2);
   assert.equal(page.hasMore, true);
   query.active = false;
   const more = await s.loadCollection("query", "bikes", { more: true });
@@ -75,7 +77,7 @@ test("native aggregation returns derived rows marked read only, and clearing res
   assert.deepEqual(page.objects, [{ total: 30, count: 2 }]);
   assert.equal(page.readOnly, true);
   assert.equal(page.resultCount, 1);
-  assert.equal(page.count, 3);
+  assert.equal(page.count, null, "aggregates do not fetch a separate collection count");
   const all = await s.loadCollection("query", "bikes", { query: {} });
   assert.equal(all.objects.length, 3);
   assert.equal(all.query, null);
@@ -166,5 +168,6 @@ test("Load more and refresh cross the server 250-row cap without losing or repea
   assert.equal(new Set(page.objects.map((o) => o._id)).size, 310);
   assert.equal(page.hasMore, false);
   await s.refresh();
-  assert.equal(s.assertCollection("query", "other").objects.length, 310);
+  assert.equal(s.assertCollection("query", "other").objects.length, 150);
+  assert.equal(s.assertCollection("query", "other").hasMore, true);
 });

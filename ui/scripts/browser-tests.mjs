@@ -114,12 +114,19 @@ const server = staticServer(join(root, "dist"), {
       return true;
     }
     if (url.pathname === "/api/config") configRequests++;
+    let forwardedBody;
     if (failQuery && url.pathname.endsWith("/search")) {
-      failQuery = false;
-      res
-        .writeHead(503, { "content-type": "application/json" })
-        .end('{"error":"Injected query failure"}');
-      return true;
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      forwardedBody = Buffer.concat(chunks);
+      // Deferred count aggregates share /search. Fail the user's object query,
+      // not a count still finishing from the preceding page.
+      if (!JSON.parse(forwardedBody).$aggregate) {
+        failQuery = false;
+        res.writeHead(503, { "content-type": "application/json" })
+          .end('{"error":"Injected query failure"}');
+        return true;
+      }
     }
     // Exercise the actual server UI routes and assets as well as its API.
     // Only this disposable backend is reachable; there is no arbitrary proxy target.
@@ -134,7 +141,8 @@ const server = staticServer(join(root, "dist"), {
     upstream.on("error", () =>
       res.writeHead(502).end("Test server unavailable"),
     );
-    req.pipe(upstream);
+    if (forwardedBody) upstream.end(forwardedBody);
+    else req.pipe(upstream);
     return true;
   },
 });

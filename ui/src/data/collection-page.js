@@ -6,7 +6,7 @@ export async function collectionPage(
   collection,
   limit,
   query = null,
-  { previous } = {},
+  { previous, totalCount = null } = {},
 ) {
   const body = query || {};
   const direct = [
@@ -24,7 +24,7 @@ export async function collectionPage(
     Object.hasOwn(body, "$vector") ||
     Number(body.$refDepth) > 0;
   const refOptions = body.$refDepth === undefined ? { refDepth: 0 } : {};
-  const count = previous?.count ?? (await adapter.count(database, collection));
+  let count = previous?.count ?? totalCount;
   if (direct) {
     const objects = await adapter.search(
       database,
@@ -41,11 +41,10 @@ export async function collectionPage(
       query,
       readOnly,
       directQuery: true,
+      countError: false,
     };
   }
-  const resultCount =
-    previous?.resultCount ??
-    (query ? await adapter.count(database, collection, body) : count);
+  let resultCount = previous?.resultCount ?? (query ? null : count);
   const objects = [...(previous?.objects || [])];
   const positions = new Map(
     objects.map((object, index) => [object._id, index]),
@@ -77,15 +76,20 @@ export async function collectionPage(
     }
   }
   const nextOffset = start + fetched;
+  if (exhausted) {
+    resultCount = nextOffset;
+    if (!query) count = resultCount;
+  }
   return {
     objects,
     count,
     resultCount,
     loaded: true,
-    hasMore: !exhausted && nextOffset < resultCount,
+    hasMore: !exhausted && (resultCount === null || nextOffset < resultCount),
     nextOffset,
     query,
     readOnly,
     directQuery: false,
+    countError: false,
   };
 }

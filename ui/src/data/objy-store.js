@@ -21,6 +21,8 @@ export class ObjyStore {
     this.databases = [];
     this.queue = Promise.resolve();
     this.refreshErrors = new Map();
+    this.recentCollections = new Map();
+    this.countRequests = new Map();
   }
   async open() {
     try {
@@ -59,11 +61,12 @@ export class ObjyStore {
     this.queue = task.catch(() => {});
     return task;
   }
-  mutate(operation, scope = null) {
+  mutate(operation, scope = null, change = null) {
     return this.enqueue(async () => {
       // A refresh failure must never turn a confirmed write into a retryable write.
       let result, failure;
       try {
+        if (scope?.length === 2) await this._ensureCollection(...scope);
         result = await operation();
       } catch (error) {
         failure = error;
@@ -71,7 +74,7 @@ export class ObjyStore {
       if (scope) {
         const key = JSON.stringify(scope);
         try {
-          await this._refreshScope(scope);
+          await this._refreshScope(scope, failure ? null : change, result);
           this.refreshErrors.delete(key);
         } catch (error) {
           this.refreshErrors.set(key, error);
@@ -158,7 +161,7 @@ export class ObjyStore {
       if (!(await this.adapter.get(database, collection, id)))
         throw new Error("Object not found. Use its exact _id.");
       return this.adapter.patch(database, collection, id, clone(patch));
-    }, [database, collection]);
+    }, [database, collection], { kind: "replace", id });
   }
   insertFile(database, collection, object, file) {
     objectValue(object);
@@ -177,11 +180,11 @@ export class ObjyStore {
       // Multipart replacement expects the object's data, without its old server-owned pointer.
       const { _file, ...object } = current;
       return this.adapter.replaceFile(database, collection, id, object, file);
-    }, [database, collection]);
+    }, [database, collection], { kind: "replace", id });
   }
   downloadFile(database, collection, id, options) {
-    return this.enqueue(() => {
-      this.assertCollection(database, collection);
+    return this.enqueue(async () => {
+      await this._ensureCollection(database, collection);
       return this.adapter.downloadFile(database, collection, id, options);
     });
   }
@@ -198,7 +201,7 @@ export class ObjyStore {
           "Object changed on the server. Use Undo to load the latest version before editing again.",
         );
       return this.adapter.replace(database, collection, id, clone(object));
-    }, [database, collection]);
+    }, [database, collection], { kind: "replace", id });
   }
   removeObjects(database, collection, ids, { expected } = {}) {
     return this.mutate(async () => {
@@ -213,11 +216,11 @@ export class ObjyStore {
           );
       }
       return this.adapter.removeMany(database, collection, ids);
-    }, [database, collection]);
+    }, [database, collection], { kind: "remove", ids });
   }
   query(database, collection, query = {}, options = {}) {
-    return this.enqueue(() => {
-      this.assertCollection(database, collection);
+    return this.enqueue(async () => {
+      await this._ensureCollection(database, collection);
       return this.adapter.search(database, collection, objectValue(query), {
         refDepth: 0,
         ...options,
@@ -225,14 +228,14 @@ export class ObjyStore {
     });
   }
   getMeta(database, collection) {
-    return this.enqueue(() => {
-      this.assertCollection(database, collection);
+    return this.enqueue(async () => {
+      await this._ensureCollection(database, collection);
       return this.adapter.getMeta(database, collection);
     });
   }
   setMeta(database, collection, meta, { expected } = {}) {
     return this.mutate(async () => {
-      this.assertCollection(database, collection);
+      await this._ensureCollection(database, collection);
       if (
         expected !== undefined &&
         !sameJSON(await this.adapter.getMeta(database, collection), expected)
@@ -287,6 +290,8 @@ export class ObjyStore {
           ? null
           : clone(objectValue(query));
     return this.enqueue(async () => {
+      if (!this.assertDatabase(database).collectionsLoaded)
+        await this._loadDatabase(database);
       const current = this.assertCollection(database, collection);
       const append =
         more &&
@@ -306,13 +311,75 @@ export class ObjyStore {
         collection,
         this.pageSize,
         selected,
-        { previous: append ? current : undefined },
+        { previous: append ? current : undefined, totalCount: current.count },
       );
       this._replaceCollection(database, collection, page);
+      this.activateCollection(database, collection);
       if (!append)
         this.refreshErrors.delete(JSON.stringify([database, collection]));
       return page;
     });
+  }
+  loadDatabase(database) {
+    return this.enqueue(() => this.assertDatabase(database).collectionsLoaded
+      ? this.assertDatabase(database) : this._loadDatabase(database));
+  }
+  async _loadDatabase(database) {
+    const next = await this._database(database);
+    this.databases = this.databases.map((db) => db.name === database ? next : db);
+    return next;
+  }
+  async _ensureCollection(database, collection) {
+    if (!this.assertDatabase(database).collectionsLoaded) await this._loadDatabase(database);
+    return this.assertCollection(database, collection);
+  }
+  // Counts are optional enrichment. They never gate page reads or discard rows.
+  loadCounts(database, collection) {
+    const key = JSON.stringify([database, collection]);
+    if (this.countRequests.has(key)) return this.countRequests.get(key);
+    const snapshot = this.assertCollection(database, collection);
+    const task = this.enqueue(async () => {
+      if (this.databases.find((db) => db.name === database)?.collections.find((c) => c.name === collection)?.objects !== snapshot.objects) return false;
+      if (!snapshot.loaded || snapshot.directQuery || snapshot.countError ||
+          (snapshot.count !== null && snapshot.resultCount !== null)) return false;
+      let counts;
+      try {
+        const count = snapshot.count ?? await this.adapter.count(database, collection);
+        const resultCount = snapshot.resultCount ?? (snapshot.query
+          ? await this.adapter.count(database, collection, snapshot.query) : count);
+        counts = { count, resultCount, hasMore: snapshot.hasMore && snapshot.nextOffset < resultCount };
+      } catch {
+        counts = { countError: true };
+      }
+      const current = this.databases.find((db) => db.name === database)?.collections.find((c) => c.name === collection);
+      if (current?.objects !== snapshot.objects) return false;
+      this._replaceCollection(database, collection, counts);
+      return true;
+    }).finally(() => this.countRequests.delete(key));
+    this.countRequests.set(key, task);
+    return task;
+  }
+  activateCollection(database, collection) {
+    const key = JSON.stringify([database, collection]);
+    this.recentCollections.delete(key);
+    this.recentCollections.set(key, [database, collection]);
+    // Retain at most 1,000 inactive rows. Drafts belong to the explorer, not this cache.
+    let retained = 0;
+    for (const [entry, [db, name]] of [...this.recentCollections].reverse()) {
+      if (entry === key) continue;
+      const page = this.databases.find((d) => d.name === db)?.collections.find((c) => c.name === name);
+      if (!page) { this.recentCollections.delete(entry); continue; }
+      retained += page.objects.length;
+      if (retained > 1000) {
+        this._replaceCollection(db, name, { objects: [], loaded: false, nextOffset: 0, hasMore: false });
+        this.recentCollections.delete(entry);
+      }
+    }
+  }
+  releasePages() {
+    this.databases = this.databases.map((db) => ({ ...db, collections: db.collections.map((c) =>
+      ({ ...c, objects: [], loaded: false, nextOffset: 0, hasMore: false })) }));
+    this.recentCollections.clear();
   }
   refresh() {
     return this.enqueue(async () => {
@@ -325,9 +392,26 @@ export class ObjyStore {
       }
     });
   }
-  async _refreshScope([database, collection]) {
+  async _refreshScope([database, collection], change, result) {
     if (collection !== undefined) {
       const current = this.assertCollection(database, collection);
+      if (current.loaded && !current.query && change) {
+        if (change.kind === "replace" && result?._id === change.id) {
+          this._replaceCollection(database, collection, {
+            objects: current.objects.map((object) => object._id === change.id ? result : object),
+          });
+          return;
+        }
+        if (change.kind === "remove" && result?.deleted === change.ids.length) {
+          const ids = new Set(change.ids), objects = current.objects.filter((object) => !ids.has(object._id));
+          const count = current.count === null ? null : Math.max(0, current.count - result.deleted);
+          this._replaceCollection(database, collection, {
+            objects, count, resultCount: count,
+            nextOffset: Math.max(0, current.nextOffset - (current.objects.length - objects.length)),
+          });
+          return;
+        }
+      }
       if (current.loaded)
         this._replaceCollection(
           database,
@@ -346,7 +430,7 @@ export class ObjyStore {
       this.adapter,
       database,
       current.name,
-      Math.max(this.pageSize, current.nextOffset || current.objects.length),
+      this.pageSize,
       current.query || null,
     );
   }
@@ -370,16 +454,16 @@ export class ObjyStore {
             };
       collections.push({ id: collection, name: collection, ...page });
     }
-    return { id: name, name, collections };
+    return { id: name, name, collections, collectionsLoaded: true };
   }
   async _catalog(reload) {
     const previous = new Map(this.databases.map((db) => [db.name, db])),
       databases = [];
     for (const name of await this.adapter.listDatabases()) {
       databases.push(
-        !reload && previous.has(name)
-          ? previous.get(name)
-          : await this._database(name, reload),
+        previous.get(name)?.collectionsLoaded
+          ? reload ? await this._database(name, true) : previous.get(name)
+          : { id: name, name, collections: [], collectionsLoaded: false },
       );
     }
     // Callers commit only complete snapshots; failed reads retain the previous view.

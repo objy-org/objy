@@ -222,6 +222,7 @@ test("forget waits out an in-flight request and stale tabs cannot resurrect or u
   });
   const entry = await f.login(first),
     second = await f.manager();
+  await first.active.store.loadDatabase("_global");
   block = true;
   const request = first.active.store.query("_global", "users");
   await waiting;

@@ -8,11 +8,6 @@ const contentTypes = {
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
-  ".wasm": "application/wasm",
-  ".bcmap": "application/octet-stream",
-  ".pfb": "application/octet-stream",
-  ".ttf": "font/ttf",
-  ".icc": "application/vnd.iccprofile",
 };
 
 // Register exact build assets only; never serve source, credentials or arbitrary paths.

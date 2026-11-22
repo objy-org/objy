@@ -32,6 +32,16 @@ function fill(selector, value, root = explorer()) {
   );
   return target;
 }
+function captureTabs(win) {
+  const open = win.open, tabs = [];
+  win.open = () => {
+    const tab = { opener: win, document: { body: {} }, closed: false,
+      location: { replace(url) { tab.url = url; } }, close() { tab.closed = true; } };
+    tabs.push(tab);
+    return tab;
+  };
+  return { tabs, restore() { tabs.forEach(tab => tab.close()); win.open = open; } };
+}
 function chooseFile(text, name = "note.txt") {
   const transfer = new frame.contentWindow.DataTransfer();
   transfer.items.add(new frame.contentWindow.File([text], name, { type: "text/plain" }));
@@ -51,8 +61,10 @@ function key(target, key, extra = {}) {
   );
 }
 async function selectCollection(name) {
-  if (!find(`[aria-label="${name}, collection"]`))
+  if (!find(`[aria-label="${name}, collection"]`) &&
+      find('[aria-label="ui_regression, database"]')?.getAttribute("aria-expanded") === "false")
     click('[aria-label="ui_regression, database"]');
+  await until(() => find(`[aria-label="${name}, collection"]`));
   click(`[aria-label="${name}, collection"]`);
   await until(
     () =>
@@ -167,6 +179,7 @@ document.querySelector("#run").addEventListener("click", async (event) => {
       const input = fill(".query-input", '{\n  "active": true\n}');
       assert(key(input, "Enter"), "Plain Enter was intercepted");
       await runQuery('{\n  "active": true\n}', "metaKey");
+      await until(() => find(".objects-pane .count").textContent === "55");
       assert(
         rows().length === 50 &&
           find(".objects-pane .count").textContent === "55",
@@ -362,19 +375,19 @@ document.querySelector("#run").addEventListener("click", async (event) => {
       await until(() => !find(".modal", doc()));
       const replaced = JSON.parse(find(".json").value);
       assert(replaced._file.key !== original._file.key && replaced.nested.keep && replaced.label === "JSON preserved", "Replacement lost fields or kept old file");
-      // Capture the real SDK download at the browser's save boundary.
-      const win = frame.contentWindow, create = win.URL.createObjectURL, anchorClick = win.HTMLAnchorElement.prototype.click;
-      let downloaded, filename;
+      // Capture the real SDK download at the native tab boundary.
+      const win = frame.contentWindow, create = win.URL.createObjectURL;
+      const captured = captureTabs(win);
+      let downloaded;
       win.URL.createObjectURL = (blob) => { downloaded = blob; return create.call(win.URL, blob); };
-      win.HTMLAnchorElement.prototype.click = function () { filename = this.download; };
       try {
         click("[data-open-file]");
-        await until(() => filename && !find("[data-open-file]").disabled);
-        assert(filename === "note.txt", "Download filename lost");
+        await until(() => captured.tabs.at(-1)?.url);
+        assert(captured.tabs.at(-1).document.title === "note.txt", "Attachment title lost");
         assert(await downloaded.text() === "file version 2", "Downloaded incorrect bytes");
       } finally {
+        captured.restore();
         win.URL.createObjectURL = create;
-        win.HTMLAnchorElement.prototype.click = anchorClick;
       }
       rows().find((row) => row.getAttribute("aria-label") !== "attachment").click();
       click("[data-attach-file]");
@@ -385,6 +398,7 @@ document.querySelector("#run").addEventListener("click", async (event) => {
     });
     await test("Collection and database deletion confirm exact scope and clear selection and drafts", async () => {
       click('[aria-label="delete_in_ui, database"]');
+      await until(() => find('[aria-label="remove_me, collection"]'));
       click('[aria-label="remove_me, collection"]');
       await until(() => rows().length === 1 && find('[aria-label="file"]'));
       click('[aria-label="file"]');
@@ -413,67 +427,44 @@ document.querySelector("#run").addEventListener("click", async (event) => {
       assert(find('[aria-label="created_in_ui, database"]'), "Unrelated database removed");
       assert(!find('[aria-label="Delete database _global"]'), "Protected global database has a delete action");
     });
-    await test("Images and PDFs preview; unsupported types download; closing releases preview URLs", async () => {
+    await test("Attachments open native tabs; executable formats download; closed tabs release URLs", async () => {
       await selectCollection("previews");
       await until(() => rows().length === 6);
       const win = frame.contentWindow, revoke = win.URL.revokeObjectURL, anchorClick = win.HTMLAnchorElement.prototype.click;
-      let downloaded = [], revoked = [];
+      const captured = captureTabs(win), downloaded = [], revoked = [];
       win.URL.revokeObjectURL = (url) => { revoked.push(url); return revoke.call(win.URL, url); };
       win.HTMLAnchorElement.prototype.click = function () { downloaded.push(this.download); };
       try {
+        for (const [id, type] of [["png", "image/png"], ["pdf", "application/pdf"], ["broken", "image/png"], ["brokenpdf", "application/pdf"]]) {
+          click(`[aria-label="${id}"]`);
+          click("[data-open-file]");
+          const tab = captured.tabs.at(-1);
+          assert(tab, "Tab was not reserved during the click");
+          assert(tab.opener === null, "Attachment tab retains an opener");
+          await until(() => tab.url);
+          assert(!find(".modal", doc()), "Opening an attachment created a viewer modal");
+          const response = await fetch(tab.url);
+          assert(response.headers.get("content-type") === type, "Native viewer lost the file MIME type");
+          assert((await response.blob()).size > 0, "Native tab received empty bytes");
+          assert(!revoked.includes(tab.url), "Blob revoked while native viewer remains open");
+          tab.close();
+          await until(() => revoked.includes(tab.url));
+        }
+        assert(downloaded.length === 0, "Passive types were forced to download");
+        for (const [id, name] of [["html", "pretend-image.jpg"], ["svg", "preview.svg"]]) {
+          click(`[aria-label="${id}"]`);
+          click("[data-open-file]");
+          const tab = captured.tabs.at(-1);
+          await until(() => downloaded.at(-1) === name && tab.closed);
+          assert(!tab.url, "Executable document was opened with the application's origin");
+        }
+        win.open = () => null;
         click('[aria-label="png"]');
         click("[data-open-file]");
-        await until(() => find(".file-viewer img", doc())?.naturalWidth === 1);
-        assert(downloaded.length === 0, "Image was downloaded instead of previewed");
-        const imageUrl = find(".file-viewer img", doc()).src;
-        click("[data-download-preview]", doc());
-        assert(downloaded.at(-1) === "pixel.png", "Explicit download missing from preview");
-        click('[data-action="close-modal"]', doc());
-        assert(revoked.includes(imageUrl), "Closing did not release image URL");
-        click('[aria-label="svg"]');
-        click("[data-open-file]");
-        await until(() => find(".file-viewer img", doc())?.naturalWidth === 800);
-        assert(!doc().documentElement.dataset.svgExecuted, "SVG executed as a document");
-        click('[data-action="close-modal"]', doc());
-        click('[aria-label="pdf"]');
-        click("[data-open-file]");
-        await until(() => find('.file-viewer canvas[data-rendered="1"]', doc()));
-        const canvas = find(".file-viewer canvas", doc());
-        const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
-        assert(pixels.some((value, index) => index % 4 === 0 && value < 100), "PDF has no rendered text");
-        assert(pixels.some((value, index) => index % 4 === 0 && value > 200), "PDF page is blank");
-        assert(find('[aria-label="Previous page"]', doc()).disabled, "First page allows going back");
-        click('[aria-label="Next page"]', doc());
-        await until(() => find('.file-viewer canvas[data-rendered="2"]', doc()));
-        assert(find('[aria-label="Next page"]', doc()).disabled, "Last page allows going forward");
-        click('[aria-label="Previous page"]', doc());
-        await until(() => find('.file-viewer canvas[data-rendered="1"]', doc()));
-        click("[data-download-preview]", doc());
-        assert(downloaded.at(-1) === "preview.pdf", "PDF cannot be downloaded from preview");
-        click('[data-action="close-modal"]', doc());
-        assert(canvas.width === 0 && canvas.height === 0, "Closing did not release the PDF canvas");
-        click('[aria-label="brokenpdf"]');
-        click("[data-open-file]");
-        await until(() => find(".file-viewer", doc())?.textContent.includes("could not be displayed"));
-        assert(!find("[data-download-preview]", doc()).disabled, "Broken PDF cannot be downloaded");
-        click('[data-action="close-modal"]', doc());
-        click('[aria-label="html"]');
-        click("[data-open-file]");
-        await until(() => downloaded.at(-1) === "pretend-image.jpg" && !find(".modal", doc()));
-        assert(!doc().documentElement.dataset.htmlExecuted, "HTML attachment executed");
-        click('[aria-label="broken"]');
-        click("[data-open-file]");
-        await until(() => find(".file-viewer", doc())?.textContent.includes("could not be displayed"));
-        assert(!find("[data-download-preview]", doc()).disabled, "Broken image cannot be downloaded");
-        click('[data-action="close-modal"]', doc());
-        click('[aria-label="png"]');
-        click("[data-open-file]");
-        click('[data-action="close-modal"]', doc());
-        click("[data-manage-collection]");
-        await until(() => find('[aria-label="Collection metadata JSON"]', doc()));
-        assert(!find(".file-viewer", doc()), "Closed preview replaced a later modal");
-        click('[data-action="close-modal"]', doc());
+        await until(() => find("#toast", doc()).textContent.includes("Allow pop-ups"));
+        assert(!find(".modal", doc()), "Blocked pop-up left a modal behind");
       } finally {
+        captured.restore();
         win.URL.revokeObjectURL = revoke;
         win.HTMLAnchorElement.prototype.click = anchorClick;
       }
@@ -490,8 +481,8 @@ document.querySelector("#run").addEventListener("click", async (event) => {
       click('[data-action="node-details"]', doc());
       const modal = find(".node-modal", doc());
       assert(
-        modal.querySelectorAll("[role=meter]").length === 1,
-        "Expected only RSS meter",
+        modal.querySelectorAll("[role=meter]").length === 2,
+        "Expected RSS and compression savings meters",
       );
       assert(!modal.textContent.includes("Heap"), "Heap is still displayed");
       for (const text of [
@@ -546,6 +537,47 @@ document.querySelector("#run").addEventListener("click", async (event) => {
         doc().activeElement.dataset.action === "node-details",
         "Focus did not return to pill",
       );
+    });
+    await test("Large lists keep bounded DOM, keyboard navigation and isolated drafts", async () => {
+      const component = doc().createElement("objy-data-explorer");
+      component.style.cssText = "position:fixed;inset:0;z-index:9999;width:100%;height:100%";
+      component.setAttribute("fill", "");
+      doc().body.append(component);
+      try {
+        const objects = Array.from({ length: 5000 }, (_, i) => ({ _id: `row-${i}`, value: i, payload: "x".repeat(300) }));
+        component.databases = [{ id: "perf", collections: [
+          { id: "large", objects, count: 5000 }, { id: "other", objects: [{ _id: "other" }] },
+        ] }];
+        component.selectCollection("perf", "large");
+        const root = component.shadowRoot, list = root.querySelector(".object-list");
+        const tree = root.querySelector("[data-node]"), query = root.querySelector(".query-input");
+        const first = root.querySelector('[aria-label="row-0"]');
+        first.click();
+        assert(root.querySelector("[data-node]") === tree, "Selection rebuilt the tree");
+        assert(root.querySelector(".query-input") === query, "Selection replaced the query input");
+        assert(root.querySelector('[aria-label="row-0"]') === first, "Selection rebuilt the object list");
+        assert(root.querySelectorAll("[data-object]").length < 80, "Large list was not virtualized");
+        const editor = root.querySelector(".json");
+        editor.value = '{"_id":"row-0","value":"draft"}';
+        editor.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+        key(first, "End");
+        assert(root.activeElement?.getAttribute("aria-label") === "row-4999", "End did not reach the final virtual row");
+        assert(JSON.parse(root.querySelector(".json").value).value === 4999, "Wrong last-row JSON");
+        key(root.activeElement, "Home");
+        assert(root.querySelector(".json").value.includes('"draft"'), "Keyboard navigation lost the draft");
+        component.selectCollection("perf", "other");
+        // Simulate the host evicting an inactive page, then reloading it.
+        component.databases = [{ id: "perf", collections: [
+          { id: "large", objects: [], loaded: false }, { id: "other", objects: [{ _id: "other" }] },
+        ] }];
+        component.databases = [{ id: "perf", collections: [{ id: "large", objects, count: 5000 }] }];
+        component.selectCollection("perf", "large");
+        root.querySelector('[aria-label="row-0"]').click();
+        assert(root.querySelector(".json").value.includes('"draft"'), "Cache eviction lost an unsaved draft");
+        list.scrollTop = 150000;
+        list.dispatchEvent(new frame.contentWindow.Event("scroll"));
+        assert(root.querySelectorAll("[data-object]").length < 80, "Scrolling grew the DOM");
+      } finally { component.remove(); }
     });
     await test("Reload restores the saved connection without losing server changes", async () => {
       await reload();

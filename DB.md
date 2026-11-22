@@ -132,7 +132,7 @@ This is a durable S3-backed example, not a list of defaults. Create the bucket f
 | `cluster` | Replication timing, hints, forwarding timeouts, and shared shard-map storage. `syncMs` defaults to 2500; both timeouts default to 60000. |
 | `auth` | JWT authentication, token lifetimes, and initial-user options. Authentication is enabled by default. Missing system secrets are generated. |
 | `persistence` | Durability, namespace, acknowledgement, journal flushes, snapshots, retention, and S3 connection. Default `mode` is `off` and default `ack` is `memory`. |
-| `imports` | Bounded write admission: `maxBulkObjects`, `maxBulkBytes`, `maxObjectBytes`, `maxPendingPersistenceBytes`, and `retryAfterMs`. |
+| `imports` | Bounded write admission: `maxBulkObjects`, `maxBulkBytes`, `maxObjectBytes`, `maxPendingPersistenceBytes`, `persistenceWaitMs`, and `retryAfterMs`. |
 | `plugins`, `vector` | Code-registered extensions and vector-index settings. |
 
 `fromEnvironment` references are optional: a setting can contain the literal string instead. A missing referenced environment variable fails startup. Keep credentials out of source control and restrict configuration-file access.
@@ -144,6 +144,10 @@ For a separate browser application, allow its origin explicitly:
 ```
 
 Configured startup stores generated system secrets in the shared S3 namespace when available, or locally otherwise. Preserve that state and the node's WAL directory. Peers must share authentication and cluster secrets, but have distinct identities and local WAL storage.
+
+Persistence pressure pauses a write batch before it changes data. The owning node waits for existing journal/WAL flushes, without polling; routing and replication use the same admission gate. `imports.maxPendingPersistenceBytes` defaults to 256 MiB and includes queued and in-flight journal/WAL bytes. It is a backpressure threshold, not a hard process-memory cap: an admitted batch can cross it. Waiting requests are bounded too.
+
+`imports.persistenceWaitMs` defaults to `60000` per pressured batch (`0` rejects immediately). The deadline does not reset on progress. A storage failure, cancellation, exhausted waiting capacity, or deadline ends the wait with an error; pressure responses use `503` and `Retry-After`. Client and forwarding timeouts can end a request sooner. Set a suitable client timeout for long imports. A successful write still follows the configured `persistence.ack` policy, not a new S3 or replica acknowledgement.
 
 ## Object Model
 
@@ -430,6 +434,10 @@ Configured startup ensures `_global/users` contains the initial administrator. W
 
 Any collection can contain authenticatable objects with a username and password. Passwords are hashed and excluded from public reads. Login targets `/api/{database}/{collection}/auth`, and token renewal uses the sibling `/renew` endpoint. Default access-token lifetime is one hour; refresh tokens last 14 days. Login to `_global/users` for global administration.
 
+Password hashing uses Node's built-in asynchronous PBKDF2-HMAC-SHA256, without an external cryptography package: 600,000 iterations, a random 16-byte salt, and a 32-byte hash. Password inputs are plaintext and limited to 1024 UTF-8 bytes. Hash work is bounded to two active jobs and 32 waiting jobs per process; overload returns `503` with `Retry-After`. Existing weaker hashes remain usable and are upgraded on successful login through the ordinary durable write path. Replication and restore preserve stored hashes without hashing again.
+
+Access tokens are deliberately stateless: changing permissions or deleting an account does not invalidate an already issued token before expiry. Renewal reads the current account and permissions and checks its `tokenVersion`; there is no per-request account lookup or immediate access-token revocation.
+
 A database can be created with its own administrator:
 
 ```js
@@ -456,6 +464,10 @@ Non-admin users have no access unless granted permissions. Object-level rules li
 ```
 
 `perm` combines `c` (create), `r` (read), `u` (update), and `d` (delete). Read constraints are merged into queries; writes validate their operation and applicable object constraints, including both stored and resulting update values. `collectionPermissions`, for example `{ "read": ["assets"], "write": ["assets"] }`, grants collection-wide access; write does not imply read. Collection/schema and database operations have their own administrative requirements. Renew or log in again after user permissions change. See [Permissions](API.md#permissions) for the exact rule formats and endpoint policy.
+
+Collection-write access does not grant account administration. Only a database/global admin may change an authenticatable object's `admin`, `role`, `permissions`, `collectionPermissions`, or `tokenVersion`, or activate an object carrying such grants. Users may change their own credentials or delete their own account only with the corresponding ordinary write permission; other accounts require an admin for those operations. Identity includes database, collection, and `_id`. Business objects without credentials can still use the same field names. The policy covers all public write formats and runs after hooks, without changing replication or restore.
+
+These checks read current fields without storing another authorization index. For non-admin writes, checking an existing compressed object can require decompression if its credentials could be cold; admin writes skip this check.
 
 ## Persistence and Recovery
 

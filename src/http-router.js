@@ -76,6 +76,26 @@ export function remoteHttpError(remote, fallback) {
   return err;
 }
 
+export function requestAbortSignal(req, res) {
+  if (req.operationSignal) return req.operationSignal;
+  const controller = new AbortController();
+  const cleanup = () => {
+    req.removeListener("aborted", abort);
+    res.removeListener("close", abort);
+    res.removeListener("finish", cleanup);
+  };
+  const abort = () => {
+    if (!res.writableEnded) controller.abort(Object.assign(new Error("request disconnected"), { status: 499 }));
+    cleanup();
+  };
+  req.once("aborted", abort);
+  res.once("close", abort);
+  res.once("finish", cleanup);
+  if (req.aborted || res.destroyed) abort();
+  req.operationSignal = controller.signal;
+  return controller.signal;
+}
+
 export function isNdjsonRequest(req) {
   return isNdjsonContentType(req.headers?.["content-type"]);
 }

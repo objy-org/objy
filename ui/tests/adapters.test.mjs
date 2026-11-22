@@ -43,7 +43,9 @@ test("server: paging, CRUD, queries and lifecycle through the official client", 
     first.objects.map((o) => o._id),
     ["a", "b"],
   );
-  assert.equal(first.count, 3);
+  assert.equal(first.count, null, "rows arrive before counts");
+  await store.loadCounts("inventory", "bikes");
+  assert.equal(store.assertCollection("inventory", "bikes").count, 3);
   assert.equal(first.hasMore, true);
   const next = await store.loadCollection("inventory", "bikes", { more: true });
   assert.deepEqual(

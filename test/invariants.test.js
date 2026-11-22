@@ -403,7 +403,7 @@ const call = async (method, path, body, token) => {
 };
 try {
   state.node.createCollection('scope-a', 'users'); state.node.createCollection('scope-a', 'docs'); state.node.createCollection('scope-b', 'secrets');
-  const [reader] = state.auth.prepareWriteObjects('scope-a', 'users', [{ _id: 'reader', username: 'reader', password: 'audit-only', permissions: [{ query: {}, perm: 'r' }] }]);
+  const [reader] = state.auth.prepareWriteObjects('scope-a', 'users', await state.auth.hashWritePasswords([{ _id: 'reader', username: 'reader', password: 'audit-only', permissions: [{ query: {}, perm: 'r' }] }]));
   state.node.insertManyCount('scope-a', 'users', [reader]);
   state.node.insertManyCount('scope-b', 'secrets', [{ _id: 'secret', secret: 'scope-b-only' }]);
   state.node.insertManyCount('scope-a', 'docs', [{ _id: 'reference', target: { type: 'reference', database: 'scope-b', collection: 'secrets', value: 'secret' } }]);
@@ -433,7 +433,7 @@ try {
   await check('Authorization', 'aggregation must honor every permission constraint', async () => {
     state.node.createCollection('scope-a', 'metrics', { indexes: ['score'] });
     state.node.insertManyCount('scope-a', 'metrics', [{ _id: 'metric', score: 1 }]);
-    const [restricted] = state.auth.prepareWriteObjects('scope-a', 'users', [{ _id: 'restricted', username: 'restricted', password: 'audit-only', permissions: [{ query: { score: { $eq: 1, $gt: 4 } }, perm: 'r' }] }]);
+    const [restricted] = state.auth.prepareWriteObjects('scope-a', 'users', await state.auth.hashWritePasswords([{ _id: 'restricted', username: 'restricted', password: 'audit-only', permissions: [{ query: { score: { $eq: 1, $gt: 4 } }, perm: 'r' }] }]));
     state.node.insertManyCount('scope-a', 'users', [restricted]);
     const session = await call('POST', '/api/scope-a/users/auth', { username: 'restricted', password: 'audit-only' });
     const got = await call('POST', '/api/scope-a/metrics/search', { $aggregate: { fields: { count: { $count: true } } } }, session.body.accessToken);

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setMaxListeners } from "node:events";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import {
   DEFAULT_SHARD,
@@ -9,7 +10,7 @@ import {
 } from "./shard-map.js";
 import { LocalWalStore } from "./local-wal.js";
 import { createObjectStorage } from "./object-storage.js";
-import { DEFAULT_DATA_PREFIX, DEFAULT_LOCAL_WAL_DIR } from "./config.js";
+import { DEFAULT_DATA_PREFIX, DEFAULT_LOCAL_WAL_DIR, normalizeImportConfig } from "./config.js";
 import { decodeUtf8Chunks } from "./ndjson.js";
 import { ContextLifecycle } from "./context-lifecycle.js";
 import { WorkBudget } from "./derived-state-scheduler.js";
@@ -42,6 +43,7 @@ export class PersistenceManager {
     restoreSnapshotId,
     ack = "memory",
     localWal,
+    imports,
     durable = false,
   } = {}) {
     if (!node) throw new Error("node is required");
@@ -72,6 +74,7 @@ export class PersistenceManager {
     }
     this.pending = new Map();
     this.pendingBytes = 0;
+    this.inflightBytes = 0;
     this.dirtyScopes = new Map();
     this.pendingDatabases = new Map();
     this.pendingDatabaseDrops = new Set();
@@ -79,6 +82,7 @@ export class PersistenceManager {
     this.pendingCollectionDrops = new Set();
     this.localWalPending = [];
     this.localWalPendingBytes = 0;
+    this.localWalInflightBytes = 0;
     this.localWalAccepted = 0;
     this.localWalDurable = 0;
     this.flushTimer = null;
@@ -94,6 +98,72 @@ export class PersistenceManager {
     this.contextVersions = new Map();
     this.replayingLocalWal = false;
     this.lifecycle = new ContextLifecycle({ node, persistence: this });
+    this.imports = normalizeImportConfig(imports);
+    this.waitingWrites = 0;
+    this.waitingWriteBytes = 0;
+    this.admissionAbort = new AbortController();
+    setMaxListeners(64, this.admissionAbort.signal);
+  }
+
+  backlogBytes() {
+    return this.pendingBytes + this.inflightBytes + this.localWalPendingBytes + this.localWalInflightBytes;
+  }
+
+  withCapacity(apply, { signal, bytes = 0 } = {}) {
+    signal?.throwIfAborted();
+    this.admissionAbort.signal.throwIfAborted();
+    if (this.backlogBytes() <= this.imports.maxPendingPersistenceBytes) return apply(false);
+    return this._waitForCapacity(apply, signal, Math.max(0, Number(bytes) || 0));
+  }
+
+  async _waitForCapacity(apply, signal, bytes) {
+    const { maxPendingPersistenceBytes, persistenceWaitMs } = this.imports;
+    const maxWaitingBytes = Math.max(maxPendingPersistenceBytes, this.imports.maxBulkBytes);
+    if (!persistenceWaitMs || this.waitingWrites >= 64 ||
+        (this.waitingWrites && this.waitingWriteBytes + bytes > maxWaitingBytes)) {
+      throw this._pressureError("waiting capacity exhausted");
+    }
+    const deadline = Date.now() + persistenceWaitMs;
+    this.waitingWrites++;
+    this.waitingWriteBytes += bytes;
+    try {
+      while (this.backlogBytes() > maxPendingPersistenceBytes) {
+        signal?.throwIfAborted();
+        this.admissionAbort.signal.throwIfAborted();
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw this._pressureError("capacity wait timed out");
+        // A checkpoint temporarily pauses journals; joining it avoids a flush spin loop.
+        const progress = this.flushPaused && this.checkpointing
+          ? this.checkpointing
+          : Promise.all([this.flush(), this.flushLocal()]);
+        try {
+          await waitForPersistence(progress, [signal, this.admissionAbort.signal], remaining,
+            () => this._pressureError("capacity wait timed out"));
+        } catch (err) {
+          if (err.status || signal?.aborted || this.admissionAbort.signal.aborted) throw err;
+          throw this._pressureError("persistence flush failed", err);
+        }
+      }
+      signal?.throwIfAborted();
+      this.admissionAbort.signal.throwIfAborted();
+      if (Date.now() >= deadline) throw this._pressureError("capacity wait timed out");
+      // Check and mutate in the same turn, so awakened writers cannot all consume one slot.
+      return apply(true);
+    } finally {
+      this.waitingWrites--;
+      this.waitingWriteBytes -= bytes;
+    }
+  }
+
+  _pressureError(reason, cause) {
+    const err = new Error(cause ? `persistence flush failed: ${cause.message}` : "persistence backlog is full", { cause });
+    err.status = 503;
+    err.code = "PERSISTENCE_BACKPRESSURE";
+    err.body = { error: err.message, code: err.code, reason, pendingBytes: this.backlogBytes(),
+      maxPendingPersistenceBytes: this.imports.maxPendingPersistenceBytes };
+    err.headers = { "retry-after": String(Math.max(1, Math.ceil(this.imports.retryAfterMs / 1000))),
+      "x-objydb-pressure": "persistence" };
+    return err;
   }
 
   async restore(options = {}) {
@@ -197,6 +267,11 @@ export class PersistenceManager {
   }
 
   start() {
+    if (this.admissionAbort.signal.aborted) {
+      this.admissionAbort = new AbortController();
+      setMaxListeners(64, this.admissionAbort.signal);
+    }
+    this.node.writeAdmission = (apply, options) => this.withCapacity(apply, options);
     if (!this.unsubscribe) {
       this.unsubscribe = this.node.onChange((change) => this._onChange(change));
     }
@@ -221,6 +296,7 @@ export class PersistenceManager {
   }
 
   async stop() {
+    this.admissionAbort.abort(Object.assign(new Error("persistence is stopping"), { status: 503 }));
     this.unsubscribe?.();
     this.unsubscribe = null;
     if (this.flushTimer) clearInterval(this.flushTimer);
@@ -338,6 +414,9 @@ export class PersistenceManager {
       pendingScopes: this.pending.size,
       pendingOps: [...this.pending.values()].reduce((sum, ops) => sum + ops.length, 0),
       pendingBytes: this.pendingBytes,
+      inflightBytes: this.inflightBytes,
+      waitingWrites: this.waitingWrites,
+      waitingWriteBytes: this.waitingWriteBytes,
       dirtyScopes: this.dirtyScopes.size,
       dirtyOps: [...this.dirtyScopes.values()].reduce((sum, dirty) => sum + dirty.ops, 0),
       pendingDatabases: this.pendingDatabases.size,
@@ -350,6 +429,7 @@ export class PersistenceManager {
         fsync: this.localWal.fsync,
         pendingRecords: this.localWalPending.length,
         pendingBytes: this.localWalPendingBytes,
+        inflightBytes: this.localWalInflightBytes,
         flushActive: this.localWalFlushing !== null,
       } : null,
       lastError: this.lastError?.message || null,
@@ -570,6 +650,8 @@ export class PersistenceManager {
     }
 
     const batches = this.pending;
+    const inflightBytes = this.pendingBytes;
+    this.inflightBytes += inflightBytes;
     const databases = this.pendingDatabases;
     const databaseDrops = this.pendingDatabaseDrops;
     const metadata = this.pendingMeta;
@@ -634,12 +716,16 @@ export class PersistenceManager {
       this._requeueCollectionDrops(collectionDrops, stillCurrent);
       this.lastError = err;
       throw err;
+    } finally {
+      this.inflightBytes -= inflightBytes;
     }
   }
 
   async _flushLocalOnce() {
     if (!this.localWal || !this.localWalPending.length) return emptyLocalFlushStats();
     const records = this.localWalPending;
+    const inflightBytes = this.localWalPendingBytes;
+    this.localWalInflightBytes += inflightBytes;
     this.localWalPending = [];
     this.localWalPendingBytes = 0;
 
@@ -660,6 +746,8 @@ export class PersistenceManager {
       this.localWalPendingBytes = pendingWalJsonBytes(this.localWalPending);
       this.lastError = err;
       throw err;
+    } finally {
+      this.localWalInflightBytes -= inflightBytes;
     }
   }
 
@@ -1166,7 +1254,7 @@ export class PersistenceManager {
 
     const flush = async () => {
       if (!batch.length) return;
-      const applied = this._applyRestoredJournalOps(sourceNode, scope, batch);
+      const applied = await this._admitRestoredJournalOps(sourceNode, scope, batch);
       stats.ops += applied;
       progress?.add?.("journalOps", applied);
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
@@ -1195,6 +1283,7 @@ export class PersistenceManager {
   async _restoreLegacyJsonJournalSegment(scope, key, snapshotCursors = {}, progress = null) {
     const raw = await this.storage.get(key);
     if (!raw) return emptyJournalRestoreStats(this.node.seq);
+    const bytes = Buffer.byteLength(raw);
     const segment = JSON.parse(raw);
     const sourceNode = segment.node || parseJournalKey(key, this.prefix)?.node || "persistence";
     const segmentOps = Array.isArray(segment.ops) ? segment.ops : [];
@@ -1206,7 +1295,7 @@ export class PersistenceManager {
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(input, this.node.id));
       const batch = input.filter((op) => !operationCovered(op, snapshotCursors));
       if (!batch.length) continue;
-      const applied = this._applyRestoredJournalOps(sourceNode, scope, batch);
+      const applied = await this._admitRestoredJournalOps(sourceNode, scope, batch, bytes);
       stats.ops += applied;
       progress?.add?.("journalOps", applied);
       stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(batch, this.node.id));
@@ -1219,6 +1308,12 @@ export class PersistenceManager {
       stats.skippedOps = segmentOps.length;
     }
     return stats;
+  }
+
+  _admitRestoredJournalOps(sourceNode, scope, ops, bytes = this.journalMaxBytes) {
+    this.admissionAbort.signal.throwIfAborted();
+    const apply = () => this._applyRestoredJournalOps(sourceNode, scope, ops);
+    return this.unsubscribe ? this.withCapacity(apply, { bytes }) : apply();
   }
 
   _applyRestoredJournalOps(sourceNode, scope, ops) {
@@ -1534,7 +1629,33 @@ export class PersistenceManager {
   }
 }
 
-export function createPersistence(node, config = {}) {
+function waitForPersistence(progress, signals, timeoutMs, timeoutError) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const listeners = [];
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const [signal, listener] of listeners) signal.removeEventListener("abort", listener);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(timeoutError()), timeoutMs);
+    for (const signal of signals.filter(Boolean)) {
+      const listener = () => finish(signal.reason || new Error("operation aborted"));
+      listeners.push([signal, listener]);
+      signal.addEventListener("abort", listener, { once: true });
+      if (signal.aborted) {
+        listener();
+        break;
+      }
+    }
+    Promise.resolve(progress).then(() => finish(), finish);
+  });
+}
+
+export function createPersistence(node, config = {}, imports) {
   const mode = config.mode || "off";
   if (mode === "off" || mode === false) return null;
   if (mode !== "s3" && mode !== "memory") {
@@ -1546,6 +1667,7 @@ export function createPersistence(node, config = {}) {
   return new PersistenceManager({
     node,
     storage,
+    imports,
     prefix: config.prefix || DEFAULT_DATA_PREFIX,
     flushMs: config.flushMs ?? 5000,
     opBatchSize: config.opBatchSize ?? 1000,

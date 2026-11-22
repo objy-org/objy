@@ -11,6 +11,7 @@ import { createUiInterface } from "./interfaces/ui.js";
 import { createCorsHandler } from "./http-cors.js";
 import { normalizeClusterSecret } from "./cluster-secret.js";
 import { createMemoryGuard } from "./memory-guard.js";
+import { normalizeImportConfig } from "./config.js";
 import { createObjectHookRegistry, createObjectHookRunner } from "./object-hooks.js";
 import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
@@ -84,6 +85,7 @@ export async function startServer({
 } = {}) {
   const handleCors = createCorsHandler(cors);
   const n = node || new CRDTNode({ storage: { compression: nodeCompression, readHeapUsageRatio } });
+  if (persistence && imports) persistence.imports = normalizeImportConfig(imports);
   const secret = normalizeClusterSecret(clusterSecret ?? auth?.clusterSecret ?? auth?.jwtSecret) || randomSecret();
   const guard = createMemoryGuard(memoryGuard);
   const hookRunner = createObjectHookRunner(n, objectHooks || createObjectHookRegistry());
@@ -94,7 +96,7 @@ export async function startServer({
 
   if (shardMap) n.replaceShardMap(shardMapFromHttp(shardMap, n.id, { secret, timeoutMs: replicationTimeoutMs }));
   for (const peer of peers) n.addPeer(httpPeer(peer, n.id, { secret, timeoutMs: replicationTimeoutMs }));
-  const authService = createAuthService(n, auth, { environment });
+  const authService = await createAuthService(n, auth, { environment });
   const lifecycle = n.lifecycle || new ContextLifecycle({ node: n, persistence });
   if (shardMapStore) shardMapStore.node = n;
   lifecycle.files = files;
@@ -117,6 +119,7 @@ export async function startServer({
     imports,
     objectHooks: hookRunner,
   });
+  authService.durability = context.durability;
   lifecycle.send = async (url, body) => {
     const result = await context.routing.forwardJson({ headers: {} }, { url }, null, "/cluster/context", { method: "POST", body, forwardedOnly: true });
     if (result.status !== 200) throw Object.assign(new Error(result.body?.error || `peer returned ${result.status}`), { status: result.status });
@@ -194,6 +197,7 @@ export function createInterfaceContext({
   const durableWrite = durability || {
     afterWrite: () => persistence?.afterWrite?.() || Promise.resolve({ records: 0, ops: 0 }),
     getStats: () => persistence?.getStats?.() || null,
+    withCapacity: (apply, options) => persistence ? persistence.withCapacity(apply, options) : apply(),
   };
   return {
     node,

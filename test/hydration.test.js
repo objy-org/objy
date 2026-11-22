@@ -244,9 +244,10 @@ for (const filesEnabled of [false, true]) {
         };
         const result = await request("PATCH", name, [{ _id: "remote", $set: { rank: 7 } }, { _id: "id-0", $set: { rank: 8 } }]);
         assert.deepEqual(result, { status: 200, body: { updated: 2, skipped: 0 } });
-        assert.equal(await storage.getBlob(concurrentFile.key), null);
+        assert.ok(await storage.getBlob(concurrentFile.key));
         assert.ok(await storage.getBlob(oldFile.key));
         assert.equal(f.node.get("db", name, "id-0").rank, 8);
+        assert.deepEqual(f.node.get("db", name, "id-0")._file, concurrentFile);
       }
       if (!filesEnabled) {
         const { name, data } = await f.collection();
@@ -263,25 +264,25 @@ for (const filesEnabled of [false, true]) {
         assert.equal(f.decompressions, 0);
 
         f.node.createCollection("db", "users");
-        const [user] = state.auth.prepareWriteObjects("db", "users", [{ _id: "limited", username: "limited", password: "test-only", permissions: [{ perm: "crud", query: { group: 2 } }] }]);
+        const [user] = state.auth.prepareWriteObjects("db", "users", await state.auth.hashWritePasswords([{ _id: "limited", username: "limited", password: "test-only", permissions: [{ perm: "crud", query: { group: 2 } }] }]));
         f.node.insertManyCount("db", "users", [user]);
-        const token = state.auth.login("db", "users", "limited", "test-only").accessToken;
+        const token = (await state.auth.login("db", "users", "limited", "test-only")).accessToken;
         f.reset();
         const allowed = await request("PUT", name, [{ ...data[2], rank: 200 }], { token });
         assert.equal(allowed.status, 200);
-        assert.equal(f.decompressions, 0);
+        assert.equal(f.decompressions, 1); // Account authorization must inspect cold credentials, if present.
         const denied = await request("PUT", name, [{ ...data[2], group: 3 }], { token });
         assert.equal(denied.status, 403);
-        assert.equal(f.decompressions, 0);
+        assert.equal(f.decompressions, 1);
         assert.equal(f.node.get("db", name, "id-2").rank, 200);
 
         const info = { indexes: ["username"], tiering: { mode: "compressedMemory", keep: ["username", "password"], minBytes: 1 } };
-        const userData = state.auth.prepareUserObject({ _id: "account", username: "account", password: "test-only", payload: "cold user data ".repeat(512) });
+        const [userData] = await state.auth.hashWritePasswords([{ _id: "account", username: "account", password: "test-only", payload: "cold user data ".repeat(512) }]);
         const users = await f.collection([userData], info);
         f.reset();
         const [prepared] = state.auth.prepareWriteObjects("db", users.name, [{ _id: "account", username: "account" }]);
         assert.equal(prepared.password, userData.password);
-        assert.throws(() => state.auth.prepareWriteObjects("db", users.name, [{ _id: "conflict", username: "account", password: "test-only" }]), /username already exists/);
+        assert.throws(() => state.auth.prepareWriteObjects("db", users.name, [{ ...userData, _id: "conflict" }]), /username already exists/);
         assert.equal(f.decompressions, 0);
       }
     } finally {

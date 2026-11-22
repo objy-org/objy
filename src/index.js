@@ -26,7 +26,7 @@ const node = new CRDTNode({
   vector: config.vector,
 });
 const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence, node);
-const persistence = createPersistence(node, config.persistence);
+const persistence = createPersistence(node, config.persistence, config.imports);
 const storedShardMap = await shardMapStore?.load();
 const configuredShardMap = storedShardMap || config.cluster.shardMap;
 if (configuredShardMap) node.replaceShardMap(configuredShardMap);

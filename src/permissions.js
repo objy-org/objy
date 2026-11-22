@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { matchesQuery } from "./query.js";
 
 const OP_CODES = {
@@ -44,6 +45,46 @@ export function normalizeCollectionPermissions(permissions) {
     return [...new Set(names)];
   };
   return { read: normalizeNames("read"), write: normalizeNames("write") };
+}
+
+export function accountAuthority(value) {
+  const read = typeof value === "function" ? value : (field) => value?.[field];
+  return {
+    role: read("role") || "user",
+    admin: read("admin") === true,
+    permissions: normalizePermissions(read("permissions")),
+    collectionPermissions: normalizeCollectionPermissions(read("collectionPermissions")),
+    tokenVersion: read("tokenVersion") || 0,
+  };
+}
+
+const EMPTY_AUTHORITY = accountAuthority(null);
+
+export function assertAccountWriteAllowed(actor, database, collection, id, before, after) {
+  if (!actor || (isPermissionBypass(actor) && (actor.globalUser === true || actor.database === database))) return;
+  const username = before?.("username");
+  const wasAccount = typeof username === "string" && username.length > 0 && hasCredentials(username, before("password"));
+  const becomesAccount = after && hasCredentials(after.username, after.password);
+  if (!wasAccount && !becomesAccount) return;
+
+  const ownAccount = actor.database === database && actor.collection === collection
+    && String(actor.sub) === String(id);
+  if (!after) {
+    if (!ownAccount) throw permissionError("delete another account", id);
+    return;
+  }
+  // Activation must authorize all resulting grants, including previously dormant ones.
+  if (!isDeepStrictEqual(wasAccount ? accountAuthority(before) : EMPTY_AUTHORITY, accountAuthority(after))) {
+    throw permissionError("change account authority", id);
+  }
+  if (wasAccount && !ownAccount && (before("username") !== after.username || before("password") !== after.password)) {
+    throw permissionError("change another account's credentials", id);
+  }
+}
+
+function hasCredentials(username, password) {
+  return typeof username === "string" && username.length > 0
+    && typeof password === "string" && password.length > 0;
 }
 
 export function mergeReadPermissionQuery(criteria = {}, user = null, collection = null) {

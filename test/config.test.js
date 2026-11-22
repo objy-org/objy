@@ -66,6 +66,7 @@ test("normalizes a single-node config with runtime defaults", () => {
     maxBulkBytes: 64 * 1024 * 1024,
     maxObjectBytes: 8 * 1024 * 1024,
     maxPendingPersistenceBytes: 256 * 1024 * 1024,
+    persistenceWaitMs: 60000,
     retryAfterMs: 1000,
   });
   assert.equal(config.cluster.syncMs, 2500);
@@ -129,6 +130,7 @@ test("loads node identity overrides from cli arguments", () => {
       maxBulkBytes: 345678,
       maxObjectBytes: 45678,
       maxPendingPersistenceBytes: 567890,
+      persistenceWaitMs: 2500,
       retryAfterMs: 2500,
     },
     cluster: {
@@ -212,6 +214,7 @@ test("loads node identity overrides from cli arguments", () => {
     maxBulkBytes: 345678,
     maxObjectBytes: 45678,
     maxPendingPersistenceBytes: 567890,
+    persistenceWaitMs: 2500,
     retryAfterMs: 2500,
   });
   assert.equal(config.cluster.syncMs, 250);

@@ -5,7 +5,7 @@ import {
   clusterSecretMatches,
   normalizeClusterSecret,
 } from "../cluster-secret.js";
-import { json, readJson, remoteHttpError } from "../http-router.js";
+import { json, readJson, remoteHttpError, requestAbortSignal } from "../http-router.js";
 import { localClusterStatus } from "../cluster-status.js";
 import { acceptsNdjson, isNdjsonContentType, NDJSON_CONTENT_TYPE, parseNdjsonBatches } from "../ndjson.js";
 import { publishShardMap, TOPOLOGY_RESHARDING } from "../shard-map.js";
@@ -156,6 +156,7 @@ export function createClusterInterface() {
       }));
 
       router.post("/replicate", secure((req, res) => lifecycle.track(null, async () => {
+        const signal = requestAbortSignal(req, res);
         if (isNdjsonContentType(req.headers["content-type"])) {
           const from = String(req.headers["x-objydb-node"] || req.query.get("node") || "");
           let applied = 0;
@@ -164,14 +165,15 @@ export function createClusterInterface() {
             maxBatchObjects: replicationBatchObjects(node.syncBatchSize),
             label: "replication stream",
           })) {
-            applied += node.applyRemote(from, ops);
+            applied += await node.applyRemoteBatch(from, ops, from, { signal });
             batches++;
           }
           json(res, 200, { ok: true, lastSeq: node.seq, applied, batches });
           return;
         }
         const body = await readJson(req);
-        node.applyRemote(String(body.node || ""), Array.isArray(body.ops) ? body.ops : []);
+        const from = String(body.node || "");
+        await node.applyRemoteBatch(from, Array.isArray(body.ops) ? body.ops : [], from, { signal, bytes: req._bodyBytes || 0 });
         json(res, 200, { ok: true, lastSeq: node.seq });
       })));
     },
@@ -208,7 +210,10 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
           }),
         };
       }
-      const body = await r.json().catch(() => null);
+      const text = await r.text();
+      let body;
+      try { body = JSON.parse(text); } catch { body = null; }
+      if (Array.isArray(body?.ops)) Object.defineProperty(body.ops, "byteLength", { value: Buffer.byteLength(text) });
       return { status: r.status, ...(body || {}) };
     },
     ack: async (id, after, scope) => {

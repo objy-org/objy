@@ -40,6 +40,7 @@ test("browsing 2000 objects transfers 2000 rows with 40 searches and one count",
   const store = await fixture(t, 2000),
     work = measure(store);
   await store.loadCollection("one", "items");
+  await store.loadCounts("one", "items");
   for (let page = 1; page < 40; page++)
     await store.loadCollection("one", "items", { more: true });
   assert.equal(store.assertCollection("one", "items").objects.length, 2000);
@@ -66,12 +67,9 @@ test("editing one collection does not reload catalogs or previously visited coll
   assert.equal(store.assertCollection("two", "other").objects[0].value, 2);
   assert.deepEqual(
     work.calls.map((call) => call.slice(0, 3)),
-    [
-      ["count", "two", "other"],
-      ["search", "two", "other"],
-    ],
+    [],
   );
-  assert.equal(work.rows.length, 1);
+  assert.equal(work.rows.length, 0);
   work.calls.length = 0;
   await store.setMeta("two", "other", { label: "Other" });
   assert.equal(
@@ -155,7 +153,7 @@ test("default browsing follows ID order and refresh includes new objects before 
 
 test("refresh failures remain scoped and retain confirmed writes until recovery", async (t) => {
   const store = await fixture(t);
-  await store.loadCollection("one", "items");
+  await store.loadCollection("one", "items", { query: { value: { $gte: 0 } } });
   await store.loadCollection("two", "other");
   const original = store.adapter.search;
   store.adapter.search = (db, ...args) => {

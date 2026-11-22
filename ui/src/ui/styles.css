@@ -200,18 +200,6 @@ objy-data-explorer {
 .builder-row { display: grid; grid-template-columns: 75px minmax(0,1fr) minmax(0,1fr); align-items: center; gap: 6px; margin-top: 9px; }
 .builder-result { color: var(--muted); padding-left: 8px; overflow-wrap: anywhere; }
 @media(max-width:420px) { .builder-filter { grid-template-columns: minmax(0,1fr) 75px 24px; }.builder-filter input[aria-label="Value"] { grid-column:1/3; grid-row:2; }.builder-filter button { grid-column:3; grid-row:1/3; } }
-.file-preview-modal { width: min(1040px, 100%); height: 86dvh; display: flex; flex-direction: column; padding: 18px; }
-.file-preview-modal .modal-header { margin-bottom: 14px; flex-shrink: 0; }
-.file-preview-modal .modal-header h2 { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-preview-modal .modal-actions { margin-top: 14px; flex-shrink: 0; }
-.file-viewer { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--canvas); border-radius: 6px; }
-.file-viewer img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
-.file-viewer[data-kind="pdf"] { flex-direction: column; }
-.pdf-page { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
-.pdf-page canvas { max-width: 100%; }
-.pdf-navigation { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 8px; font-size: 12px; color: var(--muted); }
-.pdf-navigation button { padding: 4px 10px; }
-.file-viewer p { padding: 20px; font-size: 12px; color: var(--muted); text-align: center; }
 .confirm-name { margin-top: 20px; }
 .form-field input[type="file"] { padding: 7px; font-size: 11px; }
 .form-field input::file-selector-button {

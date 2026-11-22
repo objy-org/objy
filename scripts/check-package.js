@@ -29,10 +29,6 @@ for (const path of [
   "public/ui/styles.css",
   "public/ui/theme.css",
   "public/ui/licenses/objy-client.txt",
-  "public/ui/licenses/pdfjs.txt",
-  "public/ui/pdf/pdf.worker.js",
-  "public/ui/pdf/wasm/openjpeg.wasm",
-  "public/ui/pdf/standard_fonts/LiberationSans-Regular.ttf",
   "src/api.js",
   "src/index.js",
 ]) {
@@ -42,7 +38,8 @@ for (const path of [
 for (const path of paths) {
   if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js"].includes(path) ||
       path.startsWith("bin/") || path.startsWith("client/") || path.startsWith("release/") || path === "public/index.html" ||
-      path.startsWith("ui/")) {
+      path.startsWith("ui/") || path.startsWith("public/ui/pdf/") ||
+      /public\/ui\/(?:pdf-preview-|licenses\/pdfjs)/.test(path)) {
     throw new Error(`database package contains removed or private source ${path}`);
   }
 }

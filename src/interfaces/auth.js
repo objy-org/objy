@@ -19,7 +19,7 @@ export function createAuthInterface() {
           if (!result) return json(res, 401, { error: "invalid username or password" });
           json(res, 200, result);
         } catch (err) {
-          json(res, err.status || 500, err.body || { error: err.message });
+          json(res, err.status || 500, err.body || { error: err.message }, err.headers || {});
         }
       });
 
@@ -59,7 +59,7 @@ async function loginWithRouting(req, { auth, node, routing, database, collection
   }
 
   for (const target of routing.queryTargets(database, collection).filter((candidate) => candidate.local)) {
-    const result = auth.loginFromUsers(
+    const result = await auth.loginFromUsers(
       database,
       collection,
       username,

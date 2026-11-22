@@ -44,9 +44,11 @@ export class ReplicationScheduler {
       lastSyncFailures: [],
     };
     this.unsubscribe = this.node.onChange((change) => this._recordLocalChange(change));
+    this.abort = new AbortController();
   }
 
   start() {
+    if (this.abort.signal.aborted) this.abort = new AbortController();
     if (!this.enabled || this.antiEntropyTimer || !this.antiEntropyMs) return;
     this.antiEntropyTimer = setInterval(() => {
       this.syncAll("anti-entropy");
@@ -55,6 +57,7 @@ export class ReplicationScheduler {
   }
 
   async stop() {
+    this.abort.abort(new Error("replication is stopping"));
     if (this.hintTimer) clearTimeout(this.hintTimer);
     if (this.antiEntropyTimer) clearInterval(this.antiEntropyTimer);
     this.hintTimer = null;
@@ -123,7 +126,7 @@ export class ReplicationScheduler {
     if (!this.enabled || this.syncingAll) return 0;
     this.syncingAll = true;
     try {
-      const applied = await this.node.syncAll();
+      const applied = await this.node.syncAll({ signal: this.abort.signal });
       if (reason === "anti-entropy") this.stats.antiEntropySyncs++;
       const failures = Array.isArray(this.node.lastSyncFailures) ? this.node.lastSyncFailures : [];
       this.stats.lastSyncFailures = failures;
@@ -222,7 +225,7 @@ export class ReplicationScheduler {
   async _runPull(key, peer, scope) {
     this.inflightPulls.add(key);
     try {
-      await this.node.syncPeer(peer, scope);
+      await this.node.syncPeer(peer, scope, { signal: this.abort.signal });
       this.stats.pullSyncs++;
       this.stats.lastSyncAt = new Date().toISOString();
       this._rememberSuccess(`pull ${key}`);

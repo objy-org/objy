@@ -67,12 +67,6 @@ export async function buildSite({ serverOutput = false } = {}) {
       ),
       join(staging, "licenses/objy-client.txt"),
     );
-    const pdfPackage = dirname(fileURLToPath(import.meta.resolve("pdfjs-dist/package.json")));
-    await mkdir(join(staging, "pdf"));
-    await copyFile(join(pdfPackage, "legacy/build/pdf.worker.mjs"), join(staging, "pdf/pdf.worker.js"));
-    for (const directory of ["cmaps", "standard_fonts", "wasm", "iccs"])
-      await cp(join(pdfPackage, directory), join(staging, "pdf", directory), { recursive: true });
-    await copyFile(join(pdfPackage, "LICENSE"), join(staging, "licenses/pdfjs.txt"));
     // Finish the build before touching the served directory; retain its inode for
     // existing static servers. dist contains generated files only.
     const outputs = [join(root, "dist")];

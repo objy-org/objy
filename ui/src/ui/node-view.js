@@ -89,7 +89,7 @@ export function nodeDetails(node) {
       ? "No compressed objects"
       : compression?.savedPercent != null
         ? `${compression.savedPercent.toLocaleString(undefined, { maximumFractionDigits: 1 })}% of object payload`
-        : "";
+        : "Not reported by this server";
   return `<div class="node-identity"><span class="node-health ${!node.reachable || node.restoring ? "node-warning" : ""}">${status}</span>${node.url ? `<span class="node-address" title="${esc(node.url)}">${esc(node.url)}</span>` : ""}</div>
   ${
     node.reachable
@@ -97,10 +97,10 @@ export function nodeDetails(node) {
    <div class="node-metrics">
     ${nodeMetric("Memory · RSS", memorySize(node.used), node.used === null ? "Not reported by this server" : rssCaption, node.percent)}
     ${nodeMetric("Index readiness", indexState, indexCaption, indexes?.percent ?? null, "progressbar")}
+    ${nodeMetric("Compression saved", memorySize(compression?.savedBytes ?? null), compressionDetail, compression?.savedPercent ?? null)}
    </div>
    <dl class="node-stats">
     ${stat("Active workers", node.workers?.active?.toLocaleString(), false, workerDetail)}
-    ${stat("Compression saved", memorySize(compression?.savedBytes ?? null), false, compressionDetail)}
     ${stat("Uptime", uptimeLabel(node.uptimeMs))}
     ${stat("Shards", node.shardCount?.toLocaleString())}
     ${stat("Replication", node.replication, node.replication === "Needs attention")}

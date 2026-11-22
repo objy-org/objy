@@ -385,6 +385,7 @@ export class ShardRequestRouter {
         last = response;
         if (!retryStatuses.includes(response.status)) return response;
       } catch (err) {
+        req.operationSignal?.throwIfAborted();
         last = {
           status: err.status || 503,
           body: { error: err.message },
@@ -411,6 +412,7 @@ export class ShardRequestRouter {
         last = response;
         if (!retryStatuses.includes(response.status)) return response;
       } catch (err) {
+        req.operationSignal?.throwIfAborted();
         last = {
           status: err.status || 503,
           body: { error: err.message },
@@ -439,6 +441,7 @@ export class ShardRequestRouter {
         last = response;
         if (!retryStatuses.includes(response.status)) return response;
       } catch (err) {
+        req.operationSignal?.throwIfAborted();
         last = {
           status: err.status || 503,
           body: { error: err.message },
@@ -498,6 +501,7 @@ export class ShardRequestRouter {
     if (adminApply) headers[ADMIN_APPLY_HEADER] = "1";
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
+    const unlink = linkRequestAbort(req, controller);
     const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
     timer.unref?.();
     try {
@@ -514,12 +518,14 @@ export class ShardRequestRouter {
         headers: Object.fromEntries(response.headers),
       };
     } catch (err) {
+      req.operationSignal?.throwIfAborted();
       if (err?.name === "AbortError") {
         throw httpError(504, `forward timeout after ${forwardTimeoutMs}ms`);
       }
       throw err;
     } finally {
       clearTimeout(timer);
+      unlink?.();
     }
   }
 
@@ -531,6 +537,7 @@ export class ShardRequestRouter {
     headers.prefer = preferMinimal(headers.prefer);
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
+    const unlink = linkRequestAbort(req, controller);
     const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
     timer.unref?.();
     try {
@@ -548,12 +555,14 @@ export class ShardRequestRouter {
         headers: Object.fromEntries(response.headers),
       };
     } catch (err) {
+      req.operationSignal?.throwIfAborted();
       if (err?.name === "AbortError") {
         throw httpError(504, `forward timeout after ${forwardTimeoutMs}ms`);
       }
       throw err;
     } finally {
       clearTimeout(timer);
+      unlink?.();
     }
   }
 
@@ -564,6 +573,7 @@ export class ShardRequestRouter {
     if (contentType) headers["content-type"] = contentType;
     const forwardTimeoutMs = positiveInt(timeoutMs, this.forwardTimeoutMs);
     const controller = new AbortController();
+    const unlink = linkRequestAbort(req, controller);
     const timer = setTimeout(() => controller.abort(), forwardTimeoutMs);
     timer.unref?.();
     try {
@@ -582,12 +592,14 @@ export class ShardRequestRouter {
         headers: Object.fromEntries(response.headers),
       };
     } catch (err) {
+      req.operationSignal?.throwIfAborted();
       if (err?.name === "AbortError") {
         throw httpError(504, `forward timeout after ${forwardTimeoutMs}ms`);
       }
       throw err;
     } finally {
       clearTimeout(timer);
+      unlink?.();
     }
   }
 
@@ -647,6 +659,15 @@ function queryForAggregate(criteria, spec = {}) {
     $refDepth: 0,
   }));
   return query.toString();
+}
+
+function linkRequestAbort(req, controller) {
+  const signal = req.operationSignal;
+  if (!signal) return null;
+  const abort = () => controller.abort(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  return () => signal.removeEventListener("abort", abort);
 }
 
 function queryForVectorSearch(criteria, vector = {}, options = {}) {

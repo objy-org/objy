@@ -537,7 +537,7 @@ test("first boot accepts OBJYDB_ADMIN_PASSWORD without printing it", async () =>
       password: "supplied-test-password",
     });
     assert.equal(session.status, 200);
-    s.auth.ensureGlobalUsers({ adminPassword: "replacement-password" });
+    await s.auth.ensureGlobalUsers({ adminPassword: "replacement-password" });
     assert.equal(messages.length, 1);
     assert.equal((await api(`http://localhost:${s.port}`).post("/api/_global/users/auth", {
       username: "admin",
@@ -1336,7 +1336,7 @@ test("compound permission predicates and reference database scope agree across s
       assert.equal(result.status, 200, JSON.stringify(result.body));
       assert.deepEqual(result.body, []);
     }
-    const unrestricted = a.auth.prepareWriteObjects(db, "users", [{ _id: userId, username: "reader", password: "secret", permissions: [{ query: {}, perm: "r" }] }]);
+    const unrestricted = a.auth.prepareWriteObjects(db, "users", await a.auth.hashWritePasswords([{ _id: userId, username: "reader", password: "secret", permissions: [{ query: {}, perm: "r" }] }]));
     a.node.replaceManyCount(db, "users", unrestricted);
     const session = await login(urlA, "reader", "secret", db);
     for (const [shard, owner] of [["shard-a", a], ["shard-b", b]]) {
@@ -2925,18 +2925,9 @@ test("serves the integrated Data Explorer and its local assets", async () => {
     for (const route of ["/ui/src/ui/app.js", "/ui/package.json", "/.git/config", "/client.js", "/ai/agent.js", "/missing.js"]) {
       assert.equal((await fetch(`http://localhost:${s.port}${route}`)).status, 404, route);
     }
-    for (const [path, type] of [
-      ["/pdf/pdf.worker.js", "text/javascript"],
-      ["/pdf/wasm/openjpeg.wasm", "application/wasm"],
-      ["/pdf/standard_fonts/LiberationSans-Regular.ttf", "font/ttf"],
-      ["/pdf/cmaps/Adobe-Japan1-UCS2.bcmap", "application/octet-stream"],
-      ["/licenses/pdfjs.txt", "text/plain"],
-    ]) {
-      const asset = await fetch(`http://localhost:${s.port}${path}`);
-      assert.equal(asset.status, 200, path);
-      assert.ok(asset.headers.get("content-type").startsWith(type));
-      assert.ok((await asset.arrayBuffer()).byteLength > 0);
-    }
+    assert.equal((await fetch(`http://localhost:${s.port}/licenses/objy-client.txt`)).status, 200);
+    for (const path of ["/pdf/pdf.worker.js", "/pdf/wasm/openjpeg.wasm", "/licenses/pdfjs.txt"])
+      assert.equal((await fetch(`http://localhost:${s.port}${path}`)).status, 404, path);
 
     const logo = await fetch(`http://localhost:${s.port}/objy-db-logo.png`);
     assert.equal(logo.status, 200);

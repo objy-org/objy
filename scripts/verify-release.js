@@ -39,7 +39,7 @@ try {
         const html = await ui.text();
         assert.match(html, /OBJY/);
         assert.ok(html.includes("components/data-explorer"));
-        for (const path of ["/app.js", "/styles.css", "/theme.css", "/components/data-explorer.js", "/licenses/objy-client.txt", "/pdf/pdf.worker.js", "/pdf/wasm/openjpeg.wasm", "/licenses/pdfjs.txt"]) {
+        for (const path of ["/app.js", "/styles.css", "/theme.css", "/components/data-explorer.js", "/licenses/objy-client.txt"]) {
           const asset = await fetch(base + path);
           assert.equal(asset.status, 200, path);
           assert.ok((await asset.arrayBuffer()).byteLength > 0);

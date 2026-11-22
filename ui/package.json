@@ -9,8 +9,7 @@
     "test:browser": "node scripts/browser-tests.mjs"
   },
   "dependencies": {
-    "@objy/client": "0.1.0",
-    "pdfjs-dist": "6.5.438"
+    "@objy/client": "0.1.0"
   },
   "devDependencies": {
     "esbuild": "0.25.12",
