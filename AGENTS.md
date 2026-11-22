@@ -14,3 +14,12 @@ OBJY DB is an ultra-fast, large-scale, distributed, in-memory database for fully
 For ordering work, the agreed initial regression budget is 5% for writes/imports and restore readiness, evaluated with repeated before/after runs. This is an acceptance target, not a forecast. Evaluate additional derived structures separately and revise or remove them if their benefits do not justify their costs.
 
 Read CONTRIBUTING.md for development and verification commands. Keep unrelated user changes intact. Do not update README.md for routine implementation work unless requested; update API.md when public behavior changes.
+
+## Deferred Security Work
+
+Postponed at the user's request; do not implement without approval:
+
+- Login brute-force protection. The bounded password-hashing queue is not rate limiting.
+- Query-abuse protection, especially blocking regular expressions and query complexity/concurrency limits.
+- Decide whether password changes should invalidate refresh tokens. Access tokens remaining valid until expiry is intentional.
+- Broader adversarial security tests and deployment checks for HTTPS, cluster connectivity, secrets, and storage permissions.

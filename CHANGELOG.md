@@ -10,6 +10,7 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ### Removed
 
+- Alternative shape storage engine. Object storage retains its dictionaries, indexes, RID-based columns, and compressed memory. Remove `storage.engine: "shape"` from configurations; snapshots, journals, and WAL formats are unchanged.
 - Embedded Node.js and browser database distributions. OBJY DB now ships as the `@objy/db` server runtime; applications connect through HTTP or `@objy/client`.
 
 ## 0.1.0 - 2026-11-04

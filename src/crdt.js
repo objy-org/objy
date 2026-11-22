@@ -364,7 +364,7 @@ export class CRDTNode {
   }
 
   stats(db, coll) {
-    return this.db.getCollection(db, coll)?.shapeStats() || [];
+    return this.db.getCollection(db, coll)?.storageStats() || [];
   }
 
   indexStats(db, coll) {

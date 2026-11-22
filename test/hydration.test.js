@@ -19,11 +19,11 @@ const rows = (count = 64) => Array.from({ length: count }, (_, i) => ({
   payload: { amount: i, text: "Unrelated cold object data. ".repeat(256) },
 }));
 
-function fixture(engine = "object") {
+function fixture() {
   let decompressions = 0;
   const node = new CRDTNode({
     id: "hydration", operationLog: false,
-    storage: { engine, compression: { ...nodeCompression, decompress(value) { decompressions++; return nodeCompression.decompress(value); } } },
+    storage: { compression: { ...nodeCompression, decompress(value) { decompressions++; return nodeCompression.decompress(value); } } },
   });
   let serial = 0;
   return {
@@ -40,146 +40,144 @@ function fixture(engine = "object") {
   };
 }
 
-for (const engine of ["object", "shape"]) {
-  test(`${engine}: replacements, deletes and stale remote writes need no old object body`, async () => {
-    const f = fixture(engine);
-    try {
-      const { name, data, collection } = await f.collection();
-      f.reset();
-      const rejected = data.map((row) => ({ kind: "putObj", db: "db", coll: name, id: row._id, value: {}, ts: collection.meta.get(row._id).ts, seq: 1 }));
-      assert.equal(f.node.applyRemote("remote", rejected), 0);
-      assert.equal(f.decompressions, 0);
-      const changed = data.map((row) => ({ ...row, group: 9, score: row.score + 1, tags: ["new"] }));
-      assert.equal(f.node.replaceManyCount("db", name, changed), data.length);
-      assert.equal(f.decompressions, 0);
-      assert.equal(f.node.count("db", name, { tags: { $contains: "all" } }), 0);
-      assert.equal(f.node.count("db", name, { group: 9 }), data.length);
-      assert.equal(f.node.removeMany("db", name, data.map((row) => row._id)).deleted, data.length);
-      assert.equal(f.decompressions, 0);
-      assert.equal(collection.indexes.get("group").forward.size, 0);
-      assert.equal(f.node.count("db", name), 0);
-    } finally { f.node.db.dispose(); }
-  });
+test(`replacements, deletes and stale remote writes need no old object body`, async () => {
+  const f = fixture();
+  try {
+    const { name, data, collection } = await f.collection();
+    f.reset();
+    const rejected = data.map((row) => ({ kind: "putObj", db: "db", coll: name, id: row._id, value: {}, ts: collection.meta.get(row._id).ts, seq: 1 }));
+    assert.equal(f.node.applyRemote("remote", rejected), 0);
+    assert.equal(f.decompressions, 0);
+    const changed = data.map((row) => ({ ...row, group: 9, score: row.score + 1, tags: ["new"] }));
+    assert.equal(f.node.replaceManyCount("db", name, changed), data.length);
+    assert.equal(f.decompressions, 0);
+    assert.equal(f.node.count("db", name, { tags: { $contains: "all" } }), 0);
+    assert.equal(f.node.count("db", name, { group: 9 }), data.length);
+    assert.equal(f.node.removeMany("db", name, data.map((row) => row._id)).deleted, data.length);
+    assert.equal(f.decompressions, 0);
+    assert.equal(collection.indexes.get("group").forward.size, 0);
+    assert.equal(f.node.count("db", name), 0);
+  } finally { f.node.db.dispose(); }
+});
 
-  test(`${engine}: actual applied batch size and indexed-value ownership remain correct`, async () => {
-    const f = fixture(engine);
-    try {
-      const { name, data, collection } = await f.collection();
-      data[0].tags.push("not-stored");
-      f.reset();
-      const stale = { id: data[1]._id, value: {}, ts: collection.meta.get(data[1]._id).ts };
-      const applied = collection.putObjects([
-        ...Array.from({ length: 5000 }, () => stale),
-        { id: data[0]._id, value: { ...rows(1)[0], score: 123, tags: ["replacement"] }, ts: f.node.nextTs() },
-      ]);
-      assert.equal(applied.length, 1);
-      assert.equal(f.decompressions, 0);
-      assert.equal(collection.indexDirtyRids.size, 0);
-      assert.equal(f.node.count("db", name, { tags: { $contains: "all" } }), data.length - 1);
-      assert.equal(f.node.count("db", name, { tags: { $contains: "not-stored" } }), 0);
-      assert.equal(f.node.get("db", name, data[0]._id).score, 123);
-      collection.scheduleIndexBuildsFromMeta();
-      const tags = ["queued"];
-      f.node.replaceManyCount("db", name, [{ ...rows(1)[0], tags }]);
-      tags.push("mutated-after-write");
-      await f.node.awaitIndexes("db", name);
-      assert.equal(f.node.count("db", name, { tags: { $contains: "queued" } }), 1);
-      assert.equal(f.node.count("db", name, { tags: { $contains: "mutated-after-write" } }), 0);
-    } finally { f.node.db.dispose(); }
-  });
+test(`actual applied batch size and indexed-value ownership remain correct`, async () => {
+  const f = fixture();
+  try {
+    const { name, data, collection } = await f.collection();
+    data[0].tags.push("not-stored");
+    f.reset();
+    const stale = { id: data[1]._id, value: {}, ts: collection.meta.get(data[1]._id).ts };
+    const applied = collection.putObjects([
+      ...Array.from({ length: 5000 }, () => stale),
+      { id: data[0]._id, value: { ...rows(1)[0], score: 123, tags: ["replacement"] }, ts: f.node.nextTs() },
+    ]);
+    assert.equal(applied.length, 1);
+    assert.equal(f.decompressions, 0);
+    assert.equal(collection.indexDirtyRids.size, 0);
+    assert.equal(f.node.count("db", name, { tags: { $contains: "all" } }), data.length - 1);
+    assert.equal(f.node.count("db", name, { tags: { $contains: "not-stored" } }), 0);
+    assert.equal(f.node.get("db", name, data[0]._id).score, 123);
+    collection.scheduleIndexBuildsFromMeta();
+    const tags = ["queued"];
+    f.node.replaceManyCount("db", name, [{ ...rows(1)[0], tags }]);
+    tags.push("mutated-after-write");
+    await f.node.awaitIndexes("db", name);
+    assert.equal(f.node.count("db", name, { tags: { $contains: "queued" } }), 1);
+    assert.equal(f.node.count("db", name, { tags: { $contains: "mutated-after-write" } }), 0);
+  } finally { f.node.db.dispose(); }
+});
 
-  test(`${engine}: counts, aggregate scans and partial-index verification read only required fields`, async () => {
-    const f = fixture(engine);
-    try {
-      const { name, data, collection } = await f.collection();
-      const criteria = { group: 2, rank: { $gte: 2 } };
-      const selected = data.filter((row) => row.group === 2 && row.rank >= 2);
-      const spec = { groupBy: "group", fields: { sum: { $sum: "score" }, avg: { $avg: "score" }, min: { $min: "score" }, max: { $max: "score" }, count: { $count: true } } };
-      f.reset();
-      assert.equal(f.node.count("db", name, { rank: { $gte: 2 } }), data.filter((row) => row.rank >= 2).length);
-      assert.equal(f.node.count("db", name, criteria), selected.length);
-      assert.deepEqual(f.node.aggregate("db", name, criteria, spec), aggregateObjects(selected, spec));
-      const scanSpec = { ...spec, groupBy: ["group", "rank"], fields: { ...spec.fields, rank: { $sum: "rank" } }, $pageSize: 100 };
-      assert.deepEqual(f.node.aggregate("db", name, {}, scanSpec), aggregateObjects(data, scanSpec));
-      const legacy = { groupBy: "group", sum: ["score", "rank"], min: ["rank"], max: ["rank"], avg: ["rank"] };
-      assert.deepEqual(f.node.aggregate("db", name, {}, legacy), aggregateLegacyObjects(data, legacy));
-      collection.rebuildDerivedState();
-      assert.equal(f.decompressions, 0);
-      assert.deepEqual(f.node.get("db", name, "id-10"), data[10]);
-      f.reset();
-      const cold = { fields: { sum: { $sum: "payload.amount" } } };
-      assert.deepEqual(f.node.aggregate("db", name, {}, cold), [{ sum: data.reduce((n, row) => n + row.payload.amount, 0) }]);
-      assert.equal(f.decompressions, data.length);
-      f.reset();
-      assert.equal(f.node.count("db", name, { $where: (object) => object.payload.amount % 2 === 0 }), data.length / 2);
-      assert.equal(f.decompressions, data.length);
-    } finally { f.node.db.dispose(); }
-  });
+test(`counts, aggregate scans and partial-index verification read only required fields`, async () => {
+  const f = fixture();
+  try {
+    const { name, data, collection } = await f.collection();
+    const criteria = { group: 2, rank: { $gte: 2 } };
+    const selected = data.filter((row) => row.group === 2 && row.rank >= 2);
+    const spec = { groupBy: "group", fields: { sum: { $sum: "score" }, avg: { $avg: "score" }, min: { $min: "score" }, max: { $max: "score" }, count: { $count: true } } };
+    f.reset();
+    assert.equal(f.node.count("db", name, { rank: { $gte: 2 } }), data.filter((row) => row.rank >= 2).length);
+    assert.equal(f.node.count("db", name, criteria), selected.length);
+    assert.deepEqual(f.node.aggregate("db", name, criteria, spec), aggregateObjects(selected, spec));
+    const scanSpec = { ...spec, groupBy: ["group", "rank"], fields: { ...spec.fields, rank: { $sum: "rank" } }, $pageSize: 100 };
+    assert.deepEqual(f.node.aggregate("db", name, {}, scanSpec), aggregateObjects(data, scanSpec));
+    const legacy = { groupBy: "group", sum: ["score", "rank"], min: ["rank"], max: ["rank"], avg: ["rank"] };
+    assert.deepEqual(f.node.aggregate("db", name, {}, legacy), aggregateLegacyObjects(data, legacy));
+    collection.rebuildDerivedState();
+    assert.equal(f.decompressions, 0);
+    assert.deepEqual(f.node.get("db", name, "id-10"), data[10]);
+    f.reset();
+    const cold = { fields: { sum: { $sum: "payload.amount" } } };
+    assert.deepEqual(f.node.aggregate("db", name, {}, cold), [{ sum: data.reduce((n, row) => n + row.payload.amount, 0) }]);
+    assert.equal(f.decompressions, data.length);
+    f.reset();
+    assert.equal(f.node.count("db", name, { $where: (object) => object.payload.amount % 2 === 0 }), data.length / 2);
+    assert.equal(f.decompressions, data.length);
+  } finally { f.node.db.dispose(); }
+});
 
-  test(`${engine}: container indexes overlapping columns retain stable values without cold reads`, async () => {
-    const f = fixture(engine);
-    try {
-      const profile = { score: 1, labels: ["original"] };
-      const data = [{ ...rows(1)[0], profile }];
-      const { name, collection } = await f.collection(data, { ...meta, indexes: ["profile"], columns: ["profile.score"] });
-      profile.labels.push("not-stored");
-      assert.deepEqual(collection.indexes.get("profile").valueForRid(0), { score: 1, labels: ["original"] });
-      f.reset();
-      const next = { score: 9, labels: ["updated"] };
-      f.node.replaceManyCount("db", name, [{ ...data[0], profile: next }]);
-      next.labels.push("not-stored-either");
-      assert.equal(f.decompressions, 0);
-      assert.deepEqual(collection.indexes.get("profile").valueForRid(0), { score: 9, labels: ["updated"] });
-      assert.deepEqual(f.node.get("db", name, "id-0").profile, { score: 9, labels: ["updated"] });
-    } finally { f.node.db.dispose(); }
-  });
+test(`container indexes overlapping columns retain stable values without cold reads`, async () => {
+  const f = fixture();
+  try {
+    const profile = { score: 1, labels: ["original"] };
+    const data = [{ ...rows(1)[0], profile }];
+    const { name, collection } = await f.collection(data, { ...meta, indexes: ["profile"], columns: ["profile.score"] });
+    profile.labels.push("not-stored");
+    assert.deepEqual(collection.indexes.get("profile").valueForRid(0), { score: 1, labels: ["original"] });
+    f.reset();
+    const next = { score: 9, labels: ["updated"] };
+    f.node.replaceManyCount("db", name, [{ ...data[0], profile: next }]);
+    next.labels.push("not-stored-either");
+    assert.equal(f.decompressions, 0);
+    assert.deepEqual(collection.indexes.get("profile").valueForRid(0), { score: 9, labels: ["updated"] });
+    assert.deepEqual(f.node.get("db", name, "id-0").profile, { score: 9, labels: ["updated"] });
+  } finally { f.node.db.dispose(); }
+});
 
-  test(`${engine}: filtered vector ranking hydrates only winners and keeps exact scores`, async () => {
-    const f = fixture(engine);
-    try {
-      const data = rows().map((row, i) => ({ ...row, _vec: [1, i % 3 + 1, 1] }));
-      const { name } = await f.collection(data);
-      const query = [1, 2, 1];
-      const expected = f.node.rankVectorRows("db", name, f.node.find("db", name, { group: 2 }), query, 3);
-      f.reset();
-      const actual = new ShardRequestRouter({ node: f.node }).vectorSearchLocalShards("db", name, { group: 2 }, { queryVec: query, limit: 3 });
-      assert.equal(f.decompressions, 3);
-      assert.deepEqual(actual, expected);
-    } finally { f.node.db.dispose(); }
-  });
+test(`filtered vector ranking hydrates only winners and keeps exact scores`, async () => {
+  const f = fixture();
+  try {
+    const data = rows().map((row, i) => ({ ...row, _vec: [1, i % 3 + 1, 1] }));
+    const { name } = await f.collection(data);
+    const query = [1, 2, 1];
+    const expected = f.node.rankVectorRows("db", name, f.node.find("db", name, { group: 2 }), query, 3);
+    f.reset();
+    const actual = new ShardRequestRouter({ node: f.node }).vectorSearchLocalShards("db", name, { group: 2 }, { queryVec: query, limit: 3 });
+    assert.equal(f.decompressions, 3);
+    assert.deepEqual(actual, expected);
+  } finally { f.node.db.dispose(); }
+});
 
-  test(`${engine}: durable WAL replay replaces and deletes compressed objects without old-body reads`, async () => {
-    const f = fixture(engine), restored = fixture(engine);
-    const dir = await mkdtemp(join(tmpdir(), "objy-hydration-wal-"));
-    const options = { storage: new MemoryObjectStorage(), flushMs: 0, snapshotMs: 0, ack: "localWal", localWal: { mode: "on", dir, fsync: true } };
-    const persistence = new PersistenceManager({ node: f.node, ...options });
-    persistence.start();
-    try {
-      const { name, data } = await f.collection(rows(128));
-      const changed = data.map((row) => ({ ...row, group: 9, score: row.score + 10 }));
-      f.node.replaceManyCount("db", name, changed);
-      f.node.removeMany("db", name, data.slice(0, 16).map((row) => row._id));
-      const recreated = data.slice(0, 8).map((row) => ({ ...row, group: 3, score: 999 }));
-      f.node.replaceManyCount("db", name, recreated);
-      await persistence.afterWrite();
-      await new PersistenceManager({ node: restored.node, ...options }).restore();
-      restored.node.startIndexWarmup();
-      await restored.node.awaitIndexes("db", name);
-      assert.equal(restored.decompressions, 0);
-      const expected = new Map(changed.map((row) => [row._id, row]));
-      for (const row of data.slice(0, 16)) expected.delete(row._id);
-      for (const row of recreated) expected.set(row._id, row);
-      assert.equal(restored.node.count("db", name), expected.size);
-      assert.equal(restored.node.count("db", name, { group: 9 }), 112);
-      for (const row of expected.values()) assert.deepEqual(restored.node.get("db", name, row._id), row);
-      for (const row of data.slice(8, 16)) assert.equal(restored.node.get("db", name, row._id), undefined);
-    } finally {
-      await persistence.stop();
-      f.node.db.dispose(); restored.node.db.dispose();
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-}
+test(`durable WAL replay replaces and deletes compressed objects without old-body reads`, async () => {
+  const f = fixture(), restored = fixture();
+  const dir = await mkdtemp(join(tmpdir(), "objy-hydration-wal-"));
+  const options = { storage: new MemoryObjectStorage(), flushMs: 0, snapshotMs: 0, ack: "localWal", localWal: { mode: "on", dir, fsync: true } };
+  const persistence = new PersistenceManager({ node: f.node, ...options });
+  persistence.start();
+  try {
+    const { name, data } = await f.collection(rows(128));
+    const changed = data.map((row) => ({ ...row, group: 9, score: row.score + 10 }));
+    f.node.replaceManyCount("db", name, changed);
+    f.node.removeMany("db", name, data.slice(0, 16).map((row) => row._id));
+    const recreated = data.slice(0, 8).map((row) => ({ ...row, group: 3, score: 999 }));
+    f.node.replaceManyCount("db", name, recreated);
+    await persistence.afterWrite();
+    await new PersistenceManager({ node: restored.node, ...options }).restore();
+    restored.node.startIndexWarmup();
+    await restored.node.awaitIndexes("db", name);
+    assert.equal(restored.decompressions, 0);
+    const expected = new Map(changed.map((row) => [row._id, row]));
+    for (const row of data.slice(0, 16)) expected.delete(row._id);
+    for (const row of recreated) expected.set(row._id, row);
+    assert.equal(restored.node.count("db", name), expected.size);
+    assert.equal(restored.node.count("db", name, { group: 9 }), 112);
+    for (const row of expected.values()) assert.deepEqual(restored.node.get("db", name, row._id), row);
+    for (const row of data.slice(8, 16)) assert.equal(restored.node.get("db", name, row._id), undefined);
+  } finally {
+    await persistence.stop();
+    f.node.db.dispose(); restored.node.db.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 for (const filesEnabled of [false, true]) {
   test(`HTTP mutation hydration and response contracts, files=${filesEnabled}`, async () => {

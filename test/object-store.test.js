@@ -19,6 +19,20 @@ function objectNode() {
   });
 }
 
+test("collection creation rejects unsupported physical storage engines", () => {
+  for (const engine of ["shape", "unknown"]) {
+    const node = new CRDTNode({ storage: { engine } });
+    try {
+      assert.throws(() => node.createCollection("db", "items"), {
+        name: "TypeError",
+        message: `unsupported storage engine: ${engine}`,
+      });
+    } finally {
+      node.db.dispose();
+    }
+  }
+});
+
 test("object storage engine supports CRUD and queries through CRDTNode", () => {
   const n = objectNode();
   n.createCollection("db", "events", { indexes: ["status", "tenant"] });
@@ -66,18 +80,18 @@ test("object row store pools repeated small values and skips large unique string
   store.rebuild("b", [["status", "open"], ["blob", "y".repeat(100)]]);
   store.rebuild("c", [["status", "open"], ["blob", "z".repeat(100)]]);
 
-  let stats = store.shapeStats()[0].valueDirectory;
+  let stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.entries, 1);
   assert.equal(stats.refs, 2);
   assert.equal(store.read("a").blob.length, 100);
 
   store.removeObject("b");
-  stats = store.shapeStats()[0].valueDirectory;
+  stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.entries, 1);
   assert.equal(stats.refs, 1);
 
   store.removeObject("c");
-  stats = store.shapeStats()[0].valueDirectory;
+  stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.entries, 0);
 });
 
@@ -93,13 +107,13 @@ test("object row store promotes values only after runtime repeats on the same pa
   });
 
   store.rebuild("a", [["left", "same"], ["right", "same"]]);
-  let stats = store.shapeStats()[0].valueDirectory;
+  let stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.entries, 0);
   assert.equal(stats.candidates, 2);
   assert.equal(stats.candidatePaths, 2);
 
   store.rebuild("b", [["left", "same"], ["right", "other"]]);
-  stats = store.shapeStats()[0].valueDirectory;
+  stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.entries, 1);
   assert.equal(stats.refs, 1);
 });
@@ -116,7 +130,7 @@ test("object row store avoids structured value dictionary keys by default", () =
   store.rebuild("a", [["payload", { kind: "same", score: 1 }]]);
   store.rebuild("b", [["payload", { kind: "same", score: 1 }]]);
 
-  const stats = store.shapeStats()[0].valueDirectory;
+  const stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.poolStructuredValues, false);
   assert.equal([...store.valueDirectory.pool.keys()].some((key) => key.startsWith("object:")), false);
   assert.ok([...store.valueDirectory.pool.keys()].some((key) => key === "string:same"));
@@ -135,7 +149,7 @@ test("object row store can opt into structured value dictionary keys", () => {
   store.rebuild("a", [["payload", { kind: "same", score: 1 }]]);
   store.rebuild("b", [["payload", { kind: "same", score: 1 }]]);
 
-  const stats = store.shapeStats()[0].valueDirectory;
+  const stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.poolStructuredValues, true);
   assert.ok([...store.valueDirectory.pool.keys()].some((key) => key.startsWith("object:")));
 });
@@ -151,7 +165,7 @@ test("object row store does not recurse into large containers", () => {
   store.rebuild("a", [["payload", ["same", "same"]]]);
   store.rebuild("b", [["payload", ["same", "same"]]]);
 
-  const stats = store.shapeStats()[0].valueDirectory;
+  const stats = store.storageStats()[0].valueDirectory;
   assert.equal(stats.maxNestedContainerEntries, 1);
   assert.equal(stats.entries, 0);
 });

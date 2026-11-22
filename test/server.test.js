@@ -2945,7 +2945,7 @@ test("serves the integrated Data Explorer and its local assets", async () => {
   }
 });
 
-test("shape store remains available behind the public interface", async () => {
+test("object store handles dynamic field types behind the public interface", async () => {
   const s = await startTestServer({ port: 0 });
   try {
     const session = await login(`http://localhost:${s.port}`);
@@ -2953,11 +2953,18 @@ test("shape store remains available behind the public interface", async () => {
     await c.post("/api/d/c/object", { x: 1, y: "a" });
     await c.post("/api/d/c/object", { x: 2, y: "b" });
     await c.post("/api/d/c/object", { x: 3, y: 1 });
-    const shapes = s.node.stats("d", "c");
-    assert.equal(shapes.length, 1);
-    const shared = shapes.find((s2) => s2.rows === 3);
-    assert.ok(shared);
-    assert.ok(shared.bytes > 0);
+    const stats = s.node.stats("d", "c");
+    assert.equal(stats.length, 1);
+    assert.equal(stats[0].engine, "object");
+    assert.equal(stats[0].rows, 3);
+    assert.ok(stats[0].bytes > 0);
+    const rows = await c.get("/api/d/c/object");
+    assert.equal(rows.status, 200);
+    assert.deepEqual(rows.body.map(({ x, y }) => ({ x, y })).sort((a, b) => a.x - b.x), [
+      { x: 1, y: "a" },
+      { x: 2, y: "b" },
+      { x: 3, y: 1 },
+    ]);
   } finally {
     s.server.close();
   }

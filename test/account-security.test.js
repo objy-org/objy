@@ -255,17 +255,15 @@ test("account field checks preserve compressed account behavior", async (t) => {
   assert.equal((await call("PATCH", "/api/app/accounts/object/writer", { $set: { label: "allowed" } }, { accessToken })).status, 200);
 });
 
-for (const engine of ["object", "shape"]) {
-  test(`${engine}: account authorization reads indexed and column-backed fields`, async (t) => {
-    const node = new CRDTNode({ storage: { engine, compression: nodeCompression } });
-    const { call, writer } = await fixture(t, { node });
-    node.setCollectionMeta("app", "accounts", { indexes: ["username", "role"],
-      columns: ["admin", "permissions", "password", "tokenVersion"] });
-    await node.awaitIndexes("app", "accounts");
-    assert.equal((await call("PATCH", "/api/app/accounts/object/boss", { $set: { admin: false } })).status, 403);
-    assert.equal((await call("PATCH", "/api/app/accounts/object/writer", { $set: { permissions: [] } })).status, 403);
-    const { password: _password, ...redacted } = writer;
-    assert.equal((await call("PUT", "/api/app/accounts/object/writer", { ...redacted, label: "profile" })).status, 200);
-    assert.equal(node.getField("app", "accounts", "writer", "password"), HASH);
-  });
-}
+test(`account authorization reads indexed and column-backed fields`, async (t) => {
+  const node = new CRDTNode({ storage: { compression: nodeCompression } });
+  const { call, writer } = await fixture(t, { node });
+  node.setCollectionMeta("app", "accounts", { indexes: ["username", "role"],
+    columns: ["admin", "permissions", "password", "tokenVersion"] });
+  await node.awaitIndexes("app", "accounts");
+  assert.equal((await call("PATCH", "/api/app/accounts/object/boss", { $set: { admin: false } })).status, 403);
+  assert.equal((await call("PATCH", "/api/app/accounts/object/writer", { $set: { permissions: [] } })).status, 403);
+  const { password: _password, ...redacted } = writer;
+  assert.equal((await call("PUT", "/api/app/accounts/object/writer", { ...redacted, label: "profile" })).status, 200);
+  assert.equal(node.getField("app", "accounts", "writer", "password"), HASH);
+});

@@ -101,6 +101,17 @@ test("normalizes a single-node config with runtime defaults", () => {
   });
 });
 
+test("object is the only configurable storage engine", () => {
+  const config = { node: { id: "node-a" }, storage: { engine: "object" } };
+  assert.equal(normalizeConfig(config).storage.engine, "object");
+  for (const engine of ["shape", "unknown"]) {
+    assert.throws(
+      () => normalizeConfig({ ...config, storage: { engine } }),
+      /storage.engine must be object/,
+    );
+  }
+});
+
 test("runtime secrets are optional in native configuration", () => {
   const config = normalizeConfig({ node: { id: "node-a" }, auth: {} });
   assert.equal(config.auth.jwtSecret, null);

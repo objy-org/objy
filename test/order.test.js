@@ -54,35 +54,33 @@ test("bounded selection and shard merge match an independent full-sort oracle", 
   }
 });
 
-for (const engine of ["object", "shape"]) {
-  test(`${engine} scan and index paging agree across insertion orders and value types`, async () => {
-    const nodes = [new CRDTNode({ id: "a", storage: { engine } }), new CRDTNode({ id: "b", storage: { engine } })];
-    const rows = fixture();
-    try {
-      nodes[0].insertMany("db", "items", rows);
-      nodes[1].insertMany("db", "items", [...rows].reverse());
-      for (const indexed of [false, true]) {
-        if (indexed) {
-          for (const node of nodes) node.db.collection("db", "items").createIndex("value");
-          for (const node of nodes) await node.db.awaitIndexes("db", "items");
-        }
-        for (const sort of ["asc", "desc"]) {
-          for (const filtered of [false, true]) {
-            const expected = oracle(rows.filter((row) => !filtered || row.active), sort);
-            for (const offset of [0, 13, 100, 250]) {
-              for (const node of nodes) {
-                const actual = node.find("db", "items", filtered ? { active: true } : {}, { sortBy: "value", sort, offset, limit: 19 });
-                assert.deepEqual(ids(actual), ids(expected.slice(offset, offset + 19)));
-              }
+test(`scan and index paging agree across insertion orders and value types`, async () => {
+  const nodes = [new CRDTNode({ id: "a" }), new CRDTNode({ id: "b" })];
+  const rows = fixture();
+  try {
+    nodes[0].insertMany("db", "items", rows);
+    nodes[1].insertMany("db", "items", [...rows].reverse());
+    for (const indexed of [false, true]) {
+      if (indexed) {
+        for (const node of nodes) node.db.collection("db", "items").createIndex("value");
+        for (const node of nodes) await node.db.awaitIndexes("db", "items");
+      }
+      for (const sort of ["asc", "desc"]) {
+        for (const filtered of [false, true]) {
+          const expected = oracle(rows.filter((row) => !filtered || row.active), sort);
+          for (const offset of [0, 13, 100, 250]) {
+            for (const node of nodes) {
+              const actual = node.find("db", "items", filtered ? { active: true } : {}, { sortBy: "value", sort, offset, limit: 19 });
+              assert.deepEqual(ids(actual), ids(expected.slice(offset, offset + 19)));
             }
           }
         }
       }
-    } finally {
-      for (const node of nodes) node.db.dispose();
     }
-  });
-}
+  } finally {
+    for (const node of nodes) node.db.dispose();
+  }
+});
 
 test("sorted pages hydrate only selected compressed objects for ID, hot, column, and indexed sorting", async () => {
   let inflations = 0;

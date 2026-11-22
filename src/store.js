@@ -1,5 +1,4 @@
 import { ObjectRowStore } from "./object-store.js";
-import { ShapeStore } from "./shape.js";
 import { gt } from "./clock.js";
 import { percentOf, summarizeCompression } from "./compression-stats.js";
 import { DerivedStateScheduler } from "./derived-state-scheduler.js";
@@ -773,8 +772,8 @@ class Collection {
     }
   }
 
-  shapeStats() {
-    return this.store.shapeStats().map((entry) => ({
+  storageStats() {
+    return this.store.storageStats().map((entry) => ({
       ...entry,
       ridTable: {
         live: this.liveCount,
@@ -1879,9 +1878,8 @@ class Collection {
 
 function createPhysicalStore(options = {}) {
   const engine = options.engine || "object";
-  if (engine === "shape") return new ShapeStore();
-  if (engine === "object") return new ObjectRowStore(options.object);
-  throw new TypeError(`unsupported storage engine: ${engine}`);
+  if (engine !== "object") throw new TypeError(`unsupported storage engine: ${engine}`);
+  return new ObjectRowStore(options.object);
 }
 
 class RidBitmapQueue {

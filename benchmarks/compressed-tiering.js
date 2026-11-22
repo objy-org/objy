@@ -119,7 +119,7 @@ async function runChild(options) {
   });
 
   assertGroupedAggregate(aggregate.value, expected);
-  const stats = collection.shapeStats()[0];
+  const stats = collection.storageStats()[0];
   const result = {
     mode: options.mode,
     objects: options.objects,

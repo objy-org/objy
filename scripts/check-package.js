@@ -36,7 +36,7 @@ for (const path of [
 }
 
 for (const path of paths) {
-  if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js"].includes(path) ||
+  if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js", "src/shape.js"].includes(path) ||
       path.startsWith("bin/") || path.startsWith("client/") || path.startsWith("release/") || path === "public/index.html" ||
       path.startsWith("ui/") || path.startsWith("public/ui/pdf/") ||
       /public\/ui\/(?:pdf-preview-|licenses\/pdfjs)/.test(path)) {

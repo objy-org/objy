@@ -19,244 +19,242 @@ import { startServer } from '../src/server.js';
 function check(feature, name, run) {
   return test(`${feature}: ${name}`, run);
 }
-function makeNode(engine = 'object', id = 'audit') {
-  return new CRDTNode({ id, storage: { engine, compression: nodeCompression } });
+function makeNode(id = 'audit') {
+  return new CRDTNode({ id, storage: { compression: nodeCompression } });
 }
 function sortedIds(rows) { return rows.map(row => row._id).sort(); }
 const tiering = { mode: 'compressedMemory', offload: ['payload'], minBytes: 1 };
 const sample = { _id: 'a', score: 42, details: { rank: 7, label: 'keep' }, items: [{ score: 42, name: 'first' }, { score: 8, name: 'second' }], payload: 'cold '.repeat(32) };
 
-for (const engine of ['object', 'shape']) {
-  await check('CRUD', `${engine}: defensive reads, replace, unset, delete`, async () => {
-    const n = makeNode(engine);
+await check('CRUD', `defensive reads, replace, unset, delete`, async () => {
+  const n = makeNode();
+  try {
+    n.insertMany('d', 'c', [sample]);
+    const got = n.get('d', 'c', 'a'); got.details.rank = 999;
+    assert.deepEqual(n.get('d', 'c', 'a'), sample);
+    const replacement = { _id: 'a', score: 0, flag: false, nullable: null };
+    n.replaceManyCount('d', 'c', [replacement]);
+    assert.deepEqual(n.get('d', 'c', 'a'), replacement);
+    n.replace('d', 'c', 'a', applyPatchToObject(replacement, { $unset: ['score'], $set: { 'nested.value': 5 } }));
+    assert.deepEqual(n.get('d', 'c', 'a'), { _id: 'a', flag: false, nullable: null, nested: { value: 5 } });
+    n.remove('d', 'c', 'a'); assert.equal(n.get('d', 'c', 'a'), undefined);
+  } finally { n.db.dispose(); }
+});
+for (const transition of ['remove', 'deferred-remove', 'parent-child', 'array-column', 'array-tiering']) {
+  await check('Storage transitions', transition, async () => {
+    const n = makeNode();
     try {
-      n.insertMany('d', 'c', [sample]);
-      const got = n.get('d', 'c', 'a'); got.details.rank = 999;
-      assert.deepEqual(n.get('d', 'c', 'a'), sample);
-      const replacement = { _id: 'a', score: 0, flag: false, nullable: null };
-      n.replaceManyCount('d', 'c', [replacement]);
-      assert.deepEqual(n.get('d', 'c', 'a'), replacement);
-      n.replace('d', 'c', 'a', applyPatchToObject(replacement, { $unset: ['score'], $set: { 'nested.value': 5 } }));
-      assert.deepEqual(n.get('d', 'c', 'a'), { _id: 'a', flag: false, nullable: null, nested: { value: 5 } });
-      n.remove('d', 'c', 'a'); assert.equal(n.get('d', 'c', 'a'), undefined);
-    } finally { n.db.dispose(); }
-  });
-  for (const transition of ['remove', 'deferred-remove', 'parent-child', 'array-column', 'array-tiering']) {
-    await check('Storage transitions', `${engine}: ${transition}`, async () => {
-      const n = makeNode(engine);
-      try {
-        n.createCollection('d', 'c', transition === 'parent-child' ? { columns: ['details'] } : transition.startsWith('array') ? {} : { columns: ['score'] });
-        n.insertManyCount('d', 'c', [sample]); await n.awaitIndexes('d', 'c');
-        if (transition === 'deferred-remove') n.db.beginBulkLoad();
-        const next = transition === 'parent-child' ? { columns: ['details.rank'] } : transition === 'array-column' ? { columns: ['items.0.score'] } : transition === 'array-tiering' ? { tiering: { mode: 'compressedMemory', keep: ['items.0.score'], minBytes: 1 } } : {};
-        n.setCollectionMeta('d', 'c', next);
-        if (transition === 'deferred-remove') n.db.endBulkLoad();
-        await n.awaitIndexes('d', 'c');
-        assert.deepEqual(n.get('d', 'c', 'a'), sample);
-      } finally { n.db.dispose(); }
-    });
-  }
-  await check('Storage transitions', `${engine}: retiering preserves dirty column fields`, async () => {
-    const n = makeNode(engine);
-    try {
-      n.createCollection('d', 'c', { columns: ['score'] });
-      const rows = Array.from({ length: 5001 }, (_, i) => ({ _id: String(i), score: i, payload: 'cold '.repeat(16) }));
-      n.insertManyCount('d', 'c', rows); await n.awaitIndexes('d', 'c');
-      const updated = rows.map(row => ({ ...row, score: 10000 }));
-      n.replaceManyCount('d', 'c', updated);
-      assert.equal(n.db.getCollection('d', 'c').indexDirtyRids.size, 5001);
-      n.setCollectionMeta('d', 'c', { columns: ['score'], tiering });
-      await n.awaitIndexes('d', 'c');
-      assert.deepEqual(n.get('d', 'c', '0'), updated[0]);
-    } finally { n.db.dispose(); }
-  });
-  await check('Job lifecycle', `${engine}: replacement build preserves pending unset`, async () => {
-    const n = makeNode(engine);
-    try {
-      n.createCollection('d', 'c', { columns: ['score'] });
+      n.createCollection('d', 'c', transition === 'parent-child' ? { columns: ['details'] } : transition.startsWith('array') ? {} : { columns: ['score'] });
       n.insertManyCount('d', 'c', [sample]); await n.awaitIndexes('d', 'c');
-      const c = n.db.getCollection('d', 'c'); c.scheduleIndexBuildsFromMeta();
-      const { score, ...expected } = sample;
-      n.replaceManyCount('d', 'c', [expected]); c.scheduleIndexBuildsFromMeta();
-      await n.awaitIndexes('d', 'c'); assert.deepEqual(n.get('d', 'c', 'a'), expected);
-    } finally { n.db.dispose(); }
-  });
-  await check('Job lifecycle', `${engine}: removed and recreated column rejects the superseded build`, async () => {
-    const n = makeNode(engine);
-    try {
-      const rows = Array.from({ length: 5001 }, (_, i) => ({ _id: String(i), score: i, details: { rank: i, label: 'keep' } }));
-      n.insertManyCount('d', 'c', rows);
-      const c = n.db.getCollection('d', 'c');
-      const scheduler = c.derivedStateScheduler;
-      const schedule = scheduler.schedule.bind(scheduler);
-      let changed = false;
-      scheduler.schedule = (name, run, options) => schedule(name, (job) => {
-        const checkpoint = job.checkpoint.bind(job);
-        job.checkpoint = async (scanned) => {
-          if (name.startsWith('column:') && !changed) {
-            changed = true;
-            rows[0] = { ...rows[0], score: 99999 };
-            n.replaceManyCount('d', 'c', [rows[0]]);
-            n.setCollectionMeta('d', 'c', {});
-            n.setCollectionMeta('d', 'c', { columns: ['score'] });
-          }
-          await checkpoint(scanned);
-        };
-        return run(job);
-      }, options);
-      n.setCollectionMeta('d', 'c', { columns: ['score'] });
+      if (transition === 'deferred-remove') n.db.beginBulkLoad();
+      const next = transition === 'parent-child' ? { columns: ['details.rank'] } : transition === 'array-column' ? { columns: ['items.0.score'] } : transition === 'array-tiering' ? { tiering: { mode: 'compressedMemory', keep: ['items.0.score'], minBytes: 1 } } : {};
+      n.setCollectionMeta('d', 'c', next);
+      if (transition === 'deferred-remove') n.db.endBulkLoad();
       await n.awaitIndexes('d', 'c');
-      assert.equal(changed, true);
-      assert.deepEqual(n.get('d', 'c', '0'), rows[0]);
-      assert.deepEqual(n.aggregate('d', 'c', {}, { fields: { sum: { $sum: 'score' } } }), [{ sum: rows.reduce((sum, row) => sum + row.score, 0) }]);
-    } finally { n.db.dispose(); }
-  });
-  await check('Storage transitions', `${engine}: overlapping columns, dirty writes and retiering retain every value`, async () => {
-    const n = makeNode(engine);
-    try {
-      const rows = Array.from({ length: 5001 }, (_, i) => ({ ...sample, _id: String(i), score: i, details: { rank: i, label: 'keep' } }));
-      n.createCollection('d', 'c', { columns: ['details', 'details.rank', 'score', 'items.0.score'], tiering });
-      n.insertManyCount('d', 'c', rows);
-      await n.awaitIndexes('d', 'c');
-      rows[0] = { _id: rows[0]._id, ...applyPatchToObject(rows[0], { $unset: ['details.rank'], $set: { 'items.0.score': null } }) };
-      n.replaceManyCount('d', 'c', rows);
-      n.setCollectionMeta('d', 'c', { columns: ['details.rank', 'score'], tiering: { mode: 'compressedMemory', offload: ['details', 'items', 'payload'], minBytes: 1 } });
-      await n.awaitIndexes('d', 'c');
-      n.setCollectionMeta('d', 'c', { columns: ['score'] });
-      await n.awaitIndexes('d', 'c');
-      for (const row of rows) assert.deepEqual(n.get('d', 'c', row._id), row);
-    } finally { n.db.dispose(); }
-  });
-
-  const values = [undefined, null, '', 0, 1, 2, 3, '1', '01', false, true, [], [1, 2], ['1'], [null], [[1]], { a: 1 }, ['1', 1], 5, ' ', '0x1', '1e0', '-0', 'false', 'Infinity'];
-  const rows = values.map((v, i) => ({ _id: String(i).padStart(3, '0'), ...(v === undefined ? {} : { v }), score: i, group: i % 3, payload: 'cold '.repeat(16) }));
-  const constraints = [0, 1, '1', '01', false, true, null, '', ' ', '0x1', '1e0', 'Infinity', { $eq: 1 }, { $equal: '1' }, { $in: [1, 2] }, { $eq: 1, $gt: 4 }, { $in: [1, 2], $ne: 1 }, { $or: [1, 2], $gt: 1 }, { $eq: 1, $type: 'number' }, { $eq: 1, unknown: 1 }, { $contains: 1 }, { $contains: '' }, { $contains: null }, { $exists: true }, { $exists: false }, { $gt: 0 }, { $gte: 1, $lt: 3 }, { $ne: 1 }, { $nin: [1, 2] }, { $deepEquals: [1, 2] }, { $regex: '^0?1$' }, { $eq: 5, $regex: '^0?1$' }];
-  for (const [mode, meta] of [['scan', {}], ['indexed', { indexes: ['v', 'group'] }], ['columns', { columns: ['v', 'score', 'group'] }], ['compressed', { indexes: ['v', 'group'], columns: ['score'], tiering }]]) {
-    const n = makeNode(engine);
-    try {
-      n.createCollection('d', 'c', meta); n.insertManyCount('d', 'c', rows); await n.awaitIndexes('d', 'c');
-      await check('Query semantics', `${engine}/${mode}: optimized results equal scan evaluator`, () => {
-        const mismatches = [];
-        for (const constraint of constraints) {
-          const criteria = { v: constraint };
-          const expected = sortedIds(rows.filter(row => matchesQuery(row, criteria)));
-          const actual = sortedIds(n.find('d', 'c', criteria));
-          if (!isDeepStrictEqual(actual, expected)) mismatches.push({ criteria, expected, actual });
-          assert.equal(n.count('d', 'c', criteria), expected.length, JSON.stringify(criteria));
-          const aggregated = n.aggregate('d', 'c', criteria, { fields: { count: { $count: true }, sum: { $sum: 'score' } } });
-          assert.deepEqual(aggregated, expected.length ? [{ count: expected.length, sum: rows.filter(row => matchesQuery(row, criteria)).reduce((sum, row) => sum + row.score, 0) }] : [], JSON.stringify(criteria));
-        }
-        assert.deepEqual(mismatches, []);
-        return { comparisons: constraints.length };
-      });
-      await check('Ordering', `${engine}/${mode}: total order with ID ties`, () => {
-        const expected = [...rows].sort((a, b) => compareSortValues(a.v, b.v) || (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
-        assert.deepEqual(n.find('d', 'c', {}, { sortBy: 'v', limit: 7, offset: 3 }).map(o => o._id), expected.slice(3, 10).map(o => o._id));
-      });
-      await check('Aggregation', `${engine}/${mode}: sum and non-null field count`, () => {
-        const spec = { fields: { total: { $sum: 'score' }, nonNull: { $count: 'v' }, count: { $count: true } } };
-        assert.deepEqual(n.aggregate('d', 'c', {}, spec), [{ total: rows.reduce((sum, r) => sum + r.score, 0), nonNull: rows.filter(r => r.v !== undefined && r.v !== null).length, count: rows.length }]);
-      });
-    } finally { n.db.dispose(); }
-  }
-  await check('Persistence', `${engine}: full snapshot restores logical values`, async () => {
-    const n = makeNode(engine, 'snapshot-source'); const fresh = makeNode(engine, 'snapshot-restored');
-    const storage = new MemoryObjectStorage();
-    const p = new PersistenceManager({ node: n, storage, flushMs: 0, snapshotMs: 0 });
-    try {
-      p.start(); n.createCollection('d', 'c', { indexes: ['details.rank'], columns: ['score'], tiering });
-      n.insertManyCount('d', 'c', [sample]); await n.awaitIndexes('d', 'c'); await p.checkpoint();
-      await new PersistenceManager({ node: fresh, storage, flushMs: 0, snapshotMs: 0 }).restore();
-      await fresh.awaitIndexes('d', 'c'); assert.deepEqual(fresh.get('d', 'c', 'a'), sample);
-    } finally { await p.stop(); n.db.dispose(); fresh.db.dispose(); }
-  });
-  await check('Query semantics', `${engine}: warming and dirty plans preserve mixed-type predicates`, async () => {
-    const n = makeNode(engine);
-    try {
-      const rows = Array.from({ length: 5001 }, (_, i) => ({ _id: String(i), v: values[i % values.length], score: i }));
-      n.insertManyCount('d', 'c', rows);
-      n.setCollectionMeta('d', 'c', { indexes: ['v'], columns: ['score'] });
-      const verify = () => {
-        for (const v of constraints) {
-          const query = { v }, expected = rows.filter(row => matchesQuery(row, query));
-          assert.deepEqual(sortedIds(n.find('d', 'c', query)), sortedIds(expected));
-          assert.equal(n.count('d', 'c', query), expected.length);
-          assert.deepEqual(n.aggregate('d', 'c', query, { fields: { count: { $count: true }, sum: { $sum: 'score' } } }),
-            expected.length ? [{ count: expected.length, sum: expected.reduce((sum, row) => sum + row.score, 0) }] : []);
-        }
-      };
-      verify();
-      await n.awaitIndexes('d', 'c'); verify();
-      for (let i = 0; i < rows.length; i++) rows[i] = { ...rows[i], v: values[(i + 7) % values.length], score: i * 3 };
-      n.replaceManyCount('d', 'c', rows);
-      assert.equal(n.db.getCollection('d', 'c').indexDirtyRids.size, rows.length);
-      verify();
-      await n.awaitIndexes('d', 'c'); verify();
-    } finally { n.db.dispose(); }
-  });
-  await check('Query semantics', `${engine}: numeric ID predicates do not become exact string lookups`, () => {
-    const n = makeNode(engine);
-    try {
-      const rows = ['1', '01', '001', '2', 'true'].map(_id => ({ _id, score: 1 }));
-      n.insertManyCount('d', 'c', rows);
-      for (const operand of [1, true, '01', { $in: [1, 'true'] }, { $eq: 1, $ne: '1' }]) {
-        const query = { _id: operand }, expected = rows.filter(row => matchesQuery(row, query));
-        assert.deepEqual(sortedIds(n.find('d', 'c', query)), sortedIds(expected));
-        assert.equal(n.count('d', 'c', query), expected.length);
-      }
-    } finally { n.db.dispose(); }
-  });
-  await check('Persistence', `${engine}: column removal survives replicated metadata and a new snapshot`, async () => {
-    const n = makeNode(engine, 'column-writer'), replica = makeNode(engine, 'column-reader'), fresh = makeNode(engine, 'column-writer');
-    const storage = new MemoryObjectStorage();
-    const p = new PersistenceManager({ node: n, storage, flushMs: 0, snapshotMs: 0 });
-    try {
-      p.start();
-      n.createCollection('d', 'c', { columns: ['score', 'items.0.score'], tiering });
-      n.insertManyCount('d', 'c', [sample]);
-      await n.awaitIndexes('d', 'c');
-      replica.addPeer(localPeer(n)); await replica.syncAll(); await replica.awaitIndexes('d', 'c');
-      n.setCollectionMeta('d', 'c', { tiering });
-      await replica.syncAll();
-      assert.deepEqual(replica.get('d', 'c', 'a'), sample);
-      await p.checkpoint();
-      await new PersistenceManager({ node: fresh, storage, flushMs: 0, snapshotMs: 0 }).restore();
-      assert.deepEqual(fresh.get('d', 'c', 'a'), sample);
-    } finally { await p.stop(); n.db.dispose(); replica.db.dispose(); fresh.db.dispose(); }
-  });
-  await check('Replication', `${engine}: replace/delete convergence with indexes and columns`, async () => {
-    const a = makeNode(engine, 'writer'); const b = makeNode(engine, 'replica');
-    try {
-      for (const n of [a, b]) n.createCollection('d', 'c', { columns: ['score'], indexes: ['details.rank'], tiering });
-      a.insertManyCount('d', 'c', [sample, { ...sample, _id: 'b' }]);
-      const peer = localPeer(a); b.addPeer(peer); await b.syncAll();
-      a.replace('d', 'c', 'a', { ...sample, score: 99 }); a.remove('d', 'c', 'b'); await b.syncAll();
-      await Promise.all([a.awaitIndexes('d', 'c'), b.awaitIndexes('d', 'c')]);
-      assert.deepEqual(b.get('d', 'c', 'a'), a.get('d', 'c', 'a')); assert.equal(b.get('d', 'c', 'b'), undefined);
-    } finally { a.db.dispose(); b.db.dispose(); }
-  });
-  await check('State-machine oracle', `${engine}: 600 mixed writes preserve objects and aggregates`, async () => {
-    const n = makeNode(engine); const model = new Map(); let seed = 8473;
-    const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
-    try {
-      n.createCollection('d', 'c', { indexes: ['group'], columns: ['score'], tiering });
-      for (let i = 0; i < 600; i++) {
-        const id = String(random() % 47);
-        if (random() % 5 === 0) { n.remove('d', 'c', id); model.delete(id); }
-        else {
-          const row = { _id: id, group: random() % 5, score: random() % 10000, flag: random() % 2 === 0, payload: 'cold '.repeat(64), details: { a: i }, items: [i, null, false] };
-          n.replaceManyCount('d', 'c', [row]); model.set(id, row);
-        }
-        if (i % 53 === 0) n.db.getCollection('d', 'c').scheduleIndexBuildsFromMeta();
-        if (i % 53 === 10) await n.awaitIndexes('d', 'c');
-        for (const [key, expected] of model) assert.deepEqual(n.get('d', 'c', key), expected);
-      }
-      await n.awaitIndexes('d', 'c');
-      assert.deepEqual(n.aggregate('d', 'c', {}, { fields: { sum: { $sum: 'score' }, count: { $count: true } } }), [{ sum: [...model.values()].reduce((sum, r) => sum + r.score, 0), count: model.size }]);
-      return { operations: 600, survivingObjects: model.size };
+      assert.deepEqual(n.get('d', 'c', 'a'), sample);
     } finally { n.db.dispose(); }
   });
 }
+await check('Storage transitions', `retiering preserves dirty column fields`, async () => {
+  const n = makeNode();
+  try {
+    n.createCollection('d', 'c', { columns: ['score'] });
+    const rows = Array.from({ length: 5001 }, (_, i) => ({ _id: String(i), score: i, payload: 'cold '.repeat(16) }));
+    n.insertManyCount('d', 'c', rows); await n.awaitIndexes('d', 'c');
+    const updated = rows.map(row => ({ ...row, score: 10000 }));
+    n.replaceManyCount('d', 'c', updated);
+    assert.equal(n.db.getCollection('d', 'c').indexDirtyRids.size, 5001);
+    n.setCollectionMeta('d', 'c', { columns: ['score'], tiering });
+    await n.awaitIndexes('d', 'c');
+    assert.deepEqual(n.get('d', 'c', '0'), updated[0]);
+  } finally { n.db.dispose(); }
+});
+await check('Job lifecycle', `replacement build preserves pending unset`, async () => {
+  const n = makeNode();
+  try {
+    n.createCollection('d', 'c', { columns: ['score'] });
+    n.insertManyCount('d', 'c', [sample]); await n.awaitIndexes('d', 'c');
+    const c = n.db.getCollection('d', 'c'); c.scheduleIndexBuildsFromMeta();
+    const { score, ...expected } = sample;
+    n.replaceManyCount('d', 'c', [expected]); c.scheduleIndexBuildsFromMeta();
+    await n.awaitIndexes('d', 'c'); assert.deepEqual(n.get('d', 'c', 'a'), expected);
+  } finally { n.db.dispose(); }
+});
+await check('Job lifecycle', `removed and recreated column rejects the superseded build`, async () => {
+  const n = makeNode();
+  try {
+    const rows = Array.from({ length: 5001 }, (_, i) => ({ _id: String(i), score: i, details: { rank: i, label: 'keep' } }));
+    n.insertManyCount('d', 'c', rows);
+    const c = n.db.getCollection('d', 'c');
+    const scheduler = c.derivedStateScheduler;
+    const schedule = scheduler.schedule.bind(scheduler);
+    let changed = false;
+    scheduler.schedule = (name, run, options) => schedule(name, (job) => {
+      const checkpoint = job.checkpoint.bind(job);
+      job.checkpoint = async (scanned) => {
+        if (name.startsWith('column:') && !changed) {
+          changed = true;
+          rows[0] = { ...rows[0], score: 99999 };
+          n.replaceManyCount('d', 'c', [rows[0]]);
+          n.setCollectionMeta('d', 'c', {});
+          n.setCollectionMeta('d', 'c', { columns: ['score'] });
+        }
+        await checkpoint(scanned);
+      };
+      return run(job);
+    }, options);
+    n.setCollectionMeta('d', 'c', { columns: ['score'] });
+    await n.awaitIndexes('d', 'c');
+    assert.equal(changed, true);
+    assert.deepEqual(n.get('d', 'c', '0'), rows[0]);
+    assert.deepEqual(n.aggregate('d', 'c', {}, { fields: { sum: { $sum: 'score' } } }), [{ sum: rows.reduce((sum, row) => sum + row.score, 0) }]);
+  } finally { n.db.dispose(); }
+});
+await check('Storage transitions', `overlapping columns, dirty writes and retiering retain every value`, async () => {
+  const n = makeNode();
+  try {
+    const rows = Array.from({ length: 5001 }, (_, i) => ({ ...sample, _id: String(i), score: i, details: { rank: i, label: 'keep' } }));
+    n.createCollection('d', 'c', { columns: ['details', 'details.rank', 'score', 'items.0.score'], tiering });
+    n.insertManyCount('d', 'c', rows);
+    await n.awaitIndexes('d', 'c');
+    rows[0] = { _id: rows[0]._id, ...applyPatchToObject(rows[0], { $unset: ['details.rank'], $set: { 'items.0.score': null } }) };
+    n.replaceManyCount('d', 'c', rows);
+    n.setCollectionMeta('d', 'c', { columns: ['details.rank', 'score'], tiering: { mode: 'compressedMemory', offload: ['details', 'items', 'payload'], minBytes: 1 } });
+    await n.awaitIndexes('d', 'c');
+    n.setCollectionMeta('d', 'c', { columns: ['score'] });
+    await n.awaitIndexes('d', 'c');
+    for (const row of rows) assert.deepEqual(n.get('d', 'c', row._id), row);
+  } finally { n.db.dispose(); }
+});
+
+const values = [undefined, null, '', 0, 1, 2, 3, '1', '01', false, true, [], [1, 2], ['1'], [null], [[1]], { a: 1 }, ['1', 1], 5, ' ', '0x1', '1e0', '-0', 'false', 'Infinity'];
+const rows = values.map((v, i) => ({ _id: String(i).padStart(3, '0'), ...(v === undefined ? {} : { v }), score: i, group: i % 3, payload: 'cold '.repeat(16) }));
+const constraints = [0, 1, '1', '01', false, true, null, '', ' ', '0x1', '1e0', 'Infinity', { $eq: 1 }, { $equal: '1' }, { $in: [1, 2] }, { $eq: 1, $gt: 4 }, { $in: [1, 2], $ne: 1 }, { $or: [1, 2], $gt: 1 }, { $eq: 1, $type: 'number' }, { $eq: 1, unknown: 1 }, { $contains: 1 }, { $contains: '' }, { $contains: null }, { $exists: true }, { $exists: false }, { $gt: 0 }, { $gte: 1, $lt: 3 }, { $ne: 1 }, { $nin: [1, 2] }, { $deepEquals: [1, 2] }, { $regex: '^0?1$' }, { $eq: 5, $regex: '^0?1$' }];
+for (const [mode, meta] of [['scan', {}], ['indexed', { indexes: ['v', 'group'] }], ['columns', { columns: ['v', 'score', 'group'] }], ['compressed', { indexes: ['v', 'group'], columns: ['score'], tiering }]]) {
+  const n = makeNode();
+  try {
+    n.createCollection('d', 'c', meta); n.insertManyCount('d', 'c', rows); await n.awaitIndexes('d', 'c');
+    await check('Query semantics', `${mode}: optimized results equal scan evaluator`, () => {
+      const mismatches = [];
+      for (const constraint of constraints) {
+        const criteria = { v: constraint };
+        const expected = sortedIds(rows.filter(row => matchesQuery(row, criteria)));
+        const actual = sortedIds(n.find('d', 'c', criteria));
+        if (!isDeepStrictEqual(actual, expected)) mismatches.push({ criteria, expected, actual });
+        assert.equal(n.count('d', 'c', criteria), expected.length, JSON.stringify(criteria));
+        const aggregated = n.aggregate('d', 'c', criteria, { fields: { count: { $count: true }, sum: { $sum: 'score' } } });
+        assert.deepEqual(aggregated, expected.length ? [{ count: expected.length, sum: rows.filter(row => matchesQuery(row, criteria)).reduce((sum, row) => sum + row.score, 0) }] : [], JSON.stringify(criteria));
+      }
+      assert.deepEqual(mismatches, []);
+      return { comparisons: constraints.length };
+    });
+    await check('Ordering', `${mode}: total order with ID ties`, () => {
+      const expected = [...rows].sort((a, b) => compareSortValues(a.v, b.v) || (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
+      assert.deepEqual(n.find('d', 'c', {}, { sortBy: 'v', limit: 7, offset: 3 }).map(o => o._id), expected.slice(3, 10).map(o => o._id));
+    });
+    await check('Aggregation', `${mode}: sum and non-null field count`, () => {
+      const spec = { fields: { total: { $sum: 'score' }, nonNull: { $count: 'v' }, count: { $count: true } } };
+      assert.deepEqual(n.aggregate('d', 'c', {}, spec), [{ total: rows.reduce((sum, r) => sum + r.score, 0), nonNull: rows.filter(r => r.v !== undefined && r.v !== null).length, count: rows.length }]);
+    });
+  } finally { n.db.dispose(); }
+}
+await check('Persistence', `full snapshot restores logical values`, async () => {
+  const n = makeNode('snapshot-source'); const fresh = makeNode('snapshot-restored');
+  const storage = new MemoryObjectStorage();
+  const p = new PersistenceManager({ node: n, storage, flushMs: 0, snapshotMs: 0 });
+  try {
+    p.start(); n.createCollection('d', 'c', { indexes: ['details.rank'], columns: ['score'], tiering });
+    n.insertManyCount('d', 'c', [sample]); await n.awaitIndexes('d', 'c'); await p.checkpoint();
+    await new PersistenceManager({ node: fresh, storage, flushMs: 0, snapshotMs: 0 }).restore();
+    await fresh.awaitIndexes('d', 'c'); assert.deepEqual(fresh.get('d', 'c', 'a'), sample);
+  } finally { await p.stop(); n.db.dispose(); fresh.db.dispose(); }
+});
+await check('Query semantics', `warming and dirty plans preserve mixed-type predicates`, async () => {
+  const n = makeNode();
+  try {
+    const rows = Array.from({ length: 5001 }, (_, i) => ({ _id: String(i), v: values[i % values.length], score: i }));
+    n.insertManyCount('d', 'c', rows);
+    n.setCollectionMeta('d', 'c', { indexes: ['v'], columns: ['score'] });
+    const verify = () => {
+      for (const v of constraints) {
+        const query = { v }, expected = rows.filter(row => matchesQuery(row, query));
+        assert.deepEqual(sortedIds(n.find('d', 'c', query)), sortedIds(expected));
+        assert.equal(n.count('d', 'c', query), expected.length);
+        assert.deepEqual(n.aggregate('d', 'c', query, { fields: { count: { $count: true }, sum: { $sum: 'score' } } }),
+          expected.length ? [{ count: expected.length, sum: expected.reduce((sum, row) => sum + row.score, 0) }] : []);
+      }
+    };
+    verify();
+    await n.awaitIndexes('d', 'c'); verify();
+    for (let i = 0; i < rows.length; i++) rows[i] = { ...rows[i], v: values[(i + 7) % values.length], score: i * 3 };
+    n.replaceManyCount('d', 'c', rows);
+    assert.equal(n.db.getCollection('d', 'c').indexDirtyRids.size, rows.length);
+    verify();
+    await n.awaitIndexes('d', 'c'); verify();
+  } finally { n.db.dispose(); }
+});
+await check('Query semantics', `numeric ID predicates do not become exact string lookups`, () => {
+  const n = makeNode();
+  try {
+    const rows = ['1', '01', '001', '2', 'true'].map(_id => ({ _id, score: 1 }));
+    n.insertManyCount('d', 'c', rows);
+    for (const operand of [1, true, '01', { $in: [1, 'true'] }, { $eq: 1, $ne: '1' }]) {
+      const query = { _id: operand }, expected = rows.filter(row => matchesQuery(row, query));
+      assert.deepEqual(sortedIds(n.find('d', 'c', query)), sortedIds(expected));
+      assert.equal(n.count('d', 'c', query), expected.length);
+    }
+  } finally { n.db.dispose(); }
+});
+await check('Persistence', `column removal survives replicated metadata and a new snapshot`, async () => {
+  const n = makeNode('column-writer'), replica = makeNode('column-reader'), fresh = makeNode('column-writer');
+  const storage = new MemoryObjectStorage();
+  const p = new PersistenceManager({ node: n, storage, flushMs: 0, snapshotMs: 0 });
+  try {
+    p.start();
+    n.createCollection('d', 'c', { columns: ['score', 'items.0.score'], tiering });
+    n.insertManyCount('d', 'c', [sample]);
+    await n.awaitIndexes('d', 'c');
+    replica.addPeer(localPeer(n)); await replica.syncAll(); await replica.awaitIndexes('d', 'c');
+    n.setCollectionMeta('d', 'c', { tiering });
+    await replica.syncAll();
+    assert.deepEqual(replica.get('d', 'c', 'a'), sample);
+    await p.checkpoint();
+    await new PersistenceManager({ node: fresh, storage, flushMs: 0, snapshotMs: 0 }).restore();
+    assert.deepEqual(fresh.get('d', 'c', 'a'), sample);
+  } finally { await p.stop(); n.db.dispose(); replica.db.dispose(); fresh.db.dispose(); }
+});
+await check('Replication', `replace/delete convergence with indexes and columns`, async () => {
+  const a = makeNode('writer'); const b = makeNode('replica');
+  try {
+    for (const n of [a, b]) n.createCollection('d', 'c', { columns: ['score'], indexes: ['details.rank'], tiering });
+    a.insertManyCount('d', 'c', [sample, { ...sample, _id: 'b' }]);
+    const peer = localPeer(a); b.addPeer(peer); await b.syncAll();
+    a.replace('d', 'c', 'a', { ...sample, score: 99 }); a.remove('d', 'c', 'b'); await b.syncAll();
+    await Promise.all([a.awaitIndexes('d', 'c'), b.awaitIndexes('d', 'c')]);
+    assert.deepEqual(b.get('d', 'c', 'a'), a.get('d', 'c', 'a')); assert.equal(b.get('d', 'c', 'b'), undefined);
+  } finally { a.db.dispose(); b.db.dispose(); }
+});
+await check('State-machine oracle', `600 mixed writes preserve objects and aggregates`, async () => {
+  const n = makeNode(); const model = new Map(); let seed = 8473;
+  const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+  try {
+    n.createCollection('d', 'c', { indexes: ['group'], columns: ['score'], tiering });
+    for (let i = 0; i < 600; i++) {
+      const id = String(random() % 47);
+      if (random() % 5 === 0) { n.remove('d', 'c', id); model.delete(id); }
+      else {
+        const row = { _id: id, group: random() % 5, score: random() % 10000, flag: random() % 2 === 0, payload: 'cold '.repeat(64), details: { a: i }, items: [i, null, false] };
+        n.replaceManyCount('d', 'c', [row]); model.set(id, row);
+      }
+      if (i % 53 === 0) n.db.getCollection('d', 'c').scheduleIndexBuildsFromMeta();
+      if (i % 53 === 10) await n.awaitIndexes('d', 'c');
+      for (const [key, expected] of model) assert.deepEqual(n.get('d', 'c', key), expected);
+    }
+    await n.awaitIndexes('d', 'c');
+    assert.deepEqual(n.aggregate('d', 'c', {}, { fields: { sum: { $sum: 'score' }, count: { $count: true } } }), [{ sum: [...model.values()].reduce((sum, r) => sum + r.score, 0), count: model.size }]);
+    return { operations: 600, survivingObjects: model.size };
+  } finally { n.db.dispose(); }
+});
 
 await check('Input safety', 'PATCH must reject prototype-mutating paths', () => {
   try {
@@ -322,7 +320,7 @@ await check('Durability', 'a failed WAL append rolls back its entire batch and l
 
 await check('Durability', 'S3 handoff must not truncate a newly acknowledged WAL write', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'objy-audit-wal-handoff-'));
-  const storage = new MemoryObjectStorage(); const n = makeNode('object', 'wal-node'); const fresh = makeNode('object', 'wal-node');
+  const storage = new MemoryObjectStorage(); const n = makeNode('wal-node'); const fresh = makeNode('wal-node');
   const options = { storage, flushMs: 0, snapshotMs: 0, ack: 'localWal', localWal: { mode: 'on', dir, fsync: true } };
   const p = new PersistenceManager({ node: n, ...options });
   try {
@@ -378,7 +376,7 @@ await check('Durability', 'acknowledged writes survive SIGKILL without any S3 up
         const exited = once(child, 'exit');
         child.kill('SIGKILL');
         await exited;
-        const fresh = makeNode('object', 'crash-node');
+        const fresh = makeNode('crash-node');
         try {
           await new PersistenceManager({ node: fresh, storage: new MemoryObjectStorage(), flushMs: 0, snapshotMs: 0,
             ack: 'localWal', localWal: { mode: 'on', dir: join(dir, String(round)), fsync: true } }).restore();

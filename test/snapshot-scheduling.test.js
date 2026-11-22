@@ -11,8 +11,8 @@ import { readPublished } from "./helpers/primary-state.js";
 const scope = { database: "app", collection: "items", shard: "default" };
 const base = "objydb/db/app/collection/items/shard/default";
 
-function fixture(t, engine = "object") {
-  const node = new CRDTNode({ id: "writer", storage: { engine, compression: nodeCompression } });
+function fixture(t) {
+  const node = new CRDTNode({ id: "writer", storage: { compression: nodeCompression } });
   const storage = new MemoryObjectStorage();
   const persistence = new PersistenceManager({ node, storage, flushMs: 0, snapshotMs: 0 });
   t.after(() => { persistence.unsubscribe?.(); node.db.dispose(); });
@@ -67,51 +67,49 @@ test("the shared work budget yields for both count and elapsed-time limits", asy
   assert.equal(serviced, true);
 });
 
-for (const engine of ["object", "shape"]) {
-  test(`${engine}: yielding preserves snapshot bytes, segment boundaries, and full hydrated objects`, async (t) => {
-    const { node, storage, persistence } = fixture(t, engine);
-    node.createCollection("app", "items", {
-      indexes: ["kind"], columns: ["score"],
-      tiering: { mode: "compressedMemory", offload: ["details"], minBytes: 1 },
-    });
-    node.insertManyCount("app", "items", Array.from({ length: 5001 }, (_, i) => ({
-      _id: String(i), kind: i % 7, score: i,
-      details: { text: `M\u00fcnchen \ud83d\ude00 ${i}`, payload: "cold data ".repeat(16) },
-    })));
-    node.removeMany("app", "items", ["17"]);
-    await node.awaitIndexes("app", "items");
-    for (const segmentBytes of [16 * 1024 * 1024, 1024]) {
-      persistence.segmentBytes = segmentBytes;
-      const expected = [];
-      let lines = [], bytes = 0;
-      for (const row of node.snapshotScopeObjects(scope)) {
-        const line = `${JSON.stringify(row)}\n`;
-        if (lines.length && bytes + Buffer.byteLength(line) > segmentBytes) {
-          expected.push(lines.join("")); lines = []; bytes = 0;
-        }
-        lines.push(line); bytes += Buffer.byteLength(line);
-      }
-      if (lines.length) expected.push(lines.join(""));
-      const written = await persistence.checkpoint();
-      assert.equal(written.objects, 5001);
-      assert.equal(written.segments, expected.length);
-      const manifest = JSON.parse(await readPublished(storage, `${base}/latest.json`));
-      for (let i = 0; i < manifest.segments.length; i++) {
-        const segment = manifest.segments[i];
-        assert.equal(await storage.get(segment.key), expected[i]);
-        assert.equal(segment.bytes, Buffer.byteLength(expected[i]));
-        assert.equal(segment.count, expected[i].trim().split("\n").length);
-      }
-    }
-    const fresh = new CRDTNode({ id: "restored", storage: { engine, compression: nodeCompression } });
-    t.after(() => fresh.db.dispose());
-    await new PersistenceManager({ node: fresh, storage }).restore();
-    await fresh.awaitIndexes("app", "items");
-    assert.equal(fresh.count("app", "items"), 5000);
-    assert.equal(fresh.get("app", "items", "17"), undefined);
-    for (let i = 0; i < 5001; i++) assert.deepEqual(fresh.get("app", "items", String(i)), node.get("app", "items", String(i)));
+test(`yielding preserves snapshot bytes, segment boundaries, and full hydrated objects`, async (t) => {
+  const { node, storage, persistence } = fixture(t);
+  node.createCollection("app", "items", {
+    indexes: ["kind"], columns: ["score"],
+    tiering: { mode: "compressedMemory", offload: ["details"], minBytes: 1 },
   });
-}
+  node.insertManyCount("app", "items", Array.from({ length: 5001 }, (_, i) => ({
+    _id: String(i), kind: i % 7, score: i,
+    details: { text: `M\u00fcnchen \ud83d\ude00 ${i}`, payload: "cold data ".repeat(16) },
+  })));
+  node.removeMany("app", "items", ["17"]);
+  await node.awaitIndexes("app", "items");
+  for (const segmentBytes of [16 * 1024 * 1024, 1024]) {
+    persistence.segmentBytes = segmentBytes;
+    const expected = [];
+    let lines = [], bytes = 0;
+    for (const row of node.snapshotScopeObjects(scope)) {
+      const line = `${JSON.stringify(row)}\n`;
+      if (lines.length && bytes + Buffer.byteLength(line) > segmentBytes) {
+        expected.push(lines.join("")); lines = []; bytes = 0;
+      }
+      lines.push(line); bytes += Buffer.byteLength(line);
+    }
+    if (lines.length) expected.push(lines.join(""));
+    const written = await persistence.checkpoint();
+    assert.equal(written.objects, 5001);
+    assert.equal(written.segments, expected.length);
+    const manifest = JSON.parse(await readPublished(storage, `${base}/latest.json`));
+    for (let i = 0; i < manifest.segments.length; i++) {
+      const segment = manifest.segments[i];
+      assert.equal(await storage.get(segment.key), expected[i]);
+      assert.equal(segment.bytes, Buffer.byteLength(expected[i]));
+      assert.equal(segment.count, expected[i].trim().split("\n").length);
+    }
+  }
+  const fresh = new CRDTNode({ id: "restored", storage: { compression: nodeCompression } });
+  t.after(() => fresh.db.dispose());
+  await new PersistenceManager({ node: fresh, storage }).restore();
+  await fresh.awaitIndexes("app", "items");
+  assert.equal(fresh.count("app", "items"), 5000);
+  assert.equal(fresh.get("app", "items", "17"), undefined);
+  for (let i = 0; i < 5001; i++) assert.deepEqual(fresh.get("app", "items", String(i)), node.get("app", "items", String(i)));
+});
 
 test("writes, deletes, and replicated tails during preparation survive restore", async (t) => {
   const { node, storage, persistence } = fixture(t);

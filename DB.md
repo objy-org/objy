@@ -126,7 +126,7 @@ This is a durable S3-backed example, not a list of defaults. Create the bucket f
 | --- | --- |
 | `node` | Unique local `id` and reachable `url`. `retainOps` bounds the in-memory replication log (default 256); `syncBatchSize` bounds a pull batch (default 1024). |
 | `server` | HTTP `port` (default 8080), `cors`, and JSON request limits. |
-| `storage` | In-memory engine. `object` is the default; `shape` is the alternative. The object engine also has bounded, automatic value dictionaries. |
+| `storage` | In-memory object storage with bounded, automatic value dictionaries. `engine` defaults to `object`, the only built-in engine. |
 | `files` | Optional private file storage. Default `mode` is `off`; `s3` inherits connection settings from `persistence.s3`, with optional `files.s3` overrides. |
 | `memoryGuard` | Optional RSS-based write admission. `limitMb` is a per-process budget; otherwise the guard uses detected container or host memory. Disabled by default. |
 | `cluster` | Replication timing, hints, forwarding timeouts, and shared shard-map storage. `syncMs` defaults to 2500; both timeouts default to 60000. |
@@ -621,7 +621,7 @@ Preserve node identities, local WAL/publication state, generated secrets, and S3
 
 ## Extensions
 
-Storage, persistence, interfaces, and code plugins have separate responsibilities. The supplied in-memory engines are `object` and `shape`; custom engines must implement the storage contract, not merely name an arbitrary module in JSON. The default HTTP interface provides auth, public CRUD, cluster routes, and the UI. A custom interface must explicitly implement its access controls rather than assuming the default REST protections apply automatically.
+Storage, persistence, interfaces, and code plugins have separate responsibilities. The built-in object engine combines dynamic objects, value dictionaries, RID-based columns, and optional compressed memory. A different engine would require implementing the storage contract and integrating it in code, not merely naming an arbitrary module in JSON. The default HTTP interface provides auth, public CRUD, cluster routes, and the UI. A custom interface must explicitly implement its access controls rather than assuming the default REST protections apply automatically.
 
 ### Object Hooks
 

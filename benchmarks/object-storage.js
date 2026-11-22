@@ -1,23 +1,5 @@
-import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
-import { fileURLToPath } from "node:url";
 import { Store } from "../src/store.js";
-
-const ENGINES = {
-  shape: {
-    engine: "shape",
-  },
-  object: {
-    engine: "object",
-    object: {
-      valueDirectory: {
-        enabled: true,
-        minRefs: 2,
-        maxStringLength: 256,
-      },
-    },
-  },
-};
 
 const DEFAULTS = Object.freeze({
   objects: 100_000,
@@ -27,53 +9,12 @@ const DEFAULTS = Object.freeze({
 
 const args = parseArgs(process.argv.slice(2));
 
-if (!args.engine) runParent(args);
-else await runChild(args);
+await run(args);
 
-function runParent(options) {
-  const script = fileURLToPath(import.meta.url);
-  const nodeArgs = process.execArgv.includes("--expose-gc")
-    ? process.execArgv
-    : [...process.execArgv, "--expose-gc"];
-  const results = [];
-
-  for (const engine of Object.keys(ENGINES)) {
-    const child = spawnSync(process.execPath, [
-      ...nodeArgs,
-      script,
-      `--engine=${engine}`,
-      `--objects=${options.objects}`,
-      `--batch=${options.batch}`,
-      `--reads=${options.reads}`,
-      "--json",
-    ], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    if (child.status !== 0) {
-      process.stderr.write(child.stderr || child.stdout);
-      process.exit(child.status || 1);
-    }
-    const line = child.stdout.trim().split("\n").find((entry) => entry.startsWith("RESULT "));
-    if (!line) {
-      process.stderr.write(child.stderr || child.stdout);
-      process.exit(1);
-    }
-    results.push(JSON.parse(line.slice("RESULT ".length)));
-  }
-
-  printSummary(results);
-}
-
-async function runChild(options) {
-  const storage = ENGINES[options.engine];
-  if (!storage) throw new Error(`unknown benchmark engine: ${options.engine}`);
-
+async function run(options) {
   forceGc();
   const beforeHeap = heapUsed();
-  const store = new Store(storage);
+  const store = new Store();
   store.createCollection("bench", "assets", {
     indexes: ["status", "applications", "properties.department.value"],
     columns: ["cost", "properties.cost.value", "status", "properties.department.value"],
@@ -120,7 +61,7 @@ async function runChild(options) {
   assertGroupedAggregate(groupedAggregate.value, expected);
 
   const result = {
-    engine: options.engine,
+    engine: "object",
     objects: options.objects,
     heapMb: mb(afterLoadHeap - beforeHeap),
     heapUsedMb: mb(afterLoadHeap),
@@ -137,7 +78,7 @@ async function runChild(options) {
         n: { $count: true },
       },
     }),
-    stats: collection.shapeStats()[0],
+    stats: collection.storageStats()[0],
   };
 
   if (options.json) console.log(`RESULT ${JSON.stringify(result)}`);
@@ -260,44 +201,11 @@ function parseArgs(argv) {
       continue;
     }
     const [key, value] = arg.replace(/^--/, "").split("=");
-    if (key === "engine") parsed.engine = value;
     if (key === "objects" || key === "n") parsed.objects = positiveInt(value, DEFAULTS.objects);
     if (key === "batch") parsed.batch = positiveInt(value, DEFAULTS.batch);
     if (key === "reads") parsed.reads = positiveInt(value, DEFAULTS.reads);
   }
   return parsed;
-}
-
-function printSummary(results) {
-  const rows = results.map((result) => ({
-    engine: result.engine,
-    objects: result.objects,
-    "heap delta MB": result.heapMb,
-    "insert ms": result.insertMs,
-    "random reads ms": result.randomReadMs,
-    "indexed read ms": result.indexedReadMs,
-    "flat agg ms": result.flatAggregateMs,
-    "group agg ms": result.groupedAggregateMs,
-    "read path": result.readPath,
-    "aggregate path": result.aggregatePath,
-    columns: result.stats.columns || 0,
-  }));
-  console.table(rows);
-  for (const result of results) {
-    console.log(`${result.engine} stats: ${JSON.stringify(compactStats(result.stats))}`);
-  }
-}
-
-function compactStats(stats) {
-  return {
-    engine: stats.engine,
-    rows: stats.rows,
-    bytes: stats.bytes,
-    ridTable: stats.ridTable,
-    valueDirectory: stats.valueDirectory,
-    columns: stats.columns,
-    columnStats: stats.columnStats?.slice(0, 12),
-  };
 }
 
 function forceGc() {

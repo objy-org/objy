@@ -59,7 +59,7 @@ export class ObjectRowStore {
     return total + this.valueDirectory.bytes();
   }
 
-  shapeStats() {
+  storageStats() {
     return [{
       engine: "object",
       rows: this.rows.size,
