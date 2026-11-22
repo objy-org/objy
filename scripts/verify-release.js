@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { buildRelease } from "./build-release.js";
+import { withNode } from "../test/helpers/launcher.js";
 
 const run = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -20,6 +21,25 @@ try {
     "--no-fund",
     join(root, ".release", "artifacts", manifest.package.artifact),
   ]);
+  const help = await command(workspace, "npm", ["exec", "--offline", "--", "objy", "--help"]);
+  if (!help.stdout.includes("Usage: objy [options]")) throw new Error("installed objy help is missing");
+  const version = await command(workspace, "npm", ["exec", "--offline", "--", "objy", "--version"]);
+  if (version.stdout.trim() !== manifest.version) throw new Error("installed objy version does not match the package");
+  await writeFile(join(workspace, "objydb.config.json"), JSON.stringify({
+    node: { id: "installed-launcher" }, server: { port: 0 }, auth: { enabled: false },
+  }));
+  await withNode({ entry: join(workspace, "node_modules", "@objy", "db", "bin", "objy.js"), cwd: workspace }, async (base) => {
+    const health = await fetch(`${base}/health`).then((response) => response.json());
+    if (health.node !== "installed-launcher") throw new Error("installed objy ignored its config");
+    const object = { _id: "installed", nested: { values: [1, "dynamic", null] } };
+    const inserted = await fetch(`${base}/api/app/items/object`, {
+      method: "POST", headers: { "content-type": "application/json", prefer: "return=minimal" }, body: JSON.stringify(object),
+    });
+    if (inserted.status !== 201) throw new Error(`installed objy insert failed: ${inserted.status}`);
+    await inserted.json();
+    const read = await fetch(`${base}/api/app/items/object/installed`).then((response) => response.json());
+    if (JSON.stringify(read.nested) !== JSON.stringify(object.nested)) throw new Error("installed objy object readback failed");
+  });
   await command(workspace, process.execPath, ["--input-type=module", "--eval", `
     import assert from "node:assert/strict";
     import { startServer } from "@objy/db";
@@ -56,7 +76,7 @@ try {
   await rm(workspace, { recursive: true, force: true });
 }
 
-console.log(`database release passed isolated install and runtime smoke tests (${manifest.version})`);
+console.log(`database release passed isolated install, objy command, and runtime smoke tests (${manifest.version})`);
 
 async function command(cwd, file, args) {
   try {

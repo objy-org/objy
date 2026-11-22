@@ -24,7 +24,7 @@ Verified:
 
 ## Real browser checks
 
-Tested the local UI at `http://127.0.0.1:4317/` against the user's authorized local `@objy/cli` test server at `http://127.0.0.1:8179/`:
+Tested the local UI at `http://127.0.0.1:4317/` against the user's authorized local test server at `http://127.0.0.1:8179/`:
 
 1. Logged in through the connection dialog using the existing test credentials.
 2. Reloaded the page. The authenticated server and catalog restored automatically, with no password prompt.
@@ -34,7 +34,7 @@ Tested the local UI at `http://127.0.0.1:4317/` against the user's authorized lo
 6. Closed the extra tab, connected again, and reloaded the final build successfully. Left the first tab connected for the user.
 7. Browser error/warning logs were empty after the final reload. The three-pane explorer remains unchanged.
 
-Proof: `outputs/objy-saved-connection.png` in the workspace root, showing the restored server in the connection dialog. No password or token is visible. Browser verification made no object changes on the user's CLI test server.
+Proof: `outputs/objy-saved-connection.png` in the workspace root, showing the restored server in the connection dialog. No password or token is visible. Browser verification made no object changes on the user's local test server.
 
 ## Limits
 

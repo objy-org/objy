@@ -6,7 +6,7 @@
 
 - `npm test`: **68/68 passing**. New real-HTTP integration cases verify full JSON replacement by immutable ID, key-order-independent snapshot checks, rejection of stale saves/deletes, deletion of exactly one selected ID, and native metadata round-trips/conflicts.
 - Browser build, JavaScript syntax checks and `git diff --check` passed.
-- Actual local browser testing used the official OBJY client against a separate, disposable in-memory server. No objects were modified on the user's CLI test server.
+- Actual local browser testing used the official OBJY client against a separate, disposable in-memory server. No objects were modified on the user's local test server.
 
 ## Browser results
 
@@ -22,4 +22,4 @@
 
 Screenshot with disposable fixture data: `outputs/objy-json-editor.png` in the workspace root.
 
-After testing, the temporary connection was forgotten and the original saved CLI server at `http://127.0.0.1:8179/` was selected again. Unsaved object drafts stay in page memory only. No publishing or deployment was performed.
+After testing, the temporary connection was forgotten and the original saved local server at `http://127.0.0.1:8179/` was selected again. Unsaved object drafts stay in page memory only. No publishing or deployment was performed.

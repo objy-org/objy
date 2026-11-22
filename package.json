@@ -22,7 +22,11 @@
     ".": "./src/api.js",
     "./hooks": "./src/object-hooks.js"
   },
+  "bin": {
+    "objy": "bin/objy.js"
+  },
   "files": [
+    "bin/",
     "public/objy-db-logo.png",
     "src/",
     "DB.md",

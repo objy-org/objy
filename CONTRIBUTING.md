@@ -29,9 +29,9 @@ The database UI lives in `ui/` as an npm workspace in this same Git repository. 
 - `npm run test:ui:manual` prints a disposable localhost browser-test page; open it and click **Run checks**. It tests the actual server UI routes and API without modifying an existing database.
 - `npm run test:ui` runs the same browser regression suite in Chromium, Firefox, and WebKit through Playwright. Install those browsers first with `npx playwright install --with-deps`.
 
-Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` for compatibility with the CLI's database-package extraction.
+Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` so source checkouts, release packages, and Docker images share the same layout.
 
-Start a configured database from this checkout with `node src/index.js --config objydb.config.json`. See the [database guide](DB.md) for configuration and operation, and the [UI module map](ui/README.md) for its internal architecture. UI build and browser-test implementation details live in `ui/scripts/`; those commands never publish anything.
+Start a configured database from this checkout with `node bin/objy.js --config objydb.config.json`. The launcher uses the same startup path as `node src/index.js`. See the [database guide](DB.md) for configuration and operation, and the [UI module map](ui/README.md) for its internal architecture. UI build and browser-test implementation details live in `ui/scripts/`; those commands never publish anything.
 
 Add focused tests beside the behavior being changed. The broader suites are selected by impact:
 

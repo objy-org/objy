@@ -22,23 +22,26 @@ Objects need no shared schema. Each has an `_id`; collections have metadata for 
 
 ## Start the Database
 
-The deployment CLI (Node.js 22+) downloads and starts OBJY DB locally:
+Install the database with Node.js 20 or newer:
 
 ```sh
-npm install --global @objy/cli
-objy deploy local --name dev --size tiny
+npm install --global @objy/db
 ```
 
-Open the printed URL for the Data Explorer and sign in with the initial administrator password printed in the logs.
+Create `objydb.config.json`:
+
+```json
+{
+  "node": { "id": "node-a", "url": "http://127.0.0.1:8080" },
+  "server": { "port": 8080 }
+}
+```
 
 ```sh
-objy status dev
-objy logs dev --follow
-objy stop dev
-objy start dev
+objy
 ```
 
-Prefer to run it yourself? See [Run the Server](https://github.com/objy-org/objy/blob/main/DB.md#run-the-server) for direct Node.js startup and configuration.
+Open the printed URL for the Data Explorer and sign in with the initial administrator password printed in the logs. The node runs in the foreground; Ctrl+C shuts it down gracefully. This minimal config is memory-only; see the [database guide](https://github.com/objy-org/objy/blob/main/DB.md#configuration) for durability and clusters.
 
 ## Work with Objects
 
@@ -65,7 +68,7 @@ await assets.patch("a1", { $set: { score: 9 }, $unset: ["status"] });
 await assets.remove("a1");
 ```
 
-The same collection handle supports bulk and streamed writes, aggregation, vector search, references, and files. `@objy/db` runs the database; `@objy/client` connects to it; `@objy/cli` manages deployments.
+The same collection handle supports bulk and streamed writes, aggregation, vector search, references, and files. `@objy/db` runs the database; `@objy/client` connects to it.
 
 ## Go Deeper
 

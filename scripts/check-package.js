@@ -23,6 +23,7 @@ for (const path of [
   "NOTICE.md",
   "objydb.config.json",
   "package.json",
+  "bin/objy.js",
   "public/ui/index.html",
   "public/ui/app.js",
   "public/ui/components/data-explorer.js",
@@ -37,7 +38,7 @@ for (const path of [
 
 for (const path of paths) {
   if (["src/browser.js", "src/compression.js", "src/core.js", "src/core.d.ts", "src/database.js", "src/shape.js"].includes(path) ||
-      path.startsWith("bin/") || path.startsWith("client/") || path.startsWith("release/") || path === "public/index.html" ||
+      (path.startsWith("bin/") && path !== "bin/objy.js") || path.startsWith("client/") || path.startsWith("release/") || path === "public/index.html" ||
       path.startsWith("ui/") || path.startsWith("public/ui/pdf/") ||
       /public\/ui\/(?:pdf-preview-|licenses\/pdfjs)/.test(path)) {
     throw new Error(`database package contains removed or private source ${path}`);
@@ -45,7 +46,9 @@ for (const path of paths) {
 }
 
 const packageJson = JSON.parse(await readFile(join(root, item.stage, "package.json"), "utf8"));
-if (packageJson.bin) throw new Error("database package must not expose a CLI binary");
+if (Object.keys(packageJson.bin || {}).length !== 1 || packageJson.bin.objy !== "bin/objy.js") {
+  throw new Error("database package must expose only the objy foreground launcher");
+}
 if (packageJson.dependencies?.["@objy/client"]) throw new Error("database package must not depend on the standalone client");
 if (packageJson.exports?.["./client"]) throw new Error("database package must not export the standalone client");
 

@@ -7,7 +7,7 @@ Use this before publishing an OBJY DB release to GitHub, npm, or a container reg
 - [ ] Use the `package.json` version consistently in the Git tag, release notes, npm package, and container tag.
 - [ ] Use an explicit npm distribution tag such as `alpha` for prereleases.
 - [ ] Confirm publishing access for `@objy/db` and use a version never previously published under that name, including unpublished versions.
-- [ ] Confirm that `@objy/db` contains no executable; the `objy` binary is published only by `@objy/cli`.
+- [ ] Confirm that `@objy/db` packages the `objy` foreground launcher and that the installed command passes help, version, startup, and shutdown checks.
 - [ ] Confirm that the pinned `@objy/client` version imported by the admin console is already available from npm.
 - [ ] Confirm the working tree is clean and the release commit is on the intended branch.
 

@@ -12,6 +12,8 @@ test("database and UI package identities match the workspace lockfile", async ()
   assert.equal(manifest.name, "@objy/db");
   assert.equal(lock.name, manifest.name);
   assert.equal(lock.packages[""].name, manifest.name);
+  assert.deepEqual(manifest.bin, { objy: "bin/objy.js" });
+  assert.deepEqual(lock.packages[""].bin, manifest.bin);
   assert.equal(ui.name, "@objy/db-ui");
   assert.equal(lock.packages.ui.name, ui.name);
   assert.deepEqual(lock.packages[`node_modules/${ui.name}`], { resolved: "ui", link: true });

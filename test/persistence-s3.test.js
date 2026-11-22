@@ -1,10 +1,63 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CRDTNode } from "../src/crdt.js";
 import { S3ObjectStorage } from "../src/object-storage.js";
 import { PersistenceManager } from "../src/persistence.js";
 import { PrimaryStateStore } from "../src/primary-state.js";
+import { withNode } from "./helpers/launcher.js";
+
+for (const stopSignal of ["SIGINT", "SIGTERM"]) {
+  test(`launcher flushes S3 journals on ${stopSignal} and restores full objects on restart`, { timeout: 30000 }, async (t) => {
+    const mock = createMockS3Server();
+    const port = await mock.start();
+    const cwd = await mkdtemp(join(tmpdir(), "objy-launcher-s3-"));
+    t.after(async () => { await mock.stop(); await rm(cwd, { recursive: true, force: true }); });
+    const entry = fileURLToPath(new URL("../bin/objy.js", import.meta.url));
+    await writeFile(join(cwd, "objydb.config.json"), JSON.stringify({
+      node: { id: "launcher-durable" }, server: { port: 0 },
+      auth: { enabled: false }, cluster: { secret: "launcher-test-secret" },
+      persistence: {
+        mode: "s3", ack: "localWal", flushMs: 0, snapshotMs: 0,
+        localWal: { mode: "on", dir: join(cwd, "wal"), fsync: true },
+        s3: { bucket: "test", endpoint: `http://127.0.0.1:${port}`, accessKeyId: "test", secretAccessKey: "test" },
+      },
+    }));
+    const rows = [{ _id: "a", kind: "one", score: 10, payload: "cold ".repeat(100) },
+      { _id: "b", kind: "two", score: 20, nested: { values: [null, false, "dynamic"] } }];
+    const call = async (url, method, path, body) => {
+      const response = await fetch(url + path, {
+        method,
+        headers: { "content-type": "application/json", prefer: "return=minimal" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.ok(response.ok, `${method} ${path}: ${response.status}`);
+      return response.json();
+    };
+    await withNode({ entry, cwd, stopSignal }, async (url) => {
+      await call(url, "POST", "/api/app/items/object", rows);
+      await call(url, "PUT", "/api/app/items/meta", { indexes: ["kind"], columns: ["score"],
+        tiering: { mode: "compressedMemory", offload: ["payload"], minBytes: 1 } });
+      assert.equal([...mock.objects.keys()].some((key) => key.includes("/journal/")), false);
+    });
+    assert.ok([...mock.objects.keys()].some((key) => key.includes("/journal/")));
+    await withNode({ entry, cwd }, async (url) => {
+      assert.deepEqual(await call(url, "GET", "/api/app/items/object/a"), rows[0]);
+      assert.deepEqual(await call(url, "GET", "/api/app/items/object/b"), rows[1]);
+      assert.deepEqual(await call(url, "POST", "/api/app/items/search", {
+        $aggregate: { fields: { total: { $sum: "score" }, count: { $count: true } } },
+      }), [{ total: 30, count: 2 }]);
+      const meta = await call(url, "GET", "/api/app/items/meta");
+      assert.deepEqual(meta.columns, ["score"]);
+      assert.deepEqual(meta.indexes, ["kind"]);
+    });
+  });
+}
 
 test("S3 persistence adapter stores journals through an S3-compatible API", async () => {
   const mock = createMockS3Server();

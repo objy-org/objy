@@ -4,6 +4,10 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 
 ## Unreleased
 
+### Added
+
+- `objy` foreground executable in `@objy/db`, reusing configured node startup, restore, replication, and graceful shutdown. Supports `--help`, `--version`, and existing config/node/URL/port arguments.
+
 ### Changed
 
 - Renamed the database runtime package from `@objy/server` to `@objy/db`, including the `@objy/db/hooks` entry point and `objy-db-VERSION.tgz` release archive. Update application imports; the HTTP API, runtime exports, configuration, and persisted data formats are unchanged. This package runs the server and does not restore the retired embedded/browser API formerly published as `@objy/db`.
@@ -18,7 +22,7 @@ Notable changes to OBJY DB are recorded here. The project follows semantic versi
 ### Added
 
 - Universal `@objy/db` package for Node.js and browsers.
-- `@objy/server` package with the HTTP runtime, clustering, S3 durability, hooks, and admin console. Deployment tooling lives in the separate `@objy/cli` package.
+- `@objy/server` package with the HTTP runtime, clustering, S3 durability, hooks, and admin console.
 - Standalone, dependency-free `@objy/client` package for Node.js and browsers.
 - Standalone browser ESM artifact in GitHub releases.
 - Cross-runtime correctness and performance suite covering source, packed packages, HTTP, and Chromium.

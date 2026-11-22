@@ -21,6 +21,7 @@ export async function buildRelease() {
   await mkdir(artifactsRoot, { recursive: true });
 
   await cp(join(root, "src"), join(stage, "src"), { recursive: true });
+  await cp(join(root, "bin"), join(stage, "bin"), { recursive: true });
   await mkdir(join(stage, "public"), { recursive: true });
   await cp(join(root, "public", "ui"), join(stage, "public", "ui"), { recursive: true });
   await copyFile(join(root, "public", "objy-db-logo.png"), join(stage, "public", "objy-db-logo.png"));
@@ -93,6 +94,7 @@ function packageManifest(sourcePackage) {
       ".": "./src/api.js",
       "./hooks": "./src/object-hooks.js",
     },
+    bin: sourcePackage.bin,
     engines: sourcePackage.engines,
     dependencies: sourcePackage.dependencies,
     author: sourcePackage.author,

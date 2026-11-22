@@ -8,26 +8,33 @@ The database guide: run OBJY DB, work with dynamic objects, choose how they use 
 
 ## Run the Server
 
-### With the CLI
+### Run a Node
 
-The separate deployment CLI requires Node.js 22 or newer. It downloads and verifies the latest published database release and starts a managed local installation:
-
-```sh
-npm install --global @objy/cli
-objy deploy local --name dev --size tiny
-```
-
-Open the printed URL for the Data Explorer. The initial administrator password appears in the server logs.
+Install the database with Node.js 20 or newer:
 
 ```sh
-objy status dev
-objy logs dev --follow
-objy stop dev
-objy start dev
-objy restart dev
+npm install --global @objy/db
 ```
 
-Starting or restarting an existing installation uses its installed version; it does not implicitly upgrade it. See the [CLI guide](https://github.com/objy-org/objy-cli) for installation targets and lifecycle commands. Infrastructure templates live separately in [`objydb-terraform`](https://github.com/objy-org/terraform).
+Create `objydb.config.json`. A temporary, single-node setup needs only:
+
+```json
+{
+  "node": { "id": "node-a", "url": "http://127.0.0.1:8080" },
+  "server": { "port": 8080 }
+}
+```
+
+```sh
+objy
+objy --config /path/to/objydb.config.json
+```
+
+The command runs one node in the foreground: it loads configuration, establishes system credentials, restores configured durable data, starts replication, and serves the HTTP API and Data Explorer. Stop it gracefully with Ctrl+C or SIGTERM. Open the printed URL and use the initial administrator password printed in the logs.
+
+Without `--config`, it looks for `objydb.config.json` in the working directory. `--node`, `--url`, and `--port` override the local identity and listener, so peers can share one configuration file. `objy --help` lists these options; `objy --version` prints the installed database version. The command does not install infrastructure or manage background processes.
+
+For a project-local installation, use `npm install @objy/db` followed by `npm exec -- objy --config objydb.config.json`. Direct startup with `node node_modules/@objy/db/src/index.js` remains available. For running a source checkout, see [Contributing](https://github.com/objy-org/objy/blob/main/CONTRIBUTING.md).
 
 ### From a Node.js Application
 
@@ -44,28 +51,7 @@ const runtime = await startServer({ port: 8080 });
 console.log(`OBJY DB listening on http://127.0.0.1:${runtime.port}`);
 ```
 
-**This is a memory-only HTTP server.** `startServer()` takes runtime options; it does not read the JSON configuration or perform S3/WAL recovery. Its generated credentials and data are not durable across process exits. The application owns its lifecycle. Use the configured entry point below for the complete node bootstrap.
-
-### A Configured Node
-
-Create `objydb.config.json`. A temporary, single-node setup needs only:
-
-```json
-{
-  "node": { "id": "node-a", "url": "http://127.0.0.1:8080" },
-  "server": { "port": 8080 }
-}
-```
-
-Then run the installed entry point:
-
-```sh
-node node_modules/@objy/db/src/index.js --config objydb.config.json
-```
-
-It loads configuration, establishes system credentials, restores configured durable data, starts replication, and handles graceful shutdown. Without `--config`, it looks for `objydb.config.json` in the working directory. `--node`, `--url`, and `--port` override the local identity and listener, so peers can share one configuration file.
-
-`@objy/db` contains no management executable. The `objy` command comes from `@objy/cli`. For running a source checkout, see [Contributing](https://github.com/objy-org/objy/blob/main/CONTRIBUTING.md).
+**This is a memory-only HTTP server.** `startServer()` takes runtime options; it does not read the JSON configuration or perform S3/WAL recovery. Its generated credentials and data are not durable across process exits. The application owns its lifecycle. Use `objy` for the complete configured node bootstrap.
 
 ## Configuration
 
@@ -515,13 +501,7 @@ Replication is asynchronous, using change hints to trigger pulls and periodic an
 
 ### A Local Cluster
 
-The CLI can provision four local processes with a per-process heap budget:
-
-```sh
-objy deploy local --name dev-cluster --size custom --shards 2 --replicas 2 --memory 2048
-```
-
-For manual operation, use a shared S3-backed configuration like the earlier example and a map such as `shard-map.json`:
+For four nodes with two shards and two copies per shard, use a shared S3-backed configuration like the earlier example and a map such as `shard-map.json`:
 
 ```json
 {
@@ -551,10 +531,10 @@ node scripts/put-shard-map.js --config objydb.config.json --map shard-map.json
 Then run each installed node in its own terminal or process manager. Start `a1` first so it can establish shared bootstrap state:
 
 ```sh
-node node_modules/@objy/db/src/index.js --config objydb.config.json --node a1 --url http://127.0.0.1:8080 --port 8080
-node node_modules/@objy/db/src/index.js --config objydb.config.json --node a2 --url http://127.0.0.1:8081 --port 8081
-node node_modules/@objy/db/src/index.js --config objydb.config.json --node b1 --url http://127.0.0.1:8082 --port 8082
-node node_modules/@objy/db/src/index.js --config objydb.config.json --node b2 --url http://127.0.0.1:8083 --port 8083
+objy --config objydb.config.json --node a1 --url http://127.0.0.1:8080 --port 8080
+objy --config objydb.config.json --node a2 --url http://127.0.0.1:8081 --port 8081
+objy --config objydb.config.json --node b1 --url http://127.0.0.1:8082 --port 8082
+objy --config objydb.config.json --node b2 --url http://127.0.0.1:8083 --port 8083
 ```
 
 The persisted map takes precedence over an inline `cluster.shardMap`. Inline maps with shard-map storage off can describe a temporary memory-only cluster, but durable resharding and safe clustered context deletion require shared persistence. The first peer of each shard is its configured primary; there is no automatic primary election.

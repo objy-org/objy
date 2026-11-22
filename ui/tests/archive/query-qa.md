@@ -20,6 +20,6 @@ Actual browser verification used the local UI at `http://127.0.0.1:4317/` with a
 
 Screenshot: `outputs/objy-collection-query.png` in the workspace root (disposable fixture data).
 
-The temporary connection was forgotten and its server stopped. The UI was left connected to the user's saved CLI server at `http://127.0.0.1:8179/`; no objects on that server were modified. No publication or deployment occurred.
+The temporary connection was forgotten and its server stopped. The UI was left connected to the user's saved local server at `http://127.0.0.1:8179/`; no objects on that server were modified. No publication or deployment occurred.
 
 Query text/results are page-local. Ordinary filters use offset pagination and can change membership during concurrent server writes. Queries containing explicit window controls, aggregation or vector search use the server's native result window without automatic Load more; the count shown is the number of returned rows. Aggregation, vector and reference-expanded results are read only. No model inference is involved in executing the query bar.
