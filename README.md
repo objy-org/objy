@@ -12,13 +12,13 @@
   <img alt="Alpha" src="https://img.shields.io/badge/status-alpha-f0a020">
 </p>
 
-Keep dynamic JSON objects in memory. Query, aggregate, and follow live references. Use indexes, compact columns, and compressed memory to fit more data. Scale across shards and replicas, with local WAL and S3 durability when configured.
+Query dynamic JSON objects in memory, aggregate, and follow live references. Use indexes for speed, compact columns and compression to fit more data. Scale across shards and replicas; add local WAL and S3 for durability.
 
 ```text
 database -> collection -> objects
 ```
 
-Objects need no shared schema. Each has an `_id`; collections have metadata for indexes, storage, and conditional read defaults. Applications connect through REST or the small JavaScript client.
+Objects need no shared schema. Each has an `_id`; collection meta configures indexes, storage, and read defaults. Connect through REST or the JavaScript client.
 
 ## Start the Database
 
@@ -28,7 +28,13 @@ Install the database with Node.js 20 or newer:
 npm install --global @objy/db
 ```
 
-Create `objydb.config.json`:
+Without a config file, start a memory-only node:
+
+```sh
+objy --node node-a --port 8080
+```
+
+If `objydb.config.json` exists in the working directory, it is loaded automatically. To keep settings in that file instead:
 
 ```json
 {
@@ -41,7 +47,7 @@ Create `objydb.config.json`:
 objy
 ```
 
-Open the printed URL for the Data Explorer and sign in with the initial administrator password printed in the logs. The node runs in the foreground; Ctrl+C shuts it down gracefully. This minimal config is memory-only; see the [database guide](https://github.com/objy-org/objy/blob/main/DB.md#configuration) for durability and clusters.
+Open the printed URL and sign in with the administrator password from the logs. Ctrl+C shuts the foreground node down gracefully. This config is memory-only; see the guide for [durability](https://github.com/objy-org/objy/blob/main/DB.md#configuration) and [clusters](https://github.com/objy-org/objy/blob/main/DB.md#cluster-setup).
 
 ## Work with Objects
 
@@ -68,7 +74,7 @@ await assets.patch("a1", { $set: { score: 9 }, $unset: ["status"] });
 await assets.remove("a1");
 ```
 
-The same collection handle supports bulk and streamed writes, aggregation, vector search, references, and files. `@objy/db` runs the database; `@objy/client` connects to it.
+The same handle supports bulk/streamed writes, aggregation, vectors, references, and files. `@objy/db` runs the database; `@objy/client` connects.
 
 ## Go Deeper
 
@@ -80,4 +86,4 @@ The same collection handle supports bulk and streamed writes, aggregation, vecto
 
 ## License
 
-Original source code is available under the [MIT License](https://github.com/objy-org/objy/blob/main/LICENSE). OBJY and OBJY DB names, logos, brand artwork, and product copy remain reserved as described in [NOTICE.md](https://github.com/objy-org/objy/blob/main/NOTICE.md). Third-party materials retain their respective licenses.
+Source: [MIT License](https://github.com/objy-org/objy/blob/main/LICENSE). Names, logos, brand artwork, and product copy remain reserved under [NOTICE.md](https://github.com/objy-org/objy/blob/main/NOTICE.md). Third-party licenses still apply.

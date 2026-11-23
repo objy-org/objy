@@ -8,13 +8,18 @@ import {
 export { ConnectionStorage } from "./connection-storage.js";
 export { ClusterMonitor } from "./cluster-status.js";
 
+function randomId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 // Persist only whitelisted connection metadata and sessions. Explorer data,
 // selection and drafts remain in this page's memory.
 export class Connections {
   constructor({
     storage = null,
     onChange = () => {},
-    channel = null,
+    events = globalThis,
     adapterFactory = createServerAdapter,
   } = {}) {
     this.entries = new Map();
@@ -23,13 +28,21 @@ export class Connections {
     this.onChange = onChange;
     this.warning = "";
     this.restoreError = "";
-    this.channel = channel;
     this.adapterFactory = adapterFactory;
-    if (channel)
-      channel.onmessage = (event) =>
-        this.externalChange(event.data).catch((error) =>
-          this.storageError(error),
-        );
+    this.events = events;
+    this.onStorage = (event) => {
+      if (!this.storage || event.storageArea !== this.storage.storage) return;
+      try {
+        if (event.key === null) {
+          for (const id of this.entries.keys()) this.externalChange(id);
+        } else if (event.key.startsWith(this.storage.prefix)) {
+          this.externalChange(decodeURIComponent(event.key.slice(this.storage.prefix.length)));
+        }
+      } catch (error) {
+        this.storageError(error);
+      }
+    };
+    events.addEventListener?.("storage", this.onStorage);
   }
   get active() {
     return this.entries.get(this.activeId);
@@ -76,8 +89,8 @@ export class Connections {
     const url = serverAddress(options.url);
     const record = {
       version: 1,
-      id: id || crypto.randomUUID(),
-      generation: crypto.randomUUID(),
+      id: id || randomId(),
+      generation: randomId(),
       url,
       username: options.username || "",
       database: options.database || "_global",
@@ -92,7 +105,7 @@ export class Connections {
     record.session = session ? { url, ...session } : null;
     if (this.storage) {
       try {
-        await this.storage.lock(record.id, () => this.storage.put(record));
+        this.storage.put(record);
         store.adapter.persistWith(this.access(record));
       } catch (error) {
         // A login is not a database write, so it can fail clearly when the user
@@ -110,7 +123,6 @@ export class Connections {
     this.restoreError = "";
     if (previous?.store) await previous.store.close();
     await this.saveActive();
-    this.channel?.postMessage({ type: "replace", id });
     return entry;
   }
   async saveActive() {
@@ -156,26 +168,19 @@ export class Connections {
   async disconnect(id) {
     const entry = this.entries.get(id);
     if (!entry) return;
-    // Delete credentials first, under the same lock used by token renewal.
+    // Delete credentials first; pending requests recheck the saved connection.
     // A failed deletion stays visible rather than falsely claiming sign-out.
-    if (this.storage)
-      await this.storage.lock(id, () => this.storage.remove(id));
+    if (this.storage) this.storage.remove(id);
     // Never silently redirect subsequent operations to another server.
     if (id === this.activeId) this.activeId = null;
     this.entries.delete(id);
     this.restoreError = "";
-    this.channel?.postMessage({ type: "forget", id });
     await entry.store?.close();
   }
-  async externalChange(message) {
-    if (
-      !this.storage ||
-      !["replace", "forget"].includes(message?.type) ||
-      typeof message.id !== "string"
-    )
-      return;
-    const entry = this.entries.get(message.id);
-    const record = await this.storage.get(message.id);
+  externalChange(id) {
+    const entry = this.entries.get(id);
+    const record = this.storage.get(id);
+    if (entry && record?.generation === entry.record.generation) return;
     if (entry && (!record || record.generation !== entry.record.generation)) {
       if (this.activeId === entry.id) this.activeId = null;
       this.entries.delete(entry.id);
@@ -191,7 +196,6 @@ export class Connections {
     this.entries.clear();
     this.activeId = null;
     await Promise.all(entries.map((entry) => entry.store?.close()));
-    this.channel?.close();
-    this.storage?.close();
+    this.events.removeEventListener?.("storage", this.onStorage);
   }
 }

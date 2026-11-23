@@ -1,31 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
-import { IDBFactory } from "fake-indexeddb";
 import { Connections, ConnectionStorage } from "../src/data/connections.js";
 import { createServerAdapter } from "../src/data/adapters.js";
 import { testServer } from "./helpers/server.mjs";
 
 const password = "session-test-password";
+function memoryStorage() {
+  const entries = new Map();
+  return {
+    get length() { return entries.size; },
+    key: (i) => [...entries.keys()][i] ?? null,
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => entries.set(key, String(value)),
+    removeItem: (key) => entries.delete(key),
+  };
+}
 async function fixture(t, auth = {}) {
   const server = await testServer({
     auth: { enabled: true, ...auth },
     environment: { OBJYDB_ADMIN_PASSWORD: password },
   });
   t.after(() => server.close());
-  const indexedDB = new IDBFactory(),
-    pending = new Map();
-  // Same exclusive-lock semantics as navigator.locks, shared by every test tab.
-  const locks = {
-    request(name, fn) {
-      const task = (pending.get(name) || Promise.resolve())
-        .catch(() => {})
-        .then(fn);
-      pending.set(name, task);
-      return task;
-    },
-  };
-  const storage = () => new ConnectionStorage({ indexedDB, locks });
+  const localStorage = memoryStorage();
+  const storage = () => new ConnectionStorage({ storage: localStorage });
   const manager = async (options) => {
     const value = new Connections({ storage: storage(), ...options });
     t.after(() => value.close());
@@ -34,7 +32,7 @@ async function fixture(t, auth = {}) {
   };
   const login = (m) =>
     m.connect({ url: server.url, username: "admin", password });
-  return { server, storage, manager, login };
+  return { server, storage, localStorage, manager, login };
 }
 
 test("reload restores official-client login and selected server; only whitelisted metadata/tokens are saved", async (t) => {
@@ -80,7 +78,7 @@ test("reload restores official-client login and selected server; only whiteliste
   );
 });
 
-test("expired access token renews once across tabs and saves the new token pair for the next reload", async (t) => {
+test("concurrent tabs renew through their own official clients and persist a usable session for reload", async (t) => {
   const f = await fixture(t, {
     accessTokenTtlSeconds: 1,
     refreshTokenTtlSeconds: 60,
@@ -98,7 +96,9 @@ test("expired access token renews once across tabs and saves the new token pair 
   await delay(2100);
   await Promise.all([
     first.active.store.refresh(),
+    first.active.store.adapter.getClusterStatus(),
     second.active.store.refresh(),
+    second.active.store.adapter.getClusterStatus(),
   ]);
   const renewed = (await first.storage.get(entry.id)).session;
   assert.ok(
@@ -109,7 +109,7 @@ test("expired access token renews once across tabs and saves the new token pair 
     renewed.refreshToken !== original.refreshToken,
     "refresh token was not replaced",
   );
-  assert.equal(renewals, 1);
+  assert.equal(renewals, 2, "the SDK coalesces renewal within each client");
   assert.equal(logins, 1);
   const third = await f.manager();
   assert.equal(third.activeId, entry.id);
@@ -196,7 +196,7 @@ test("a rejected access token clears saved credentials without replaying the ope
   assert.equal((await first.storage.get(entry.id)).session, null);
 });
 
-test("forget waits out an in-flight request and stale tabs cannot resurrect or use the deleted session", async (t) => {
+test("forget removes credentials immediately and stale tabs cannot restore or use the deleted session", async (t) => {
   const f = await fixture(t);
   let release,
     started,
@@ -226,10 +226,10 @@ test("forget waits out an in-flight request and stale tabs cannot resurrect or u
   block = true;
   const request = first.active.store.query("_global", "users");
   await waiting;
-  const forgetting = second.disconnect(entry.id);
+  await second.disconnect(entry.id);
+  assert.equal(first.storage.get(entry.id), null);
   release();
   await request;
-  await forgetting;
   assert.equal(await first.storage.get(entry.id), null);
   await assert.rejects(first.active.store.refresh(), /Authentication/);
   assert.equal(await first.storage.get(entry.id), null);
@@ -275,6 +275,46 @@ test("replacement login invalidates old clients instead of redirecting their ope
   );
 });
 
+for (const change of ["forget", "replace"]) {
+  test(`a delayed renewal cannot undo ${change} in another tab`, async (t) => {
+    const f = await fixture(t, {
+      accessTokenTtlSeconds: 1,
+      refreshTokenTtlSeconds: 60,
+    });
+    let started, release;
+    const waiting = new Promise((resolve) => { started = resolve; });
+    const barrier = new Promise((resolve) => { release = resolve; });
+    t.after(() => release());
+    const first = await f.manager({
+      adapterFactory: (options) => createServerAdapter({
+        ...options,
+        fetch: async (url, init) => {
+          const response = await fetch(url, init);
+          if (url.endsWith("/renew")) {
+            started();
+            await barrier;
+          }
+          return response;
+        },
+      }),
+    });
+    const entry = await f.login(first), second = await f.manager();
+    await delay(2100);
+    const request = first.active.store.refresh();
+    await waiting;
+    if (change === "forget") await second.disconnect(entry.id);
+    else await second.connect(
+      { url: f.server.url, username: "admin", password }, { id: entry.id },
+    );
+    const expected = first.storage.get(entry.id);
+    release();
+    await request;
+    assert.deepEqual(first.storage.get(entry.id), expected);
+    await assert.rejects(first.active.store.refresh(), /Authentication/);
+    assert.deepEqual(first.storage.get(entry.id), expected);
+  });
+}
+
 test("storage failure after renewal never turns a confirmed database write into a retry", async (t) => {
   const f = await fixture(t, {
     accessTokenTtlSeconds: 1,
@@ -286,7 +326,7 @@ test("storage failure after renewal never turns a confirmed database write into 
   await entry.store.createCollections("test", ["items"]);
   await delay(2100);
   const put = first.storage.put.bind(first.storage);
-  first.storage.put = async () => {
+  first.storage.put = () => {
     throw new Error("Storage full");
   };
   const receipt = await entry.store.insertObjects("test", "items", [
@@ -307,7 +347,7 @@ test("failed local credential deletion is reported and cannot falsely claim the 
   const f = await fixture(t),
     first = await f.manager(),
     entry = await f.login(first);
-  first.storage.remove = async () => {
+  first.storage.remove = () => {
     throw new Error("Storage blocked");
   };
   await assert.rejects(first.disconnect(entry.id), /Storage blocked/);
@@ -318,7 +358,7 @@ test("failed local credential deletion is reported and cannot falsely claim the 
 test("unavailable browser storage is visible and allows only an explicitly page-local connection", async (t) => {
   const f = await fixture(t);
   const manager = new Connections({
-    storage: new ConnectionStorage({ indexedDB: null, locks: null }),
+    storage: new ConnectionStorage({ storage: null }),
   });
   t.after(() => manager.close());
   await manager.restore();
@@ -328,19 +368,33 @@ test("unavailable browser storage is visible and allows only an explicitly page-
   assert.ok(manager.active);
 });
 
+test("a blocked localStorage getter is handled when opening storage", (t) => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    get() { throw new Error("Storage blocked"); },
+  });
+  t.after(() => {
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else delete globalThis.localStorage;
+  });
+  const storage = new ConnectionStorage();
+  assert.throws(() => storage.open(), /page only/);
+});
+
 test("corrupt saved metadata is ignored without contacting its address", async (t) => {
   const f = await fixture(t),
     first = await f.manager();
-  await first.storage.transaction(["connections"], "readwrite", (tx) =>
-    tx.objectStore("connections").put({
-      version: 1,
-      id: "broken",
-      generation: "one",
-      url: "https://name:secret@example.com",
-      database: "_global",
-      collection: "users",
-    }),
-  );
+  f.localStorage.setItem(first.storage.key("broken"), JSON.stringify({
+    version: 1,
+    id: "broken",
+    generation: "one",
+    url: "https://name:secret@example.com",
+    database: "_global",
+    collection: "users",
+  }));
+  f.localStorage.setItem(first.storage.key("bad-json"), "{");
+  f.localStorage.setItem("unrelated-app-setting", "untouched");
   await first.storage.setActive("broken");
   let attempts = 0;
   const second = await f.manager({
@@ -352,6 +406,7 @@ test("corrupt saved metadata is ignored without contacting its address", async (
   assert.equal(attempts, 0);
   assert.equal(second.activeId, null);
   assert.equal(second.entries.size, 0);
+  assert.equal(f.localStorage.getItem("unrelated-app-setting"), "untouched");
 });
 
 test("saved connections restore the selected server and never send one server token to another", async (t) => {

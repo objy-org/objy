@@ -2,28 +2,28 @@
 
 ## HTTP integration tests
 
-Run `npm test` at the repository root (includes the UI build), or `npm test --workspace=ui` after `npm run build:ui`. These tests use disposable loopback instances of this repository’s server source and the official `@objy/client` over HTTP. Objects stay in memory; each server shuts down after its tests. Saved-session tests use fake-indexeddb with the real server and client.
+Run root `npm test` (builds the UI), or `npm run build:ui` then `npm test --workspace=ui`. Tests use disposable loopback, in-memory servers and the official client, then shut down. Session tests add fake-indexeddb.
 
 Coverage includes CRUD, arbitrary JSON, immutable `_id`, native filters/sorting/aggregation/references, metadata, optimistic edit checks, server isolation, failed connection switches, confirmed and uncertain writes, partial collection creation, token rotation, cross-tab locking, rejected credentials, permission failures, failed storage, cluster telemetry and cancellation.
 
-`query-builder.test.mjs` runs generated all/any filters and all five aggregation functions through the real server and official client. It also checks JSON types, repeated fields, round trips, unsupported-query preservation and invalid values.
+`query-builder.test.mjs` checks real-server all/any filters, five aggregations, JSON types, repeated fields, round trips, unsupported queries, and validation.
 
-File tests check binary and empty attachments, authenticated SDK download, replacement preserving object fields, stale/missing object protection, unavailable blob storage, and blob cleanup after object/collection/database deletion. Confirmed scope deletion removes local catalog entries even when refresh fails.
+File tests cover binary/empty data, authenticated download, field-preserving replacement, stale/missing objects, unavailable storage, and deletion cleanup. Confirmed context deletion clears catalogs even after failed refresh.
 
-`store-refresh.test.mjs` enforces request budgets: 2,000 objects require 40 searches and one count; a write does not reload unrelated collections or catalog lists. It also checks failed-page retries, changed query resets, duplicate IDs under concurrent offset changes, scoped refresh errors and metadata updates without object reloads.
+`store-refresh.test.mjs` enforces 40 searches/one count for 2,000 objects and no unrelated reloads after writes. It covers page retries, query resets, offset duplicates, scoped errors, and meta updates without page reloads.
 
 ## Browser regression tests
 
-Run root `npm run test:ui:manual` (or `npm run test:browser` from `ui/`), open the printed localhost URL and click **Run checks**. The runner loads the actual production build in an iframe and operates its DOM controls, forms and keyboard handlers. It uses a new, authenticated disposable in-memory server and a separate loopback origin, so it cannot access existing deployments or saved browser connections. The proxy forwards both built assets and API calls to that one server; the suite verifies the default hosting-server URL. No external server URL is accepted. This is an interactive browser runner, not a headless browser test.
+Run root `npm run test:ui:manual` (or `npm run test:browser` in `ui/`), open the printed URL, and click **Run checks**. The interactive runner operates production DOM/forms/keyboard handlers in an iframe. A separate loopback origin and disposable authenticated server isolate existing deployments/logins; external URLs are rejected. Assets/API share one proxy, verifying the hosting-server default.
 
-The suite covers connection, incremental paging, object selection, drafts across collection switches, Undo, multiline query shortcuts, malformed queries, injected server failure and retry, JSON/ID validation, save, metadata, delete confirmation, database/collection/object creation, node details, keyboard focus return and connection restoration after reload. Keyboard events exercise the handlers; native text insertion is also checked manually in the local UI.
+Coverage: connection/reload, paging/selection, drafts/Undo, query shortcuts/errors, server failure/retry, JSON/ID validation, save/meta, deletion, context/object creation, node details, and keyboard/focus. Native text insertion is also checked manually.
 
-Results appear in the page and terminal. The server independently verifies the resulting objects and metadata, then shuts down. The process exits nonzero on a failed assertion, mismatched server state or timeout. The HTML/JS runner lives in `tests/browser/` and is served only by this test command; it is not included in `dist/`.
+Results appear in-page and in the terminal. The server verifies final objects/meta, then stops. Assertions, state mismatches, or timeouts exit nonzero. `tests/browser/` is test-only, excluded from `dist/`.
 
-The 15 browser flows also cover the query builder's filter rows, grouped counts, reopening, cancellation, unsupported JSON and focus return; upload validation, attachment replacement/cancellation, dirty-editor guards, download bytes and filename, exact-name scope deletion confirmation/cancellation, selection cleanup, draft cleanup and protection of unrelated data. The file download is captured at the browser save boundary; its contents still come from the real authenticated client/server. The server independently checks resulting file bytes and deleted-scope blob cleanup.
+The 15 flows include builder filters/grouped counts, reopen/cancel, unsupported JSON/focus, upload validation/replacement/cancel, draft guards, download bytes/name, exact-name deletion/cancel, selection/draft cleanup, and unrelated-data protection. Downloads cross the real authenticated API before interception at browser save; the server verifies bytes and deleted-scope cleanup.
 
-The [archived QA reports](archive/) record manual checks of previous versions, including retired UI or AI behavior. They are historical evidence, not current setup instructions. Current source and these executable tests define the current implementation.
+The [QA archive](archive/) records older manual checks, including retired UI/AI behavior. Current source/tests define today's implementation, not those reports.
 
-The root Playwright suite runs this same harness in each configured browser for CI; the old console selectors and localStorage-session tests have been replaced. Token rotation, invalid sessions and cross-tab races remain covered by `connection-storage.test.mjs` against the real server and official client.
+Root Playwright runs this harness in each configured browser, replacing old selectors/localStorage tests. `connection-storage.test.mjs` covers rotation, invalid sessions, and cross-tab races against the real server/client.
 
-Preview coverage checks PNG/SVG decoding, actual PDF canvas pixels and multipage navigation, explicit downloads, unsupported HTML with a misleading image filename, broken-image/PDF fallback, object URL and canvas cleanup and closing before the request completes. The HTTP tests also verify cancellation is forwarded through the official client.
+Preview checks cover PNG/SVG decoding, PDF pixels/pages, downloads, misleading HTML filenames, broken-image/PDF fallback, URL/canvas cleanup, and early close. HTTP tests verify client cancellation forwarding.

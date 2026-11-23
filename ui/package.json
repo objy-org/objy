@@ -12,7 +12,6 @@
     "@objy/client": "0.1.0"
   },
   "devDependencies": {
-    "esbuild": "0.25.12",
-    "fake-indexeddb": "6.2.8"
+    "esbuild": "0.25.12"
   }
 }

@@ -1,8 +1,8 @@
 # Data Explorer Development
 
-The database UI is maintained here inside the server repository. There is no nested Git repository or submodule.
+The UI lives in this database repository, not a submodule.
 
-For setup, development commands, generated assets, and verification, use [Contributing](../CONTRIBUTING.md#development). For using the UI, see the [database guide](../DB.md#data-explorer). Authentication and data operations use the official JavaScript client; no browser database engine or AI is included.
+See [Contributing](../CONTRIBUTING.md#development) for setup/builds/tests and the [database guide](../DB.md#data-explorer) for usage. Data/auth use the official client, without a browser engine or AI.
 
 ## Module Map
 
@@ -17,4 +17,4 @@ For setup, development commands, generated assets, and verification, use [Contri
 - `tests/`: integration tests and the browser regression harness.
 - `scripts/`: build, local development, browser tests, and the opt-in local load-data utility.
 
-See the [data architecture](src/data/README.md), [component API](src/ui/components/README.md), and [verification guide](tests/README.md) for their integration contracts and coverage.
+Details: [data architecture](src/data/README.md), [component API](src/ui/components/README.md), [verification](tests/README.md).

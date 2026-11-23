@@ -535,10 +535,6 @@ async function initialize() {
     connections = new Connections({
       storage: new ConnectionStorage(),
       onChange: connectionChanged,
-      channel:
-        typeof BroadcastChannel === "function"
-          ? new BroadcastChannel("objy-studio-connections")
-          : null,
     });
     await connections.restore();
     store = connections.active?.store;

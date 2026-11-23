@@ -10,46 +10,80 @@ Data Explorer
     @objy/client → OBJY DB server
 ```
 
-Every database operation uses the official `@objy/client` (pinned at 0.1.0). There is no embedded database, browser adapter or automatic fallback. The build rejects any database engine or server code in the browser data bundle. Integration tests use this repository’s server source with isolated loopback instances.
+All operations use `@objy/client` (pinned at 0.1.0), without an embedded engine or fallback. The build rejects server/engine code in browser bundles; integration tests use isolated loopback servers from this repository.
 
-`adapters.js` defines `ADAPTER_METHODS`: `open`, `close`, database and collection listing/creation/deletion, `search`, `count`, `get`, `insertMany`, `insertFile`, `replaceFile`, `downloadFile`, `patch`, `replace`, `removeMany`, `getMeta`, `setMeta`, `getClusterStatus`. Every operation is asynchronous. The adapter preserves native OBJY results and errors; missing single objects normalize to `undefined`. `downloadFile` consumes the official client's download response into a Blob while still inside the session/error wrapper. `new ObjyStore(adapter)` requires an explicit adapter. SDK handles remain private to it.
+`new ObjyStore(adapter)` requires an explicit adapter; SDK handles stay private. `adapters.js` defines async `ADAPTER_METHODS`: `open`, `close`, database/collection listing/creation/deletion, `search`, `count`, `get`, `insertMany`, `insertFile`, `replaceFile`, `downloadFile`, `patch`, `replace`, `removeMany`, `getMeta`, `setMeta`, `getClusterStatus`. Native results/errors pass through; missing objects become `undefined`. File responses become Blobs inside the session/error wrapper.
 
-`Connections` restores saved server metadata and the last selected login at startup. A first visit starts disconnected. Connect using a server URL and optional username/password. New connections prefill the page's HTTP(S) origin, including its port; the URL stays editable. Signing into a saved connection retains its server URL. Authentication scope defaults to `_global/users`. The official client handles HTTP, tokens and token renewal. Connect to any compatible OBJY server accessible from the browser; the server must allow the UI origin through CORS. HTTPS pages require a browser-allowed server URL. There is no proxy.
+## Connections
 
-Each server connection has its own store, drafts and explorer selection. A failed login or switch preserves the active connection. Forgetting the active server leaves the UI disconnected, even if other connections exist; choosing another server is explicit. Without a connection, the explorer is hidden and database requests are disabled. Forget removes the saved credentials and local view state, without deleting server data. Closing a page preserves saved logins.
+`Connections` restores saved servers and the selected login; first visits start disconnected. New URLs default to the page's HTTP(S) origin/port and remain editable; saved logins retain their URL. Auth defaults to `_global/users`. The client handles HTTP/tokens/renewal. Servers must be browser-reachable with suitable CORS and HTTPS compatibility; there is no proxy.
 
-## Saved connections and tokens
+Each connection isolates its store, drafts, and selection. Failed login/switch preserves the active connection. Forgetting it disconnects without choosing another; the explorer hides and requests stop. Forget removes local credentials/view state, never server data. Closing the page preserves saved logins.
 
-The header's node pills use `getClusterStatus` → official client `status({ details: true })` → `GET /api/config?details=1`. Memory uses the fresh `memory.rss` snapshot (falling back to the memory guard's last reading only when absent), divided by `memoryGuard.limitBytes` (the configured/container-aware node limit), or `memory.systemTotal` if that limit is absent. Hover shows used/total bytes and the denominator. Missing telemetry has no percentage; unreachable nodes are shown as offline. The fill is capped at 100%, while the displayed percentage preserves over-limit usage.
+## Cluster Telemetry
 
-Clicking a pill opens a compact node modal with RSS bytes, index readiness, active workers, compression savings, uptime, owned shards, replication state and write acceptance. There is no heap display. Index readiness counts **indexed collections** from that node's `indexes.ready/building/error`, not individual index definitions. Workers come from `indexes.workers`: field, column and vector background tasks. The current server reports these as same-thread tasks, not OS worker threads. Compression joins `compression.nodes` by node identity; saved bytes/percentage describe compressed object payload, not total process RAM. Zero, missing and offline values remain distinct.
+Node pills use `getClusterStatus` → client `status({ details: true })` → `GET /api/config?details=1`. Their modal shows RSS, indexes, tasks, compression, uptime, shards, replication, and write admission, not heap.
 
-`ClusterMonitor` fetches one snapshot when a connection becomes active, then only on manual connection refresh or the modal's **Refresh** button. There are no polling timers, visibility/focus refreshes or automatic retries. The modal shows the last successful fetch time. Requests have an 8-second timeout, concurrent refreshes coalesce, and late responses after switching/forgetting a server are discarded. Failure clears old telemetry; a manual refresh can retry. Config reads share the adapter's session lock, renewal and persistence; no extra token handling is introduced. Global-admin permission is required by the server for this endpoint; denial affects only the pills. Telemetry is never persisted.
+| Metric | Interpretation |
+| --- | --- |
+| Memory | Fresh `memory.rss`, falling back to the guard reading; denominator is `memoryGuard.limitBytes`, then `memory.systemTotal`. Hover shows bytes/budget. Fill caps at 100%; displayed percentage does not. |
+| Index readiness | `indexes.ready/building/error` counts indexed collections, not definitions. |
+| Workers | `indexes.workers` describes cooperative field/column/vector tasks, not OS threads. |
+| Compression | Join `compression.nodes` by node identity; savings cover payloads, not process RAM. |
+| Missing/offline | Remain distinct from zero; missing memory has no percentage. |
 
-`connection-storage.js` stores a versioned, whitelisted record in IndexedDB (`objy-studio-connections`): connection ID/generation, canonical server URL, username, authentication scope, whether login is required, and the official client's access/refresh token pair. The selected connection ID is stored separately. Passwords, server user profiles, objects, selections and drafts are excluded. Server data lifetime remains controlled by the server.
+`ClusterMonitor` fetches on activation and manual refresh only: no polling, focus refresh, or automatic retry. Concurrent refreshes coalesce; timeout is 8 seconds. Switch/forget discards late responses; failures clear stale telemetry. The modal shows the last successful fetch. Reads share session locking/renewal/persistence; global-admin denial affects only pills. Telemetry is never persisted.
 
-Tokens are bound to the exact canonical server URL and authentication scope. An edited URL/scope requires fresh authentication; saved tokens are never reused at the new destination. The official client sends authorization headers, omits cookies and rejects redirects. Use HTTPS for remote servers; HTTP remains supported for loopback testing.
+## Saved Connections and Tokens
 
-The SDK is responsible for token expiry and renewal: only its explicit safe-to-replay expired-access-token response permits renewal and one retry. The UI does not parse JWT expiry, extend token lifetimes or implement a separate retry loop. A successful renewal's replacement tokens are saved after the operation finishes. Web Locks serialize each connection's requests, renewal and persistence across tabs; each request loads the latest stored tokens first. Network errors and ordinary permission errors keep the login. Rejected authentication/renewal removes saved tokens while retaining the server details for sign-in.
+`connection-storage.js` saves whitelisted, versioned records in IndexedDB (`objy-studio-connections`): connection ID/generation, canonical URL, username, auth scope, login requirement, and access/refresh tokens. Selection ID is separate. Passwords, profiles, objects, explorer selections, and drafts are excluded.
 
-A confirmed write stays successful if saving renewed credentials fails; the UI reports the storage problem, retains the newer tokens in memory and attempts to save them before the next request. A browser crash or storage failure between renewal and persistence may require a fresh login. No guarantee of crash-proof token rotation is made.
+Tokens are bound to the exact URL/scope; editing either requires login. The client uses authorization headers, omits cookies, and rejects redirects. Use HTTPS remotely; HTTP supports loopback tests.
 
-Forget deletes the record under the same lock as requests, preventing in-flight renewal from resurrecting it. BroadcastChannel disconnects other open tabs; the storage check also blocks stale clients if a notification is missed. Forget is local credential deletion, not server-side revocation: this client has no revocation endpoint. Replacing a login invalidates the previous connection generation. Requests already received by the server cannot be undone.
+- Only the client's explicit safe-to-replay expiry response permits renewal and one retry. The UI does not parse JWT expiry or add renewal loops.
+- Web Locks serialize requests, renewal, and persistence across tabs. Requests load current tokens first; renewed tokens save after completion.
+- Network/permission errors keep login. Rejected authentication/renewal clears tokens but retains server details.
+- Failed token persistence does not undo a confirmed write: report it, retain newer tokens in memory, and retry saving before the next request. A crash during rotation can require login.
+- Forget uses the request lock so renewal cannot resurrect credentials. BroadcastChannel disconnects tabs; storage checks catch missed notifications. Re-login invalidates the prior generation. Neither action revokes server tokens or undoes received requests.
 
-IndexedDB is origin-scoped browser storage, not encrypted credential-vault storage. Scripts running on this UI origin can access the tokens; a browser-only UI cannot make them HttpOnly. Clearing site data removes saved connections, and private browsing may discard them at session end. `localhost:4317` and `127.0.0.1:4317` are separate origins. When IndexedDB or Web Locks is unavailable, the UI displays a warning and explicitly describes connections as page-only. No secret is placed in URLs, localStorage, bundles or logs.
+IndexedDB is origin-scoped, not an encrypted vault or HttpOnly storage: same-origin scripts can read tokens. Clearing site data/private browsing may remove logins; `localhost:4317` and `127.0.0.1:4317` differ. Without IndexedDB/Web Locks, the UI warns that connections are page-only. Secrets never enter URLs, localStorage, bundles, or logs.
 
-A catalog refresh lists databases and collections without downloading unloaded collections. Selecting a collection loads 50 objects in native server order plus its native count; **Load more** fetches only the next 50 rows and appends them. Counts are reused until a new query, relevant write, or manual refresh. Requests are capped at 250 rows; duplicate identities from offset drift are reconciled, and the server offset advances by rows received, not unique objects displayed. `loadCollection(..., { query })` executes a native query and commits the query/results together only after success. Ordinary filters retain paged browsing and native sorting. Explicit pagination controls, aggregations and vectors pass through without URL paging overrides. Aggregate, vector and reference-expanded results are read only; ordinary filtered objects remain editable. `resultCount` describes matches/returned rows while `count` remains the collection total. Empty queries restore ordinary browsing. Active queries survive refreshes and writes but remain in page memory. Manual refresh reloads previously loaded windows and reconciles deleted targets. Object writes reload only the affected collection window; collection changes reload only that database’s collection list, and database changes reconcile only database names and newly discovered databases. Metadata writes do not reload object pages. Scoped refresh failures stay visible until that scope is successfully reloaded or a full refresh succeeds. This is offset-based browsing, not a transactional snapshot across concurrent writes. Unknown counts remain `null`. The standalone three-pane explorer receives projections and emits events; it has no SDK or connection dependency. Object rows show IDs with compact JSON previews. Object editing/deletion and collection metadata writes are handled by the host through this same store. Unsaved JSON drafts stay in the page, isolated per connection. Optional expected snapshots on replacement, deletion and metadata updates detect changes with a fresh read before writing; this is not an atomic conditional write.
+## Queries, Paging, and Refresh
 
-Writes are serialized per connection. UI requests capture the connection and selection when submitted; switching is disabled during an editor or dialog write. A confirmed write followed by a failed refresh retains its receipt and exposes `refreshError`. An error marked `writeMayHaveSucceeded` disables manual resubmission so the user can inspect first. Completed parts of a multi-call creation are reported. No client-side rollback is promised.
+Catalog reads list contexts without downloading unloaded collections. Selection loads 50 objects in server order and a count; **Load more** appends the next 50. Requests cap at 250. Deduplicate offset drift, but advance by received rows, not unique displayed IDs. This is live offset paging, not a snapshot; unknown counts are `null`.
 
-Native query syntax, reference expansion, aggregation, metadata and `_id` semantics are preserved. Business `id` is a normal property. Partial changes use `$set`/`$unset`; replacement and deletion require explicit identities.
+`loadCollection(..., { query })` commits query/results together after success. Ordinary filters preserve paging/sorting; explicit windows, aggregates, and vectors pass through without URL overrides. Empty queries restore browsing. Queries survive refresh/writes in page memory. `resultCount` describes matches/returned rows; `count` is the collection total. Aggregate/vector/reference-expanded results are read-only; ordinary filtered objects remain editable.
 
-## Deletion and attachments
+| Change | Refresh scope |
+| --- | --- |
+| Object write | Affected collection window. |
+| Collection change | That database's collection list. |
+| Database change | Database names and newly discovered databases. |
+| Metadata write | No object-page reload. |
+| Manual refresh | Loaded windows, reconciling deleted targets. |
 
-Database/collection deletion uses the SDK's `drop()` and updates the local catalog immediately after acknowledgment, even if the following refresh fails. Removed scopes lose their selection, query text and editor drafts. The host requires an exact-name confirmation.
+Counts invalidate on queries, relevant writes, or manual refresh. Scoped failures remain visible until that scope or a full refresh succeeds. The standalone explorer receives projections/emits events without an SDK dependency; rows show IDs/JSON previews. The host edits through this store, keeping drafts per connection in page memory.
 
-Attachments use `insertFile`, `replaceFile` and `download` from the official client. The server owns `_file` and stores one blob per object. Existing-object uploads read the latest object, check the expected snapshot, and preserve its fields while stripping the old `_file` from the multipart payload. Dirty or uncertain JSON drafts must be saved or undone first. Derived query results expose no file controls. Opening an attachment uses the same authenticated client download. Images render only as `<img>` with a temporary Blob URL. PDFs require the response MIME type and a PDF header, then render one page at a time using lazily loaded PDF.js with a local worker, fonts and decoding assets. No remote viewer or PDF scripting is used. HTML and other unsupported formats download instead of being embedded. The preview keeps an explicit Download button, aborts a pending client request on close, and releases its Blob URL or PDF worker/canvas when closed or the active connection changes. Tokens never appear in preview/download URLs. File support requires configured server file storage. No storage backend or persistence is added by the UI. Tests use disposable in-memory blobs.
+## Writes and Failures
 
-## Local development
+Writes serialize per connection and capture the connection/selection at submission. Editor/dialog writes prevent switching. Optional `expected` snapshots preflight replacements, deletes, and meta writes against fresh reads; this is not atomic compare-and-swap.
 
-Use the root [development instructions](../../../CONTRIBUTING.md#development), [UI module map](../../README.md), and [verification guide](../../tests/README.md). Editable UI source lives in `src/ui/`, with the page template in `src/index.html`. The build checks for embedded database engines, copies the official client license, fingerprints assets, and replaces obsolete generated output only after a successful build. It never reads or edits source inside `dist/`.
+Confirmed writes retain receipts and expose `refreshError` if refresh fails. `writeMayHaveSucceeded` disables resubmission pending inspection. Multi-call creation reports completed steps; there is no client rollback. Native query/reference/meta/`_id` semantics remain intact. Business `id` is ordinary data; patches use `$set`/`$unset`, replacements/deletes explicit IDs.
+
+## Deletion and Attachments
+
+The host confirms exact context names before SDK `drop()`. Acknowledged deletion immediately clears local catalog entries, selection, queries, and drafts, even if refresh fails.
+
+Use client `insertFile`, `replaceFile`, and `download`; the server owns `_file` and blob storage. Replacements preflight the latest object, preserve its fields, and strip the old descriptor from multipart data. Save/undo dirty or uncertain drafts first. Derived results have no file controls.
+
+| Preview | Behavior |
+| --- | --- |
+| Image | `<img>` with a temporary Blob URL. |
+| PDF | Require MIME type and PDF header; lazy PDF.js renders pages with local worker/fonts/decoders. No scripting or remote viewer. |
+| HTML/unsupported | Download, never embed. |
+
+Downloads stay authenticated; tokens never enter URLs. Previews offer Download, abort requests on close, and release Blob URLs/workers/canvases on close or connection change. File storage must be configured on the server; the UI adds no backend. Tests use disposable memory blobs.
+
+## Local Development
+
+See [setup](../../../CONTRIBUTING.md#development), [module map](../../README.md), and [verification](../../tests/README.md). Edit `src/ui/` and `src/index.html`, not `dist/`. Builds reject embedded engines, copy the client license, fingerprint assets, and replace generated output only after success.

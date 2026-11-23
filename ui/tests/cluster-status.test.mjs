@@ -40,20 +40,20 @@ test("node memory uses container/config limits, preserves offline peers, and nev
   assert.throws(() => clusterNodes({}), /did not return/);
 });
 
-test("config uses the authenticated official-client request path and the session lock", async (t) => {
+test("config uses the authenticated official-client request path and session persistence", async (t) => {
   const server = await testServer({
     auth: { enabled: true },
     environment: { OBJYDB_ADMIN_PASSWORD: "cluster-test-only" },
   });
   t.after(() => server.close());
   let requests = 0,
-    locks = 0;
+    accesses = 0;
   const adapter = createServerAdapter({
     url: server.url,
     username: "admin",
     password: "cluster-test-only",
     sessionAccess: async (_controls, execute) => {
-      locks++;
+      accesses++;
       return execute();
     },
     fetch: async (url, init) => {
@@ -70,7 +70,7 @@ test("config uses the authenticated official-client request path and the session
   await adapter.open();
   const status = await adapter.getClusterStatus({ details: true });
   assert.equal(requests, 1);
-  assert.equal(locks, 1);
+  assert.equal(accesses, 1);
   const [node] = clusterNodes(status);
   assert.ok(node.label);
   assert.equal(node.reachable, true);

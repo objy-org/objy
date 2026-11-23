@@ -2,6 +2,68 @@ import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+test('HTTP login persists and renews across tabs without IndexedDB or Web Locks', async ({ page, context }) => {
+  const { testServer } = await import('../ui/tests/helpers/server.mjs');
+  const backend = await testServer({ auth: { enabled: true, accessTokenTtlSeconds: 1 },
+    environment: { OBJYDB_ADMIN_PASSWORD: 'http-ui-test-only' } });
+  let logins = 0;
+  backend.runtime.server.on('request', req => { if (req.url.endsWith('/auth')) logins++; });
+  try {
+    // A non-loopback HTTP origin gives the browser a real insecure context.
+    // Route only this test hostname to its disposable local server.
+    await context.route('http://objy-http.test/**', async route => {
+      const request = new URL(route.request().url());
+      await route.fulfill({ response: await route.fetch({ url: backend.url + request.pathname + request.search }) });
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(window, 'indexedDB', { get() { throw new Error('Unexpected IndexedDB access'); } });
+      Object.defineProperty(navigator, 'locks', { get() { throw new Error('Unexpected Web Locks access'); } });
+    });
+    await page.goto('http://objy-http.test/ui');
+    expect(await page.evaluate(() => isSecureContext)).toBe(false);
+    expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe('undefined');
+    await page.locator('#connection-control').click();
+    await page.locator('[name=username]').fill('admin');
+    await page.locator('[name=password]').fill('http-ui-test-only');
+    await page.locator('.modal [type=submit]').click();
+    await expect(page.locator('.modal')).toHaveCount(0);
+    await expect(page.locator('[aria-label="_global, database"]')).toBeVisible();
+    await expect(page.locator('#connection-notice')).toBeHidden();
+    expect(await page.evaluate(() => {
+      const records = Object.keys(localStorage).filter(key => key.startsWith('objy-studio-connections:connection:'));
+      const saved = JSON.parse(localStorage.getItem(records[0]));
+      return records.length === 1 && saved.url === 'http://objy-http.test/' &&
+        Boolean(saved.session.accessToken && saved.session.refreshToken) &&
+        !JSON.stringify(localStorage).includes('http-ui-test-only') &&
+        localStorage.getItem('objy-studio-connections:active') === saved.id;
+    })).toBe(true);
+    await page.reload();
+    await expect(page.locator('[aria-label="_global, database"]')).toBeVisible();
+    const second = await context.newPage();
+    await second.goto('http://objy-http.test/ui');
+    await expect(second.locator('[aria-label="_global, database"]')).toBeVisible();
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    await Promise.all([page, second].map(tab => tab.getByRole('button', { name: 'Refresh connection', exact: true }).click()));
+    for (const tab of [page, second]) {
+      await expect(tab.getByRole('button', { name: 'Refresh connection', exact: true })).toBeEnabled();
+      await expect(tab.locator('#connection-notice')).toBeHidden();
+      await expect(tab.locator('[aria-label="_global, database"]')).toBeVisible();
+    }
+    await page.reload();
+    await expect(page.locator('[aria-label="_global, database"]')).toBeVisible();
+    expect(logins).toBe(1);
+    await page.locator('#connection-control').click();
+    await page.locator('[data-action="disconnect"]').click();
+    await expect(page.locator('#disconnected')).toBeVisible();
+    await expect(second.locator('#disconnected')).toBeVisible();
+    await page.reload();
+    await expect(page.locator('#disconnected')).toBeVisible();
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('objy-studio-connections:')))).toEqual([]);
+  } finally {
+    await backend.close();
+  }
+});
+
 // CI runs the same authenticated, disposable-server suite used for manual checks.
 // Each browser gets its own server, origin, credentials and in-memory database.
 test('integrated database UI: connection, CRUD, queries, metadata, nodes and reload', async ({ page }) => {

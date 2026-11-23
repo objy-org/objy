@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve OBJY DB. Focused fixes, tests, documentation, and carefully scoped performance work are welcome.
+Focused fixes, tests, docs, and performance work are welcome.
 
 Start with the [engineering goals](AGENTS.md): correctness, predictable latency, sustained bulk throughput, and bounded memory guide design decisions.
 
@@ -21,17 +21,18 @@ npm ci
 npm test
 ```
 
-The database UI lives in `ui/` as an npm workspace in this same Git repository. Root `npm ci` installs its build dependencies; `npm test` builds it and runs both server and UI integration tests. There is no submodule or separate UI repository.
+`ui/` is a workspace in this repository. Root `npm ci` installs its dependencies; `npm test` builds it and runs server/UI integration tests.
 
-- `npm run build:ui` generates `ui/dist/` for standalone development and `public/ui/` for the server, which serves the UI at `/`, `/ui`, and `/ui/`.
-- `npm run dev:ui` runs the UI alone at `http://127.0.0.1:4317/` with rebuild-on-change. Connect it to a local server allowed by that server's CORS configuration.
-- Set `PORT` to use another UI development port. Refresh the browser after a rebuild.
-- `npm run test:ui:manual` prints a disposable localhost browser-test page; open it and click **Run checks**. It tests the actual server UI routes and API without modifying an existing database.
-- `npm run test:ui` runs the same browser regression suite in Chromium, Firefox, and WebKit through Playwright. Install those browsers first with `npx playwright install --with-deps`.
+| Command | Purpose |
+| --- | --- |
+| `npm run build:ui` | Generate `ui/dist/` and server assets in `public/ui/`, served at `/`, `/ui`, and `/ui/`. |
+| `npm run dev:ui` | Rebuild on change at `http://127.0.0.1:4317/`; override with `PORT`. Refresh after rebuilds and allow this origin in server CORS. |
+| `npm run test:ui:manual` | Open the printed localhost page and click **Run checks**; uses a disposable server, not an existing database. |
+| `npm run test:ui` | Run the browser suite in Chromium, Firefox, and WebKit. First install browsers: `npx playwright install --with-deps`. |
 
-Release packaging and Docker builds compile the UI automatically. A direct source checkout needs `npm run build:ui` before starting the server. Built assets bundle the official JavaScript client; no CDN or browser AI is required. Never edit generated `ui/dist/` or `public/ui/` files. Compiled release assets stay under `public/` so source checkouts, release packages, and Docker images share the same layout.
+Release and Docker builds compile the UI automatically. Source checkouts need `npm run build:ui` before server startup. Assets bundle the official client, with no CDN or browser AI. Never edit generated `ui/dist/` or `public/ui/`; source and release assets share the `public/` layout.
 
-Start a configured database from this checkout with `node bin/objy.js --config objydb.config.json`. The launcher uses the same startup path as `node src/index.js`. See the [database guide](DB.md) for configuration and operation, and the [UI module map](ui/README.md) for its internal architecture. UI build and browser-test implementation details live in `ui/scripts/`; those commands never publish anything.
+Start with `node bin/objy.js --config objydb.config.json` (same bootstrap as `node src/index.js`). See the [database guide](DB.md), [UI module map](ui/README.md), and build/test scripts in `ui/scripts/`. Development commands do not publish.
 
 Add focused tests beside the behavior being changed. The broader suites are selected by impact:
 
@@ -43,7 +44,7 @@ Add focused tests beside the behavior being changed. The broader suites are sele
 | Exports, package files, release scripts, or metadata | `npm run check:package && npm run test:package` |
 | Replication, restore, or resharding | Relevant `test:stress:*` command from `package.json` |
 
-Performance changes should include a before/after command and workload. Do not present a single warm run as a general benchmark; see [BENCHMARKS.md](BENCHMARKS.md) for the repository format.
+Include before/after commands and workloads for performance changes. One warm run is not a general benchmark; follow [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Pull Requests
 

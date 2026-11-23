@@ -81,114 +81,66 @@ function cleanRecord(value) {
 }
 
 export class ConnectionStorage {
-  constructor({
-    indexedDB = globalThis.indexedDB,
-    locks = globalThis.navigator?.locks,
-    name = "objy-studio-connections",
-  } = {}) {
-    this.indexedDB = indexedDB;
-    this.locks = locks;
+  constructor({ storage, name = "objy-studio-connections" } = {}) {
+    this.storage = storage;
     this.name = name;
+    this.prefix = `${name}:connection:`;
   }
-  async open() {
-    if (this.db) return;
-    if (!this.indexedDB || !this.locks?.request)
+  open() {
+    try {
+      // Access the browser getter here so blocked storage still allows a
+      // page-local connection instead of preventing the UI from opening.
+      if (this.storage === undefined) this.storage = globalThis.localStorage;
+      const probe = `${this.name}:probe`;
+      this.storage.setItem(probe, "1");
+      this.storage.removeItem(probe);
+    } catch {
       throw new Error(
-        "This browser cannot safely save shared sessions. This connection will last for this page only.",
+        "Browser storage is unavailable. This connection will last for this page only.",
       );
-    this.db = await new Promise((resolve, reject) => {
-      let rejected = false;
-      const request = this.indexedDB.open(this.name, 1);
-      request.onupgradeneeded = () => {
-        request.result.createObjectStore("connections", { keyPath: "id" });
-        request.result.createObjectStore("settings");
-      };
-      request.onsuccess = () =>
-        rejected ? request.result.close() : resolve(request.result);
-      request.onerror = () =>
-        reject(
-          new Error(
-            "Saved connections could not be opened. Browser storage may be blocked.",
-          ),
-        );
-      request.onblocked = () => {
-        rejected = true;
-        reject(
-          new Error("Close other Studio tabs to update saved connections."),
-        );
-      };
-    });
-    this.db.onversionchange = () => this.close();
+    }
   }
-  transaction(stores, mode, action) {
-    return new Promise((resolve, reject) => {
-      let result;
-      const tx = this.db.transaction(stores, mode);
-      tx.oncomplete = () => resolve(result?.result);
-      tx.onabort = tx.onerror = () =>
-        reject(
-          new Error(
-            "Browser storage could not be updated. Saved login may be out of date.",
-          ),
-        );
-      try {
-        result = action(tx);
-      } catch (error) {
-        tx.abort();
-        reject(error);
-      }
-    });
+  key(id) {
+    return this.prefix + encodeURIComponent(id);
   }
-  lock(id, fn) {
-    return this.locks.request(`${this.name}:session:${id}`, fn);
-  }
-  async list() {
-    const values = await this.transaction(["connections"], "readonly", (tx) =>
-      tx.objectStore("connections").getAll(),
-    );
+  list() {
     const records = [];
-    for (const value of values) {
-      try {
-        records.push(cleanRecord(value));
-      } catch {
-        /* Invalid metadata is never used for a request. */
-      }
+    for (let i = 0; i < this.storage.length; i++) {
+      const key = this.storage.key(i);
+      if (!key?.startsWith(this.prefix)) continue;
+      const record = this.read(key);
+      if (record && key === this.key(record.id)) records.push(record);
     }
     return records;
   }
-  async get(id) {
-    const value = await this.transaction(["connections"], "readonly", (tx) =>
-      tx.objectStore("connections").get(id),
-    );
-    return value ? cleanRecord(value) : null;
+  read(key) {
+    const value = this.storage.getItem(key);
+    if (value === null) return null;
+    try {
+      return cleanRecord(JSON.parse(value));
+    } catch {
+      // Ignore malformed records without using their address or credentials.
+      return null;
+    }
+  }
+  get(id) {
+    const record = this.read(this.key(id));
+    return record?.id === id ? record : null;
   }
   put(record) {
-    return this.transaction(["connections"], "readwrite", (tx) =>
-      tx.objectStore("connections").put(cleanRecord(record)),
-    );
+    this.storage.setItem(this.key(record.id), JSON.stringify(cleanRecord(record)));
   }
   active() {
-    return this.transaction(["settings"], "readonly", (tx) =>
-      tx.objectStore("settings").get("active"),
-    );
+    return this.storage.getItem(`${this.name}:active`);
   }
   setActive(id) {
-    return this.transaction(["settings"], "readwrite", (tx) =>
-      tx.objectStore("settings").put(id, "active"),
-    );
+    const key = `${this.name}:active`;
+    if (id) this.storage.setItem(key, id);
+    else this.storage.removeItem(key);
   }
   remove(id) {
-    return this.transaction(["connections", "settings"], "readwrite", (tx) => {
-      tx.objectStore("connections").delete(id);
-      const active = tx.objectStore("settings").get("active");
-      active.onsuccess = () => {
-        if (active.result === id) tx.objectStore("settings").delete("active");
-      };
-    });
-  }
-  close() {
-    this.db?.close();
-    this.db = null;
+    this.storage.removeItem(this.key(id));
+    if (this.active() === id) this.setActive(null);
   }
 }
 
@@ -199,53 +151,55 @@ export function loginRequired() {
   );
 }
 
-// Cross-tab locking covers synchronization, the SDK request (including renewal),
-// and saving rotated tokens. No custom retry or JWT-expiry interpretation.
+// Each tab's official client owns renewal and coalesces concurrent renewals.
+// OBJY refresh tokens remain valid after renewal; no cross-tab lock is needed.
 export function storedSessionAccess(storage, record, onStorageError) {
   let dirty = false;
-  return async (session, operation) =>
-    storage.lock(record.id, async () => {
-      const latest = await storage.get(record.id);
-      if (
-        !latest ||
-        latest.generation !== record.generation ||
-        latest.url !== record.url
-      ) {
-        session.clear();
-        throw loginRequired();
-      }
-      if (latest.requiresAuth && !latest.session) {
-        session.clear();
-        throw loginRequired();
-      }
-      // If a prior save failed after renewal, never overwrite the newer in-memory
-      // token with the older disk token. Retry saving it before another request.
-      if (dirty) {
-        latest.session = session.get()
-          ? { url: record.url, ...savedSession(session.get(), record) }
-          : null;
-        await storage.put(latest);
-        dirty = false;
-      } else
-        session.set(
-          latest.session ? savedSession(latest.session, record) : null,
-        );
-      const before = JSON.stringify(session.get());
-      try {
-        return await operation();
-      } finally {
-        const current = session.get();
-        if (JSON.stringify(current) !== before) {
-          latest.session = current
-            ? { url: record.url, ...savedSession(current, record) }
-            : null;
-          try {
-            await storage.put(latest);
-          } catch (error) {
-            dirty = true;
-            onStorageError(error);
-          }
+  let pending = 0;
+  const matches = (latest) =>
+    latest?.generation === record.generation && latest.url === record.url;
+  function save(value) {
+    const latest = storage.get(record.id);
+    // Recheck after the request: forgetting or replacing a connection must not
+    // be undone by its old client's delayed response.
+    if (matches(latest) && (!latest.requiresAuth || latest.session)) {
+      latest.session = value
+        ? { url: record.url, ...savedSession(value, record) }
+        : null;
+      storage.put(latest);
+    }
+    dirty = false;
+  }
+  return async (session, operation) => {
+    const latest = storage.get(record.id);
+    if (!matches(latest) || (latest.requiresAuth && !latest.session)) {
+      session.clear();
+      throw loginRequired();
+    }
+    // Retry a failed token save without replaying a completed database write.
+    if (dirty) save(session.get());
+    // Pick up another tab's renewed credentials only while this client is idle.
+    // setSession during a request would invalidate the SDK's renewal/replay.
+    else if (!pending) {
+      const saved = latest.session;
+      const value = saved ? savedSession(saved, record) : null;
+      if (JSON.stringify(session.get()) !== JSON.stringify(value)) session.set(value);
+    }
+    const before = JSON.stringify(session.get());
+    pending++;
+    try {
+      return await operation();
+    } finally {
+      pending--;
+      const current = session.get();
+      if (JSON.stringify(current) !== before) {
+        dirty = true;
+        try {
+          save(current);
+        } catch (error) {
+          onStorageError(error);
         }
       }
-    });
+    }
+  };
 }

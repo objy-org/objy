@@ -115,6 +115,31 @@ test("startup is disconnected and a store requires an explicit adapter", () => {
   assert.throws(() => new ObjyStore(), /Connect to an OBJY server/);
 });
 
+test("connections generate unique IDs and generations without crypto.randomUUID", async (t) => {
+  const descriptor = Object.getOwnPropertyDescriptor(crypto, "randomUUID");
+  Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+  t.after(() => {
+    if (descriptor) Object.defineProperty(crypto, "randomUUID", descriptor);
+    else delete crypto.randomUUID;
+  });
+  const server = await testServer();
+  t.after(() => server.close());
+  const connections = new Connections();
+  t.after(() => connections.close());
+  const first = await connections.connect({ url: server.url });
+  const second = await connections.connect({ url: server.url });
+  const id = /^[0-9a-f]{32}$/;
+  for (const entry of [first, second]) {
+    assert.match(entry.id, id);
+    assert.match(entry.record.generation, id);
+  }
+  assert.notEqual(first.id, second.id);
+  assert.notEqual(first.record.generation, second.record.generation);
+  const replacement = await connections.connect({ url: server.url }, { id: first.id });
+  assert.equal(replacement.id, first.id);
+  assert.notEqual(replacement.record.generation, first.record.generation);
+});
+
 test("failed login keeps the current server; objects and explorer drafts stay isolated", async (t) => {
   const firstServer = await testServer();
   t.after(() => firstServer.close());

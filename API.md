@@ -2,15 +2,15 @@
 
 <p align="center"><strong>Dynamic objects. One public API.</strong></p>
 
-This is the public HTTP contract for OBJY DB. The standalone [JavaScript client](https://github.com/objy-org/objy-client) exposes the same operations for browsers and Node.
+Public HTTP reference. The [JavaScript client](https://github.com/objy-org/objy-client) exposes these operations in Node and browsers.
 
 [Start here](#start-here) | [JavaScript client](https://github.com/objy-org/objy-client) | [OBJY DB](README.md)
 
 ## Start Here
 
-Examples use `{URL}` as the server base URL. Public requests may reach any cluster node; OBJY DB routes them to the owning object shard.
+Examples use `{URL}` for the server base URL. Send requests to any node; the database routes them to the owning shard.
 
-Database/collection creation and metadata changes route to a fixed administrative primary. Deletion and topology coordination use the first shard's primary. If a required primary is unavailable, administration fails with `503` or a forwarding timeout (`504`); another replica does not take over. Ordinary object CRUD still uses available shard replicas. Primary replacement and resharding require a stopped cluster.
+Creation/meta changes use fixed administrative primaries; deletion/topology use the first shard's primary. If unavailable, administration returns `503` or forwarding timeout `504`, without failover. Ordinary CRUD can use surviving replicas. Stop the cluster for primary replacement or resharding.
 
 ```text
 database
@@ -32,7 +32,7 @@ Authorization: Bearer <accessToken>
 Content-Type: application/json
 ```
 
-The shortest path through the API is:
+Quick path:
 
 ```text
 POST /api/_global/users/auth       -> access token
@@ -40,11 +40,7 @@ POST /api/{db}/{collection}/object -> stored object
 POST /api/{db}/{collection}/search -> result array
 ```
 
-Every endpoint below includes an explicit request and response.
-
-Objects are dynamic JSON-style records. Collections require no schema, and objects in one collection may have different shapes and value types. Every object has an `_id`; inserts generate a compact URL-safe id when it is omitted.
-
-`PUT` replaces a complete object, `PATCH` applies Mongo-like `$set` and `$unset`, and `DELETE` creates a replicated delete. Query, search, and aggregation responses are plain arrays rather than envelopes.
+Objects need no shared schema. `PUT` replaces, `PATCH` applies `$set`/`$unset`, and `DELETE` replicates deletion. Queries, search, and aggregation return plain arrays. Each endpoint below includes a request and response.
 
 ## Endpoint Map
 
@@ -62,11 +58,11 @@ Objects are dynamic JSON-style records. Collections require no schema, and objec
 
 ## Authentication
 
-Authentication is collection-based: any collection may contain user objects. On first boot, OBJY DB creates `admin` in `_global/users` and prints its generated password once. `OBJYDB_ADMIN_PASSWORD` may supply that initial password for unattended startup.
+Any collection can contain users. First boot creates `admin` in `_global/users` and prints its password once; `OBJYDB_ADMIN_PASSWORD` can supply it instead.
 
 Passwords are hashed on write and redacted from responses. Tokens are scoped to the database and collection used for authentication.
 
-Passwords are plaintext inputs, even when they resemble a hash, and must fit within 1024 UTF-8 bytes. New passwords use salted PBKDF2-HMAC-SHA256 with 600,000 iterations. Existing weaker hashes are upgraded after successful login through the normal durable write path. Hashing is asynchronous and bounded; overload returns `503` with `Retry-After` rather than queuing unlimited work.
+Password inputs are plaintext, even if hash-like, limited to 1024 UTF-8 bytes. Hashing uses salted PBKDF2-HMAC-SHA256 (600,000 iterations); login durably upgrades weaker hashes. Work is asynchronous and bounded; overload returns `503` / `Retry-After`.
 
 Access tokens remain valid until expiry, even after account deletion or permission changes. Renewal reloads the current user and permissions; it fails if the account is missing or its `tokenVersion` changed.
 
@@ -126,9 +122,7 @@ Refresh tokens must be renewed against the same database and collection that iss
 <details>
 <summary><strong>Safe renewal and replay</strong></summary>
 
-Access-token expiration rejected before an operation begins returns HTTP 401 with `code: "ACCESS_TOKEN_EXPIRED"` and `operationStarted: false`. A client may renew and replay that request once.
-
-These markers do not authorize replay when `operationStarted` is true or `writeMayHaveSucceeded` is true. Other authentication failures and permission errors are not expiration signals.
+Only `401` with `code: "ACCESS_TOKEN_EXPIRED"` and `operationStarted: false` permits renewal and one replay. Never replay if `operationStarted` or `writeMayHaveSucceeded` is true; other auth/permission errors are not expiry signals.
 
 </details>
 
@@ -221,9 +215,9 @@ If `adminUser.collection` is omitted, `users` is used. The users collection rece
 
 Requires a global admin token. Removes metadata, objects, persisted snapshots/journals, and associated file blobs. `_global` cannot be deleted.
 
-Database and collection deletion use the same lifecycle: writes, metadata changes, and recreation are blocked with `409` while deletion is pending. `204` confirms every configured peer has drained the affected context and shared cleanup has completed. An unavailable peer or cleanup failure returns `503`; retry the same DELETE, on any peer, to resume it. There is no timeout that automatically reopens the context. Explicit creation is allowed after completion. Clustered deletion requires shared S3 persistence; standalone deletion also works without persistence. Other databases and collections remain writable, except children of a deleting database.
+Database/collection deletion blocks writes, meta changes, and recreation with `409`. `204` means all configured peers drained the context and shared cleanup finished. On unavailable peers or cleanup failure, `503` leaves deletion pending: retry DELETE on any node. Timeouts never reopen it. Other contexts remain writable, except children of a deleting database. Recreation is allowed after completion. Clusters require shared S3; standalone deletion can be memory-only.
 
-Shared S3 state uses ordinary PUT, GET, LIST, and DELETE with strongly consistent reads/listing, not conditional writes or ETags. Keep each node's local WAL directory, including its small `publication-clock.json` and generated-secret files. Run only one process per node identity. Upgrade all nodes together with the cluster stopped; older servers and deployment tools do not understand the new publication records.
+Shared state needs strongly consistent S3 GET/PUT/LIST/DELETE, not ETags. Preserve each node's WAL directory, `publication-clock.json`, and secrets; run one process per identity. Stop the cluster and upgrade together: older servers/tools may not understand publication records. See [recovery and operations](DB.md#persistence-and-recovery).
 
 A DELETE sent after explicit recreation is a new operation against the recreated context, not a retry of its previous deletion.
 
@@ -242,7 +236,7 @@ HTTP/1.1 204 No Content
 
 ## Collections
 
-A collection is a dynamic group of objects plus a small metadata document. Metadata is kept in memory, persisted separately from objects, and may contain custom application keys.
+A collection holds dynamic objects and in-memory meta, persisted separately when enabled. Meta also accepts application keys.
 
 These built-in keys change runtime behavior:
 
@@ -276,19 +270,19 @@ These built-in keys change runtime behavior:
 }
 ```
 
-Field indexes accelerate supported filter and sort paths. Columns use typed arrays for numbers and booleans, dictionary codes for strings, and an overflow map for unsupported values. They support `$sum`, `$avg`, `$min`, `$max`, `$count`, and grouped aggregation without changing hydrated API objects.
+Indexes accelerate supported filters/sorts. Columns store numbers/booleans in typed arrays, strings as dictionary codes, and unsupported values in overflow. They support ordinary/grouped `$sum`, `$avg`, `$min`, `$max`, and `$count`; returned objects stay unchanged.
 
-Tiering accepts either `keep` or `offload`, never both. For example, `"offload": ["history", "rawPayload"]` compresses only those paths. Indexed and column fields remain hot automatically. Queries over non-indexed compressed fields remain correct but require scan-time hydration.
+Tiering accepts `keep` or `offload`, never both. `"offload": ["history", "rawPayload"]` compresses those paths; indexed/column fields stay hot. Unindexed compressed-field queries require hydration.
 
-Structure conditions inspect physical object fields. Matching entries are applied in order, later virtual values take precedence, and explicit physical values always win. `condition: {}` applies to every object. Identity, file, vector, and authentication fields cannot be virtual.
+Structure conditions inspect physical fields; `{}` matches all. Later matching defaults override earlier ones; physical values win. Identity, file, vector, and auth fields cannot be virtual.
 
-Virtual structure values are returned by object reads but are not currently considered by filters, sorting, paging membership, aggregation, indexes, or columns. They are never written to the WAL, replication stream, journals, or snapshots. Unsetting a physical value makes its virtual fallback visible again. Structure changes take effect on the next read without rewriting objects or rebuilding derived state.
+Virtual defaults appear only in reads, never filters, sorts, paging membership, aggregates, indexes, columns, or durable/replicated data. Unsetting an override reveals its fallback. Structure changes apply on the next read without rewriting data or rebuilding state.
 
-Hooks store configuration only; executable code is registered on the server. `use` enables hooks for their registered operations, operation-specific arrays may target `create`, `read`, `update`, or `delete`, and `enabled: false` bypasses the chain.
+Hooks reference server-registered code. `use` selects registered operations; optional per-operation arrays target `create`, `read`, `update`, or `delete`. `enabled: false` bypasses hooks.
 
-Changing indexes, columns, or tiering schedules bounded background work. The response acknowledges the new configuration, not completion of index building or physical conversion. Reads and writes remain available while that work finishes. Changing hooks only invalidates the cached hook plan.
+Index, column, and tiering changes schedule bounded background work; responses accept settings, not completed conversion. Reads/writes remain available. Hook changes only invalidate the cached plan.
 
-Column values are object data, not disposable indexes: removing a column moves its values back into object bodies before releasing it. Values remain readable during migration. On large collections conversion takes time and can increase memory use. Compression keeps arrays intact even when a nested array path is configured.
+Removing columns moves values back into objects before release. Migration preserves reads but costs time and temporary memory. Compression preserves arrays, including nested array paths. See [meta concepts](DB.md#collection-meta).
 
 ### List Collections
 
@@ -451,9 +445,7 @@ HTTP/1.1 204 No Content
 
 ## Objects
 
-Objects are plain dynamic JSON-style records. Strings, numbers, booleans, arrays, nested objects, and `null` may coexist across different shapes in one collection.
-
-Every object has an `_id`. If `_id` is omitted on insert, the server generates a compact 16-character URL-safe id. Single and bulk operations use the same base route. Special fields such as `_vec` are handled by storage features and hidden from ordinary read responses.
+Objects accept strings, numbers, booleans, arrays, nested objects, and `null` in any shape. Omitted `_id` values become 16-character URL-safe IDs. Single/bulk operations share the base route; `_vec` is hidden from ordinary reads.
 
 ### Insert One
 
@@ -506,7 +498,7 @@ Authorization: Bearer <accessToken>
 
 `PUT /api/{db}/{collection}/object/{_id}`
 
-`PUT` is a full object replacement. The URL object id is authoritative.
+Full replacement; the URL ID is authoritative.
 
 **Request**
 
@@ -535,9 +527,9 @@ Content-Type: application/json
 
 `PATCH /api/{db}/{collection}/object/{_id}`
 
-`PATCH` is a Mongo-like partial update. Use `$set` for dot-path writes and `$unset` for dot-path removals. `_id` cannot be changed.
+Use `$set` / `$unset` for dot-path changes/removals. `_id` is immutable.
 
-Numeric path segments address array elements (`items.0.score`) without replacing the array. Unsetting an entire array element leaves `null`, without shifting later elements. Prototype-related paths (`__proto__`, `prototype`, `constructor`) are rejected in updates and metadata field paths.
+Numeric segments address array elements (`items.0.score`); unsetting an element leaves `null`, without shifting. Updates/meta field paths reject `__proto__`, `prototype`, and `constructor`.
 
 **Request**
 
@@ -721,7 +713,7 @@ The delete body may also be a plain array of ids.
 
 ### Streamed Bulk Writes
 
-Large imports can use NDJSON so the server does not need to hold one giant JSON array in memory. Each line is one JSON value. Internally, OBJY DB buffers lines into bounded chunks and then uses the same bulk storage, routing, replication, durability, permission, and index paths as normal bulk writes.
+NDJSON sends one JSON value per line instead of a giant array. Bounded batches use the ordinary bulk storage, routing, replication, durability, permissions, and indexes.
 
 Streamed writes require minimal responses:
 
@@ -730,9 +722,9 @@ Content-Type: application/x-ndjson
 Prefer: return=minimal
 ```
 
-If a streamed request fails after earlier chunks were written, those earlier chunks stay committed. Use stable `_id` values when clients retry large streams. Omitted `_id` values are allowed on insert, but generated ids are not returned by minimal streamed responses.
+Earlier batches stay committed after failure. Use stable IDs for retries; inserts may omit `_id`, but minimal responses do not return generated IDs.
 
-When persistence falls behind, the owning node pauses the next batch before applying it, for up to `imports.persistenceWaitMs` (default 60000 ms). This uses flush completion notifications, not polling, and also applies to ordinary writes and replication. A timeout, storage failure, or exhausted waiting capacity returns `503` with `Retry-After`; a disconnected client cancels an unapplied waiting batch. Earlier completed batches remain committed. Client/proxy timeouts still apply, so allow enough time for large streams. Write acknowledgement policy is unchanged.
+Persistence pressure pauses unapplied batches using flush notifications, also for ordinary writes and replication. `imports.persistenceWaitMs` defaults to 60000 ms; timeout, storage failure, or full waiting capacity returns `503` / `Retry-After`. Disconnect cancels unapplied waits. Allow for client/proxy timeouts; acknowledgement policy is unchanged.
 
 #### Stream Insert
 
@@ -830,9 +822,9 @@ Prefer: return=minimal
 
 ## Permissions
 
-Database users can access only the database where they authenticated. A global user can address other databases, but database and collection administration requires `admin: true` or `role: "admin"`. Creating or deleting databases and reading `/api/config` specifically require a global admin token.
+Database users stay within their login database; global users can address others. Context/meta administration requires `admin: true` or `role: "admin"`; database creation/deletion and `/api/config` require a global admin.
 
-The built-in `_global` database is read-only through the public API after bootstrap. Object writes, metadata changes, collection changes, and database deletion are rejected even for a global administrator.
+`_global` is publicly read-only after bootstrap, including objects, meta, and context changes, even for global admins.
 
 Collection grants provide broad read or write access by collection name:
 
@@ -848,7 +840,7 @@ Collection grants provide broad read or write access by collection name:
 }
 ```
 
-`read` allows object reads and queries. `write` allows create, update, and delete, but does not imply read access. Create users through `POST /api/{db}/users/object`; permission changes apply after login or renewal issues a new token.
+`read` allows reads/queries; `write` allows create/update/delete, not read. Create users at `POST /api/{db}/users/object`; permission changes require login or renewal.
 
 Object-level rules combine a query with `c`, `r`, `u`, and `d` permissions:
 
@@ -867,7 +859,7 @@ Object-level rules combine a query with `c`, `r`, `u`, and `d` permissions:
 }
 ```
 
-Read rules are merged into the requested query. Updates must permit both the stored object and its resulting value. A non-admin user without a matching rule or collection grant is denied by default.
+Read rules merge into queries; updates must permit stored and resulting values. Non-admins without matching rules or grants are denied.
 
 Account security is separate from ordinary collection-write access, in every collection:
 
@@ -875,11 +867,11 @@ Account security is separate from ordinary collection-write access, in every col
 - With the usual write permission, users may change their own credentials or delete their own account. Other accounts' credentials and deletion require an admin. Ownership matches database, collection, and `_id`, not username alone.
 - Creating an unprivileged account is allowed with create permission; activating an object with existing privilege fields requires an admin. Ordinary non-account objects may still use those field names as business data.
 
-These checks cover single, bulk, NDJSON, multipart, and hook-modified writes. Unauthorized changes return `403`; fields are not silently stripped. Already issued access tokens retain their authority until expiry.
+Checks cover single, bulk, NDJSON, multipart, and hook-modified writes. Violations return `403`, not silently stripped fields. Issued access tokens retain authority until expiry.
 
 ## File Handling
 
-File handling is object-backed. One object can wrap one S3-backed blob, while the database object stores only a small `_file` descriptor. The S3 bucket should stay private; blob reads go through the API and use the same read permissions as the wrapping object.
+One object wraps one private S3 blob through `_file`. Blob reads use the API and the object's read permissions; keep the bucket private.
 
 ```json
 {
@@ -891,7 +883,7 @@ File handling is object-backed. One object can wrap one S3-backed blob, while th
 }
 ```
 
-`_file.key` is derived by the server from `{db}`, `{collection}`, `_id`, and a generated file id. Clients should not invent or change it. Replacing a file writes a new blob key, commits the object pointer, then removes the old blob best-effort. Bulk file uploads are not supported; use one multipart request per file object.
+The server derives `_file.key` from context, `_id`, and a generated file ID; do not set it yourself. Replacement writes a blob, commits its pointer, then removes the old blob best-effort. Upload one multipart file object per request; bulk uploads are unsupported.
 
 ### Create Object With File
 
@@ -1005,11 +997,11 @@ HTTP/1.1 204 No Content
 
 ## Query
 
-Query responses are plain arrays. Use GET for small URL-safe queries and POST `/search` for larger payloads. Normal object queries default to `250` rows and cap each page at `250`; use `offset` / `$skip` or `$page` to read more.
+Use GET for small queries or POST `/search` for larger bodies. Object pages default/cap at 250 rows; advance with `offset` / `$skip` or `$page`.
 
-Object pages default to `_id` ascending. An explicit sort uses the selected field and breaks ties by `_id` ascending. Ascending value order is numbers, strings, booleans, arrays, objects, `null`, then missing fields; strings use case-sensitive UTF-16 order, independent of server locale. Arrays compare element by element, and objects compare their sorted property names and values. Descending sorting reverses the field order while retaining the ascending ID tie-breaker.
+Default sort: `_id` ascending, also the tie-breaker for explicit sorts. Ascending types: numbers, strings, booleans, arrays, objects, `null`, missing. Strings use case-sensitive UTF-16 order, not locale. Arrays compare elements; objects compare sorted keys/values. Descending reverses field order, not the ID tie-breaker.
 
-Indexes and scans use the same ordering, including across shards. Offset pages read live data: concurrent changes or replica lag can shift page boundaries. Pagination does not retain a snapshot.
+Indexes/scans share this ordering across shards. Pages read live data, not snapshots; writes or replica lag can shift boundaries.
 
 ### GET Query
 
@@ -1428,11 +1420,11 @@ Authorization: Bearer <accessToken>
 
 </details>
 
-The normal response contains one shard topology, lightweight node health, logical and physical heap/RSS totals, per-node memory-guard state, and aggregate index, vector, and logical compression information. Logical totals select one reachable replica per shard; physical totals count every process. The example abbreviates fields inside the memory summaries; the live response also includes byte/MiB totals, capacity percentages, and online/offline counts.
+Compact status includes topology, node health, logical/physical memory, memory guards, and index/vector/compression totals. Logical totals select one reachable replica per shard; physical totals count every process. Memory summaries above are abbreviated; live responses also include byte/MiB totals, percentages, and reachability counts.
 
 `indexes.activeTasks` counts active cooperative index, column, and vector maintenance tasks in the node process.
 
-`replication.healthy` means the node has no known replication failure or queued/in-flight catch-up work. It is an operational health signal, not a full data-checksum comparison between replicas.
+`replication.healthy` means no known failure or pending/in-flight catch-up, not a replica checksum match.
 
 Detailed request:
 
@@ -1441,7 +1433,7 @@ GET {URL}/api/config?details=1
 Authorization: Bearer <accessToken>
 ```
 
-The detailed response adds per-collection index, vector, and compression state plus full replication diagnostics. The admin UI requests it only when the cluster-status modal is opened. Restore progress is included only while a peer is restoring.
+Details add per-collection index/vector/compression state and replication diagnostics. The UI requests them on opening cluster status. Restore progress appears only during restore.
 
 ## Responses, Errors, and Limits
 
@@ -1457,6 +1449,6 @@ OBJY DB keeps public responses close to the requested operation:
 
 Errors use a JSON body containing at least `error`. Additional fields may include `code`, `operationStarted`, `writeMayHaveSucceeded`, committed import counts, restore progress, or index readiness.
 
-Normal object queries default to 250 rows and cap a page at 250. JSON bodies, individual objects, bulk counts, bulk bytes, file uploads, and pending persistence pressure are bounded by server configuration. Oversized requests return `413`; temporary restore or pressure responses may include `Retry-After`.
+Configuration bounds JSON bodies, objects, bulk counts/bytes, file uploads, and persistence pressure. Oversized requests return `413`; restore/pressure responses may include `Retry-After`. Object page limits are listed under [Query](#query).
 
-NDJSON streams commit bounded batches as they are processed. A later malformed line or failed batch does not roll back earlier committed batches.
+For partial-commit behavior and retries, see [streamed writes](#streamed-bulk-writes).
