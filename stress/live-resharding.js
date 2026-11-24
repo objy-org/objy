@@ -10,12 +10,17 @@ import { randomUUID } from "node:crypto";
 import { S3ObjectStorage } from "../src/object-storage.js";
 import { ShardMapStore } from "../src/shard-map-store.js";
 import { ndjsonReadable } from "../src/ndjson.js";
+import { mixedLoad } from "./live-load.js";
 
 const args = new Map(process.argv.slice(2).map((arg) => arg.replace(/^--/, "").split("=")));
 const count = Number(args.get("objects") || 1_000_000);
 const copies = Number(args.get("replicas") || 2);
 const payloadBytes = Number(args.get("payload") || 512);
 const failure = args.get("failure") !== "false";
+const mixed = args.get("mixed") === "true";
+const fault = args.get("fault") || "destination";
+const writerRouting = args.get("writer-routing") || "stable";
+const profile = args.get("profile") || "mixed";
 const root = resolve(new URL("..", import.meta.url).pathname);
 const dir = await mkdtemp(join(tmpdir(), "objy-live-stress-"));
 const name = `objy-live-test-${randomUUID().slice(0, 8)}`;
@@ -23,10 +28,14 @@ const secret = randomUUID();
 const httpHeaders = { "content-type": "application/json", "x-objydb-cluster-secret": secret };
 const processes = [];
 const urls = [];
-const report = { count, copies, payloadBytes, failure, phases: {}, samples: [], directory: dir };
+const report = { count, copies, payloadBytes, failure, mixed, fault, writerRouting, profile, phases: {}, samples: [], directory: dir };
+let load;
+let migrationLabel = "grow";
+let wantedMap;
 let probing = false;
 let probeTask;
 let installed = false;
+let storagePaused = false;
 let sampling = null;
 const resourceTimer = setInterval(() => {
   if (!sampling) sampling = sampleResources().catch((error) => { report.resourceSamplingError = error.message; }).finally(() => { sampling = null; });
@@ -51,7 +60,7 @@ try {
     node: { retainOps: 256, syncBatchSize: 5000 }, server: { port: 0 }, auth: { enabled: false },
     cluster: { secret, syncMs: 2500, forwardTimeoutMs: 60_000,
       shardMapStore: { mode: "s3", prefix: "stress" } },
-    persistence: { mode: "s3", prefix: "stress", s3, flushMs: 5000, snapshotMs: 0,
+    persistence: { mode: "s3", prefix: "stress", s3, flushMs: 5000, snapshotMs: Number(args.get("snapshot-ms") || 0),
       ack: "localWal", localWal: { mode: "on", dir: join(dir, "wal") } },
     files: { mode: "s3", prefix: "stress/files" }, memoryGuard: { enabled: false },
   };
@@ -61,10 +70,11 @@ try {
     for (let i = 0; i < urls.length; i++) await start(i, configPath);
   });
   await call(0, "POST", "/api/databases", { name: "stress" });
-  await call(0, "POST", "/api/stress/collections", { name: "items", meta: {
-    indexes: ["kind", "active"], columns: ["score"],
+  const meta = {
+    indexes: ["kind", "active", ...(mixed ? ["tags"] : [])], columns: ["score"],
     tiering: { mode: "compressedMemory", keep: ["kind", "active", "score", "owner"], minBytes: 128 },
-  } });
+  };
+  await call(0, "POST", "/api/stress/collections", { name: "items", meta });
   await call(0, "POST", "/api/stress/collections", { name: "owners" });
   await call(0, "POST", "/api/stress/owners/object", Array.from({ length: 16 }, (_, i) => ({ _id: `owner-${i}`, region: `region-${i % 4}` })));
   const batch = 2000;
@@ -78,6 +88,17 @@ try {
   });
   await retry(() => verify(count));
   report.before = await stats();
+  if (mixed) {
+    load = mixedLoad({ count, call, stream, objectAt, nodes: urls.length, writerRouting, profile });
+    load.start("baseline");
+    if (args.get("rebuild") === "true") {
+      const started = performance.now();
+      await call(0, "PUT", "/api/stress/items/meta", { ...meta, indexes: [...meta.indexes, "bucket"], columns: ["score", "active"] });
+      report.metaRebuildRequestMs = performance.now() - started;
+    }
+    await sleep(10_000);
+    load.assertHealthy();
+  }
   probing = true;
   probeTask = probe();
   const changed = new Map();
@@ -90,24 +111,41 @@ try {
     }
   };
   await timed("grow", async () => {
-    const begun = await call(0, "PUT", "/cluster/shards", desired(3));
+    load?.setPhase("grow:prepare");
+    wantedMap = desired(3);
+    const begun = await call(0, "PUT", "/cluster/shards", wantedMap);
     assert.ok(begun.migration);
-    const writes = writer();
+    const writes = mixed ? Promise.resolve() : writer();
     if (failure) {
-      const victim = processes.length - 1;
-      await kill(victim);
-      await waitMigration(false);
-      const state = await call(0, "GET", "/cluster/shards");
-      assert.ok(state.migration.error, "dead destination must prevent commit");
-      assert.equal(Object.keys(state.shardMap.shards).length, 2);
-      await start(victim, configPath);
-      await call(0, "PUT", "/cluster/shards", desired(3));
+      if (mixed) await waitStage("copy");
+      const victim = fault === "coordinator" ? 0 : fault === "source" ? copies : processes.length - 1;
+      report.failureInjected = { fault, victim, state: (await call(0, "GET", "/cluster/shards")).migration };
+      if (fault === "storage") {
+        execFileSync("docker", ["pause", name], { stdio: "pipe" }); storagePaused = true;
+        await sleep(3000);
+        execFileSync("docker", ["unpause", name], { stdio: "pipe" }); storagePaused = false;
+      } else {
+        await kill(victim);
+        if (victim !== 0) {
+          await waitMigration(false);
+          const state = await call(0, "GET", "/cluster/shards");
+          assert.ok(state.migration.error, "dead participant must prevent commit");
+          assert.equal(Object.keys(state.shardMap.shards).length, 2);
+        } else await sleep(1000);
+        await start(victim, configPath);
+        if (victim !== 0) await call(0, "PUT", "/cluster/shards", desired(3));
+      }
     }
     await writes;
     await waitMigration(true);
   });
   probing = false;
   await probeTask;
+  if (load) {
+    load.setPhase("after-grow"); await sleep(5000); await load.stop(); load.assertHealthy();
+    await indexesReady("after-grow");
+    await retry(() => load.verify());
+  }
   await retry(() => verify(count, changed));
   report.after = await stats();
   await timed("crashRestart", async () => {
@@ -115,27 +153,41 @@ try {
     for (let i = 0; i < processes.length; i++) await start(i, configPath);
   });
   await retry(() => verify(count, changed));
+  if (load) { await indexesReady("after-crash"); await retry(() => load.verify()); load.start("before-shrink"); await sleep(2000); }
   await timed("shrink", async () => {
-    await call(0, "PUT", "/cluster/shards", desired(2));
+    migrationLabel = "shrink";
+    load?.setPhase("shrink:prepare");
+    wantedMap = desired(2);
+    await call(0, "PUT", "/cluster/shards", wantedMap);
     await waitMigration(true);
   });
+  if (load) {
+    load.setPhase("after-shrink"); await sleep(5000); await load.stop(); load.assertHealthy();
+    await indexesReady("after-shrink");
+    await retry(() => load.verify());
+  }
   await retry(() => verify(count, changed));
   report.final = await stats();
   report.latency = summarize(report.samples);
+  if (load) report.load = load.snapshot();
   report.samples = undefined;
   await writeFile(join(dir, "report.json"), JSON.stringify(report, null, 2));
   console.log(`LIVE_RESHARD_RESULT ${JSON.stringify(report)}`);
 } catch (error) {
   report.error = error.message;
+  report.processExits = processes.map(({ child }, index) => ({ index, exitCode: child.exitCode, signal: child.signalCode }));
   throw error;
 } finally {
   clearInterval(resourceTimer);
   probing = false;
+  await load?.stop();
+  if (load) report.load = load.snapshot();
   await probeTask?.catch(() => {});
   await sampling;
   if (report.samples) { report.latency = summarize(report.samples); report.samples = undefined; }
   await writeFile(join(dir, "report.json"), JSON.stringify(report, null, 2));
   for (let i = 0; i < processes.length; i++) await kill(i);
+  if (storagePaused) execFileSync("docker", ["unpause", name], { stdio: "pipe" });
   if (installed) execFileSync("docker", ["rm", "-f", name], { stdio: "pipe" });
   if (args.get("keep") !== "true") await rm(join(dir, "wal"), { recursive: true, force: true });
 }
@@ -166,7 +218,9 @@ async function sampleResources() {
 
 async function start(index, configPath) {
   const output = createWriteStream(join(dir, `node-${index}.log`), { flags: "a" });
-  const child = spawn(process.execPath, ["--max-old-space-size=2048", join(root, "src/index.js"), "--config", configPath,
+  const trace = "const real=globalThis.fetch;globalThis.fetch=async(...args)=>{try{return await real(...args)}catch(error){console.error('TEST_FETCH_ERROR',JSON.stringify({url:String(args[0]),message:error.message,cause:error.cause?.message,code:error.cause?.code}));throw error}}";
+  const diagnostic = mixed ? ["--import", `data:text/javascript;base64,${Buffer.from(trace).toString("base64")}`] : [];
+  const child = spawn(process.execPath, ["--max-old-space-size=2048", ...diagnostic, join(root, "src/index.js"), "--config", configPath,
     "--node", `stress-${index}`, "--url", urls[index], "--port", new URL(urls[index]).port], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.pipe(output, { end: false }); child.stderr.pipe(output, { end: false });
   processes[index] = { child, output };
@@ -187,31 +241,76 @@ async function kill(index) {
   await exit;
   state.output.end();
 }
-async function call(index, method, path, body) {
+async function call(index, method, path, body, observe) {
   const response = await fetch(`${urls[index]}${path}`, { method, headers: httpHeaders,
-    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(120_000) });
+    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(120_000) })
+    .catch((error) => { throw Object.assign(error, { status: 0 }); });
+  observe?.({ status: response.status, path: response.headers.get("x-objydb-query-path") });
   const text = await response.text();
   const result = text ? JSON.parse(text) : null;
   if (!response.ok) throw Object.assign(new Error(`${method} ${path}: ${response.status} ${text}`), { status: response.status });
   return result;
 }
-async function stream(index, method, rows) {
+async function stream(index, method, rows, observe) {
   const response = await fetch(`${urls[index]}/api/stress/items/object`, { method,
     headers: { ...httpHeaders, "content-type": "application/x-ndjson", prefer: "return=minimal" },
-    body: ndjsonReadable(rows), duplex: "half", signal: AbortSignal.timeout(120_000) });
+    body: ndjsonReadable(rows), duplex: "half", signal: AbortSignal.timeout(120_000) })
+    .catch((error) => { throw Object.assign(error, { status: 0 }); });
+  observe?.({ status: response.status, path: response.headers.get("x-objydb-query-path") });
   const result = await response.json();
-  if (!response.ok) throw new Error(`${method} stream: ${response.status} ${JSON.stringify(result)}`);
+  if (!response.ok) throw Object.assign(new Error(`${method} stream: ${response.status} ${JSON.stringify(result)}`), { status: response.status, body: result });
   return result;
 }
 async function waitMigration(success) {
   const end = Date.now() + 15 * 60_000;
   for (;;) {
     const state = await call(0, "GET", "/cluster/shards");
+    if (load) {
+      load.assertHealthy();
+      load.setPhase(`${migrationLabel}:${state.migration?.stage || state.migration?.phase || "complete"}`);
+    }
     if (!state.migration) { assert.ok(success); return; }
-    if (!state.migration.running && state.migration.error) { assert.ok(!success, state.migration.error); return; }
+    if (!state.migration.running && state.migration.error) {
+      if (success && mixed && (report.retries?.length || 0) < 2) {
+        (report.retries ||= []).push({ phase: migrationLabel, error: state.migration.error });
+        console.log(`retry ${migrationLabel}: ${state.migration.error}`);
+        await call(0, "PUT", "/cluster/shards", wantedMap);
+        continue;
+      }
+      assert.ok(!success, state.migration.error); return;
+    }
     assert.ok(Date.now() < end, `migration stalled: ${JSON.stringify(state.migration)}`);
     await sleep(100);
   }
+}
+async function waitStage(stage) {
+  const end = Date.now() + 120_000;
+  for (;;) {
+    const state = await call(0, "GET", "/cluster/shards");
+    load?.assertHealthy();
+    if (state.migration?.stage === stage) {
+      const target = await call(urls.length - 1, "GET", "/cluster/status");
+      const copied = target.compression?.liveObjects || 0;
+      if (stage !== "copy" || copied >= Math.min(512, Math.floor(count / 4))) {
+        report.pendingObjectsAtFault = copied;
+        load?.setPhase(`grow:${stage}`); return;
+      }
+    }
+    assert.ok(state.migration?.running && Date.now() < end, `did not reach ${stage}: ${JSON.stringify(state.migration)}`);
+    await sleep(20);
+  }
+}
+async function indexesReady(stage) {
+  const started = performance.now();
+  await retry(async () => {
+    for (let i = 0; i < urls.length; i++) {
+      const state = await call(i, "GET", "/cluster/status");
+      assert.equal(state.indexes.error, 0, `${stage}/${i} index errors`);
+      assert.equal(state.indexes.building, 0, `${stage}/${i} indexes warming`);
+    }
+  }, 180_000);
+  (report.indexWarmupMs ||= {})[stage] = performance.now() - started;
+  load?.setPhase(`${stage}:indexes-ready`);
 }
 async function verify(total, changed = new Map()) {
   const expected = Array.from({ length: 17 }, () => ({ count: 0, sum: 0, min: Infinity, max: -Infinity }));
@@ -221,7 +320,7 @@ async function verify(total, changed = new Map()) {
     group.count++; group.sum += score; group.min = Math.min(group.min, score); group.max = Math.max(group.max, score);
   }
   for (let node = 0; node < urls.length; node++) {
-    const rows = await call(node, "POST", "/api/stress/items/search", { $aggregate: { groupBy: "kind",
+    const rows = await call(node, "POST", "/api/stress/items/search", { ...(mixed ? { kind: { $lt: 17 } } : {}), $aggregate: { groupBy: "kind",
       fields: { count: { $count: true }, total: { $sum: "score" }, min: { $min: "score" }, max: { $max: "score" } } }, $refDepth: 0 });
     assert.equal(rows.length, 17);
     for (const row of rows) assert.deepEqual({ count: row.count, sum: row.total, min: row.min, max: row.max }, expected[row.kind]);
@@ -241,7 +340,9 @@ function objectAt(i) {
   return { _id: `object-${i}`, kind: i % 17, score: i % 1000, active: i % 2 === 0,
     owner: { type: "reference", collection: "owners", value: `owner-${i % 16}` },
     payload: `object:${i}:` + "payload-".repeat(Math.ceil(payloadBytes / 8)),
-    dynamic: i % 3 ? { values: [i, null, "value", true] } : { nested: { value: `v${i}` } } };
+    dynamic: i % 3 ? { values: [i, null, "value", true] } : { nested: { value: `v${i}` } },
+    ...(mixed ? { tags: [`tag${i % 7}`, "all"], bucket: `b${i % 5}`,
+      ...(i < 1000 ? { _vec: i === 0 ? [1, 0, 0, 0] : [0, 1, i / 1000, 0] } : {}) } : {}) };
 }
 async function probe() {
   while (probing) {

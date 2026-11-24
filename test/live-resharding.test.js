@@ -556,3 +556,148 @@ test("automatic checkpoints stay deferred until local placement cleanup finishes
   for (const state of nodes) assert.ok(!(await state.persistence.checkpoint()).skipped);
   await assertRestored(nodes, storage, new Map([["kept", { _id: "kept", value: 1 }]]));
 });
+
+test("a lost ingest acknowledgement is replayed without duplicate index or column contributions", async (t) => {
+  const { nodes, storage, desired } = await clusterFixture(t);
+  for (const state of nodes) state.node.setCollectionMeta("test", "items", {
+    indexes: ["kind", "tags"], columns: ["score"], tiering: { keep: ["kind", "tags", "score"] },
+  });
+  const objects = Array.from({ length: 3000 }, (_, i) => ({ _id: `lost-ack-${i}`, kind: i % 7,
+    tags: [`t${i % 3}`, "shared"], score: i, payload: "cold-data-".repeat(100) }));
+  await request(nodes[0], "POST", "/api/test/items/object", objects, { prefer: "return=minimal" });
+  const receive = nodes[2].migration.receive.bind(nodes[2].migration);
+  let failed = false;
+  nodes[2].migration.receive = async (...args) => {
+    const result = await receive(...args);
+    if (args[1] === "base" && !failed) { failed = true; throw Object.assign(new Error("ingest applied but reply lost"), { status: 503 }); }
+    return result;
+  };
+  await request(nodes[0], "PUT", "/cluster/shards", desired(3));
+  await nodes[0].migration.running;
+  assert.ok(failed);
+  assert.match(nodes[0].migration.lastError.message, /reply lost/);
+  await resize(nodes, desired(3));
+  for (const state of nodes) {
+    const response = await request(state, "POST", "/api/test/items/search", { tags: { $contains: "shared" },
+      $aggregate: { groupBy: "kind", fields: { total: { $sum: "score" }, count: { $count: true } } } });
+    assert.equal(response.status, 200);
+    for (const row of response.body) {
+      const group = objects.filter((object) => object.kind === row.kind);
+      assert.equal(row.count, group.length);
+      assert.equal(row.total, group.reduce((sum, object) => sum + object.score, 0));
+    }
+  }
+  await assertRestored(nodes, storage, new Map(objects.map((object) => [object._id, object])));
+});
+
+for (const victim of [0, 1]) {
+  test(`process ${victim} can restart after copy and recover with replica-origin writes and tombstones`, async (t) => {
+    const { nodes, storage, desired, restart } = await clusterFixture(t, { shards: 1, replicas: 2, spare: 2 });
+    for (const state of nodes) state.node.setCollectionMeta("test", "items", { indexes: ["group"], columns: ["score"] });
+    const objects = Array.from({ length: 600 }, (_, i) => ({ _id: `restart-copy-${i}`, group: i % 4, score: i }));
+    await request(nodes[1], "POST", "/api/test/items/object", objects, { prefer: "return=minimal" });
+    const expected = new Map(objects.map((object) => [object._id, object]));
+    let failed = false;
+    const all = nodes[0].migration._all.bind(nodes[0].migration);
+    nodes[0].migration._all = async (peers, phase, ...args) => {
+      if (!failed && phase === "checkpoint") {
+        failed = true;
+        const changed = objects.slice(0, 100).map((row) => ({ ...row, score: row.score + 10_000, group: 9 }));
+        const updated = await request(nodes[1], "PUT", "/api/test/items/object", changed, { prefer: "return=minimal" });
+        assert.equal(updated.status, 200);
+        for (const row of changed) expected.set(row._id, row);
+        const ids = objects.slice(100, 130).map((row) => row._id);
+        assert.equal((await request(nodes[1], "DELETE", "/api/test/items/object", ids)).status, 200);
+        for (const id of ids) expected.set(id, undefined);
+        if (victim === 0) throw new Error("coordinator process lost after copy");
+        await restart(1);
+      }
+      return all(peers, phase, ...args);
+    };
+    await request(nodes[0], "PUT", "/cluster/shards", desired(2));
+    await nodes[0].migration.running;
+    assert.ok(failed);
+    assert.ok(nodes[0].migration.lastError);
+    if (victim === 0) { await restart(0); await nodes[0].migration.running; }
+    else await resize(nodes, desired(2));
+    assert.equal(nodes[0].migration.lastError, null, nodes[0].migration.lastError?.stack);
+    await assertRestored(nodes, storage, expected);
+    for (const state of nodes) {
+      const result = await request(state, "POST", "/api/test/items/search", { $aggregate: { groupBy: "group",
+        fields: { total: { $sum: "score" }, count: { $count: true } } } });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.reduce((sum, row) => sum + row.count, 0), 570);
+      assert.equal(result.body.find((row) => row.group === 9).total, 1_004_950);
+    }
+  });
+}
+
+test("concurrent topology submissions coalesce the same job and reject a competing map", async (t) => {
+  const { nodes, desired } = await clusterFixture(t);
+  await request(nodes[0], "POST", "/api/test/items/object", { _id: "one-job", score: 12 });
+  let release, entered = false;
+  const held = new Promise((resolve) => { release = resolve; });
+  t.after(() => release());
+  const distribute = nodes[0].migration._distribute.bind(nodes[0].migration);
+  nodes[0].migration._distribute = async (...args) => { if (args[2] === "base") { entered = true; await held; } return distribute(...args); };
+  assert.equal((await request(nodes[0], "PUT", "/cluster/shards", desired(3))).status, 202);
+  await waitFor(() => entered);
+  const id = nodes[0].node.shardMap.migration.id;
+  const same = await Promise.all(nodes.map((state) => request(state, "PUT", "/cluster/shards", desired(3))));
+  for (const response of same) { assert.equal(response.status, 202); assert.equal(response.body.migration.id, id); }
+  const conflict = await request(nodes[1], "PUT", "/cluster/shards", desired(2));
+  assert.equal(conflict.status, 409);
+  assert.equal(nodes[0].node.shardMap.migration.id, id);
+  release();
+  await nodes[0].migration.running;
+  assert.equal(nodes[0].migration.lastError, null);
+  const result = await request(nodes[2], "GET", "/api/test/items/object/one-job");
+  assert.deepEqual(result.body, { _id: "one-job", score: 12 });
+});
+
+test("mixed column types and compressed indexed fields stay exact across repeated live changes", async (t) => {
+  const { nodes, storage, desired } = await clusterFixture(t);
+  const values = [0, -2, 3.5, null, "5", true, { nested: [1, "two"] }, [1, 2]];
+  for (const state of nodes) state.node.setCollectionMeta("test", "items", {
+    indexes: ["kind", "name", "tags"], columns: ["metric", "active"],
+    tiering: { mode: "compressedMemory", keep: ["kind", "metric", "active"], minBytes: 1 },
+  });
+  const objects = Array.from({ length: 1200 }, (_, i) => ({ _id: `types-${i}`, kind: i % 3,
+    metric: values[i % values.length], active: i % 2 === 0, name: `repeated-${i % 5}`,
+    tags: [`tag${i % 7}`, "shared"], payload: { optional: i, keep: "compress-".repeat(70) } }));
+  const expected = new Map(objects.map((row) => [row._id, row]));
+  await request(nodes[0], "POST", "/api/test/items/object", objects, { prefer: "return=minimal" });
+  const check = async () => {
+    for (const state of nodes) {
+      const result = await request(state, "POST", "/api/test/items/search", { tags: { $contains: "shared" },
+        $aggregate: { groupBy: "kind", fields: { total: { $sum: "metric" }, average: { $avg: "metric" }, count: { $count: true } } } });
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(result.body.length, 3);
+      for (const row of result.body) {
+        const group = [...expected.values()].filter((value) => value && value.kind === row.kind);
+        const numbers = group.map((value) => value.metric).filter((value) => typeof value === "number");
+        const total = numbers.reduce((sum, value) => sum + value, 0);
+        assert.equal(row.count, group.length);
+        assert.equal(row.total, total);
+        assert.equal(row.average, numbers.length ? total / numbers.length : null);
+      }
+    }
+  };
+  await resize(nodes, desired(3));
+  await check();
+  const patches = objects.slice(0, 400).map((row, i) => ({ _id: row._id,
+    $set: { metric: values[(i + 3) % values.length] }, $unset: ["payload.optional"] }));
+  assert.equal((await request(nodes[0], "PATCH", "/api/test/items/object", patches, { prefer: "return=minimal" })).status, 200);
+  for (let i = 0; i < patches.length; i++) {
+    const old = expected.get(patches[i]._id);
+    expected.set(old._id, { ...old, metric: patches[i].$set.metric, payload: { keep: old.payload.keep } });
+  }
+  const removed = objects.slice(600, 640).map((row) => row._id);
+  assert.equal((await request(nodes[0], "DELETE", "/api/test/items/object", removed)).status, 200);
+  for (const id of removed) expected.set(id, undefined);
+  await resize(nodes, desired(2));
+  await check();
+  for (const state of nodes) await state.node.awaitIndexes("test", "items");
+  await check();
+  await assertRestored(nodes, storage, expected);
+});
