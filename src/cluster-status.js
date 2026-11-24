@@ -27,6 +27,7 @@ export function localClusterStatus(node, memoryGuard = null, replicationSchedule
     memory,
     memoryGuard: memoryGuard?.status?.() || null,
     ownedShards,
+    migration: node.migration?.status() || null,
     replication: details ? {
       ...compactReplicationStatus(replicationScheduler),
       seq: node.seq,
@@ -105,6 +106,7 @@ async function buildClusterStatus(node, {
     indexes: aggregateIndexSummary(nodes),
     vectors: aggregateVectorSummary(nodes),
     nodes: nodes.map((status) => nodeStatusResponse(status, details)),
+    migration: node.migration?.status() || null,
   };
 }
 
@@ -173,6 +175,7 @@ function nodeStatusResponse(status, details) {
     memoryGuard: status.memoryGuard || null,
     ownedShards: status.ownedShards || [],
     replication: status.replication || null,
+    migration: status.migration || null,
     restoring: status.restoring === true,
     ...(status.restore ? { restore: status.restore } : {}),
     process: status.process || null,

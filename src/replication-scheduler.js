@@ -29,6 +29,8 @@ export class ReplicationScheduler {
     this.hintTimer = null;
     this.antiEntropyTimer = null;
     this.syncingAll = false;
+    this.suspended = false;
+    this.tasks = new Set();
     this.stats = {
       hintsSent: 0,
       hintsReceived: 0,
@@ -123,10 +125,11 @@ export class ReplicationScheduler {
   }
 
   async syncAll(reason = "manual") {
-    if (!this.enabled || this.syncingAll) return 0;
+    if (!this.enabled || this.syncingAll || this.suspended) return 0;
     this.syncingAll = true;
     try {
-      const applied = await this.node.syncAll({ signal: this.abort.signal });
+      this.syncPromise = this.node.syncAll({ signal: this.abort.signal });
+      const applied = await this.syncPromise;
       if (reason === "anti-entropy") this.stats.antiEntropySyncs++;
       const failures = Array.isArray(this.node.lastSyncFailures) ? this.node.lastSyncFailures : [];
       this.stats.lastSyncFailures = failures;
@@ -143,6 +146,7 @@ export class ReplicationScheduler {
       return 0;
     } finally {
       this.syncingAll = false;
+      this.syncPromise = null;
     }
   }
 
@@ -215,11 +219,24 @@ export class ReplicationScheduler {
   }
 
   _drainPullQueue() {
+    if (this.suspended) return;
     for (const [key, item] of this.pullQueue) {
       if (this.inflightPulls.has(key)) continue;
       this.pullQueue.delete(key);
-      this._runPull(key, item.peer, item.scope);
+      const task = this._runPull(key, item.peer, item.scope);
+      this.tasks.add(task);
+      task.finally(() => this.tasks.delete(task));
     }
+  }
+
+  async quiesce() {
+    this.suspended = true;
+    await Promise.allSettled([...this.tasks, this.syncPromise].filter(Boolean));
+  }
+
+  resume() {
+    this.suspended = false;
+    this._drainPullQueue();
   }
 
   async _runPull(key, peer, scope) {

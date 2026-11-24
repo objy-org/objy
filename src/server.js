@@ -17,6 +17,7 @@ import { createReplicationScheduler } from "./replication-scheduler.js";
 import { ShardRequestRouter } from "./shard-router.js";
 import { randomSecret } from "./system-secrets.js";
 import { nodeCompression, readHeapUsageRatio } from "./node-runtime.js";
+import { LiveResharding } from "./live-resharding.js";
 
 export { createObjectHookRegistry, httpPeer, shardMapFromHttp };
 
@@ -119,6 +120,9 @@ export async function startServer({
     imports,
     objectHooks: hookRunner,
   });
+  const migration = new LiveResharding({ node: n, shardMapStore, persistence, replication: scheduler,
+    secret, memoryGuard: guard, timeoutMs: forwardTimeoutMs || 60_000 });
+  context.migration = state.migration = migration;
   authService.durability = context.durability;
   lifecycle.send = async (url, body) => {
     const result = await context.routing.forwardJson({ headers: {} }, { url }, null, "/cluster/context", { method: "POST", body, forwardedOnly: true });
@@ -134,7 +138,7 @@ export async function startServer({
   const server = createServer(async (req, res) => {
     try {
       if (handleCors(req, res)) return;
-      if (await router.handle(req, res)) return;
+      if (await migration.request(req, () => router.handle(req, res))) return;
       json(res, 404, { error: "not found" });
     } catch (err) {
       if (!res.writableEnded) json(res, err.status || 500, err.body || { error: err.message }, err.headers || {});
@@ -157,6 +161,7 @@ export async function startServer({
   n.startVectorIndexWarmup().catch((err) => {
     console.error(`vector index warmup failed: ${err.message}`);
   });
+  migration.resume();
   return state;
 }
 

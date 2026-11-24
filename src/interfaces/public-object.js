@@ -769,8 +769,7 @@ function runObjectOperation({
   input,
   batch = null,
 }, execute) {
-  if (!objectHooks || routing.isForwarded(req)) return execute(input, null);
-  return objectHooks.run({
+  const run = () => !objectHooks || routing.isForwarded(req) ? execute(input, null) : objectHooks.run({
     operation,
     variant,
     database: req.params.database,
@@ -780,6 +779,7 @@ function runObjectOperation({
     batch,
     lookup: createHookLookup(req, node, routing, auth),
   }, execute);
+  return node.migration ? node.migration.batch(run) : run();
 }
 
 function writeResponse(req, auth, result, ordinaryBody) {
@@ -2354,6 +2354,7 @@ function secureRoute(auth, lifecycle, routing) {
 
 function administrationRoute(secure, lifecycle, routing, node, auth, memoryGuard) {
   return (databaseOf, handler, global = false) => secure(async (req, res) => {
+    node.migration?.assertSchema();
     if ((global ? rejectUnlessGlobalAdmin : rejectUnlessDatabaseAdmin)(req, res, auth)) return;
     if (req.params.database && rejectIfReadOnlyDatabaseWrite(res, req.params.database)) return;
     if (req.method !== "DELETE" && rejectIfMemoryGuardBlocked(res, memoryGuard)) return;

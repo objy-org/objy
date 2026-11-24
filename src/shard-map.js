@@ -5,6 +5,7 @@ export const GLOBAL_COLLECTION = "*";
 export const DEFAULT_SHARD = "default";
 export const SHARD_MAP_VERSION = 2;
 export const SHARD_PARTITIONER = "fnv1a32-mod-v1";
+export const JUMP_PARTITIONER = "fnv1a32-jump-v1";
 export const TOPOLOGY_ACTIVE = "active";
 export const TOPOLOGY_RESHARDING = "resharding";
 
@@ -14,15 +15,21 @@ export class ShardMap {
     this.version = SHARD_MAP_VERSION;
     this.topology = null;
     this.ownershipEpoch = 0;
+    this.names = [];
+    this.migration = null;
+    this.originSequences = {};
     if (map) this.replace(map);
   }
 
   replace(map) {
     const normalized = normalizeShardMap(map);
     this.shards.clear();
+    this.names = [];
     this.version = normalized.version;
     this.topology = normalized.topology;
     this.ownershipEpoch = normalized.ownershipEpoch || 0;
+    this.migration = normalized.migration || null;
+    this.originSequences = normalized.originSequences || {};
     for (const [shard, shardConfig] of Object.entries(normalized.shards)) {
       this._ensureShard(shard);
       for (const peer of shardConfig.peers || []) this.addPeer(shard, peer);
@@ -52,13 +59,14 @@ export class ShardMap {
   }
 
   shardForObject(database, collection, objectId) {
-    const shards = this.shardsForCollection(database, collection);
+    const shards = this.names;
     if (!shards.length) return DEFAULT_SHARD;
-    return shards[hashString(String(objectId)) % shards.length];
+    const hash = hashString(String(objectId));
+    return shards[this.topology?.partitioner === JUMP_PARTITIONER ? jumpHash(hash, shards.length) : hash % shards.length];
   }
 
   shardsForCollection(database, collection) {
-    return [...this.shards.keys()].sort();
+    return [...this.names];
   }
 
   syncTargets() {
@@ -88,6 +96,8 @@ export class ShardMap {
       ...(this.ownershipEpoch ? { ownershipEpoch: this.ownershipEpoch } : {}),
       topology: cloneTopology(this.topology),
       shards,
+      ...(Object.keys(this.originSequences).length ? { originSequences: { ...this.originSequences } } : {}),
+      ...(this.migration ? { migration: structuredClone(this.migration) } : {}),
     };
   }
 
@@ -96,6 +106,7 @@ export class ShardMap {
     if (!shardEntry) {
       shardEntry = { peers: new Map() };
       this.shards.set(shard, shardEntry);
+      this.names = [...this.shards.keys()].sort();
     }
     return shardEntry;
   }
@@ -127,12 +138,46 @@ export function normalizeShardMap(map) {
     ...(ownershipEpoch ? { ownershipEpoch } : {}),
     topology,
     shards,
+    ...(map.originSequences ? { originSequences: normalizeSequences(map.originSequences) } : {}),
+    ...(map.migration ? { migration: normalizeMigration(map.migration) } : {}),
   };
+}
+
+function normalizeMigration(migration) {
+  if (!["copying", "sealing", "committed"].includes(migration.phase) || !migration.id ||
+      migration.source?.migration || migration.target?.migration) throw new Error("invalid live migration state");
+  const source = normalizeShardMap(migration.source);
+  const target = normalizeShardMap(migration.target);
+  if (isTopologyResharding(source) || isTopologyResharding(target) || target.topology.id !== migration.id) throw new Error("invalid live migration topology");
+  return { id: String(migration.id), phase: migration.phase, source, target,
+    startedAt: migration.startedAt, ...(migration.frontiers ? { frontiers: { ...migration.frontiers } } : {}) };
+}
+
+function normalizeSequences(sequences) {
+  if (!sequences || typeof sequences !== "object" || Array.isArray(sequences) ||
+      Object.values(sequences).some((seq) => !Number.isSafeInteger(seq) || seq < 0)) throw new Error("invalid origin sequence watermarks");
+  return { ...sequences };
+}
+
+export function planLiveShardMap(currentMap, desiredMap) {
+  const current = normalizeShardMap(currentMap);
+  if (current.migration || isTopologyResharding(current)) throw new Error("a topology change is already pending");
+  const desired = normalizeDesiredShardMap({ ...desiredMap, topology: { ...desiredMap.topology, partitioner: JUMP_PARTITIONER } });
+  return finalizeShardMap(transitionMap(current, desired, liveShardOrder(current, desired)));
+}
+
+export function liveShardOrder(current, desired) {
+  const previous = Object.keys(current.shards).sort();
+  const retained = previous.filter((name) => Object.hasOwn(desired.shards, name));
+  if (!retained.length) return Object.keys(desired.shards).sort();
+  if (retained.some((name, index) => name !== previous[index])) throw new Error("remove logical shards from the end, not from the middle");
+  return [...retained, ...Object.keys(desired.shards).filter((name) => !Object.hasOwn(current.shards, name)).sort()];
 }
 
 export function publishShardMap(currentMap, desiredMap) {
   if (!currentMap || !Object.keys(currentMap.shards || {}).length) return normalizeShardMap(desiredMap);
   const current = normalizeShardMap(currentMap);
+  if (current.migration) throw new Error("cannot replace the shard map during live resharding");
   const desired = normalizeDesiredShardMap(desiredMap, current.topology.partitioner);
   const currentSignature = partitionSignature(current);
   const desiredSignature = partitionSignature(desired);
@@ -151,13 +196,16 @@ export function publishShardMap(currentMap, desiredMap) {
     };
   }
 
-  const topologyId = transitionTopologyId(current.topology.id, desiredSignature);
-  const targetShardNames = Object.keys(desired.shards)
-    .sort()
-    .map((_, index) => topologyShardName(topologyId, index));
+  return transitionMap(current, desired);
+}
+
+function transitionMap(current, desired, order = Object.keys(desired.shards).sort()) {
+  const topologyId = transitionTopologyId(current.topology.id, partitionSignature(desired));
+  const targetShardNames = order.map((_, index) => topologyShardName(topologyId, index));
   return {
     version: SHARD_MAP_VERSION,
     ownershipEpoch: (current.ownershipEpoch || 0) + 1,
+    ...(current.originSequences ? { originSequences: { ...current.originSequences } } : {}),
     topology: {
       id: topologyId,
       state: TOPOLOGY_RESHARDING,
@@ -167,7 +215,7 @@ export function publishShardMap(currentMap, desiredMap) {
         shards: Object.keys(current.shards).sort(),
       },
     },
-    shards: assignPeerLayout(targetShardNames, desired.shards),
+    shards: Object.fromEntries(targetShardNames.map((name, index) => [name, cloneShard(desired.shards[order[index]])])),
   };
 }
 
@@ -224,7 +272,7 @@ function normalizeDesiredShardMap(map, fallbackPartitioner) {
   }
   const shards = cloneShards(map.shards);
   const partitioner = map.topology?.partitioner || fallbackPartitioner || SHARD_PARTITIONER;
-  if (partitioner !== SHARD_PARTITIONER) throw new Error(`unsupported shard partitioner: ${partitioner}`);
+  if (![SHARD_PARTITIONER, JUMP_PARTITIONER].includes(partitioner)) throw new Error(`unsupported shard partitioner: ${partitioner}`);
   return {
     version: SHARD_MAP_VERSION,
     topology: {
@@ -257,7 +305,7 @@ function normalizeTopology(topology, shardNames) {
 
 function validateTopology(topology, shardNames) {
   if (!topology.id) throw new Error("shard map topology.id is required");
-  if (topology.partitioner !== SHARD_PARTITIONER) {
+  if (![SHARD_PARTITIONER, JUMP_PARTITIONER].includes(topology.partitioner)) {
     throw new Error(`unsupported shard partitioner: ${topology.partitioner}`);
   }
   if (![TOPOLOGY_ACTIVE, TOPOLOGY_RESHARDING].includes(topology.state)) {
@@ -305,7 +353,7 @@ function cloneShards(shards) {
 
 function cloneShard(config = {}) {
   return {
-    peers: [...(config?.peers || [])],
+    peers: [...(config?.peers || [])].map((peer) => peer.url ? { ...peer, url: String(peer.url).replace(/\/+$/, "") } : peer),
   };
 }
 
@@ -334,4 +382,22 @@ function hashString(value) {
     h = Math.imul(h, 0x01000193);
   }
   return h >>> 0;
+}
+
+// Lamping/Veach Jump Consistent Hash, with exact 64-bit multiplication in two
+// 32-bit words. Avoid BigInt allocations on the per-object routing path.
+export function jumpHash(key, buckets) {
+  if (!Number.isSafeInteger(buckets) || buckets < 1) throw new RangeError("invalid jump hash bucket count");
+  let lo = key >>> 0, hi = 0, previous = -1, next = 0;
+  while (next < buckets) {
+    previous = next;
+    const low = lo & 65535, high = lo >>> 16;
+    const middle = high * 0xb0fd + low * 0x87b0 + ((low * 0xb0fd) >>> 16);
+    const upper = (high * 0x87b0 + Math.floor(middle / 65536)) >>> 0;
+    hi = (Math.imul(hi, 0x87b0b0fd) + Math.imul(lo, 0x27bb2ee6) + upper) >>> 0;
+    lo = (Math.imul(lo, 0x87b0b0fd) + 1) >>> 0;
+    if (!lo) hi = (hi + 1) >>> 0;
+    next = Math.floor((previous + 1) * 2147483648 / ((hi >>> 1) + 1));
+  }
+  return previous;
 }

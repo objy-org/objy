@@ -18,7 +18,7 @@ export const DEFAULT_REPLICATION_TIMEOUT_MS = 60_000;
 export function createClusterInterface() {
   return {
     name: "cluster",
-    register(router, { node, lifecycle, routing, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler }) {
+    register(router, { node, lifecycle, routing, shardMapStore, persistence, memoryGuard, restoreStatus, clusterSecret, replicationScheduler, migration }) {
       const secure = secureClusterRoute(clusterSecret);
       const administration = (handler) => secure(async (req, res) => {
         if (routing.isForwarded(req) && req.headers[ADMIN_APPLY_HEADER] === "1") return handler(req, res);
@@ -64,7 +64,17 @@ export function createClusterInterface() {
       });
 
       router.get("/cluster/shards", secure((req, res) => {
-        json(res, 200, { node: node.id, shardMap: node.shardMapSnapshot() });
+        json(res, 200, { node: node.id, shardMap: node.shardMapSnapshot(), migration: migration?.status() || null });
+      }));
+
+      router.post("/cluster/migration", secure(async (req, res) => {
+        if (!migration) throw Object.assign(new Error("migration service is unavailable"), { status: 503 });
+        if (isNdjsonContentType(req.headers["content-type"])) {
+          return json(res, 200, await migration.receive(req.query.get("id"), req.query.get("mode"), req, requestAbortSignal(req, res), req.headers["x-objydb-migration-instance"]));
+        }
+        const body = await readJson(req);
+        const result = body.phase === "finished" ? await migration.finish(body.map) : await migration.command(body);
+        json(res, 200, result || { ok: true });
       }));
 
       router.get("/cluster/status", secure((req, res) => {
@@ -79,12 +89,22 @@ export function createClusterInterface() {
           const body = await readJson(req);
           const desired = body.shardMap || body;
           if (routing.isForwarded(req) && req.headers[ADMIN_APPLY_HEADER] === "1") {
+            if (node.shardMap.migration?.phase === "committed" && !desired.migration && desired.topology?.id === node.shardMap.topology.id) {
+              await migration.finish(desired);
+              return json(res, 200, { ok: true });
+            }
             const checked = publishShardMap(node.shardMapSnapshot(), desired);
             if ((checked.ownershipEpoch || 0) !== (node.shardMapSnapshot().ownershipEpoch || 0) || checked.topology.state === TOPOLOGY_RESHARDING) {
               return json(res, 409, { error: "partition or primary changes require a stopped cluster" });
             }
             node.replaceShardMap(shardMapFromHttp(desired, node.id, { secret: clusterSecret }));
             return json(res, 200, { ok: true });
+          }
+          const current = node.shardMapSnapshot();
+          if (current.migration) return json(res, 202, { ok: true, migration: await migration.start(desired) });
+          const proposed = publishShardMap(current, desired);
+          if (proposed.topology.state === TOPOLOGY_RESHARDING || (proposed.ownershipEpoch || 0) !== (current.ownershipEpoch || 0)) {
+            return json(res, 202, { ok: true, migration: await migration.start(desired) });
           }
           await publishOnline(req, () => desired);
           json(res, 200, { ok: true, node: node.id, shardMap: node.shardMapSnapshot() });
@@ -94,6 +114,7 @@ export function createClusterInterface() {
       }));
 
       router.post("/cluster/peers", administration(async (req, res) => {
+        migration?.assertSchema();
         await lifecycle.assertTopologyMutable();
         const body = await readJson(req);
         if (!body.url) {
@@ -114,11 +135,13 @@ export function createClusterInterface() {
         const limit = Number(req.query.get("limit") || 0);
         const scope = scopeFromParams(req.query);
         if (node.needsSnapshot(after, scope)) {
+          const durableThrough = persistence?.durable ? await persistence.flushThrough() : null;
           json(res, 410, {
             error: "log truncated, durable catch-up required",
             node: node.id,
             lastSeq: node.seq,
             trimmed: node.trimmed,
+            ...(durableThrough !== null ? { durableThrough } : {}),
             contextRevision: lifecycle.revision,
           });
           return;
@@ -269,6 +292,8 @@ export function shardMapFromHttp(map, nodeId, { secret = null, timeoutMs = DEFAU
     ...(map.version ? { version: map.version } : {}),
     ...(map.topology ? { topology: map.topology } : {}),
     ...(map.ownershipEpoch ? { ownershipEpoch: map.ownershipEpoch } : {}),
+    ...(map.migration ? { migration: map.migration } : {}),
+    ...(map.originSequences ? { originSequences: map.originSequences } : {}),
     shards: Object.fromEntries(
       Object.entries(map.shards || {}).map(([shard, shardConfig]) => [
         shard,

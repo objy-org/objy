@@ -57,6 +57,7 @@ npm run test:scale -- \
 | `npm run test:stress:persistence` | Million-object snapshot, journal, and restore correctness |
 | `npm run test:stress:sharded` | Multi-shard, multi-replica durable restore and consistency |
 | `npm run test:stress:reshard` | Restart-based topology generation and object redistribution |
+| `npm run test:stress:live` | Live growth/shrink, concurrent writes, process failure, durable restart, and oracle checks ([results](benchmarks/live-resharding.md)) |
 | `npm run benchmark:storage` | Object storage, dictionaries, indexed reads, and column aggregations |
 | `npm run benchmark:tiering` | Full-object versus compressed-memory tiering tradeoffs |
 

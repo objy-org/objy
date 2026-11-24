@@ -332,7 +332,7 @@ class Collection {
   read(id) {
     const key = String(id);
     const m = this.meta.get(key);
-    if (!m || m.deleted) return undefined;
+    if (!m?.ts || m.deleted) return undefined;
     const vals = this.store.read(key) || {};
     return this._hydrateStoredValue(vals, m.rid, key);
   }
@@ -340,7 +340,7 @@ class Collection {
   readForQuery(id) {
     const key = String(id);
     const m = this.meta.get(key);
-    if (!m || m.deleted) return undefined;
+    if (!m?.ts || m.deleted) return undefined;
     const vals = typeof this.store.readForQuery === "function"
       ? this.store.readForQuery(key) || {}
       : this.store.read(key) || {};
@@ -365,7 +365,7 @@ class Collection {
     const read = this._fieldValueReader();
     return (id, path) => {
       const m = this.meta.get(String(id));
-      return m && !m.deleted ? read(m.rid, path) : undefined;
+      return m?.ts && !m.deleted ? read(m.rid, path) : undefined;
     };
   }
 
@@ -412,7 +412,31 @@ class Collection {
 
   has(id) {
     const m = this.meta.get(id);
-    return !!m && !m.deleted;
+    return !!m?.ts && !m.deleted;
+  }
+
+  // Retirement is local placement maintenance, not a replicated deletion.
+  // Keep the existing ID/RID slot reusable without creating a tombstone.
+  retireObjects(ids) {
+    const deltas = [];
+    for (const id of ids) {
+      const m = this.meta.get(id);
+      if (!m || (!m.ts && !m.deleted)) continue;
+      if (m.ts && !m.deleted) { this.liveCount--; this._removeShardRid(m.rid, m.shard); }
+      this.store.removeObject(id);
+      this._clearCompressedCold(m.rid);
+      this._removeVector(id);
+      m.ts = m.deleted = m.shard = null;
+      deltas.push({ rid: m.rid, after: undefined });
+    }
+    this._applyIndexDeltas(deltas);
+  }
+
+  relocateObject(id, shard) {
+    const m = this.meta.get(id);
+    if (!m || m.shard === shard) return;
+    if (m.ts && !m.deleted) { this._removeShardRid(m.rid, m.shard); this._addShardRid(m.rid, shard); }
+    m.shard = shard;
   }
 
   list(options = {}) {
@@ -856,9 +880,11 @@ class Collection {
     while (this.storageBuild) await this.storageBuild;
   }
 
-  *snapshotObjects({ includeId } = {}) {
+  *snapshotObjects({ includeId, ids } = {}) {
     const allow = typeof includeId === "function" ? includeId : () => true;
-    for (const [id, m] of this.meta) {
+    for (const [id, m] of ids ? ids.map((id) => [id, this.meta.get(id)]) : this.meta) {
+      if (!m) continue;
+      if (!m.ts && !m.deleted) continue;
       if (!allow(id)) continue;
       if (m.deleted) {
         yield { id, ts: m.ts, deleted: m.deleted, ...(m.shard ? { shard: m.shard } : {}) };
@@ -1053,7 +1079,7 @@ class Collection {
     const end = this.idByRid.length;
     for (const m of this.meta.values()) {
       if (m.rid >= end) break;
-      if (!m.deleted) yield m.rid;
+      if (m.ts && !m.deleted) yield m.rid;
     }
   }
 
@@ -1102,7 +1128,7 @@ class Collection {
   _ridSetForAll(includeId = null) {
     const rids = new Set();
     for (const [id, m] of this.meta) {
-      if (!m.deleted && (!includeId || includeId(id))) rids.add(m.rid);
+      if (m.ts && !m.deleted && (!includeId || includeId(id))) rids.add(m.rid);
     }
     return rids;
   }
@@ -1266,7 +1292,7 @@ class Collection {
 
   *_candidateIds(query) {
     if (!query || Object.keys(query).length === 0) {
-      for (const [id, m] of this.meta) if (!m.deleted) yield id;
+      for (const [id, m] of this.meta) if (m.ts && !m.deleted) yield id;
       return;
     }
     const plan = this._planIndexedIds(query);
@@ -3026,6 +3052,7 @@ export class Store {
   }
 
   collection(dbName, collName) {
+    if (!this.getCollection(dbName, collName)) this.lifecycle?.node.migration?.assertSchema();
     this.assertCollectionWritable(dbName, collName);
     return this.db(dbName).collection(collName);
   }

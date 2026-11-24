@@ -563,9 +563,31 @@ Replication is asynchronous: hints trigger pulls; periodic anti-entropy catches 
 
 Surviving replicas can handle ordinary CRUD. Creation/meta changes use assigned fixed primaries; topology/deletion also have a fixed coordinator. Administration may fail if its primary is down; snapshot publication pauses for an unavailable shard primary.
 
-To change shard count, gracefully stop the cluster, then publish the new map. Publication records the new topology and old sources. Targets scan sources in bounded batches, retain their assigned objects, and checkpoint. Finalization waits for all required targets; sources remain available during handoff.
+**Live changes:** start the additional nodes with the same S3 settings and secrets, then submit the desired map to any existing node. Starting a process alone does not assign it data. Map changes use the cluster secret, not a public user token:
 
-Restore automatically follows the map: scoped normally, reshard during a pending repartition. Do not set `restoreMode` or mix running topologies. Resharding requires restart. New replicas need a map update and catch-up; starting a process alone assigns no data.
+```http
+PUT {URL}/cluster/shards
+X-ObjyDB-Cluster-Secret: {clusterSecret}
+Content-Type: application/json
+
+{
+  "shards": {
+    "shard-000": { "peers": [{ "url": "http://node-a:8080" }] },
+    "shard-001": { "peers": [{ "url": "http://node-b:8080" }] },
+    "shard-002": { "peers": [{ "url": "http://node-c:8080" }] }
+  }
+}
+```
+
+`202` starts migration automatically; there is no separate start command. The old map serves CRUD during bounded copying and journal catch-up. Target checkpoints are prepared first, then a short handover barrier drains requests and durably switches ownership. Requests during the barrier can receive `503`; streamed writes retain their usual partial-result counts. Pending copies do not participate in queries or aggregation.
+
+Inspect `GET {URL}/cluster/shards` with the same cluster-secret header for the active map and migration phase, stage, counters, and error. A failed migration stays retryable: submit the same desired map again. Restarting the administrative primary also resumes its pending migration. Do not manually overwrite the S3 map while the cluster runs.
+
+Live migration requires shared S3 persistence, addressable participants running this version, and one topology change at a time. Keep the first shard's administrative primary on the same node. All old and new participants must acknowledge the handover; an unavailable node prevents commit. Database/collection creation, deletion, and meta changes wait until migration completes. There is no automatic coordinator failover or cancellation of a pending migration.
+
+Live changes adopt Jump Consistent Hashing. Keep logical buckets ordered and grow/shrink at the end; generation-specific S3 shard names are managed by the database. Subsequent growth from N to N+1 moves approximately 1/(N+1) of keys. The first migration from the older modulo layout can move substantially more. This balances key counts, not object sizes. Allow temporary room for incoming objects and retained journal tails; indexes and vector warmup still consume resources. Old S3 topology generations are retained, as with restart-based resharding. Local retired payloads are removed without logical deletes or blob changes; their ID/RID slots remain reusable until restart.
+
+**Stopped-cluster changes remain supported:** gracefully stop every node, publish the new map with `scripts/put-shard-map.js`, then restart. Restore automatically follows the map: scoped normally, reshard during a pending offline repartition. Do not set `restoreMode` or run mixed binary versions. Replica-only additions still use a map update and asynchronous catch-up without repartitioning.
 
 ## Operating the Database
 

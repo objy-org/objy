@@ -34,6 +34,7 @@ export class CRDTNode {
     this.acks = new Map();
     this.peers = [];
     this.shardMap = new ShardMap(shardMap);
+    this.seq = Math.max(this.seq, this.shardMap.originSequences[this.id] || 0);
     this.syncBatchSize = syncBatchSize;
     this.changeListeners = new Set();
     this.vectorWarmupEnabled = false;
@@ -75,6 +76,7 @@ export class CRDTNode {
   }
 
   _commitLocalOps(ops) {
+    this.migration?.assertMutation();
     const logged = this._logOps(ops);
     const applied = this._applyOps(logged);
     this._notifyOps(applied);
@@ -82,14 +84,16 @@ export class CRDTNode {
     return { ops: logged, applied };
   }
 
-  applyRemote(fromId, ops, cursorKey = fromId) {
+  applyRemote(fromId, ops, cursorKey = fromId, { notify = true } = {}) {
+    this.migration?.assertMutation();
     const incoming = Array.isArray(ops) ? ops : [];
+    this.migration?.assertRemote(incoming);
     for (const op of incoming) {
       touch(this.clock, op.ts);
       op.shard = op.shard || this.shardForObject(op.db, op.coll, op.id);
     }
     const applied = this._applyOps(incoming);
-    this._notifyOps(applied);
+    if (notify) this._notifyOps(applied);
     if (applied.length) this._scheduleVectorIndexWarmup();
     this.lastSeen.set(cursorKey, Math.max(this.lastSeen.get(cursorKey) || 0, incoming.length ? incoming[incoming.length - 1].seq : 0));
     return applied.length;
@@ -201,6 +205,7 @@ export class CRDTNode {
   }
 
   get(db, coll, id, options = {}) {
+    if (this.migration && !this.migration.visible(db, coll, String(id))) return undefined;
     const object = this.db.getCollection(db, coll)?.read(id);
     if (!object) return object;
     const depth = normalizeRefDepth(options.refDepth, 0);
@@ -208,6 +213,7 @@ export class CRDTNode {
   }
 
   has(db, coll, id) {
+    if (this.migration && !this.migration.visible(db, coll, String(id))) return false;
     return this.db.getCollection(db, coll)?.has(String(id)) || false;
   }
 
@@ -220,11 +226,13 @@ export class CRDTNode {
   }
 
   findIds(db, coll, query = {}, options = {}) {
+    options = this.migration?.readOptions(db, coll, options) || options;
     if (this._needsReferenceRead(query, options)) return this.find(db, coll, query, options).map((row) => row._id);
     return this.db.getCollection(db, coll)?.findIds(query, options) || [];
   }
 
   getMany(db, coll, ids, options = {}) {
+    if (this.migration?.filtering) ids = ids.filter((id) => this.migration.visible(db, coll, String(id)));
     const objects = this.db.readObjects(db, coll, ids);
     const depth = normalizeRefDepth(options.refDepth, 0);
     return depth > 0 ? objects.map((object) => this.expandReferences(db, object, depth)) : objects;
@@ -239,10 +247,11 @@ export class CRDTNode {
   }
 
   list(db, coll) {
-    return this.db.getCollection(db, coll)?.list() || [];
+    return this.find(db, coll);
   }
 
   find(db, coll, query = {}, options = {}) {
+    options = this.migration?.readOptions(db, coll, options) || options;
     if (this._needsReferenceRead(query, options)) return this._findWithReferences(db, coll, query, options);
     return this.db.getCollection(db, coll)?.find(query, options) || [];
   }
@@ -262,6 +271,7 @@ export class CRDTNode {
   }
 
   count(db, coll, query = {}, options = {}) {
+    options = this.migration?.readOptions(db, coll, options) || options;
     if (referenceDepthForQuery(query) > 0) return this._countWithReferences(db, coll, query, options);
     return this.db.getCollection(db, coll)?.count(query, options) || 0;
   }
@@ -271,8 +281,9 @@ export class CRDTNode {
   }
 
   aggregate(db, coll, query = {}, spec = {}, options = {}) {
+    options = this.migration?.readOptions(db, coll, options) || options;
     if (referenceDepthForQuery(query) > 0 || referenceDepthForAggregateSpec(spec) > 0) {
-      return this._aggregateWithReferences(db, coll, query, spec);
+      return this._aggregateWithReferences(db, coll, query, spec, options);
     }
     return this.db.getCollection(db, coll)?.aggregate(query, spec, options) || [];
   }
@@ -462,6 +473,7 @@ export class CRDTNode {
       const key = this._peerKey(peer);
       const cursorKey = this._cursorKey(key, scope);
       const after = this.lastSeen.get(cursorKey) || 0;
+      if (peer.nodeId && after >= (options.until?.[peer.nodeId] ?? Infinity)) return total;
       const res = await peer.pull(after, this.syncBatchSize, scope);
       if (!res) return total;
       if (this.lifecycle && res.contextRevision && res.contextRevision !== peer.contextRevision) {
@@ -475,13 +487,16 @@ export class CRDTNode {
         if (remoteId) this._bindPeer(peer, remoteId, key);
         const remoteKey = this._cursorKey(remoteId || key, scope);
         const before = this.lastSeen.get(remoteKey) || after;
+        // Restored cursors use origin IDs, while a new HTTP peer starts with
+        // its URL. Retry with the known cursor once that identity is bound.
+        if (before > after) continue;
         const restored = await this._handleLogTruncated({ peer, scope, after, response: res, remoteId });
         let seen = this.lastSeen.get(remoteKey) || 0;
-        const restoredRows = Number(restored?.applied || restored?.snapshotObjects || restored?.journalOps || 0);
-        const durableFloor = Math.max(0, Number(res.trimmed) || 0);
-        if (restoredRows > 0 && durableFloor > seen) {
-          this.lastSeen.set(remoteKey, durableFloor);
-          seen = durableFloor;
+        // Only the writer can establish that its complete durable stream was
+        // flushed before recovery. A trimmed RAM log alone proves nothing.
+        if (restored && Number.isSafeInteger(res.durableThrough) && res.durableThrough >= 0) {
+          seen = Math.max(seen, res.durableThrough);
+          this.lastSeen.set(remoteKey, seen);
         }
         if (!restored || seen <= before) {
           const err = new Error("replication log truncated and durable catch-up did not advance");
@@ -497,6 +512,8 @@ export class CRDTNode {
 
       const remoteId = res.nodeId || res.node || peer.nodeId;
       if (!remoteId || remoteId === this.id) return total;
+
+      const until = options.until?.[remoteId] ?? Infinity;
 
       this._bindPeer(peer, remoteId, key);
       const remoteKey = this._cursorKey(remoteId, scope);
@@ -526,7 +543,7 @@ export class CRDTNode {
         await this._ack(peer, seen, scope);
       }
 
-      if (!received || seen >= (res.lastSeq || seen)) return total;
+      if (!received || seen >= Math.min(until, res.lastSeq || seen)) return total;
     }
   }
 
@@ -655,6 +672,13 @@ export class CRDTNode {
       if (trimmed > after && scopeMatches(parseScopeKey(key), scope)) return true;
     }
     return false;
+  }
+
+  markHistoryTruncated() {
+    this.trimmed = Math.max(this.trimmed, this.seq);
+    for (const { shard } of this.ownedShardTargets()) {
+      this.scopeTrimmed.set(scopeKey({ database: GLOBAL_DATABASE, collection: GLOBAL_COLLECTION, shard }), this.seq);
+    }
   }
 
   prune() {
@@ -791,6 +815,7 @@ export class CRDTNode {
 
   replaceShardMap(shardMap) {
     this.shardMap.replace(shardMap);
+    this.seq = Math.max(this.seq, this.shardMap.originSequences[this.id] || 0);
     this.peers = this.shardMap.allPeers();
     this.db.clearVectorIndexes();
     this._scheduleVectorIndexWarmup();
@@ -813,6 +838,7 @@ export class CRDTNode {
   _shardQueryOptions(database, collection, shards = []) {
     const shardSet = new Set((shards || []).filter(Boolean));
     if (!shardSet.size) return {};
+    if (this.migration?.filtering && this.shardMap.migration?.phase === "committed") return { includeId: this._includeShardId(database, collection, shards) };
     const includeIds = this.db.idsForShards(database, collection, [...shardSet]);
     if (includeIds) return { includeIds };
     const includeId = this._includeShardId(database, collection, [...shardSet]);
@@ -893,9 +919,9 @@ export class CRDTNode {
     return n;
   }
 
-  _aggregateWithReferences(db, coll, query = {}, spec = {}) {
+  _aggregateWithReferences(db, coll, query = {}, spec = {}, options = {}) {
     const depth = Math.max(referenceDepthForQuery(query), referenceDepthForAggregateSpec(spec));
-    const rows = this._findWithReferences(db, coll, query, { refDepth: depth });
+    const rows = this._findWithReferences(db, coll, query, { ...options, refDepth: depth });
     return aggregateRows(rows, spec);
   }
 
@@ -1079,8 +1105,8 @@ function parseScopeKey(key) {
 
 function scopeMatches(opScope, requested) {
   return (
-    (requested.database === GLOBAL_DATABASE || requested.database === opScope.database) &&
-    (requested.collection === GLOBAL_COLLECTION || requested.collection === opScope.collection) &&
+    (requested.database === GLOBAL_DATABASE || opScope.database === GLOBAL_DATABASE || requested.database === opScope.database) &&
+    (requested.collection === GLOBAL_COLLECTION || opScope.collection === GLOBAL_COLLECTION || requested.collection === opScope.collection) &&
     requested.shard === opScope.shard
   );
 }

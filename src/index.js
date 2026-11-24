@@ -134,6 +134,7 @@ let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  await state.migration?.stop();
   await replication.stop();
   await new Promise((resolve) => state.server.close(resolve));
   try {

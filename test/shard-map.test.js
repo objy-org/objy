@@ -246,7 +246,7 @@ test("cluster shard updates require durable shared storage for partition changes
   }
 });
 
-test("live cluster routes reject partition changes even with durable storage", async () => {
+test("live cluster routes reject unaddressable target shards", async () => {
   const storage = new MemoryObjectStorage();
   const node = new CRDTNode({ id: "node-a", url: "http://node-a" });
   node.replaceShardMap(shardMapFor(["shard-0", "shard-1"]));
@@ -260,9 +260,9 @@ test("live cluster routes reject partition changes even with durable storage", a
       headers: clusterHeaders(true),
       body: JSON.stringify(shardMapFor(["slot-0", "slot-1", "slot-2"])),
     });
-    assert.equal(res.status, 409);
+    assert.equal(res.status, 400);
     const body = await res.json();
-    assert.match(body.error, /cluster is stopped/);
+    assert.match(body.error, /addressable peers/);
     assert.equal(Object.keys((await shardMapStore.load()).shards).length, 2);
   } finally {
     server.server.close();

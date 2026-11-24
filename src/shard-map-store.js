@@ -34,6 +34,10 @@ export class ShardMapStore {
     return this.update(() => shardMap);
   }
 
+  publishState(shardMap) {
+    return this._serialize(() => this._write(normalizeShardMap(shardMap)));
+  }
+
   update(change) {
     return this._serialize(async () => {
       const current = await this.load();

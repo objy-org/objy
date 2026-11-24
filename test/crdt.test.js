@@ -349,6 +349,21 @@ test("far-behind peer recovers via durable catch-up after 410", async () => {
   assert.equal(fresh.get("db", "c", "o1").v, 100, "post-snapshot ops flow incrementally");
 });
 
+test("a restored origin cursor is reused after an HTTP peer first identifies itself", async () => {
+  const node = new CRDTNode({ id: "replica" });
+  const scope = { database: "db", collection: "c", shard: "default" };
+  node.lastSeen.set(node._cursorKey("writer", scope), 42);
+  const pulls = [];
+  const peer = { url: "http://writer:8080", pull: async (after) => {
+    pulls.push(after);
+    return after === 0 ? { status: 410, node: "writer", trimmed: 42 }
+      : { node: "writer", ops: [], lastSeq: 42 };
+  } };
+  node.setLogTruncatedHandler(() => { assert.fail("already restored coverage must not trigger another restore"); });
+  await node.syncPeer(peer, scope);
+  assert.deepEqual(pulls, [0, 42]);
+});
+
 test("empty objects survive durable catch-up", async () => {
   const a = new CRDTNode({ id: "a", retainOps: 0 });
   const b = new CRDTNode({ id: "b" });

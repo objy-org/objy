@@ -10,7 +10,7 @@ Public HTTP reference. The [JavaScript client](https://github.com/objy-org/objy-
 
 Examples use `{URL}` for the server base URL. Send requests to any node; the database routes them to the owning shard.
 
-Creation/meta changes use fixed administrative primaries; deletion/topology use the first shard's primary. If unavailable, administration returns `503` or forwarding timeout `504`, without failover. Ordinary CRUD can use surviving replicas. Stop the cluster for primary replacement or resharding.
+Creation/meta changes use fixed administrative primaries; deletion/topology use the first shard's primary. If unavailable, administration returns `503` or forwarding timeout `504`, without failover. Ordinary CRUD can use surviving replicas. [Live resharding](DB.md#availability-and-resharding) keeps CRUD running during copying, with a short handover barrier that can return `503`. Schema changes wait until migration completes.
 
 ```text
 database

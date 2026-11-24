@@ -219,7 +219,12 @@ export class PersistenceManager {
     }
 
     this.node.seq = Math.max(this.node.seq, maxLocalSeq);
-    if (this.node.log.length === 0) this.node.trimmed = Math.max(this.node.trimmed, this.node.seq);
+    if (this.node.log.length === 0) {
+      // Recovered WAL tails must be available to durable peer catch-up before
+      // the node advertises an empty replication log with a newer sequence.
+      await this.flush();
+      this.node.markHistoryTruncated();
+    }
     if (this._isManagedReshard()) {
       this._assertDisjointReshardShards();
       stats.reshardCheckpoint = await this.checkpoint({
@@ -228,6 +233,7 @@ export class PersistenceManager {
       });
     }
     progress?.done?.(stats);
+    this.restoredTopology = this.node.shardMap.topology?.id;
     return stats;
   }
 
@@ -323,6 +329,19 @@ export class PersistenceManager {
     return this.flushing;
   }
 
+  async flushThrough() {
+    const seq = this.node.seq;
+    await this.flushLocal();
+    // A caller can join a flush which started before its captured boundary.
+    // A successor flush covers that remainder without chasing future writers.
+    for (let i = 0; i < 2; i++) {
+      if (this.checkpointing) await this.checkpointing;
+      await this.flush();
+      if (this.flushPaused) { await this.checkpointing; i--; }
+    }
+    return seq;
+  }
+
   async flushLocal() {
     if (!this.localWal) return { records: 0, ops: 0 };
     const total = emptyLocalFlushStats();
@@ -342,6 +361,7 @@ export class PersistenceManager {
   }
 
   async checkpoint(options = {}) {
+    if (this.node.shardMap.migration) return { skipped: "live migration" };
     if (this.checkpointing) return this.checkpointing;
     this.checkpointing = this._checkpointOnce(options).finally(() => {
       this.checkpointing = null;
@@ -1028,8 +1048,9 @@ export class PersistenceManager {
     return this.node.shardMap.syncTargets().length === 0;
   }
 
-  async _writeSnapshot(scope, id = snapshotId(), coverage = this._snapshotCoverage()) {
-    if (!this.node.isPrimaryForShard(scope.shard)) throw snapshotConflict("only the shard primary may publish snapshots");
+  async _writeSnapshot(scope, id = snapshotId(), coverage = this._snapshotCoverage(), options = {}) {
+    const isOwner = options.isOwner || (() => this.node.isPrimaryForShard(scope.shard));
+    if (!isOwner()) throw snapshotConflict("only the shard primary may publish snapshots");
     const contextVersion = this._contextVersion(scope.database, scope.collection);
     const contextTicket = this.lifecycle.ticket(scope);
     const headKey = `${scopePrefix(this.prefix, scope)}/latest.json`;
@@ -1037,7 +1058,7 @@ export class PersistenceManager {
     const previousValue = previous.body === null ? null : JSON.parse(previous.body);
     const previousManifest = previousValue?.deletedBy ? null : previousValue;
     if (previousManifest) validateSnapshotManifest(previousManifest, scope);
-    const cursors = this._snapshotCursors(scope, coverage);
+    const cursors = options.cursors || this._snapshotCursors(scope, coverage);
     if (previousManifest && !coversCursors(cursors, normalizeSnapshotCursors(previousManifest))) {
       throw snapshotConflict("snapshot would regress published coverage");
     }
@@ -1045,7 +1066,7 @@ export class PersistenceManager {
     const segments = [];
     let objectCount = 0;
 
-    for await (const chunk of chunkJsonlIterable(this.node.snapshotScopeObjects(scope), this.segmentBytes, `${scopeKey(scope)} snapshot`)) {
+    for await (const chunk of chunkJsonlIterable(options.objects || this.node.snapshotScopeObjects(scope), this.segmentBytes, `${scopeKey(scope)} snapshot`)) {
       const key = `${base}/segment-${String(segments.length).padStart(6, "0")}.jsonl`;
       await this.storage.put(key, chunk.body, "application/x-ndjson");
       segments.push({ key, count: chunk.count, bytes: chunk.bytes, format: "jsonl" });
@@ -1061,7 +1082,7 @@ export class PersistenceManager {
       database: scope.database,
       collection: scope.collection,
       shard: scope.shard,
-      topologyId: this.node.shardMapSnapshot().topology?.id || null,
+      topologyId: options.topologyId || this.node.shardMapSnapshot().topology?.id || null,
       databaseMeta: clone(this.node.getDatabaseMeta(scope.database) || {}),
       collectionMeta: clone(this.node.getCollectionMeta(scope.database, scope.collection) || {}),
       cursors,
@@ -1075,7 +1096,7 @@ export class PersistenceManager {
     await this.storage.put(`${base}/manifest.json`, JSON.stringify(manifest), "application/json");
     if (contextVersion !== this._contextVersion(scope.database, scope.collection)) throw snapshotConflict("context changed during checkpoint");
     const published = await this.states.publish(headKey, manifest, { previous: previous.revision, guard: () => {
-      if (!this.node.isPrimaryForShard(scope.shard)) throw snapshotConflict("snapshot primary changed");
+      if (!isOwner()) throw snapshotConflict("snapshot primary changed");
       if (contextVersion !== this._contextVersion(scope.database, scope.collection) || JSON.stringify(contextTicket) !== JSON.stringify(this.lifecycle.ticket(scope))) throw snapshotConflict("context changed during checkpoint");
       this.lifecycle.assert(scope.database, scope.collection);
     } });
@@ -1094,6 +1115,7 @@ export class PersistenceManager {
   }
 
   async _compactJournals(scope, cursors = {}) {
+    if (this.node.shardMap.migration) return 0;
     const prefix = `${scopePrefix(this.prefix, scope)}/journal/`;
     const keys = await this.storage.list(prefix);
     if (!keys.length) return 0;
@@ -1121,6 +1143,21 @@ export class PersistenceManager {
     });
     if (!removable.length) return 0;
     return this.storage.delete(removable);
+  }
+
+  async *migrationJournalOps(shards, after, until) {
+    const selected = new Set(shards);
+    const keys = await this.storage.list(this._rootPrefix());
+    for (const key of keys) {
+      const info = parseJournalKey(key, this.prefix);
+      if (!info || !selected.has(info.shard) || (info.originVerified && info.lastSeq <= (after[info.node] || 0))) continue;
+      for await (const op of journalObjectsFromStorage(this.storage, key, "migration")) {
+        validateJournalOp(op, info);
+        if (!Object.hasOwn(until, op.from)) continue;
+        if (!Number.isSafeInteger(op.seq)) throw new Error("migration requires versioned journal operations");
+        if (op.seq > (after[op.from] || 0) && op.seq <= (until[op.from] || 0)) yield op;
+      }
+    }
   }
 
   async _applySnapshotRetention(scope, latestId) {
@@ -1403,6 +1440,7 @@ export class PersistenceManager {
           if (state && state.status !== "active") continue;
         }
         if (record.type === "ops") {
+          stats.maxLocalSeq = Math.max(stats.maxLocalSeq, maxLocalSeqForOps(record.ops || [], this.node.id));
           const ops = this._filterLocalWalOps(Array.isArray(record.ops) ? record.ops : []).filter((op) => !this.lifecycle.obsolete(op));
           const sourceNode = record.node || "local-wal";
           this.node.applyRemote(sourceNode, ops, `local-wal:${line}`);
@@ -1697,7 +1735,12 @@ async function* chunkJsonlIterable(rows, maxBytes, label) {
   }
 
   let i = 0;
-  for (const value of rows) {
+  const asynchronous = Boolean(rows[Symbol.asyncIterator]);
+  const iterator = asynchronous ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]();
+  for (;;) {
+    const entry = asynchronous ? await iterator.next() : iterator.next();
+    if (entry.done) break;
+    const value = entry.value;
     const row = stringifyJson(value, `${label} row ${i}`);
     i++;
     const rowBytes = Buffer.byteLength(row);

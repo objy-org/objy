@@ -112,6 +112,7 @@ export class ContextLifecycle {
   }
 
   async create(context, req, action) {
+    this.node.migration?.assertSchema();
     await this.assertNotDeleting(context);
     const captured = req?.contextTicket;
     if (req?.schemaApply || !isPrimary(this.node)) {
@@ -152,6 +153,7 @@ export class ContextLifecycle {
   }
 
   drop(context) {
+    this.node.migration?.assertSchema();
     if (!isPrimary(this.node)) return this._owner({ phase: "drop", context }).then(() => this.load());
     const slot = key(context);
     if (this.runs.has(slot)) return this.runs.get(slot);
