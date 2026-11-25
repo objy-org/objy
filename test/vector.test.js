@@ -81,6 +81,27 @@ test("HNSW removal physically releases graph nodes", () => {
   }
 });
 
+test("HNSW can reach an isolated nearest vector with a full search budget across deterministic builds", () => {
+  const random = Math.random;
+  try {
+    for (let seed = 1; seed <= 12; seed++) {
+      let state = seed;
+      Math.random = () => ((state = Math.imul(state, 1664525) + 1013904223 >>> 0) + 1) / 4294967297;
+      const vectors = new Map();
+      const index = new HNSWIndex({ getVec: (id) => vectors.get(id) });
+      for (let i = 0; i < 1000; i++) {
+        const value = i === 0 ? [1, 0, 0, 0] : [0, 1, i / 1000, 0];
+        vectors.set(String(i), value);
+        index.insert(String(i), value);
+      }
+      const result = index.search([1, 0, 0, 0], 5, 1000);
+      assert.equal(result[0].id, "0", `isolated nearest vector, seed ${seed}`);
+      assert.equal(result[0].dist, 0);
+      assert.equal(new Set(result.map((row) => row.id)).size, 5);
+    }
+  } finally { Math.random = random; }
+});
+
 test("replication carries vectors in object ops and rebuilds local vector indexes", async () => {
   const source = new CRDTNode({ id: "source" });
   const replica = new CRDTNode({ id: "replica" });

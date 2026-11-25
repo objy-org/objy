@@ -23,3 +23,11 @@ Postponed at the user's request; do not implement without approval:
 - Query-abuse protection, especially blocking regular expressions and query complexity/concurrency limits.
 - Decide whether password changes should invalidate refresh tokens. Access tokens remaining valid until expiry is intentional.
 - Broader adversarial security tests and deployment checks for HTTPS, cluster connectivity, secrets, and storage permissions.
+
+## Deferred Replication Cleanup
+
+Postponed at the user's request on 2026-11-25; do not implement without approval:
+
+- P2: Cancel an HTTP replication pull on every unsuccessful exit, including engine-level rejection before stream consumption. Reproduced with regressed sequence and unknown catch-up origin: the response stays open until timeout. Add regression coverage for immediate cancellation without changing cursor or acknowledgement safety.
+- P3: Remove repeated `durableThrough` integer/range checks in the recovery branch; retain centralized response validation and the optional-value presence check.
+- P3: Remove the redundant nonempty-batch cursor update in `_syncPeer`, already performed by `applyRemote`. Preserve empty-response cursor advancement. This duplication predates the latest fix.

@@ -52,13 +52,17 @@ export class HttpRouter {
 }
 
 export function json(res, status, body, headers = {}) {
+  if (status >= 400 && body && typeof body === "object" && !Array.isArray(body) && res.operationStarted !== true) body = { operationStarted: false, ...body };
   // A downstream auth rejection cannot undo work already begun by this node.
   if (status >= 400 && res.operationStarted && body?.operationStarted === false) body = { ...body, operationStarted: true };
   const payload = body === undefined ? "" : JSON.stringify(body);
+  // JSON is re-encoded here, so upstream framing/encoding cannot be reused.
+  const responseHeaders = Object.fromEntries(Object.entries(headers).filter(([name]) =>
+    !["content-length", "content-type", "content-encoding", "transfer-encoding", "connection", "keep-alive", "trailer", "upgrade"].includes(name.toLowerCase())));
   res.writeHead(status, {
+    ...responseHeaders,
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
-    ...headers,
   });
   res.end(payload);
 }

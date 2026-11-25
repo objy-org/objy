@@ -52,34 +52,32 @@ For project-local use: `npm install @objy/db`, then `npm exec -- objy --config o
 
 Use the [S3-backed configuration below](#configuration) on every node. One shared shard map assigns objects across all databases and collections. This example has **two shards, two copies per shard, and four node processes**.
 
-Save `shard-map.json`:
+In the same config file, replace `cluster.shardMap` with this initial map:
 
 ```json
 {
-  "shards": {
-    "shard-a": {
-      "peers": [
-        { "nodeId": "a1", "url": "http://127.0.0.1:8080" },
-        { "nodeId": "a2", "url": "http://127.0.0.1:8081" }
-      ]
-    },
-    "shard-b": {
-      "peers": [
-        { "nodeId": "b1", "url": "http://127.0.0.1:8082" },
-        { "nodeId": "b2", "url": "http://127.0.0.1:8083" }
-      ]
+  "cluster": {
+    "shardMap": {
+      "shards": {
+        "shard-a": {
+          "peers": [
+            { "nodeId": "a1", "url": "http://127.0.0.1:8080" },
+            { "nodeId": "a2", "url": "http://127.0.0.1:8081" }
+          ]
+        },
+        "shard-b": {
+          "peers": [
+            { "nodeId": "b1", "url": "http://127.0.0.1:8082" },
+            { "nodeId": "b2", "url": "http://127.0.0.1:8083" }
+          ]
+        }
+      }
     }
   }
 }
 ```
 
-Publish it before starting the cluster. This helper requires a [source checkout](CONTRIBUTING.md#development); it is not part of the npm package:
-
-```sh
-node scripts/put-shard-map.js --config objydb.config.json --map shard-map.json
-```
-
-Start `a1` first to establish shared bootstrap state, then run each remaining node in its own terminal or process manager:
+Keep the other `cluster` settings. Run each node in its own terminal or process manager:
 
 ```sh
 objy --config objydb.config.json --node a1 --url http://127.0.0.1:8080 --port 8080
@@ -90,7 +88,9 @@ objy --config objydb.config.json --node b2 --url http://127.0.0.1:8083 --port 80
 
 All nodes share S3 settings and system secrets; each needs a unique identity, reachable URL, and separate local WAL state. The configured WAL root separates nodes by ID. Replace loopback URLs with peer-reachable addresses on separate machines. Clients can connect to any node; requests route to the appropriate shard.
 
-The S3 map overrides `cluster.shardMap`. An inline map with shard-map storage off supports temporary memory-only clusters, but durable resharding and safe clustered database/collection deletion require shared persistence. The first peer in each shard is its fixed primary; there is no automatic election. See [Shards and Replicas](#shards-and-replicas) before changing topology.
+No manual S3 upload is needed. If the map is missing, `a1` (the first peer of the first shard) publishes it automatically. Other nodes may start first: they wait for the map before initializing secrets, restoring data, or serving requests. Waiting uses `cluster.replicationTimeoutMs` (60000 ms by default; `0` also uses 60000 ms for this startup wait). Only the coordinator needs the initial map in its config; sharing the same config across all nodes is simpler.
+
+The S3 map always overrides `cluster.shardMap`, including after topology changes. Editing the config or restarting does not trigger resharding; use the [existing topology endpoint](#availability-and-resharding). An inline map with shard-map storage off still supports temporary memory-only clusters. Durable resharding and safe clustered database/collection deletion require shared persistence. There is no automatic primary election.
 
 ### From a Node.js Application
 
@@ -134,6 +134,11 @@ Durable S3 example, not defaults. Create the bucket first; use a distinct prefix
     "syncMs": 2500,
     "forwardTimeoutMs": 60000,
     "replicationTimeoutMs": 60000,
+    "shardMap": {
+      "shards": {
+        "default": { "peers": [{ "url": "http://127.0.0.1:8080" }] }
+      }
+    },
     "shardMapStore": {
       "mode": "s3",
       "prefix": "objydb",
@@ -171,7 +176,7 @@ Durable S3 example, not defaults. Create the bucket first; use a distinct prefix
 | `storage` | Object engine and automatic, bounded value dictionaries. `object` is the default and only built-in engine. |
 | `files` | Private blobs; `off` by default. `s3` inherits `persistence.s3`, with optional `files.s3` overrides. |
 | `memoryGuard` | RSS-based write admission; disabled by default. Uses per-process `limitMb` or detected container/host memory. |
-| `cluster` | Replication hints, `syncMs` (default 2500), forwarding/replication timeouts (both 60000), and shard-map storage. |
+| `cluster` | Initial `shardMap`, shared map storage, replication hints, `syncMs` (default 2500), and forwarding/replication timeouts (both 60000). |
 | `auth` | JWT lifetimes and initial-user options. Enabled by default; missing secrets are generated. |
 | `persistence` | S3 connection, namespace, acknowledgement, journals, snapshots, and retention. Defaults: `mode: "off"`, `ack: "memory"`. |
 | `imports` | Bounded write admission: `maxBulkObjects`, `maxBulkBytes`, `maxObjectBytes`, `maxPendingPersistenceBytes`, `persistenceWaitMs`, and `retryAfterMs`. |
@@ -445,7 +450,7 @@ Once its vector index is ready, search it:
 const matches = await assets.search({ $vector: { vector: [0.21, 0.79, 0.4], limit: 10, ef: 64 } });
 ```
 
-HNSW search uses cosine similarity, ordinary filters, and permissions. Supply finite, dimension-compatible vectors from the same embedding model. Vectors are durable; the derived HNSW index is not persisted.
+HNSW search uses cosine similarity, ordinary filters, and permissions. It is approximate: increasing `ef` trades CPU/latency for recall, not an exact-result guarantee. Supply finite, dimension-compatible vectors from the same embedding model. Vectors are durable; the derived HNSW index is not persisted.
 
 Configure `vector.enabled`, `vector.field` (default `_vec`), and `vector.hnsw` (`M`, `efConstruction`, `efSearch`). Boot, rebuilds, or vector writes can cause `503` / `"vector index warming"`. Retry search after warmup, not the insert; ordinary reads remain available.
 
@@ -558,6 +563,8 @@ One global map partitions all objects by `_id` hash, not database or byte size. 
 A **shard** partitions data; **replicas** copy it. CRUD routes to an available owner. Queries fan out in parallel to one replica per shard, with timeouts, then merge and page globally. See [Cluster Setup](#cluster-setup) for the four-node example.
 
 Replication is asynchronous: hints trigger pulls; periodic anti-entropy catches missed hints. `cluster.syncMs` sets this safety interval, not acknowledgement. Hints default to 25 ms debounce and 128 scopes. Immediate reads from another replica may lag.
+
+Writes use whole-object last-write-wins; acknowledgement is not a replication barrier. Successive writes reaching different replicas, including after failover, are not guaranteed to preserve client order. A lagging replica can report an object missing or skip an update. Failed requests can have partial effects: internal forwarding does not automatically replay ambiguous mutations on another replica.
 
 ### Availability and Resharding
 

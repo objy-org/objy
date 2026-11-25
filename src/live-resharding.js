@@ -12,6 +12,7 @@ export const TOPOLOGY_HEADER = "x-objydb-topology";
 const PATH = "/cluster/migration";
 const BATCH_SIZE = 512;
 const BATCH_BYTES = 4 * 1024 * 1024;
+const TRANSFER_CONCURRENCY = 4;
 
 // The source map owns all API traffic until one durable map publication commits
 // the handover. Pending copies share storage, but never the active read view.
@@ -225,7 +226,7 @@ export class LiveResharding {
         }
         return {};
       }
-      case "seal":
+      case "seal": {
         if (state.phase !== "sealing") throw stale();
         this.sealed = true;
         await deadline((async () => {
@@ -233,10 +234,10 @@ export class LiveResharding {
           await Promise.allSettled([...this.requests].map((request) => request.promise));
           await Promise.allSettled([...this.node.lifecycle.work].map((work) => work.promise));
         })(), this.timeoutMs);
-        await this.persistence.flushLocal();
-        await this.persistence.flush();
+        const seq = await this.persistence.flushThrough();
         this.ready = id;
-        return { node: this.node.id, seq: this.node.seq };
+        return { node: this.node.id, seq };
+      }
       case "flush":
         await this.persistence.flushThrough();
         return {};
@@ -404,13 +405,18 @@ export class LiveResharding {
     const state = this.node.shardMap.migration;
     const source = new ShardMap(state.source);
     const batches = new Map();
-    let count = 0, bytes = 0;
+    let bytes = 0;
     const flush = async () => {
-      for (const [url, batch] of batches) {
-        if (url === this.node.url) await this.receive(state.id, mode, Readable.from(batch), undefined, this.instances[url]);
-        else await this._fetch(url, `${PATH}?id=${encodeURIComponent(state.id)}&mode=${mode}`, Readable.from(batch), true);
+      const destinations = [...batches];
+      for (let offset = 0; offset < destinations.length; offset += TRANSFER_CONCURRENCY) {
+        const results = await Promise.allSettled(destinations.slice(offset, offset + TRANSFER_CONCURRENCY).map(async ([url, batch]) => {
+          if (url === this.node.url) await this.receive(state.id, mode, Readable.from(batch), undefined, this.instances[url]);
+          else await this._fetch(url, `${PATH}?id=${encodeURIComponent(state.id)}&mode=${mode}`, Readable.from(batch), true);
+        }));
+        const failed = results.find((result) => result.status === "rejected");
+        if (failed) throw failed.reason;
       }
-      batches.clear(); count = bytes = 0;
+      batches.clear(); bytes = 0;
     };
     let sent = 0;
     for await (const op of ops) {
@@ -418,15 +424,17 @@ export class LiveResharding {
       const previous = source.peersFor(source.shardForObject(op.db, op.coll, op.id));
       const line = `${JSON.stringify(op)}\n`;
       const lineBytes = Buffer.byteLength(line);
+      let full = false;
       for (const peer of target.peersFor(op.shard)) {
         if (skipExisting && previous.some((old) => old.url === peer.url)) continue;
         const batch = batches.get(peer.url) || [];
         batch.push(line); batches.set(peer.url, batch);
-        bytes += lineBytes; count++; sent++;
+        bytes += lineBytes; sent++;
+        if (batch.length >= BATCH_SIZE) full = true;
       }
-      if (count >= BATCH_SIZE || bytes >= BATCH_BYTES) await flush();
+      if (full || bytes >= BATCH_BYTES) await flush();
     }
-    if (count) await flush();
+    if (batches.size) await flush();
     return sent;
   }
 
@@ -510,6 +518,9 @@ async function* storedObjects(collection, includeId) {
 }
 function members(state) { return [...new Set([...urls(state.source), ...urls(state.target)])]; }
 function frontiersOf(results) {
+  if (results.some((entry) => typeof entry?.node !== "string" || !entry.node || !Number.isSafeInteger(entry.seq) || entry.seq < 0)) {
+    throw new Error("migration participants must report valid node IDs and sequence positions");
+  }
   const entries = results.map(({ node, seq }) => [node, seq]);
   if (new Set(entries.map(([node]) => node)).size !== entries.length) throw new Error("migration participants must have unique node IDs");
   return Object.fromEntries(entries);

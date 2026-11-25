@@ -273,3 +273,192 @@ load or client-order preservation across replica failover**. No runtime fixes we
 made during this pass. Disposable processes, S3 containers and WAL files were
 removed; measurement reports and process logs remain in the harness's temporary
 report directories.
+
+## Historical Repair Validation
+
+These runs included an experimental write-ordering receipt mechanism that has
+since been removed. They are retained as historical evidence, not validation of
+the current receipt-free runtime. The separate migration, durable-frontier,
+forwarding and replication-timeout fixes remain. Writes again use eventual LWW
+semantics without a client-order guarantee across replicas.
+
+The source-failure mismatch was reproduced with request and commit tracing. The
+fallback's POST occurred first, at logical clock 57,859. After restarting, the
+source accepted the subsequent PUT at 56,864 and PATCH at 56,884. The client sent
+the requests in order; their executing replicas did not share that causal order.
+This narrows the earlier finding: this traced case was not a POST executed late
+after the PATCH. Its earlier POST carried the greater logical version.
+
+The experimental repair preserved multi-writer replicas by carrying signed
+receipts referencing existing `(shard, origin, sequence)` cursors. A handling
+replica caught up before mutation when a dependency was missing. The runtime no
+longer creates or consumes these receipts or performs these ordering waits.
+No snapshot, journal, WAL, object, column, or index format changed.
+
+The retained HTTP forwarding fix no longer
+re-originates ambiguous mutations on another replica; safe pre-operation
+rejections and refused connections can still fall back. Read-only retries remain.
+
+Migration transfer now fills per-destination batches up to 512 rows, keeps the
+combined 4 MiB bound, sends at most four destinations concurrently, and waits for
+all in-flight sends before reporting a failed round. Donors and ownership
+handover retain their existing protocol.
+
+A later 100,000-object run with an S3 pause, metadata rebuild and 5-second
+checkpoints exposed an additional handover race: two expected-deleted IDs were
+still live after shrink. Passing repeats did not clear that failure. A controlled
+regression then reproduced the same lost-delete outcome by holding an existing
+journal flush open while accepting a delete. Sealing joined that earlier flush
+but advertised a frontier including the later, still-pending delete; the final
+tail therefore missed it. Sealing now reuses `flushThrough()` and reports only
+its captured durable frontier. The regression fails before this change and
+passes after it, including a fresh durable restore. No new persistence mechanism
+or per-object state was introduced.
+
+### Completed Repair Runs
+
+All these disposable-process runs included full final mutable-object and deleted
+ID comparisons through every node, fixed query/aggregation oracles, an all-node
+SIGKILL/restore, and shrink. PUT/PATCH counts are now also asserted by the writer,
+not inferred solely from its intended state.
+
+| Workload | Grow | All-node crash restore | Shrink | Result |
+| --- | ---: | ---: | ---: | --- |
+| 1,000,000 objects, six processes, sustained mixed indexed traffic | 233.02 s | 70.31 s | 97.63 s | Passed |
+| 1,000,000 objects, final repair, source killed, round-robin entry nodes with receipts | 369.57 s | 71.09 s | 91.29 s | Passed |
+| 100,000 objects, source killed, stable entry, no caller receipts | 13.25 s | 11.46 s | 4.84 s | Passed |
+| 100,000 objects, source killed, round-robin entry nodes with caller receipts | 22.79 s | 9.94 s | 5.25 s | Passed |
+| 100,000 objects, coordinator killed, caller receipts retained | 16.97 s | 9.45 s | 5.02 s | Passed |
+| 100,000 objects, S3 pause + metadata rebuild + 5-second snapshots, final sealing fix, repeat 1 | 8.81 s | 9.03 s | 5.83 s | Passed |
+| 100,000 objects, same S3/rebuild/snapshot workload, repeat 2 | 9.29 s | 9.32 s | 5.12 s | Passed |
+
+The two final S3 runs completed 464 and 436 traffic cycles with no oracle errors.
+They retained lightweight test-only local commit tracing. The earlier outage
+failure is retained above, not counted as a passing run. The original million
+and source/coordinator runs preceded the additional sealing fix.
+
+The final million-object run completed 748 cycles, with 7,480 live traffic
+objects and 7,480 deleted IDs checked through every API node after growth,
+all-process crash/restore and shrink. Its sampled aggregate peak was 6.94 GiB RSS,
+7.26 GiB heap used and 631% OS CPU. These are independent sampled maxima, not one
+instantaneous heap/RSS measurement. The all-node restore had a further 26.54 s
+derived-index warmup. Successful copying-phase p95 was 930 ms for point reads,
+1,289 ms for grouped aggregation and 2,471 ms for filtered aggregation. Source
+failure and handover caused transient failures that the harness retried; the
+settled object and aggregation oracles had no errors. This run had no test-only
+commit/state tracing enabled.
+
+The million run completed 814 traffic cycles, leaving 8,140 live traffic objects
+and 8,140 deleted IDs. It had no oracle errors. Its sampled aggregate peak was
+6.72 GiB RSS, 7.35 GiB heap used, and 725% OS CPU. During copying, successful p95
+was 869 ms for point reads, 1,265 ms for grouped aggregation, and 2,066 ms for
+filtered aggregation. This is a completion/correctness improvement, **not** an
+elimination of maintenance-related latency tails. Some handover requests still
+return `503` by design.
+
+The older 15-minute failure and repaired run are not a strict speedup ratio: the
+expanded harness now also cycles offset and aggregate pages and carries receipts.
+The 10-second baseline windows have few large-query samples. Restart timing does
+not include all derived warmup or exhaustive oracle verification.
+
+Two intermediate runs are not counted as passes. One completed growth in 245 s
+but then hit a truncated forwarded error response: JSON re-encoding retained an
+upstream Content-Length after changing the handling flag. The central JSON
+response helper now owns framing and removes upstream encoding/hop headers.
+Another stopped before import because an idle TCP connection kept the temporary
+restore-status server open. Its shutdown now closes remaining connections before
+handing its port to the data server. Both have focused regressions.
+
+### Normal API Comparison
+
+The original branch HEAD (`fd23b3f`) and repaired runtime were compared in
+separate processes without overlapping load tests. Both used the same HTTP
+client and workload: field/array indexes, typed columns, compressed memory,
+512-byte payloads, 100,000 initial objects and 500 point reads. Persistence was
+disabled, so this isolates caught-up API overhead, not lagging-replica catch-up
+or S3 acknowledgement latency.
+
+An initial three-pair run with the default 5,000 mutations showed insert/patch
+medians +3.4%/+2.7%, but a 500-object delete sample fell 8.4% (7.88 ms to 8.60 ms).
+Rather than dismissing that result, a larger workload used
+`runServerWorkload({ objects: 100000, mutationCount: 100000, batchSize: 2000,
+payloadBytes: 512, pointReads: 500, ... })`: 100,000 patches and 10,000 deletes
+per run, with dirty and settled count/sum/group oracles. The initial three-pair
+patch median fell 6.5%, with wide variability. This was extended to a fixed seven
+pairs, reversing before/after order on alternating pairs. All samples were kept;
+no runtime code changed during these comparisons.
+
+| Median, seven pairs | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Insert objects/s | 24,927 | 24,800 | -0.5% |
+| Patch objects/s | 15,660 | 17,019 | +8.7% |
+| Delete objects/s | 96,032 | 96,101 | +0.1% |
+| Point-read p95 | 0.387 ms | 0.407 ms | +0.020 ms |
+| Heap after insert | 274.36 MB | 274.48 MB | +0.05% |
+| Heap after mutations | 451.35 MB | 451.41 MB | +0.01% |
+
+Patch throughput ranged from 14,487 to 18,311/s before and 15,304 to 17,306/s
+after, so the positive median is not evidence of a causal speedup. Median RSS
+changed +1.72% after insert and +0.33% after mutation; allocator/GC variability
+makes RSS less stable than post-GC heap here. These measurements support low
+steady-state overhead in this workload, not a universal latency guarantee.
+
+Historical verification before receipt removal: 604 unit/integration tests, nine UI browser tests, package
+contents validation, and isolated package installation/executable/runtime smoke
+tests passed. No changes were merged, published or deployed.
+
+### Vector Diagnostic
+
+The vector algorithm was not changed. On 12 deterministic builds of the same
+1,000-vector isolated-neighbour fixture, the nearest vector was found in 9/12
+builds with `ef=20`, `100`, and `200`, and 12/12 with `ef=1000`. Every build had
+incoming graph edges to the isolated vector. A regression checks the full-budget
+case across these seeds. This supports a search-effort/recall limitation for this
+fixture, not corrupted stored vectors or a general exact-search guarantee.
+
+### Current Stress Commands
+
+These commands run without write receipts. Their failover or round-robin writer
+oracles can expose the cross-replica ordering limitation described above; the
+historical receipt-enabled results cannot be assumed to apply.
+
+```sh
+node stress/live-resharding.js --objects=1000000 --replicas=2 --mixed=true --profile=indexed --failure=false
+node stress/live-resharding.js --objects=1000000 --replicas=2 --mixed=true --profile=indexed --fault=source --writer-routing=round-robin
+node stress/live-resharding.js --objects=100000 --replicas=2 --mixed=true --profile=indexed --fault=source
+node stress/live-resharding.js --objects=100000 --replicas=2 --mixed=true --profile=indexed --fault=source --writer-routing=round-robin
+node stress/live-resharding.js --objects=100000 --replicas=2 --mixed=true --profile=indexed --fault=coordinator
+node stress/live-resharding.js --objects=100000 --replicas=2 --mixed=true --profile=indexed --fault=storage --rebuild=true --snapshot-ms=5000
+```
+
+## Write-Ordering Removal Validation
+
+The experimental receipt implementation, HTTP/CORS integrations and client
+dependency waits were removed, not disabled behind a configuration switch. The
+stress writer no longer sends receipts. Independent routing, response framing,
+replication cancellation and durable handover regressions remain covered.
+Focused regressions explicitly check that a stale replica does not synchronously
+pull before a JSON or NDJSON write; a patch to an unreplicated object is skipped.
+
+Receipt-free verification passed 595 unit/integration tests and nine browser UI
+tests. Package contents validation also passed. The lower unit-test count removes
+the retired causal-ordering cases while retaining the unrelated regressions.
+
+The disposable S3 run used 100,000 initial objects, six processes, two replicas
+per shard, field/array indexes, typed columns, compressed memory, and mixed CRUD,
+queries and aggregation. It grew from two to three shards, killed and restored
+all processes, then shrank to two shards:
+
+| Phase | Elapsed |
+| --- | ---: |
+| Initial insert | 10.54 s |
+| Live growth | 7.88 s |
+| All-process crash/restore | 9.63 s |
+| Live shrink | 4.82 s |
+
+The run completed 528 traffic cycles, checking 5,280 live traffic objects and
+5,280 deleted IDs through every API node, with no oracle errors. Restore had
+another 3.04 s of derived-index warmup. This used a stable entry node with no
+injected outage during copying; it does not validate ordered writes across
+replica failover. The report is `objy-live-stress-np7aKB/report.json` in the
+machine's temporary directory. No isolated before/after memory saving is claimed.

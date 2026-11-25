@@ -112,13 +112,21 @@ export function mixedLoad({ count, call, stream, objectAt, nodes, batchSize = 20
   async function mutation(method, rows) {
     const deadline = Date.now() + 180_000;
     let pending = rows;
+    let retried = false;
     for (;;) {
       try {
         const result = await measure(method, (observe) => stream(writerRouting === "round-robin" ? nodeIndex() : 0, method, pending, observe), pending.length);
         if (method === "POST") assert.equal(result.inserted, pending.length);
+        if (method === "PUT") assert.equal(result.replaced, pending.length);
+        if (method === "PATCH") { assert.equal(result.updated, pending.length); assert.equal(result.skipped, 0); }
+        if (method === "DELETE") {
+          assert.equal(result.deleted + result.skipped, pending.length);
+          if (!retried) assert.equal(result.skipped, 0, "first delete attempt must find every acknowledged object");
+        }
         return;
       } catch (error) {
         if (!transient(error) || Date.now() > deadline) throw error;
+        retried = true;
         if (method === "POST" && error.status === 409) {
           // An interrupted sharded insert can commit some IDs. Retain stable
           // IDs and retry only missing rows, rather than overwriting results.

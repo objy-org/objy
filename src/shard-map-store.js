@@ -34,6 +34,19 @@ export class ShardMapStore {
     return this.update(() => shardMap);
   }
 
+  initialize(shardMap) {
+    return this._serialize(async () => {
+      const stored = await this.load();
+      if (stored) return stored;
+      const initial = normalizeShardMap(shardMap);
+      if (initial.migration || isTopologyResharding(initial) || !Object.keys(initial.shards).length ||
+          Object.values(initial.shards).some(({ peers }) => !peers.length || peers.some((peer) => !peer.url))) {
+        throw new Error("initial shard map must have an active topology and addressable peers for every shard");
+      }
+      return (await this._write(initial)).shardMap;
+    });
+  }
+
   publishState(shardMap) {
     return this._serialize(() => this._write(normalizeShardMap(shardMap)));
   }

@@ -473,9 +473,16 @@ export class CRDTNode {
       const key = this._peerKey(peer);
       const cursorKey = this._cursorKey(key, scope);
       const after = this.lastSeen.get(cursorKey) || 0;
-      if (peer.nodeId && after >= (options.until?.[peer.nodeId] ?? Infinity)) return total;
-      const res = await peer.pull(after, this.syncBatchSize, scope);
-      if (!res) return total;
+      const target = options.until?.[peer.nodeId];
+      if (target !== undefined && (!Number.isSafeInteger(target) || target < 0)) throw invalidReplication("invalid replication catch-up target");
+      if (peer.nodeId && after >= (target ?? Infinity)) return total;
+      const res = await peer.pull(after, this.syncBatchSize, scope, options);
+      const remoteId = validatePullResponse(res);
+      if (remoteId === this.id) throw invalidReplication("replication peer reported the local node ID");
+      const until = options.until ? options.until[remoteId] : Infinity;
+      if (options.until && (!Number.isSafeInteger(until) || until < 0)) {
+        throw invalidReplication("replication peer has no valid catch-up target");
+      }
       if (this.lifecycle && res.contextRevision && res.contextRevision !== peer.contextRevision) {
         const revived = await this.lifecycle.load();
         for (const context of revived) await this.lifecycle.persistence?.restoreScope(context);
@@ -483,9 +490,8 @@ export class CRDTNode {
       }
 
       if (res.status === 410) {
-        const remoteId = res.nodeId || res.node || peer.nodeId;
-        if (remoteId) this._bindPeer(peer, remoteId, key);
-        const remoteKey = this._cursorKey(remoteId || key, scope);
+        this._bindPeer(peer, remoteId, key);
+        const remoteKey = this._cursorKey(remoteId, scope);
         const before = this.lastSeen.get(remoteKey) || after;
         // Restored cursors use origin IDs, while a new HTTP peer starts with
         // its URL. Retry with the known cursor once that identity is bound.
@@ -510,40 +516,32 @@ export class CRDTNode {
         continue;
       }
 
-      const remoteId = res.nodeId || res.node || peer.nodeId;
-      if (!remoteId || remoteId === this.id) return total;
-
-      const until = options.until?.[remoteId] ?? Infinity;
-
+      if (res.lastSeq < after) throw invalidReplication("replication peer sequence regressed");
       this._bindPeer(peer, remoteId, key);
       const remoteKey = this._cursorKey(remoteId, scope);
       let seen = after;
       let received = 0;
 
-      if (res.opBatches) {
-        for await (const ops of res.opBatches) {
-          if (!Array.isArray(ops) || !ops.length) continue;
-          received += ops.length;
-          total += await this.applyRemoteBatch(remoteId, ops, remoteKey, options);
-          seen = ops.length ? ops[ops.length - 1].seq : seen;
-          this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
-          await this._ack(peer, seen, scope);
-        }
-        if (!received) {
-          seen = res.lastSeq || after;
-          this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
-          await this._ack(peer, seen, scope);
-        }
-      } else {
-        const ops = Array.isArray(res.ops) ? res.ops : [];
-        received = ops.length;
+      for await (const ops of res.opBatches || [res.ops]) {
+        const next = validatePullBatch(ops, remoteId, seen, res.lastSeq);
+        if (!ops.length) continue;
         total += await this.applyRemoteBatch(remoteId, ops, remoteKey, options);
-        seen = ops.length ? ops[ops.length - 1].seq : res.lastSeq || after;
+        received += ops.length;
+        seen = next;
         this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
-        await this._ack(peer, seen, scope);
+        await this._ack(peer, seen, scope, options);
+      }
+      if (!received) {
+        seen = res.lastSeq;
+        this.lastSeen.set(remoteKey, Math.max(this.lastSeen.get(remoteKey) || 0, seen));
+        await this._ack(peer, seen, scope, options);
       }
 
-      if (!received || seen >= Math.min(until, res.lastSeq || seen)) return total;
+      if (seen >= until) return total;
+      if (!received || seen >= res.lastSeq) {
+        if (options.until) throw invalidReplication(`replication catch-up stopped at ${seen}, required ${until}`, "REPLICATION_INCOMPLETE");
+        return total;
+      }
     }
   }
 
@@ -556,10 +554,10 @@ export class CRDTNode {
     return this.logTruncatedHandler(event);
   }
 
-  async _ack(peer, lastSeq, scope) {
+  async _ack(peer, lastSeq, scope, options) {
     if (!peer.ack) return;
     try {
-      await peer.ack(this.id, lastSeq, scope);
+      await peer.ack(this.id, lastSeq, scope, options);
     } catch {
       // ack is best-effort; unpruned ops are safe
     }
@@ -1109,6 +1107,43 @@ function scopeMatches(opScope, requested) {
     (requested.collection === GLOBAL_COLLECTION || opScope.collection === GLOBAL_COLLECTION || requested.collection === opScope.collection) &&
     requested.shard === opScope.shard
   );
+}
+
+export function validatePullResponse(response) {
+  if (!response || typeof response !== "object" || Array.isArray(response)) throw invalidReplication("missing replication response");
+  if (response.status !== undefined && response.status !== 200 && response.status !== 410) {
+    throw Object.assign(invalidReplication(response.error || `replication peer returned ${response.status}`), {
+      status: Number.isInteger(response.status) && response.status >= 400 && response.status <= 599 ? response.status : 502,
+    });
+  }
+  const origin = response.nodeId || response.node;
+  if (typeof origin !== "string" || !origin || !Number.isSafeInteger(response.lastSeq) || response.lastSeq < 0 ||
+      (response.durableThrough !== undefined && (!Number.isSafeInteger(response.durableThrough) || response.durableThrough < 0 || response.durableThrough > response.lastSeq))) {
+    throw invalidReplication("invalid replication identity or sequence");
+  }
+  if (response.status !== 410 && (response.error || (response.opBatches
+    ? typeof response.opBatches[Symbol.asyncIterator] !== "function"
+    : !Array.isArray(response.ops)))) throw invalidReplication("invalid replication payload");
+  return origin;
+}
+
+function validatePullBatch(ops, origin, after, lastSeq) {
+  if (!Array.isArray(ops)) throw invalidReplication("invalid replication batch");
+  let seen = after;
+  for (const op of ops) {
+    if (!Number.isSafeInteger(op?.seq) || op.seq <= seen || op.seq > lastSeq || op.from !== origin ||
+        typeof op.db !== "string" || !op.db || typeof op.coll !== "string" || !op.coll || typeof op.id !== "string" || !op.id ||
+        (op.kind !== "putObj" && op.kind !== "delObj" && op.kind !== "touch") ||
+        !Number.isSafeInteger(op.ts?.c) || op.ts.c < 1 || typeof op.ts.n !== "string" || !op.ts.n) {
+      throw invalidReplication("invalid replication operation or sequence order");
+    }
+    seen = op.seq;
+  }
+  return seen;
+}
+
+function invalidReplication(message, code = "INVALID_REPLICATION_RESPONSE") {
+  return Object.assign(new Error(message), { code, status: 502 });
 }
 
 export function localPeer(node) {

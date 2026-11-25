@@ -13,6 +13,7 @@ import { JUMP_PARTITIONER, ShardMap, jumpHash, normalizeShardMap } from "../src/
 import { startServer, shardMapFromHttp, createObjectHookRegistry } from "../src/server.js";
 import { FileService } from "../src/files.js";
 import { TOPOLOGY_HEADER } from "../src/live-resharding.js";
+import { LiveResharding } from "../src/live-resharding.js";
 import { Readable } from "node:stream";
 import { nodeCompression } from "../src/node-runtime.js";
 
@@ -218,6 +219,71 @@ test("old topology traffic and unauthorized migration commands cannot write afte
   assert.equal(stale.status, 409);
   assert.equal(stale.body.operationStarted, false);
   assert.equal(nodes[0].node.get("test", "items", "stale"), undefined);
+});
+
+for (const failure of ["HTTP 503", "malformed success", "incomplete frontier"]) {
+  test(`migration cannot commit after ${failure} from a replica with unreplicated writes`, async (t) => {
+    const { nodes, storage, desired } = await clusterFixture(t, { shards: 1, replicas: 2, spare: 2 });
+    for (const state of nodes) { state.replication.enabled = false; await state.replication.quiesce(); }
+    for (const state of nodes) state.node.setCollectionMeta("test", "items", { indexes: ["kind"], columns: ["score"] });
+    const objects = Array.from({ length: 600 }, (_, i) => ({ _id: `catch-up-${i}`, kind: i % 4, score: i }));
+    nodes[0].node.insertManyCount("test", "items", objects);
+    await nodes[1].node.syncAll();
+    const expected = new Map(objects.map((object) => [object._id, object]));
+    const replaced = objects.slice(0, 20).map((object) => ({ ...object, kind: 9, score: object.score + 10000 }));
+    nodes[1].node.replaceManyCount("test", "items", replaced);
+    for (const object of replaced) expected.set(object._id, object);
+    for (const object of objects.slice(20, 25)) { nodes[1].node.remove("test", "items", object._id); expected.set(object._id, undefined); }
+    const fresh = { _id: "replica-only-before-migration", kind: 9, score: 12345 };
+    assert.equal((await request(nodes[1], "POST", "/api/test/items/object", fresh)).status, 201);
+    expected.set(fresh._id, fresh);
+    const peer = nodes[0].node.peersForShard("s000").find(({ url }) => url === nodes[1].url);
+    const pull = peer.pull;
+    peer.pull = async () => failure === "HTTP 503" ? { status: 503, error: "replica unavailable" }
+      : { status: 200, node: nodes[1].node.id, lastSeq: failure === "incomplete frontier" ? 0 : nodes[1].node.seq,
+        ...(failure === "incomplete frontier" ? { ops: [] } : {}) };
+    const old = nodes[0].node.shardMap.topology.id;
+    assert.equal((await request(nodes[0], "PUT", "/cluster/shards", desired(2))).status, 202);
+    await nodes[0].migration.running;
+    assert.ok(nodes[0].migration.lastError);
+    assert.equal(nodes[0].node.shardMap.topology.id, old);
+    assert.equal((await nodes[0].mapStore.load()).migration.phase, "copying");
+    const survivor = { _id: "writable-after-catch-up-failure", kind: 9, score: 777 };
+    assert.equal((await request(nodes[1], "POST", "/api/test/items/object", survivor)).status, 201);
+    expected.set(survivor._id, survivor);
+    peer.pull = pull;
+    await resize(nodes, desired(2));
+    for (const state of nodes) for (const [id, value] of expected) {
+      const owns = state.node.ownsShard(state.node.shardForObject("test", "items", id));
+      assert.deepEqual(state.node.get("test", "items", id), owns ? value : undefined);
+    }
+    await assertRestored(nodes, storage, expected);
+    const values = [...expected.values()].filter(Boolean);
+    for (const state of nodes) {
+      const result = await request(state, "POST", "/api/test/items/search", { $aggregate: {
+        groupBy: "kind", fields: { count: { $count: true }, total: { $sum: "score" } } }, $refDepth: 0 });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.reduce((sum, row) => sum + row.count, 0), values.length);
+      assert.equal(result.body.reduce((sum, row) => sum + row.total, 0), values.reduce((sum, row) => sum + row.score, 0));
+    }
+  });
+}
+
+test("migration rejects invalid participant sequence positions before copying", async (t) => {
+  const { nodes, desired } = await clusterFixture(t);
+  const all = nodes[0].migration._all.bind(nodes[0].migration);
+  nodes[0].migration._all = async (...args) => {
+    const results = await all(...args);
+    if (args[1] === "prepare") results[0].seq = -1;
+    return results;
+  };
+  assert.equal((await request(nodes[0], "PUT", "/cluster/shards", desired(3))).status, 202);
+  await nodes[0].migration.running;
+  assert.match(nodes[0].migration.lastError.message, /sequence positions/);
+  assert.equal(nodes[0].migration.copied, 0);
+  assert.equal((await nodes[0].mapStore.load()).migration.phase, "copying");
+  nodes[0].migration._all = all;
+  await resize(nodes, desired(3));
 });
 
 for (const failure of ["transfer", "checkpoint", "commit-before", "commit-after"]) {
@@ -557,6 +623,43 @@ test("automatic checkpoints stay deferred until local placement cleanup finishes
   await assertRestored(nodes, storage, new Map([["kept", { _id: "kept", value: 1 }]]));
 });
 
+test("sealing persists writes queued behind an already running journal flush before reporting its frontier", async (t) => {
+  const { nodes, desired, storage } = await clusterFixture(t);
+  const source = nodes[1];
+  const id = Array.from({ length: 100 }, (_, i) => `sealing-${i}`).find((id) =>
+    source.node.ownsShard(source.node.shardForObject("test", "items", id)));
+  await request(nodes[0], "POST", "/api/test/items/object", { _id: id, score: 1 });
+  const coordinator = nodes[0].migration;
+  const all = coordinator._all.bind(coordinator);
+  let inflight;
+  coordinator._all = async (peers, phase, body) => {
+    if (phase === "seal") {
+      let release;
+      const blocked = new Promise((resolve) => { release = resolve; });
+      const write = source.persistence._writeJournalSegment.bind(source.persistence);
+      source.persistence._writeJournalSegment = async (...args) => {
+        await blocked;
+        return write(...args);
+      };
+      source.node.replace("test", "items", id, { score: 2 });
+      inflight = source.persistence.flush();
+      source.node.remove("test", "items", id);
+      const flush = source.persistence.flush.bind(source.persistence);
+      source.persistence.flush = () => {
+        const running = source.persistence.flushing;
+        const result = flush();
+        if (running) release();
+        return result;
+      };
+    }
+    return all(peers, phase, body);
+  };
+  await resize(nodes, desired(3));
+  await inflight;
+  for (const state of nodes) assert.equal(state.node.get("test", "items", id), undefined, state.node.id);
+  await assertRestored(nodes, storage, new Map([[id, undefined]]));
+});
+
 test("a lost ingest acknowledgement is replayed without duplicate index or column contributions", async (t) => {
   const { nodes, storage, desired } = await clusterFixture(t);
   for (const state of nodes) state.node.setCollectionMeta("test", "items", {
@@ -700,4 +803,34 @@ test("mixed column types and compressed indexed fields stay exact across repeate
   for (const state of nodes) await state.node.awaitIndexes("test", "items");
   await check();
   await assertRestored(nodes, storage, expected);
+});
+
+test("migration transfer uses full bounded batches, parallel destinations, and drains failures", async () => {
+  const node = new CRDTNode({ id: "source", url: "http://source" });
+  const target = new ShardMap({ shards: { s: { peers: Array.from({ length: 6 }, (_, i) => ({ url: `http://destination-${i}` })) } } });
+  node.shardMap.migration = { id: "transfer", source: { shards: { s: { peers: [{ url: node.url }] } } } };
+  const migration = new LiveResharding({ node });
+  let inflight = 0, peak = 0;
+  const batches = [];
+  migration._fetch = async (url, _path, stream) => {
+    inflight++; peak = Math.max(peak, inflight);
+    let rows = 0;
+    for await (const line of stream) { assert.ok(JSON.parse(line).id); rows++; }
+    batches.push({ url, rows });
+    await sleep(5);
+    inflight--;
+  };
+  const ops = Array.from({ length: 600 }, (_, i) => ({ id: `parallel-${i}`, db: "test", coll: "items", shard: "s", value: { score: i } }));
+  assert.equal(await migration._distribute(ops, target, "base"), 3600);
+  assert.equal(peak, 4);
+  assert.equal(inflight, 0);
+  for (const peer of target.peersFor("s")) assert.deepEqual(batches.filter((batch) => batch.url === peer.url).map((batch) => batch.rows), [512, 88]);
+  migration._fetch = async (url) => {
+    inflight++;
+    try { if (url.endsWith("0")) throw new Error("failed destination"); await sleep(10); }
+    finally { inflight--; }
+  };
+  await assert.rejects(migration._distribute(ops, target, "base"), /failed destination/);
+  assert.equal(inflight, 0, "a failed transfer must not leave earlier requests writing during retry");
+  node.db.dispose();
 });

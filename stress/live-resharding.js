@@ -8,7 +8,6 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { S3ObjectStorage } from "../src/object-storage.js";
-import { ShardMapStore } from "../src/shard-map-store.js";
 import { ndjsonReadable } from "../src/ndjson.js";
 import { mixedLoad } from "./live-load.js";
 
@@ -54,11 +53,10 @@ try {
   const desired = (shards) => ({ shards: Object.fromEntries(Array.from({ length: shards }, (_, i) =>
     [`shard-${String(i).padStart(3, "0")}`, { peers: urls.slice(i * copies, (i + 1) * copies).map((url) => ({ url })) }])) });
   const storage = new S3ObjectStorage(s3);
-  const maps = new ShardMapStore({ storage, prefix: "stress", durable: true });
-  await retry(() => maps.save(desired(2)));
+  await retry(() => storage.ensureBucket());
   const config = {
     node: { retainOps: 256, syncBatchSize: 5000 }, server: { port: 0 }, auth: { enabled: false },
-    cluster: { secret, syncMs: 2500, forwardTimeoutMs: 60_000,
+    cluster: { secret, syncMs: 2500, forwardTimeoutMs: 60_000, shardMap: desired(2),
       shardMapStore: { mode: "s3", prefix: "stress" } },
     persistence: { mode: "s3", prefix: "stress", s3, flushMs: 5000, snapshotMs: Number(args.get("snapshot-ms") || 0),
       ack: "localWal", localWal: { mode: "on", dir: join(dir, "wal") } },
@@ -176,6 +174,14 @@ try {
 } catch (error) {
   report.error = error.message;
   report.processExits = processes.map(({ child }, index) => ({ index, exitCode: child.exitCode, signal: child.signalCode }));
+  const failedIds = Array.isArray(error.actual) ? error.actual.map((row) => row?._id).filter(Boolean) : [];
+  if (failedIds.length) {
+    report.failedObjects = [];
+    for (let index = 0; index < urls.length; index++) for (const id of failedIds) {
+      try { report.failedObjects.push({ index, id, value: await call(index, "GET", `/api/stress/items/object/${encodeURIComponent(id)}?q=${encodeURIComponent(JSON.stringify({ $refDepth: 0 }))}`) }); }
+      catch (error) { report.failedObjects.push({ index, id, status: error.status || 0, error: error.message }); }
+    }
+  }
   throw error;
 } finally {
   clearInterval(resourceTimer);

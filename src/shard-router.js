@@ -269,6 +269,7 @@ export class ShardRequestRouter {
       this.forwardToShard(req, target.shard, searchPath(database, collection), {
         method: "POST",
         body: queryForVectorSearch(criteria, vector, options),
+        readOnly: true,
         retryStatuses: [409, 503, 504],
       })
     )), () => {
@@ -373,6 +374,7 @@ export class ShardRequestRouter {
     body,
     query,
     retryStatuses = [409, 502, 503, 504],
+    readOnly = method === "GET",
     timeoutMs,
   } = {}) {
     const peers = this.node.routingPeersForShard(shard);
@@ -383,13 +385,14 @@ export class ShardRequestRouter {
       try {
         const response = await this.forwardJson(req, peer, shard, path, { method, body, query, timeoutMs });
         last = response;
-        if (!retryStatuses.includes(response.status)) return response;
+        if (!retryStatuses.includes(response.status) || !retryableForward(readOnly, response)) return response;
       } catch (err) {
         req.operationSignal?.throwIfAborted();
         last = {
           status: err.status || 503,
           body: { error: err.message },
         };
+        if (!retryableForward(readOnly, null, err)) return last;
       }
     }
     return last;
@@ -400,6 +403,7 @@ export class ShardRequestRouter {
     items = [],
     query,
     retryStatuses = [409, 502, 503, 504],
+    readOnly = false,
     timeoutMs,
   } = {}) {
     const peers = this.node.routingPeersForShard(shard);
@@ -410,7 +414,7 @@ export class ShardRequestRouter {
       try {
         const response = await this.forwardNdjson(req, peer, shard, path, { method, items, query, timeoutMs });
         last = response;
-        if (!retryStatuses.includes(response.status)) return response;
+        if (!retryStatuses.includes(response.status) || !retryableForward(readOnly, response)) return response;
       } catch (err) {
         req.operationSignal?.throwIfAborted();
         last = {
@@ -418,6 +422,7 @@ export class ShardRequestRouter {
           body: { error: err.message },
           headers: {},
         };
+        if (!retryableForward(readOnly, null, err)) return last;
       }
     }
     return last;
@@ -429,6 +434,7 @@ export class ShardRequestRouter {
     contentType,
     query,
     retryStatuses = [409, 502, 503, 504],
+    readOnly = method === "GET",
     timeoutMs,
   } = {}) {
     const peers = this.node.routingPeersForShard(shard);
@@ -439,7 +445,7 @@ export class ShardRequestRouter {
       try {
         const response = await this.forwardRaw(req, peer, shard, path, { method, body, contentType, query, timeoutMs });
         last = response;
-        if (!retryStatuses.includes(response.status)) return response;
+        if (!retryStatuses.includes(response.status) || !retryableForward(readOnly, response)) return response;
       } catch (err) {
         req.operationSignal?.throwIfAborted();
         last = {
@@ -447,6 +453,7 @@ export class ShardRequestRouter {
           body: { error: err.message },
           headers: {},
         };
+        if (!retryableForward(readOnly, null, err)) return last;
       }
     }
     return last;
@@ -623,6 +630,12 @@ export function httpError(status, message, body) {
   err.status = status;
   err.body = body;
   return err;
+}
+
+function retryableForward(readOnly, response, error) {
+  if (readOnly) return true;
+  if (error) return ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(error.cause?.code || error.code);
+  return response.body?.operationStarted === false;
 }
 
 export function ok(status) {

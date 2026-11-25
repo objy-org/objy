@@ -42,6 +42,8 @@ POST /api/{db}/{collection}/search -> result array
 
 Objects need no shared schema. `PUT` replaces, `PATCH` applies `$set`/`$unset`, and `DELETE` replicates deletion. Queries, search, and aggregation return plain arrays. Each endpoint below includes a request and response.
 
+Replication is asynchronous and whole-object last-write-wins. Successive writes reaching different replicas are not guaranteed to execute in client order; a lagging replica can report an object missing or skip its update. An interrupted request may already have written data. Internal forwarding does not replay ambiguous mutations on another replica.
+
 ## Endpoint Map
 
 | Area | Routes |

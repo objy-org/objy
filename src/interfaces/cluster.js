@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { validatePullResponse } from "../crdt.js";
 import {
   CLUSTER_SECRET_HEADER,
   clusterSecretFromRequest,
@@ -211,18 +212,19 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
     url: base,
     secret: normalizeClusterSecret(secret),
     nodeId: null,
-    pull: async (after, limit, scope) => {
+    pull: async (after, limit, scope, { signal } = {}) => {
       const params = new URLSearchParams({ after: String(after), node: nodeId });
       if (limit) params.set("limit", String(limit));
       addScopeParams(params, scope);
       const r = await fetchWithTimeout(`${base}/replicate?${params}`, {
+        signal,
         headers: {
           ...clusterHeaders(secret),
           accept: NDJSON_CONTENT_TYPE,
         },
       }, timeout);
       if (r.status === 200 && isNdjsonResponse(r)) {
-        return {
+        const response = {
           status: r.status,
           node: r.headers.get("x-objydb-node") || undefined,
           lastSeq: numberHeader(r.headers, "x-objydb-last-seq"),
@@ -232,19 +234,22 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
             label: "replication stream",
           }),
         };
+        try { validatePullResponse(response); }
+        catch (error) { await r.body?.cancel().catch(() => {}); throw error; }
+        return response;
       }
-      const text = await r.text();
-      let body;
-      try { body = JSON.parse(text); } catch { body = null; }
-      if (Array.isArray(body?.ops)) Object.defineProperty(body.ops, "byteLength", { value: Buffer.byteLength(text) });
-      return { status: r.status, ...(body || {}) };
+      const response = await readPeerResponse(r, "replication pull", r.status === 200 || r.status === 410);
+      validatePullResponse(response);
+      return response;
     },
-    ack: async (id, after, scope) => {
-      await fetchWithTimeout(`${base}/replicate/ack`, {
+    ack: async (id, after, scope, { signal } = {}) => {
+      const r = await fetchWithTimeout(`${base}/replicate/ack`, {
+        signal,
         method: "POST",
         headers: clusterHeaders(secret, true),
         body: JSON.stringify({ node: id, after, ...scopeBody(scope) }),
       }, timeout);
+      await readPeerResponse(r, "replication acknowledgement");
     },
     hint: async (body) => {
       const r = await fetchWithTimeout(`${base}/replicate/hint`, {
@@ -252,20 +257,33 @@ export function httpPeer(url, nodeId, { secret = null, timeoutMs = DEFAULT_REPLI
         headers: clusterHeaders(secret, true),
         body: JSON.stringify(body),
       }, timeout);
-      const responseBody = await r.json().catch(() => null);
-      return { status: r.status, ...(responseBody || {}) };
+      return readPeerResponse(r, "replication hint");
     },
   };
 }
 
+async function readPeerResponse(response, operation, accepted = response.ok) {
+  const text = await response.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = null; }
+  if (!accepted) throw remoteHttpError({ status: response.status, body }, `${operation} returned ${response.status}`);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw Object.assign(new Error(`invalid ${operation} response`), { status: 502, code: "INVALID_REPLICATION_RESPONSE" });
+  }
+  if (Array.isArray(body.ops)) Object.defineProperty(body.ops, "byteLength", { value: Buffer.byteLength(text) });
+  return { ...body, status: response.status };
+}
+
 async function writeReplicationNdjson(res, node, after, limit, scope) {
+  const lastSeq = node.seq;
   res.writeHead(200, {
     "content-type": NDJSON_CONTENT_TYPE,
     "x-objydb-node": node.id,
-    "x-objydb-last-seq": String(node.seq),
+    "x-objydb-last-seq": String(lastSeq),
     "x-objydb-context-revision": node.lifecycle?.revision || "",
   });
   for (const op of node._opsAfterIterable(after, limit, scope)) {
+    if (op.seq > lastSeq) break;
     if (!res.write(`${JSON.stringify(op)}\n`)) await once(res, "drain");
   }
   res.end();
@@ -277,8 +295,8 @@ function isNdjsonResponse(response) {
 }
 
 function numberHeader(headers, name) {
-  const n = Number(headers.get(name));
-  return Number.isFinite(n) ? n : 0;
+  const value = headers.get(name);
+  return value?.trim() ? Number(value) : NaN;
 }
 
 function replicationBatchObjects(limit) {
@@ -325,15 +343,13 @@ function clusterHeaders(secret, hasBody = false) {
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_REPLICATION_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : null;
+  const signal = timeout && options.signal ? AbortSignal.any([timeout, options.signal]) : timeout || options.signal;
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...options, signal });
   } catch (err) {
-    if (err.name === "AbortError") throw new Error(`replication timeout after ${timeoutMs}ms`);
+    if (timeout?.aborted && !options.signal?.aborted) throw new Error(`replication timeout after ${timeoutMs}ms`);
     throw err;
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 

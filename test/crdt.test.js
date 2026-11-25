@@ -356,7 +356,7 @@ test("a restored origin cursor is reused after an HTTP peer first identifies its
   const pulls = [];
   const peer = { url: "http://writer:8080", pull: async (after) => {
     pulls.push(after);
-    return after === 0 ? { status: 410, node: "writer", trimmed: 42 }
+    return after === 0 ? { status: 410, node: "writer", trimmed: 42, lastSeq: 42 }
       : { node: "writer", ops: [], lastSeq: 42 };
   } };
   node.setLogTruncatedHandler(() => { assert.fail("already restored coverage must not trigger another restore"); });

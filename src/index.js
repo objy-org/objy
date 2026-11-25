@@ -14,6 +14,7 @@ import { resolveSystemSecrets } from "./system-secrets.js";
 import { isTopologyResharding } from "./shard-map.js";
 import { nodeCompression, readHeapUsageRatio } from "./node-runtime.js";
 import { isPrimary } from "./primary-state.js";
+import { DEFAULT_REPLICATION_TIMEOUT_MS } from "./interfaces/cluster.js";
 
 const config = loadConfig();
 
@@ -27,7 +28,23 @@ const node = new CRDTNode({
 });
 const shardMapStore = createShardMapStore(config.cluster.shardMapStore, config.persistence, node);
 const persistence = createPersistence(node, config.persistence, config.imports);
-const storedShardMap = await shardMapStore?.load();
+let storedShardMap = await shardMapStore?.load();
+if (shardMapStore?.durable && !storedShardMap) {
+  if (config.cluster.shardMap) node.replaceShardMap(config.cluster.shardMap);
+  if (config.cluster.shardMap && isPrimary(node)) {
+    storedShardMap = await shardMapStore.initialize(config.cluster.shardMap);
+    console.log(`shard map ${storedShardMap.topology.id} initialized in S3`);
+  } else {
+    const timeoutMs = config.cluster.replicationTimeoutMs || DEFAULT_REPLICATION_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    console.log(`waiting up to ${timeoutMs}ms for the coordinator to initialize the S3 shard map`);
+    while (!(storedShardMap = await shardMapStore.load())) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("S3 shard map is not initialized; start its coordinator with cluster.shardMap in the config");
+      await sleep(Math.min(1000, remaining));
+    }
+  }
+}
 const configuredShardMap = storedShardMap || config.cluster.shardMap;
 if (configuredShardMap) node.replaceShardMap(configuredShardMap);
 const sharedSecrets = config.persistence.mode === "s3"
@@ -103,7 +120,7 @@ if (persistence) {
 } else {
   restoreStatus.done({ disabled: true });
 }
-await new Promise((resolve) => restoreServer.server.close(resolve));
+await restoreServer.close();
 
 const objectHooks = createObjectHookRegistry();
 await loadPlugins(config.plugins, { configPath: config.configPath, node, objectHooks });

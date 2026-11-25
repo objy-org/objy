@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
-import { createServer as createNetServer } from "node:net";
+import { createServer as createNetServer, createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startRestoreStatusServer, startServer, httpPeer } from "../src/server.js";
@@ -49,6 +49,20 @@ test("restore status server exposes health and rejects data routes", async () =>
   } finally {
     await new Promise((resolve) => state.server.close(resolve));
   }
+});
+
+test("temporary restore status shutdown closes idle connections before handing over the port", { timeout: 5000 }, async (t) => {
+  const state = await startRestoreStatusServer({ port: 0 });
+  const socket = createConnection({ host: "127.0.0.1", port: state.port });
+  t.after(() => { socket.destroy(); state.server.closeAllConnections(); state.server.close(); });
+  await new Promise((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  const disconnected = new Promise((resolve) => socket.once("close", resolve));
+  await state.close();
+  await disconnected;
+  assert.equal(state.server.listening, false);
+  const replacement = createNetServer();
+  await new Promise((resolve, reject) => { replacement.once("error", reject); replacement.listen(state.port, resolve); });
+  await new Promise((resolve) => replacement.close(resolve));
 });
 
 async function login(base, username = "admin", password = "123", database = "_global", collection = "users") {

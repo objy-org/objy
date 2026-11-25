@@ -55,7 +55,10 @@ export async function startRestoreStatusServer({
   });
 
   await new Promise((resolve) => server.listen(port, resolve));
-  return { server, port: server.address().port };
+  return { server, port: server.address().port, close: () => new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }) };
 }
 
 export async function startServer({
